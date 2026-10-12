@@ -22,6 +22,8 @@
 //! `plan/modules.toml` (regions, face/loop/edge/vertex uses, geometry binding,
 //! tolerances, attributes) extend these records; keep the id/arena/accessor shape.
 
+pub mod database_io;
+
 use core::marker::PhantomData;
 
 use crate::error::{EntityRef, Result, SolidError};
