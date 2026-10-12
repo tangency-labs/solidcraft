@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **12** (10,677 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d` |
+| Green | **13** (11,063 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial` |
 | Partial | **3** (3,301 lines): `geom.extent3d`, `geom.tree`, `geom.attribute` |
-| Ported (green + partial) | 15 units, 13,978 upstream lines (3.6%); about 13,400 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 6 (4,721 lines): `nlib.basis_basic`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve_nd`, `geom.polynomial` |
+| Ported (green + partial) | 16 units, 14,364 upstream lines (3.7%); about 13,400 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 5 (4,335 lines): `nlib.basis_basic`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve_nd` |
 | Blocked | 0 |
 | Todo | 239 |
 
@@ -65,6 +65,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `geom.assert_array` | `geom::assert_array` | 3734 cases (14 fixture + 720 label-table + 3000 generated), max_rel_err 0 | bit-identical; all 86 label tables ported here, lengths checked against libSMLib.a symbol sizes |
 | `geom.matrix` | `geom::matrix` | 4044 cases (44 fixture + 4000 generated), max_rel_err 0 | bit-identical; a 100,044-case run was also clean; upstream quirks in findings.md |
 | `geom.extent1d` | `geom::extent1d` | 3091 cases (91 fixture + 3000 generated), max_rel_err 0 | bit-identical; wired extent3d intervals and tol MapTo1d / GetScaledZero(SmExtent1d) |
+| `geom.polynomial` | `geom::polynomial` | 6038 cases (38 fixture + 6000 generated), max_rel_err 0 | bit-identical; quartic UB with tol > 1 noted in findings.md |
 
 ## Partial units
 
