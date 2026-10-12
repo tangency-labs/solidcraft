@@ -8,6 +8,7 @@
 
 pub mod assert_array;
 pub mod attribute;
+pub mod axis2_placement;
 pub mod context;
 pub mod extent1d;
 pub mod extent3d;
