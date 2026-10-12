@@ -1,0 +1,5 @@
+upstream/
+bin/
+target/
+/build/
+*.swp
