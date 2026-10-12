@@ -20,6 +20,7 @@ pub mod local_solve_nd;
 pub mod matrix;
 pub mod object;
 pub mod periodic_extent1d;
+pub mod polar_box;
 pub mod polynomial;
 pub mod tol;
 pub mod tree;
