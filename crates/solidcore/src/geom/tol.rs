@@ -38,6 +38,7 @@
 //! | [`context_xsect_tol_3d`]               | `SmTol::GetXSectTol3d(const SmContext*, SmSmallTopoType)` |
 //! | [`scaled_zero`], [`scaled_zero_sq`], [`scaled_zero_sqrt`] | `SmTol::GetScaledZero()`, `GetScaledZeroSq()`, `GetScaledZeroSqrt()` |
 //! | [`ScaledZero`] (`f64`, [`Vec2`], [`Vec3`], [`Extent1d`], `Extent2d`, [`Extent3d`]) | `SmTol::GetScaledZero(const double)`, `(const SmVector2d&)`, `(const SmVector3d&)`, `(const SmExtent1d&)`, `(const SmExtent2d&)` (impl in `geom::extent2d`), `(const SmExtent3d&)` |
+//! | [`scaled_zero_of_equations`]           | `SmTol::GetScaledZero(const SmEvalNFunctionsObject&)` |
 //! | [`map_to_1d`]                          | `SmTol::MapTo1d(SmTol3d&, SmVector3d&, const SmExtent1d&)` |
 //! | [`scaled_zero_sq_of`], [`scaled_zero_sqrt_of`] | unary `GetScaledZeroSq<cA>`, `GetScaledZeroSqrt<cA>` |
 //! | [`scaled_zero2`], [`scaled_zero_sq2`], [`scaled_zero_sqrt2`] | binary `GetScaledZero<cA,cB>`, `...Sq`, `...Sqrt` |
@@ -93,6 +94,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
+use crate::geom::local_solve_nd::EvalNFunctions;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::sqrt as sm_sqrt;
 use crate::kernel::{Kernel, Tolerances};
@@ -121,7 +123,6 @@ use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF
 // SmSurface::Evaluate1stDerivatives / GetNaturalUVDomain / ApproximateSize.
 // UNPORTED(geom.pseudo_box): SmTol::GetScaledZero(const SmPseudoBox&) needs SmPseudoBox.
 // UNPORTED(surface.volume_p1): SmTol::GetScaledZero(const SmVolume&) needs SmVolume.
-// UNPORTED(geom.local_solve_nd): SmTol::GetScaledZero(const SmEvalNFunctionsObject&).
 // UNPORTED(intersect.curve_class_p1): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of
 // SmCurveClassification / SmCurveInterval and SmTol::GetScaledZero(const
 // SmCurveInterval&) need the classification classes.
@@ -649,6 +650,13 @@ impl ScaledZero for Extent3d {
     fn scaled_zero(&self) -> f64 {
         tol3d(EFF_ZERO * (1.0 + smax(self.min().max_dimension(), self.max().max_dimension())))
     }
+}
+
+/// `SmTol::GetScaledZero(const SmEvalNFunctionsObject&)`: the equation set's own
+/// scaled zero ([`EvalNFunctions::scaled_zero`]) as a tolerance (`fabs`).
+#[must_use]
+pub fn scaled_zero_of_equations<E: EvalNFunctions + ?Sized>(equations: &E) -> f64 {
+    tol3d(equations.scaled_zero())
 }
 
 /// Square of the scaled zero of `a` (unary `SmTol::GetScaledZeroSq<cA>`).
