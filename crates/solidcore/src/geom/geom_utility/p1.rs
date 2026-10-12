@@ -86,7 +86,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::matrix::Matrix;
 use crate::geom::polynomial::{solve_quadratic, Roots};
-use crate::geom::tol;
+use crate::geom::tol::{are_same_to_tol, is_zero};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
@@ -118,16 +118,6 @@ fn zero_vec_er(v: Vec3, operation: &'static str) -> Result<()> {
     } else {
         Err(invalid(operation, "zero-length vector"))
     }
-}
-
-/// `SM_IS_ZERO(a)` = `SmTol::InTol(a, SmTol::GetScaledZero())`.
-fn is_zero(a: f64) -> bool {
-    tol::in_tol(a, tol::scaled_zero())
-}
-
-/// `SM_ARE_SAME_TO_TOL(a, b, tol)` = `SmTol::InTol(a - b, SmScaledZero(tol))`.
-fn are_same_to_tol(a: f64, b: f64, t: f64) -> bool {
-    tol::in_tol(a - b, tol::tol3d(t))
 }
 
 /// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`.
