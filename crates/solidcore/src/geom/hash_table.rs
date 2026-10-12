@@ -162,6 +162,10 @@ pub struct HashTable {
 
 impl HashTable {
     /// Empties the table and sizes it (`SmHashTable(lItemEstimate, lBucketCount)`).
+    ///
+    /// # Errors
+    ///
+    /// As [`HashTable::init_size`].
     pub fn new(item_estimate: usize, bucket_count: usize) -> Result<Self> {
         let mut t = Self::default();
         t.init_size(item_estimate, bucket_count)?;
@@ -170,6 +174,10 @@ impl HashTable {
 
     /// Empties every bucket, sets `bucket_count` buckets and reserves item slots
     /// for `item_estimate` items (`InitSize`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `bucket_count` buckets cannot be allocated.
     pub fn init_size(&mut self, item_estimate: usize, bucket_count: usize) -> Result<()> {
         self.used_buckets = None;
         self.buckets.clear();
@@ -269,6 +277,11 @@ impl HashTable {
     /// Adds `item` to bucket `bucket_index` with id `item_id` (`Add`): the first
     /// item of an empty bucket is pushed on the used-bucket list, later items go
     /// second in their bucket.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `bucket_index` is not a bucket (undefined
+    /// behaviour upstream).
     pub fn add(&mut self, item: usize, bucket_index: usize, item_id: usize) -> Result<()> {
         let Some(&head) = self.buckets.get(bucket_index) else {
             return Err(SolidError::InvalidInput {
@@ -471,6 +484,10 @@ pub struct ObjsInVoxels<T> {
 impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     /// A model of `x_cnt * y_cnt * z_cnt` voxels over `bbox` (`None`: not sized)
     /// with room for `item_estimate` items (`SmObjsInVoxels(...)`).
+    ///
+    /// # Errors
+    ///
+    /// As [`HashTable::init_size`] (one bucket per voxel).
     pub fn new(
         x_cnt: usize,
         y_cnt: usize,
@@ -497,6 +514,10 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     }
 
     /// Empties the model and redefines its voxels (`SetSize`).
+    ///
+    /// # Errors
+    ///
+    /// As [`HashTable::init_size`] (one bucket per voxel).
     pub fn set_size(
         &mut self,
         x_cnt: usize,
@@ -581,8 +602,12 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
             .wrapping_add(ix)
     }
 
-    /// `(ix, iy, iz)` of voxel `index` (`MapVoxelIndexToIndices`); fails when
-    /// `x_cnt * y_cnt` is zero (a division by zero upstream).
+    /// `(ix, iy, iz)` of voxel `index` (`MapVoxelIndexToIndices`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `x_cnt * y_cnt` is zero (a division by zero
+    /// upstream).
     pub fn map_voxel_index_to_indices(&self, index: usize) -> Result<(usize, usize, usize)> {
         let xy = self.x_cnt.wrapping_mul(self.y_cnt);
         if xy == 0 {
@@ -677,6 +702,11 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     /// and into each neighbouring voxel whose shared side is within `zone_tol`
     /// (`Add`). Returns the voxel index, or `None` when the model has no box.
     /// The voxels used are added (once) to `updated`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when the model has a box but no voxels
+    /// (undefined behaviour upstream).
     pub fn add(
         &mut self,
         item: T,
@@ -768,6 +798,11 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
     /// As upstream, each item is compared with its bucket's first item only, and
     /// the comparisons overwrite stored points (see the module docs). The
     /// histogram, when given, accumulates every gap compared.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `opts.buckets` names a bucket index past the
+    /// table (undefined behaviour upstream).
     pub fn find_coincident_pairs(
         &mut self,
         k: &Kernel,

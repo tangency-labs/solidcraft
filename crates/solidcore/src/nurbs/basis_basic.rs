@@ -49,13 +49,6 @@ pub const PTOL: f64 = 1.0e-12;
 /// Knot tolerance used by [`compatible_knot_array`] (upstream literal `1.0e-08`).
 pub const COMPATIBLE_KNOT_TOL: f64 = 1.0e-08;
 
-const OP_GLOBAL_MAX: &str = "nurbs::basis_basic::find_global_max";
-const OP_SPAN_MAXIMA: &str = "nurbs::basis_basic::find_all_span_maxima";
-const OP_REPARAM: &str = "nurbs::basis_basic::reparam";
-const OP_COMPAT_TOL: &str = "nurbs::basis_basic::compatible_knot_vectors_to_tol";
-const OP_DERIVS: &str = "nurbs::basis_basic::basis_derivs";
-const OP_MAKE_COMPAT: &str = "nurbs::basis_basic::make_knots_compatible";
-
 /// Error for an array access that upstream would make out of bounds.
 fn out_of_range(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -159,12 +152,14 @@ fn i_derivs(
 /// `|N'| < tol` and `N > tol`), re-bracketing up to 20 times. Degree 1 and functions
 /// with a `p`-fold inner knot peak at `U[i+1]` with value 1.
 ///
-/// Errors: [`NlibCode::Index`] when `i > m - p - 1`; [`NlibCode::Numerical`] when the
+/// # Errors
+///
+/// [`NlibCode::Index`] when `i > m - p - 1`; [`NlibCode::Numerical`] when the
 /// Newton step would overflow; [`NlibCode::Convergence`] after 20 re-brackets; errors
 /// of [`KnotVector::basis_i_derivs`]; `InvalidInput` where upstream would index out of
 /// bounds or loop forever.
 pub fn find_global_max(knt: &KnotVector<'_>, i: usize, p: usize, tol: f64) -> Result<(f64, f64)> {
-    const OP: &str = OP_GLOBAL_MAX;
+    const OP: &str = "nurbs::basis_basic::find_global_max";
     const ITL: usize = 20;
     const NOK: usize = 10;
 
@@ -279,7 +274,9 @@ pub struct SpanMaxima {
 /// knot spans, plus the parameter of its global maximum (upstream
 /// `N_BasisFindAllSpanMaxima`).
 ///
-/// Errors: [`NlibCode::Index`] when `i > m - p - 1`; [`NlibCode::Convergence`] when
+/// # Errors
+///
+/// [`NlibCode::Index`] when `i > m - p - 1`; [`NlibCode::Convergence`] when
 /// the global maximum lies in no span of the function's support; errors of
 /// [`find_global_max`] and [`KnotVector::basis_i_eval`].
 pub fn find_all_span_maxima(
@@ -288,7 +285,7 @@ pub fn find_all_span_maxima(
     p: usize,
     tol: f64,
 ) -> Result<SpanMaxima> {
-    const OP: &str = OP_SPAN_MAXIMA;
+    const OP: &str = "nurbs::basis_basic::find_all_span_maxima";
     let uk = knt.knots();
     let m = knt.last_index();
     check_index(m, i, p, OP)?;
@@ -370,10 +367,12 @@ pub fn find_all_span_maxima(
 /// become `interval.ur`, and the inner knots are mapped linearly from
 /// `[U[0], U[m]]`. Nothing changes when the ends already match.
 ///
-/// Errors with `InvalidInput` when `knots` is empty or has fewer than `p + 1` knots
+/// # Errors
+///
+/// `InvalidInput` when `knots` is empty or has fewer than `p + 1` knots
 /// (upstream would write out of bounds).
 pub fn reparam(knots: &mut [f64], p: usize, interval: Interval) -> Result<()> {
-    const OP: &str = OP_REPARAM;
+    const OP: &str = "nurbs::basis_basic::reparam";
     let m = last_index(knots, OP)?;
     if p > m {
         return Err(out_of_range(OP));
@@ -428,12 +427,14 @@ fn not_done(knot_indices: &[i64], knots: &[Vec<f64>]) -> bool {
 /// smaller) count as one knot: they are moved, **in place in `knots`**, to their
 /// average, and the inserted copies take that average value.
 ///
-/// Errors: [`NlibCode::Input`] when a knot index runs past a vector's end (malformed
+/// # Errors
+///
+/// [`NlibCode::Input`] when a knot index runs past a vector's end (malformed
 /// input); `InvalidInput` for an empty set or an empty vector, where upstream would
 /// write more new knots than it allocated, or would loop forever (an iteration that
 /// matches no knot: `tol <= 0` or NaN knots).
 pub fn compatible_knot_vectors_to_tol(knots: &mut [Vec<f64>], tol: f64) -> Result<Vec<Vec<f64>>> {
-    const OP: &str = OP_COMPAT_TOL;
+    const OP: &str = "nurbs::basis_basic::compatible_knot_vectors_to_tol";
     if knots.is_empty() {
         return Err(SolidError::InvalidInput {
             operation: OP,
@@ -572,7 +573,9 @@ pub struct BasisDerivs {
 /// All non-vanishing basis functions of degree `p` and their derivatives up to order
 /// `der` at `u` (upstream `N_BasisDerivs`, The NURBS Book A2.3).
 ///
-/// Errors: [`NlibCode::Numerical`] when a knot difference is below `1e-24` (more than
+/// # Errors
+///
+/// [`NlibCode::Numerical`] when a knot difference is below `1e-24` (more than
 /// `p + 1` equal knots); errors of [`KnotVector::find_span`]; `InvalidInput` where
 /// upstream would index out of bounds or overflow its `int` derivative factor.
 #[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
@@ -583,7 +586,7 @@ pub fn basis_derivs(
     side: Side,
     der: usize,
 ) -> Result<BasisDerivs> {
-    const OP: &str = OP_DERIVS;
+    const OP: &str = "nurbs::basis_basic::basis_derivs";
     // Guard against an exactly zero (or tiny) denominator.
     let d_zero_tol = 1e-24;
 
@@ -705,7 +708,9 @@ pub fn basis_derivs(
 /// of the other (`s` when `r`'s range is longer, else `r`). Inner knots closer than
 /// [`PTOL`] count as equal.
 ///
-/// Errors with `InvalidInput` where upstream would read outside the knot vectors
+/// # Errors
+///
+/// `InvalidInput` where upstream would read outside the knot vectors
 /// (vectors that are too short, unclamped, or with inner knots beyond the ends) or
 /// loop forever (NaN knots), and for the errors of [`reparam`].
 pub fn make_knots_compatible(
@@ -714,7 +719,7 @@ pub fn make_knots_compatible(
     p: usize,
     q: usize,
 ) -> Result<(Vec<f64>, Vec<f64>)> {
-    const OP: &str = OP_MAKE_COMPAT;
+    const OP: &str = "nurbs::basis_basic::make_knots_compatible";
     let mr = last_index(r, OP)?;
     let ms = last_index(s, OP)?;
 

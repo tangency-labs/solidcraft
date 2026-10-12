@@ -179,9 +179,13 @@ pub trait EvalNFunctions {
 /// per-parameter `intervals` (`SmEvalNFunctionsObject::ComputeJacobian`).
 ///
 /// `x` is perturbed one parameter at a time and restored; the number of equations
-/// is `f.len()`. Errors: a failed evaluation (returned as is, leaving that parameter
-/// perturbed), `SM_ERR` when a clamped step collapses below `SM_EFF_ZERO`, and
-/// `InvalidInput` when `x`, `intervals` or `jacobian` is smaller than `f`.
+/// is `f.len()`.
+///
+/// # Errors
+///
+/// A failed evaluation (returned as is, leaving that parameter perturbed), `SM_ERR`
+/// when a clamped step collapses below `SM_EFF_ZERO`, and `InvalidInput` when `x`,
+/// `intervals` or `jacobian` is smaller than `f`.
 pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
     eval: &mut E,
     x: &mut [f64],
@@ -383,9 +387,12 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     /// the desired accuracy cannot be reached (`SmLocalSolveNd::SolveIt`).
     ///
     /// Not finding a solution is not an error: see [`NdSolution::found`] and
-    /// [`LocalSolveNd::termination_reason`]. Errors: a failing
-    /// [`EvalNFunctions::set_intervals`], interval or periodicity arrays not sized
-    /// like `guess` (`InvalidInput`), and `Unported` from the equation set.
+    /// [`LocalSolveNd::termination_reason`].
+    ///
+    /// # Errors
+    ///
+    /// A failing [`EvalNFunctions::set_intervals`], interval or periodicity arrays
+    /// not sized like `guess` (`InvalidInput`), and `Unported` from the equation set.
     pub fn solve_it(&mut self, guess: &[f64], acceptable_accuracy: f64) -> Result<NdSolution> {
         const OP: &str = "geom::local_solve_nd::LocalSolveNd::solve_it";
         let invalid = |reason| SolidError::InvalidInput {

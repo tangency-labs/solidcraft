@@ -11,6 +11,8 @@
 //! | [`PointSetType`]                         | `SmPointSetType`                           |
 //! | [`ContinuityType`]                       | `SmContinuityType`                         |
 //! | [`CurveEval`]                            | (inputs of `smgu_EvaluateCurveContinuity`) |
+//! | [`PerspectivePlane`]                     | (inputs of `smgu_SegmentSegmentPerpspectiveIntersect`) |
+//! | [`CoplanarEllipse`]                      | (inputs of `smgu_LineCoPlanarEllipseIntersect`) |
 //! | [`triangle_point_distance`]              | `smgu_TrianglePointDistance`               |
 //! | [`line_line_at_distance`]                | `smgu_LineLineAtDistance`                  |
 //! | [`is_point_on_segment`]                  | `smgu_IsPointOnSegment`                    |
@@ -34,7 +36,13 @@
 //!   [`SolidError::InvalidInput`]. Output slots upstream leaves unset are `0.0` here
 //!   (and outside `count` in [`SegmentHits`]).
 //! - `smgu_4x4Copy` (the copy into the caller's matrix) disappears: the 4x4 functions
-//!   return their result by value.
+//!   return their result by value. [`inverse_4x4`] builds each cofactor's 3x3 minor in
+//!   a loop instead of spelling out the 16 `smgu_3x3Determinate` calls (same
+//!   coefficients, same `-det / det` arithmetic).
+//! - The projection plane and eye of `smgu_SegmentSegmentPerpspectiveIntersect` and
+//!   the ellipse of `smgu_LineCoPlanarEllipseIntersect` are passed as
+//!   [`PerspectivePlane`] / [`CoplanarEllipse`] structs instead of positional
+//!   arguments.
 //! - [`intersect_two_planes`] reports parallel planes as
 //!   [`PlanesIntersection::Parallel`] (upstream: `SM_ERR` plus the optional
 //!   coincidence flag, which is always computed here).
@@ -229,6 +237,34 @@ pub struct CurveEval {
     pub third: Option<Vec3>,
 }
 
+/// Plane and eye point of a perspective projection
+/// ([`segment_segment_perspective_intersect`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PerspectivePlane {
+    /// A point on the projection plane.
+    pub point: Point3,
+    /// Unit normal of the projection plane.
+    pub unit_normal: Vec3,
+    /// The eye point the segments are projected from.
+    pub eye: Point3,
+}
+
+/// An ellipse `center + x_radius cos(s) x_axis + y_radius sin(s) y_axis` with unit,
+/// orthogonal axes ([`line_coplanar_ellipse_intersect`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CoplanarEllipse {
+    /// Center.
+    pub center: Point3,
+    /// Unit major-parameter axis.
+    pub x_axis: Vec3,
+    /// Radius along `x_axis`.
+    pub x_radius: f64,
+    /// Unit axis orthogonal to `x_axis`.
+    pub y_axis: Vec3,
+    /// Radius along `y_axis`.
+    pub y_radius: f64,
+}
+
 /// Result of [`best_fit_plane_to_points`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BestFitPlane {
@@ -366,19 +402,9 @@ fn best_fit_line_to_points(_points: &[Point3], _tol: f64) -> Result<BestFitLine>
     Err(unported_p1("smgu_BestFitLineToPoints"))
 }
 
-// UNPORTED(geom.geom_utility_p1): smgu_3x3Determinate (coefficient overload)
-#[allow(clippy::too_many_arguments)]
-fn determinant_3x3(
-    _a00: f64,
-    _a01: f64,
-    _a02: f64,
-    _a10: f64,
-    _a11: f64,
-    _a12: f64,
-    _a20: f64,
-    _a21: f64,
-    _a22: f64,
-) -> Result<f64> {
+// UNPORTED(geom.geom_utility_p1): smgu_3x3Determinate (coefficient overload, called
+// with the nine entries of `m` row by row)
+fn determinant_3x3(_m: &[[f64; 3]; 3]) -> Result<f64> {
     Err(unported_p1("smgu_3x3Determinate"))
 }
 
@@ -608,29 +634,27 @@ pub fn segment_segment_projected_intersect(
     intersect_mapped_segments(s1, e1, s2, e2, tolerance)
 }
 
-/// Intersects two segments after perspective-projecting them from `eye` onto the
-/// plane `(plane_point, plane_unit_normal)`
+/// Intersects two segments after perspective-projecting them from `view.eye` onto
+/// the plane `(view.point, view.unit_normal)`
 /// (`smgu_SegmentSegmentPerpspectiveIntersect`). `count` 2 means coincident
 /// segments.
 ///
 /// # Errors
 ///
 /// Only propagates errors of its callees.
-#[allow(clippy::too_many_arguments)]
 pub fn segment_segment_perspective_intersect(
     start1: Point3,
     end1: Point3,
     start2: Point3,
     end2: Point3,
-    plane_point: Point3,
-    plane_unit_normal: Vec3,
-    eye: Point3,
+    view: &PerspectivePlane,
     tolerance: f64,
 ) -> Result<SegmentHits> {
-    let s1 = point_perspective_to_plane(start1, plane_point, plane_unit_normal, eye)?;
-    let e1 = point_perspective_to_plane(end1, plane_point, plane_unit_normal, eye)?;
-    let s2 = point_perspective_to_plane(start2, plane_point, plane_unit_normal, eye)?;
-    let e2 = point_perspective_to_plane(end2, plane_point, plane_unit_normal, eye)?;
+    let project = |p| point_perspective_to_plane(p, view.point, view.unit_normal, view.eye);
+    let s1 = project(start1)?;
+    let e1 = project(end1)?;
+    let s2 = project(start2)?;
+    let e2 = project(end2)?;
     intersect_mapped_segments(s1, e1, s2, e2, tolerance)
 }
 
@@ -846,25 +870,26 @@ pub fn circle_plane_intersect(
     ))
 }
 
-/// Intersects a line with a coplanar ellipse
-/// `center + rx cos(s) x_axis + ry sin(s) y_axis` (unit, orthogonal axes) as line
-/// parameters (`smgu_LineCoPlanarEllipseIntersect`): the problem is scaled along
-/// `x_axis` into a line/circle intersection of radius `ry`.
+/// Intersects a line with a coplanar ellipse as line parameters
+/// (`smgu_LineCoPlanarEllipseIntersect`): the problem is scaled along `x_axis` into
+/// a line/circle intersection of radius `y_radius`.
 ///
 /// # Errors
 ///
 /// Only propagates errors of its callees.
-#[allow(clippy::too_many_arguments)]
 pub fn line_coplanar_ellipse_intersect(
     line_pnt: Point3,
     line_vec: Vec3,
-    center: Point3,
-    x_axis: Vec3,
-    x_radius: f64,
-    y_axis: Vec3,
-    y_radius: f64,
+    ellipse: &CoplanarEllipse,
     tolerance: f64,
 ) -> Result<Vec<f64>> {
+    let CoplanarEllipse {
+        center,
+        x_axis,
+        x_radius,
+        y_axis,
+        y_radius,
+    } = *ellipse;
     let normal = x_axis.cross(y_axis).unitize_or_z();
 
     // upstream projects the line to the ellipse plane (statuses checked, results
@@ -1097,36 +1122,35 @@ pub fn inverse_4x4(a: &[[f64; 4]; 4]) -> Result<[[f64; 4]; 4]> {
     if is_zero(det) {
         return Err(sm_err("geom::geom_utility::p2::inverse_4x4"));
     }
-    let [[a00, a01, a02, a03], [a10, a11, a12, a13], [a20, a21, a22, a23], [a30, a31, a32, a33]] =
-        *a;
 
     // inv[r][c] = (-1)^(r+c) * det(minor without row c, column r) / det
-    let i00 = determinant_3x3(a11, a12, a13, a21, a22, a23, a31, a32, a33)? / det;
-    let i10 = -determinant_3x3(a10, a12, a13, a20, a22, a23, a30, a32, a33)? / det;
-    let i20 = determinant_3x3(a10, a11, a13, a20, a21, a23, a30, a31, a33)? / det;
-    let i30 = -determinant_3x3(a10, a11, a12, a20, a21, a22, a30, a31, a32)? / det;
+    let mut inv = [[0.0; 4]; 4];
+    for (r, inv_row) in inv.iter_mut().enumerate() {
+        for (c, cell) in inv_row.iter_mut().enumerate() {
+            let minor = minor_3x3(a, c, r);
+            let cofactor = determinant_3x3(&minor)?;
+            let signed = if (r + c) % 2 == 1 {
+                -cofactor
+            } else {
+                cofactor
+            };
+            *cell = signed / det;
+        }
+    }
+    Ok(inv)
+}
 
-    let i01 = -determinant_3x3(a01, a02, a03, a21, a22, a23, a31, a32, a33)? / det;
-    let i11 = determinant_3x3(a00, a02, a03, a20, a22, a23, a30, a32, a33)? / det;
-    let i21 = -determinant_3x3(a00, a01, a03, a20, a21, a23, a30, a31, a33)? / det;
-    let i31 = determinant_3x3(a00, a01, a02, a20, a21, a22, a30, a31, a32)? / det;
-
-    let i02 = determinant_3x3(a01, a02, a03, a11, a12, a13, a31, a32, a33)? / det;
-    let i12 = -determinant_3x3(a00, a02, a03, a10, a12, a13, a30, a32, a33)? / det;
-    let i22 = determinant_3x3(a00, a01, a03, a10, a11, a13, a30, a31, a33)? / det;
-    let i32 = -determinant_3x3(a00, a01, a02, a10, a11, a12, a30, a31, a32)? / det;
-
-    let i03 = -determinant_3x3(a01, a02, a03, a11, a12, a13, a21, a22, a23)? / det;
-    let i13 = determinant_3x3(a00, a02, a03, a10, a12, a13, a20, a22, a23)? / det;
-    let i23 = -determinant_3x3(a00, a01, a03, a10, a11, a13, a20, a21, a23)? / det;
-    let i33 = determinant_3x3(a00, a01, a02, a10, a11, a12, a20, a21, a22)? / det;
-
-    Ok([
-        [i00, i01, i02, i03],
-        [i10, i11, i12, i13],
-        [i20, i21, i22, i23],
-        [i30, i31, i32, i33],
-    ])
+/// `a` without row `row` and column `col`, remaining entries in order.
+fn minor_3x3(a: &[[f64; 4]; 4], row: usize, col: usize) -> [[f64; 3]; 3] {
+    let mut m = [[0.0; 3]; 3];
+    let rows = a.iter().enumerate().filter(|&(i, _)| i != row);
+    for (m_row, (_, a_row)) in m.iter_mut().zip(rows) {
+        let cols = a_row.iter().enumerate().filter(|&(j, _)| j != col);
+        for (cell, (_, &v)) in m_row.iter_mut().zip(cols) {
+            *cell = v;
+        }
+    }
+    m
 }
 
 // ---- curve differential geometry -------------------------------------------------------
@@ -1370,6 +1394,24 @@ mod tests {
         let sq = mult_4x4(&a, &a);
         assert_eq!(sq[0], [90.0, 100.0, 110.0, 120.0]);
         assert_eq!(sq[3], [426.0, 484.0, 542.0, 600.0]);
+    }
+
+    #[test]
+    fn minor_skips_row_and_column() {
+        let a = [
+            [1.0, 2.0, 3.0, 4.0],
+            [5.0, 6.0, 7.0, 8.0],
+            [9.0, 10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0, 16.0],
+        ];
+        assert_eq!(
+            minor_3x3(&a, 1, 0),
+            [[2.0, 3.0, 4.0], [10.0, 11.0, 12.0], [14.0, 15.0, 16.0]]
+        );
+        assert_eq!(
+            minor_3x3(&a, 3, 2),
+            [[1.0, 2.0, 4.0], [5.0, 6.0, 8.0], [9.0, 10.0, 12.0]]
+        );
     }
 
     #[test]

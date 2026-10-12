@@ -239,9 +239,11 @@ fn rust_run(op: Op, i: &Inputs) -> solidcore::Result<Output> {
                     x.v(3),
                     x.v(6),
                     x.v(9),
-                    x.v(12),
-                    x.v(15),
-                    x.v(18),
+                    &gu::PerspectivePlane {
+                        point: x.v(12),
+                        unit_normal: x.v(15),
+                        eye: x.v(18),
+                    },
                     x.f(21),
                 )?,
                 _ => gu::segment_segment_closest_point(x.v(0), x.v(3), x.v(6), x.v(9), x.f(12))?,
@@ -287,11 +289,13 @@ fn rust_run(op: Op, i: &Inputs) -> solidcore::Result<Output> {
             let t = gu::line_coplanar_ellipse_intersect(
                 x.v(0),
                 x.v(3),
-                x.v(6),
-                x.v(9),
-                x.f(15),
-                x.v(12),
-                x.f(16),
+                &gu::CoplanarEllipse {
+                    center: x.v(6),
+                    x_axis: x.v(9),
+                    x_radius: x.f(15),
+                    y_axis: x.v(12),
+                    y_radius: x.f(16),
+                },
                 x.f(17),
             )?;
             Output::new()

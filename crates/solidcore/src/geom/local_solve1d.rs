@@ -53,7 +53,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 pub use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::tol::{in_tol, scaled_zero};
-use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
+use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, UNDEF_DOUBLE};
 
 /// Upstream status `SM_ERR`.
 const SM_ERR: i32 = 1001;
@@ -126,6 +126,12 @@ impl SolverAlgorithm {
             Self::BrentMaximize => 2,
             Self::BrentMinimize => 3,
         }
+    }
+
+    /// One of the Brent min/max modes.
+    #[must_use]
+    pub const fn is_brent(self) -> bool {
+        matches!(self, Self::BrentMaximize | Self::BrentMinimize)
     }
 
     /// The algorithm with upstream enum value `code`.
@@ -460,6 +466,7 @@ impl LocalSolve1d {
             let tol2 = 2.0 * tol1;
 
             // Calculate delta_x by either secant or bisection.
+            let mut secant_ok = false;
             if e.abs() > tol1 {
                 // Trial secant steps on the derivatives, between x and w and x and v.
                 let mut d1 = 2.0 * (bracket_max - bracket_min);
@@ -481,37 +488,33 @@ impl LocalSolve1d {
                 e = delta_x;
 
                 if ok1 || ok2 {
-                    if ok1 && ok2 {
-                        delta_x = if d1.abs() < d2.abs() { d1 } else { d2 };
+                    let step = if ok1 && ok2 {
+                        if d1.abs() < d2.abs() {
+                            d1
+                        } else {
+                            d2
+                        }
                     } else if ok1 {
-                        delta_x = d1;
+                        d1
                     } else {
-                        delta_x = d2;
-                    }
+                        d2
+                    };
 
-                    if delta_x.abs() <= (0.5 * olde).abs() {
+                    // Accept the secant step only if it is less than half the one
+                    // before last.
+                    if step.abs() <= (0.5 * olde).abs() {
+                        secant_ok = true;
+                        delta_x = step;
                         // Too close to the bracket ends?
-                        u = x + delta_x;
+                        let u = x + delta_x;
                         if u - bracket_min < tol2 || bracket_max - u < tol2 {
                             delta_x = sign(tol1, delta_x);
                         }
-                    } else {
-                        e = if dx >= 0.0 {
-                            bracket_min - x
-                        } else {
-                            bracket_max - x
-                        };
-                        delta_x = 0.5 * e;
                     }
-                } else {
-                    e = if dx >= 0.0 {
-                        bracket_min - x
-                    } else {
-                        bracket_max - x
-                    };
-                    delta_x = 0.5 * e;
                 }
-            } else {
+            }
+            if !secant_ok {
+                // Bisect towards the downhill bracket end.
                 e = if dx >= 0.0 {
                     bracket_min - x
                 } else {
@@ -598,14 +601,12 @@ impl LocalSolve1d {
         &self,
         eval: &mut E,
         max_division_level: u64,
-        lower_t: f64,
-        upper_t: f64,
-        lower_f: f64,
-        upper_f: f64,
+        mut lower_t: f64,
+        mut upper_t: f64,
+        mut lower_f: f64,
+        mut upper_f: f64,
     ) -> Result<(f64, f64)> {
         const OP: &str = "geom::local_solve1d::LocalSolve1d::solve_by_bisection";
-        let (mut lower_t, mut upper_t, mut lower_f, mut upper_f) =
-            (lower_t, upper_t, lower_f, upper_f);
         let mut level = max_division_level;
         loop {
             if level == 0 {
@@ -661,24 +662,22 @@ impl LocalSolve1d {
         }
     }
 
-    /// Evaluates at `t` into `f`/`f_prime`/`found`, keeping partial writes on
-    /// failure.
+    /// Evaluates at `value.t` into `value.f` / `value.f_prime` and `found`, keeping
+    /// whatever the evaluator wrote even when it fails.
     fn eval_into<E: EvalFunction + ?Sized>(
         eval: &mut E,
-        t: f64,
-        f: &mut f64,
-        f_prime: &mut f64,
+        value: &mut IterationValue,
         found: &mut bool,
         signal_errors: bool,
     ) -> Result<()> {
         let mut val = FunctionValue {
-            f: *f,
-            f_prime: *f_prime,
+            f: value.f,
+            f_prime: value.f_prime,
             found_answer: *found,
         };
-        let r = eval.evaluate(t, &mut val, signal_errors);
-        *f = val.f;
-        *f_prime = val.f_prime;
+        let r = eval.evaluate(value.t, &mut val, signal_errors);
+        value.f = val.f;
+        value.f_prime = val.f_prime;
         *found = val.found_answer;
         r
     }
@@ -698,14 +697,7 @@ impl LocalSolve1d {
             t: 0.5 * (self.prev1.t + self.curr.t),
             ..IterationValue::default()
         };
-        Self::eval_into(
-            eval,
-            temp.t,
-            &mut temp.f,
-            &mut temp.f_prime,
-            &mut found_answer,
-            true,
-        )?;
+        Self::eval_into(eval, &mut temp, &mut found_answer, true)?;
 
         let mut best_interior_t = temp.t;
         let mut best_interior_f = temp.f;
@@ -719,14 +711,7 @@ impl LocalSolve1d {
             for g in GUESSES {
                 let mid_t = prev_t + g * (curr_t - prev_t);
                 temp.t = mid_t;
-                let r = Self::eval_into(
-                    eval,
-                    temp.t,
-                    &mut temp.f,
-                    &mut temp.f_prime,
-                    &mut found_answer,
-                    true,
-                );
+                let r = Self::eval_into(eval, &mut temp, &mut found_answer, true);
                 if ignore_failure(r)?.is_none() {
                     continue; // just keep trying
                 }
@@ -742,44 +727,21 @@ impl LocalSolve1d {
             if temp.f * curr_f <= 0.0 {
                 // Curr and prev have the same sign, opposite to mid: pick the end on
                 // the side of the given guess.
-                let (mut new_lo_t, mut new_lo_f, mut new_hi_t, mut new_hi_f);
-                if temp.f > 0.0 {
-                    new_hi_t = temp.t;
-                    new_hi_f = temp.f;
-                    if guess_t < temp.t {
-                        if curr_t < prev_t {
-                            new_lo_t = curr_t;
-                            new_lo_f = curr_f;
-                        } else {
-                            new_lo_t = prev_t;
-                            new_lo_f = self.prev1.f;
-                        }
-                    } else if curr_t > prev_t {
-                        new_lo_t = curr_t;
-                        new_lo_f = curr_f;
-                    } else {
-                        new_lo_t = prev_t;
-                        new_lo_f = self.prev1.f;
-                    }
+                let pick_curr = if guess_t < temp.t {
+                    curr_t < prev_t
                 } else {
-                    new_lo_t = temp.t;
-                    new_lo_f = temp.f;
-                    if guess_t < temp.t {
-                        if curr_t < prev_t {
-                            new_hi_t = curr_t;
-                            new_hi_f = curr_f;
-                        } else {
-                            new_hi_t = prev_t;
-                            new_hi_f = self.prev1.f;
-                        }
-                    } else if curr_t > prev_t {
-                        new_hi_t = curr_t;
-                        new_hi_f = curr_f;
-                    } else {
-                        new_hi_t = prev_t;
-                        new_hi_f = self.prev1.f;
-                    }
-                }
+                    curr_t > prev_t
+                };
+                let end = if pick_curr {
+                    (curr_t, curr_f)
+                } else {
+                    (prev_t, self.prev1.f)
+                };
+                let ((mut new_lo_t, mut new_lo_f), (mut new_hi_t, mut new_hi_f)) = if temp.f > 0.0 {
+                    (end, (temp.t, temp.f))
+                } else {
+                    ((temp.t, temp.f), end)
+                };
 
                 // Prefer an existing bracket when it is closer.
                 if self.have_lower_bracket
@@ -832,10 +794,7 @@ impl LocalSolve1d {
         }
 
         // No bracket: oscillating between two values of the same sign.
-        if matches!(
-            self.algorithm,
-            SolverAlgorithm::BrentMinimize | SolverAlgorithm::BrentMaximize
-        ) {
+        if self.algorithm.is_brent() {
             let maximize = self.algorithm == SolverAlgorithm::BrentMaximize;
             let (t, _) = self.solve_by_brent(
                 eval,
@@ -854,20 +813,9 @@ impl LocalSolve1d {
         }
 
         // The caller expects the solution in curr.
-        let t = self.curr.t;
-        Self::eval_into(
-            eval,
-            t,
-            &mut self.curr.f,
-            &mut self.curr.f_prime,
-            &mut found_answer,
-            true,
-        )?;
+        Self::eval_into(eval, &mut self.curr, &mut found_answer, true)?;
 
-        let found = if matches!(
-            self.algorithm,
-            SolverAlgorithm::BrentMinimize | SolverAlgorithm::BrentMaximize
-        ) {
+        let found = if self.algorithm.is_brent() {
             true // for min/max the tolerance does not matter
         } else {
             found_answer || self.curr.f.abs() <= self.acceptable_accuracy
@@ -907,23 +855,14 @@ impl LocalSolve1d {
         // The initial guess must be within the problem interval (clamped if not).
         let mut guess_t = guess_t;
         if self.use_interval && !self.interval.contains_value(guess_t, 0.0) {
-            // upstream signals SM_ERR_INVALID_INPUT beyond EFF_ZERO_SQRT but goes on
-            let _ = self.interval.contains_value(guess_t, EFF_ZERO_SQRT);
+            // (upstream only logs SM_ERR_INVALID_INPUT beyond EFF_ZERO_SQRT and goes on)
             guess_t = self.interval.clamp_value(guess_t);
         }
 
         // Evaluate at the guess.
         self.curr.t = guess_t;
         let mut found_answer = false;
-        let t = self.curr.t;
-        let r = Self::eval_into(
-            eval,
-            t,
-            &mut self.curr.f,
-            &mut self.curr.f_prime,
-            &mut found_answer,
-            false,
-        );
+        let r = Self::eval_into(eval, &mut self.curr, &mut found_answer, false);
         if let Err(e) = r {
             if matches!(e, SolidError::Unported { .. }) {
                 return Err(e);
@@ -935,16 +874,8 @@ impl LocalSolve1d {
                 if !self.interval.contains_value(self.curr.t, 0.0) {
                     self.curr.t = guess_t - size / 1000.0;
                 }
-                let t = self.curr.t;
-                Self::eval_into(
-                    eval,
-                    t,
-                    &mut self.curr.f,
-                    &mut self.curr.f_prime,
-                    &mut found_answer,
-                    true,
-                )
-                .map_err(|err| eval_failed(err, OP))?;
+                Self::eval_into(eval, &mut self.curr, &mut found_answer, true)
+                    .map_err(|err| eval_failed(err, OP))?;
             }
         }
 
@@ -1062,16 +993,8 @@ impl LocalSolve1d {
 
             // Evaluate into curr.
             self.curr.t = new_t;
-            let t = self.curr.t;
-            Self::eval_into(
-                eval,
-                t,
-                &mut self.curr.f,
-                &mut self.curr.f_prime,
-                &mut found_answer,
-                true,
-            )
-            .map_err(|err| eval_failed(err, OP))?;
+            Self::eval_into(eval, &mut self.curr, &mut found_answer, true)
+                .map_err(|err| eval_failed(err, OP))?;
 
             if found_answer || self.curr.f.abs() < self.desired_accuracy {
                 self.found_accuracy = self.curr.f;
@@ -1093,44 +1016,25 @@ impl LocalSolve1d {
                 minimum = self.curr.f.abs();
             }
 
-            // Brent min/max once the extremum is roughly bracketed.
-            if self.algorithm == SolverAlgorithm::BrentMaximize
-                && self.iter > 1
-                && self.curr.f > self.prev1.f
-                && self.curr.f > self.prev2.f
-            {
-                let mut ext = Extent1d::from_value(self.prev1.t);
-                ext.add_value(self.prev2.t);
-                if ext.contains_value(self.curr.t, 0.0) {
-                    let (t, _) = self.solve_by_brent(
-                        eval,
-                        self.prev1.t,
-                        self.curr.t,
-                        self.prev2.t,
-                        self.desired_accuracy,
-                        true,
-                    )?;
-                    return Ok(SolveOutcome { found: true, t });
-                }
-            }
-
-            if self.algorithm == SolverAlgorithm::BrentMinimize
-                && self.iter > 1
-                && self.curr.f < self.prev1.f
-                && self.curr.f < self.prev2.f
-            {
-                let mut ext = Extent1d::from_value(self.prev1.t);
-                ext.add_value(self.prev2.t);
-                if ext.contains_value(self.curr.t, 0.0) {
-                    let (t, _) = self.solve_by_brent(
-                        eval,
-                        self.prev1.t,
-                        self.curr.t,
-                        self.prev2.t,
-                        self.desired_accuracy,
-                        false,
-                    )?;
-                    return Ok(SolveOutcome { found: true, t });
+            // Brent min/max once the extremum is roughly bracketed: curr beats both
+            // previous values.
+            if self.algorithm.is_brent() && self.iter > 1 {
+                let maximize = self.algorithm == SolverAlgorithm::BrentMaximize;
+                let beats = |a: f64, b: f64| if maximize { a > b } else { a < b };
+                if beats(self.curr.f, self.prev1.f) && beats(self.curr.f, self.prev2.f) {
+                    let mut ext = Extent1d::from_value(self.prev1.t);
+                    ext.add_value(self.prev2.t);
+                    if ext.contains_value(self.curr.t, 0.0) {
+                        let (t, _) = self.solve_by_brent(
+                            eval,
+                            self.prev1.t,
+                            self.curr.t,
+                            self.prev2.t,
+                            self.desired_accuracy,
+                            maximize,
+                        )?;
+                        return Ok(SolveOutcome { found: true, t });
+                    }
                 }
             }
 
