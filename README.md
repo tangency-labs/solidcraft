@@ -1,7 +1,7 @@
 # solidcore
 
-A boundary-representation (B-rep) solid modeling kernel in safe Rust: a port of
-NVIDIA's SMLib (from [USD BRep](https://github.com/NVIDIA-Omniverse/usd-brep), Apache-2.0).
+solidcore is a Rust port of NVIDIA's SMLib: a boundary-representation (B-rep) solid
+modeling kernel in safe Rust (SMLib is from [USD BRep](https://github.com/NVIDIA-Omniverse/usd-brep), Apache-2.0).
 
 Solids are exact: shells, faces, loops, edges and vertices bound to analytic and NURBS
 curves and surfaces. solidcore's first consumer is **SolidCraft**.

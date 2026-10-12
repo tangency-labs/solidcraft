@@ -92,3 +92,25 @@ back-edges call into `geom.vector3d`, `geom.tol` and others (listed in each unit
   covered by Rust unit tests only.
 - **Misleading `seeds` field.** The difftest report's `seeds` field shows the CLI value, not
   the number of cases a runner actually generated.
+
+## Wave 0 verification (independent check, 2026-10-12)
+
+| Check | Result |
+|---|---|
+| Licence | PASS. LICENSE is byte-identical to upstream; NOTICE and ATTRIBUTION.md are present and correct. No tracked file comes from OCCT, USD, Hydra, SmPy or proposals. The CMake build and the call-graph extractor read only `source/SMLib`, `source/SM_API` and `tests/*`. Fixtures cite only `tests/prog_test`. Crate names carry no NVIDIA or SMLib branding. The README now says "a Rust port of NVIDIA's SMLib". |
+| Gate | PASS. A clean `--green` run in a fresh target dir gave `nlib.knots` 2953/2953, max_rel_err 0. The C++ side really is upstream: `N_BasisEval` and the other upstream symbols are linked into the binary. REL_TOL is 1e-9 and there are no abs floors. Seeds are fixed (fnv1a(unit)+i). Two runs produced byte-identical reports, also identical to the committed report. `--perturb` caught 861/861 perturbed cases. |
+| Rules | PASS. fmt, `clippy -D warnings` (with and without `cpp`), the wasm32 check and the tests are all clean. The library code has no unsafe (`forbid`), and its only unwraps are in tests. It has no statics, clock or HashMap. `Kernel: Send` is asserted. |
+| Plan | PASS. 260 unique ids, all fields present, no dangling or self deps, no cycles. Layers equal the longest path, and every upstream path exists under SMLib/SM_API. The ready set (extent3d, vector2d, nlib.math, database_io) matches the table above. |
+
+## Open issues
+
+- **`--perturb` covers floats only.** It perturbs only the first nonzero float, so
+  2092/2953 `nlib.knots` cases go unperturbed: these return only ints or an error (span,
+  mult, valid, error codes). Exact int and error comparison is covered by
+  `compare::tests::structure_mismatches`. Still, `--perturb` should also flip one int or
+  error string per case, so that sensitivity is proven for integer/topology-only units.
+- **`geom.vector2d` / `geom.vector3d` vs `math.rs`.** The plan puts these units at
+  `geom::vector2d` / `geom::vector3d`, but `crates/solidcore/src/math.rs` already defines
+  `Vec2`/`Vec3`, mapped to `SmVector2d`/`SmVector3d`. The agent porting those units should
+  extend `math.rs`, or re-export from it, rather than create duplicate types, and update
+  `rust_module` to match.
