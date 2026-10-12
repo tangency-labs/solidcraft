@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **34** (34,567 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit` |
+| Green | **35** (35,926 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit` |
 | Partial | **12** (12,568 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nlib.crv_nurb` |
-| Ported (green + partial) | 46 units, 47,135 upstream lines (12.2%); about 54,700 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
-| Claimed | 6 (8,011 lines): `nlib.crv_fit_p2`, `nlib.srf_fit`, `topology.topology`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv` |
+| Ported (green + partial) | 47 units, 48,494 upstream lines (12.5%); about 55,200 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 5 (6,652 lines): `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv` |
 | Blocked | 0 |
 | Todo | 208 (332,757 lines) |
 
@@ -124,7 +124,7 @@ Ready (todo, every dependency green/partial): none. Waiting on a claimed unit:
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 46 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 47 ported
   units is bit-identical (`max_rel_err = 0`).
 - `nlib.crv_nurb`: `N_CrvGetMinMaxWeightsAndPts` always returns `pmax = 0`; the two
   `N_CrvReverse` codings (in place / new curve) agree only when `m = n + p + 1` (both
@@ -368,9 +368,9 @@ tests and the wasm32 check.
 
 ## Resume note (2026-10-12, after style review batch #7)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Six units are
-  claimed (`nlib.crv_fit_p2`, `nlib.srf_fit`, `topology.topology`, `nlib.crv_geom`,
-  `nlib.crv_tool_p2`, `nurbs.nurbs_crv`); check `git worktree list` before you claim.
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Five units are
+  claimed (`nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_geom`,
+  `nlib.crv_tool_p2`, `nurbs.nurbs_crv`); `nlib.srf_fit` landed green meanwhile; check `git worktree list` before you claim.
   Nothing is ready until one of them lands (see Ready set).
 - Batch #7 API changes for older worktrees: `iges_126_curve` / `iges_128_surface` take
   `Entity126` / `Entity128`, `srf_tool::p1::extract_patch` takes a `Rectangle`,
@@ -389,7 +389,7 @@ tests and the wasm32 check.
   `curve.curve_p2`, `geom.a_object` on `topology.brep_cache`/`topology.shell`/
   `topology.topology`, `nlib.crv_basic` on `nlib.crv_tool_p2`, `nlib.crv_nurb` on
   `nlib.crv_geom`.
-- Style review batch #8: `geom.point_set`, `nlib.funcs_adv`, `nlib.crv_nurb` and the
+- Style review batch #8: `geom.point_set`, `nlib.funcs_adv`, `nlib.crv_nurb`, `nlib.srf_fit` and the
   units that merge next; optionally the shared `SM_ERR` / `invalid` helper migration.
 
 ## Known problems
