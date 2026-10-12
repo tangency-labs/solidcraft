@@ -7,3 +7,4 @@
 //! `nlib.crv_fit_p2` and `nlib.crv_fit_p3`, one submodule each.
 
 pub mod p1;
+pub mod p2;
