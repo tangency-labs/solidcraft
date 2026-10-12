@@ -260,19 +260,14 @@ without `cpp`), tests and the wasm32 check.
   (`geom.geom_utility_p1`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`) with
   worktrees under `../solidcore-wt/`; check `git worktree list` before you claim.
   Nothing is ready to claim until one of them lands (see Ready set).
-- `geom.geom_utility_p1` must adapt after `git merge main`: wire the
-  `UNPORTED(geom.geom_utility_p1)` stubs in `geom/geom_utility/p2.rs` (the
-  `determinant_3x3` stub now takes one `&[[f64; 3]; 3]`; call the nine-coefficient
-  `determinate_3x3` with its entries row by row), and drop p1's private
-  `is_zero`/`are_same_to_tol` copies and its duplicate `PointSetType` in favour of
-  `geom::tol` and `p2::PointSetType`. Anyone calling the perspective or ellipse
-  intersections uses the new `PerspectivePlane` / `CoplanarEllipse` structs.
+- `geom.geom_utility_p1` is merged and green; it wired the p2 stubs and reuses
+  `geom::tol`; `p2::PointSetType` is a re-export of `p1::PointSetType`.
 - Earlier API changes still apply to older worktrees: `Axis2Placement::from_to`,
   `SurfaceIndices`, `nurbs::geom::Frame` (batches #2 and #3).
 - Remaining partial waits: `geom.extent3d` on `geom.pseudo_box`, `geom.tree` on
   `nurbs.b_spline_surface_p1`/`surface.surface_cache_p1`, `geom.attribute` on
-  `topology.shell`, `geom.object` on the topology units, `geom.axis2_placement` and
-  `geom.geom_utility_p2` on `geom.geom_utility_p1`.
+  `topology.shell`, `geom.object` on the topology units, `geom.grid` on the surface
+  caches.
 - `RUSTDOCFLAGS="-D warnings" cargo doc -p solidcore --no-deps` is clean (batch #4
   fixed a redundant explicit link in `nurbs/geom.rs`); keep it that way.
 - Style review batch #5: `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`,
