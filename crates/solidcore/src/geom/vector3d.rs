@@ -99,10 +99,7 @@ const SM_ERR: i32 = 1001;
 /// (upstream also flags an error below `-SM_EFF_ZERO_SQ`).
 #[must_use]
 pub fn sqrt(x: f64) -> f64 {
-    if x < -EFF_ZERO_SQ {
-        // upstream: ERR(SM_ERR)
-        0.0
-    } else if x <= 0.0 {
+    if x <= 0.0 {
         0.0
     } else {
         x.sqrt()
@@ -281,7 +278,7 @@ impl Vec3 {
     /// Euclidean length (`Length`).
     #[must_use]
     pub fn length(self) -> f64 {
-        sqrt((self.x * self.x) + (self.y * self.y) + (self.z * self.z))
+        sqrt(self.length_squared())
     }
 
     /// Dot product, `(x*o.x) + (y*o.y) + (z*o.z)` (`Dot`).
@@ -521,10 +518,7 @@ impl Vec3 {
         !((self.x - o.x).abs() > max
             || (self.y - o.y).abs() > max
             || (self.z - o.z).abs() > max
-            || ((self.x - o.x) * (self.x - o.x)
-                + (self.y - o.y) * (self.y - o.y)
-                + (self.z - o.z) * (self.z - o.z))
-                > max * max)
+            || self.distance_squared(o) > max * max)
     }
 
     /// Component-wise product (`Multiply`).
@@ -828,12 +822,11 @@ impl Vec3 {
     ///
     /// Propagates [`Vec3::angle_between`] on the projected vectors.
     pub fn ccw_angle_between(self, start: Self, end: Self) -> Result<f64> {
-        let this = self;
-        let start_proj = this.cross(start).cross(this);
+        let start_proj = self.cross(start).cross(self);
         if start_proj.length_squared() < 100.0 * EFF_ZERO_SQ {
             return Ok(0.0);
         }
-        let end_proj = this.cross(end).cross(this);
+        let end_proj = self.cross(end).cross(self);
         if end_proj.length_squared() < 100.0 * EFF_ZERO_SQ {
             return Ok(0.0);
         }
@@ -841,7 +834,7 @@ impl Vec3 {
         let mut proj_ang = start_proj.angle_between(end_proj)?;
 
         // negate angle's sign when Cross(start,end) opposes this vector
-        if start_proj.cross(end_proj).dot(this) < 0.0 {
+        if start_proj.cross(end_proj).dot(self) < 0.0 {
             proj_ang = -proj_ang;
         }
         Ok(proj_ang)

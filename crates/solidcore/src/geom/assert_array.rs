@@ -314,28 +314,13 @@ impl AssertReport {
 /// pass flag, owner and other object (tolerances, values and strings are ignored).
 impl PartialEq for AssertReport {
     fn eq(&self, other: &Self) -> bool {
-        if self.reporting_type != other.reporting_type {
-            return false;
-        }
-        if self.list_index != other.list_index {
-            return false;
-        }
-        if self.test_index != other.test_index {
-            return false;
-        }
-        if self.assert_type != other.assert_type {
-            return false;
-        }
-        if self.ok != other.ok {
-            return false;
-        }
-        if self.owner != other.owner {
-            return false;
-        }
-        if self.other != other.other {
-            return false;
-        }
-        true
+        self.reporting_type == other.reporting_type
+            && self.list_index == other.list_index
+            && self.test_index == other.test_index
+            && self.assert_type == other.assert_type
+            && self.ok == other.ok
+            && self.owner == other.owner
+            && self.other == other.other
     }
 }
 

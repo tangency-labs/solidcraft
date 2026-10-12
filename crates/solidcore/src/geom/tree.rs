@@ -39,7 +39,6 @@
 //! | [`ObjectList`]                         | `SmObjectList`                                  |
 //! | [`SurfaceAux`]                         | the `SmBezierAux2d` fields read here (`m_eSplitDir`, `m_bIsMarked`, `m_eNodeClass`, `m_pFace`, `mBA_pSurface`) |
 //! | [`AuxDataType`], [`NodeGeomType`], [`SplitDir`], [`NodeClass`] | `SmAuxDataType`, `SmNodeGeomType`, `SmSurfParamType` (U/V), `SmNodeClassType` |
-//! | `distance_between`, `max_dimension3` (private) | `SmVector3d::DistanceBetween`, `SmVector3d::GetMaxDimension` (co-ports, unit `geom.vector3d`) |
 //!
 //! Deviations:
 //! - Pointers become arena indices: nodes live in [`Tree::nodes`] ([`NodeId`]) and
@@ -69,7 +68,7 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
-use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ};
+use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQ};
 
 /// `SmTree_TYPE` (`CONT_BASE_TYPE + 150`).
 const SM_TREE_TYPE: i32 = 12150;
@@ -386,36 +385,6 @@ pub struct Tree<O> {
     nodes: Vec<TreeNode<O>>,
     /// `m_sListMgr`: every object-list item, in allocation order.
     lists: Vec<ObjectList<O>>,
-}
-
-/// `smos_Sqrt`: `0` for `x <= 0`, else `sqrt(x)`.
-// CO-PORT(geom.vector3d): sm_sqrt
-fn sqrt(x: f64) -> f64 {
-    if x <= 0.0 {
-        0.0
-    } else {
-        x.sqrt()
-    }
-}
-
-/// `SmVector3d::DistanceBetween`.
-// CO-PORT(geom.vector3d): SmVector3d::DistanceBetween
-fn distance_between(a: Point3, b: Point3) -> f64 {
-    sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z))
-}
-
-/// `SmVector3d::GetMaxDimension`: the largest absolute coordinate.
-// CO-PORT(geom.vector3d): SmVector3d::GetMaxDimension
-fn max_dimension3(v: Vec3) -> f64 {
-    let mut d = if v.x.abs() > v.y.abs() {
-        v.x.abs()
-    } else {
-        v.y.abs()
-    };
-    if v.z.abs() > d {
-        d = v.z.abs();
-    }
-    d
 }
 
 /// C `int` expression `1 << count` widened to `ULONG` (sign-extended, as on
@@ -759,7 +728,7 @@ impl<O: Copy + PartialEq> Tree<O> {
             }
 
             let size = union.size();
-            let tol = EFF_ZERO_SQ * max_dimension3(size);
+            let tol = EFF_ZERO_SQ * size.max_dimension();
             union.expand_absolute(tol);
             union.add_point(union.max() + 0.15 * size);
             union.add_point(union.min() - 0.15 * size);
@@ -824,8 +793,8 @@ impl<O: Copy + PartialEq> Tree<O> {
         } else {
             let top_ext = self.node(self.top_id(OP)?)?.bbox;
             let curr_ext = found_node.bbox;
-            let top_dist = distance_between(top_ext.max(), top_ext.min());
-            let curr_dist = distance_between(curr_ext.max(), curr_ext.min());
+            let top_dist = top_ext.max().distance(top_ext.min());
+            let curr_dist = curr_ext.max().distance(curr_ext.min());
             // keep upstream's comparison (NaN distances split)
             let too_small = top_dist > curr_dist * self.min_size_ratio;
             !too_small
@@ -1341,6 +1310,7 @@ struct SideSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec3;
 
     fn ext(a: [f64; 3], b: [f64; 3]) -> Extent3d {
         Extent3d::from_points(Vec3::new(a[0], a[1], a[2]), Vec3::new(b[0], b[1], b[2]))

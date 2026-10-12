@@ -53,7 +53,7 @@
 //! | [`dist_pt_inf_line`]                   | `N_DistPtInfLine`                     |
 //! | [`dist_signed_pt_plane`]               | `N_DistSignedPtPlane`                 |
 //! | [`rotation_matrix_about_axis`]         | `N_CreateRotationMatrixAboutAxis`     |
-//! | [`transform_matrix_from_axes`]         | `N_CreateTransformMatrixFromAxes`     |
+//! | [`transform_matrix_from_axes`], [`Frame`] | `N_CreateTransformMatrixFromAxes`  |
 //! | [`cpt_reflect`]                        | `N_CptReflect`                        |
 //! | [`cpts_are_colinear`], [`cpts_are_colinear_tol`], [`ColinearDim`] | `N_CPtsAreColinear` (`NL_THREED` / `NL_FOURD`) |
 //! | [`plane_pt_normal_to_implicit`]        | `N_PlanePtNormalToImplicit`           |
@@ -83,6 +83,8 @@
 //! - The rotation and transform matrices are returned as new 4x4 ([`RealMatrix`]
 //!   `n = m = 3`, full) matrices; upstream writes into the caller's matrix
 //!   (allocating it when null). The `NL_STACKS` arguments have no counterpart.
+//!   The eight point/axis arguments of `N_CreateTransformMatrixFromAxes` are two
+//!   [`Frame`]s.
 //! - Polygons and nets are slices; an empty polygon or net is `InvalidInput` for the
 //!   bounding boxes (upstream reads `P[0]`).
 //! - Errors are [`SolidError::Nlib`] values with upstream's `NL_*_ERR` number
@@ -339,10 +341,8 @@ pub fn vectors_cos_angle(a: Vec3, b: Vec3) -> Result<f64> {
     if float_op_is_bad(dot, den, FloatOp::Division) {
         return Err(nlib(OP_COS_ANGLE, NlibCode::Geometry));
     }
-    let mut cos = dot / den;
     // Upstream's two ifs; `clamp` gives the same result, NaN included.
-    cos = cos.clamp(-1.0, 1.0);
-    Ok(cos)
+    Ok((dot / den).clamp(-1.0, 1.0))
 }
 
 /// Angle between `a` and `b` in degrees (`N_VectorsAngle`). Errors with
@@ -354,9 +354,8 @@ pub fn vectors_angle(a: Vec3, b: Vec3) -> Result<f64> {
     if float_op_is_bad(dot, ma * mb, FloatOp::Division) {
         return Err(nlib(OP_ANGLE, NlibCode::Geometry));
     }
-    let mut arg = dot / (ma * mb);
     // Upstream's two ifs; `clamp` gives the same result, NaN included.
-    arg = arg.clamp(-1.0, 1.0);
+    let arg = (dot / (ma * mb)).clamp(-1.0, 1.0);
     let rad = arg.acos();
     Ok(180.0 * (rad / PI))
 }
@@ -724,20 +723,45 @@ pub fn rotation_matrix_about_axis(p: Vec3, v: Vec3, al: f64) -> Result<RealMatri
     )
 }
 
-/// 4x4 matrix mapping the frame `(o1; x1, y1, z1)` onto `(o2; x2, y2, z2)`:
-/// `T(o2) * R2 * R1^T * T(-o1)` (`N_CreateTransformMatrixFromAxes`; the axes are
-/// used as given, not normalised).
-pub fn transform_matrix_from_axes(
-    o1: Vec3,
-    x1: Vec3,
-    y1: Vec3,
-    z1: Vec3,
-    o2: Vec3,
-    x2: Vec3,
-    y2: Vec3,
-    z2: Vec3,
-) -> Result<RealMatrix> {
+/// A coordinate frame: an origin and three axes (the `O, X, Y, Z` argument groups of
+/// `N_CreateTransformMatrixFromAxes`). The axes are used as given, not normalised.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Frame {
+    /// Origin.
+    pub origin: Vec3,
+    /// X axis.
+    pub x: Vec3,
+    /// Y axis.
+    pub y: Vec3,
+    /// Z axis.
+    pub z: Vec3,
+}
+
+impl Frame {
+    /// Frame from its origin and axes.
+    #[must_use]
+    pub const fn new(origin: Vec3, x: Vec3, y: Vec3, z: Vec3) -> Self {
+        Self { origin, x, y, z }
+    }
+}
+
+/// 4x4 matrix mapping the frame `from = (o1; x1, y1, z1)` onto
+/// `to = (o2; x2, y2, z2)`: `T(o2) * R2 * R1^T * T(-o1)`
+/// (`N_CreateTransformMatrixFromAxes`; the axes are used as given, not normalised).
+pub fn transform_matrix_from_axes(from: Frame, to: Frame) -> Result<RealMatrix> {
     const OP: &str = "nurbs::geom::transform_matrix_from_axes";
+    let Frame {
+        origin: o1,
+        x: x1,
+        y: y1,
+        z: z1,
+    } = from;
+    let Frame {
+        origin: o2,
+        x: x2,
+        y: y2,
+        z: z2,
+    } = to;
     // Inverse rotation: X1, Y1, Z1 as rows.
     let rm1 = matrix4(
         [
@@ -822,7 +846,7 @@ pub enum ColinearDim {
 impl ColinearDim {
     /// The upstream flag value.
     #[must_use]
-    pub fn flag(self) -> i32 {
+    pub const fn flag(self) -> i32 {
         match self {
             Self::Three => 3,
             Self::Four => 4,
@@ -853,10 +877,7 @@ pub fn cpts_are_colinear_tol(
             let p = pw.to_euclid();
             let q = qw.to_euclid();
             let r = rw.to_euclid();
-            match dist_pt_line_seg_tol(q, p, r, mtol) {
-                Ok(d) => d <= 2.0 * mtol,
-                Err(_) => false,
-            }
+            matches!(dist_pt_line_seg_tol(q, p, r, mtol), Ok(d) if d <= 2.0 * mtol)
         }
         ColinearDim::Four => {
             let p = pw.drop_w();
@@ -1009,9 +1030,8 @@ mod tests {
     #[test]
     fn transform_identity_frames() {
         let o = v(1.0, 2.0, 3.0);
-        let m =
-            transform_matrix_from_axes(o, Vec3::X, Vec3::Y, Vec3::Z, o, Vec3::X, Vec3::Y, Vec3::Z)
-                .unwrap();
+        let f = Frame::new(o, Vec3::X, Vec3::Y, Vec3::Z);
+        let m = transform_matrix_from_axes(f, f).unwrap();
         for i in 0..4 {
             for j in 0..4 {
                 let e = if i == j { 1.0 } else { 0.0 };

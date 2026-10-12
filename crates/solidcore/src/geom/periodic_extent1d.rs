@@ -67,6 +67,19 @@ pub struct PeriodicExtent1d {
     full_period: bool,
 }
 
+/// Which of the extent and the added span cross the seam, in
+/// [`PeriodicExtent1d::add_interval`] (upstream's case 2, only the extent crossing, is
+/// swapped into [`SeamCase::SpanOnly`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SeamCase {
+    /// Case 0: neither crosses.
+    Neither,
+    /// Case 1: only the added span crosses.
+    SpanOnly,
+    /// Case 3: both cross.
+    Both,
+}
+
 /// `SM_IS_CONTAINED(c, a, b)`: `c` inside or on `[a, b]` (either order), widened by
 /// `SmTol::GetScaledZero(a, b)`.
 fn is_contained(c: f64, a: f64, b: f64) -> bool {
@@ -195,9 +208,7 @@ impl PeriodicExtent1d {
     pub fn complement(&mut self) {
         // empty set
         if self.is_empty() {
-            self.min = 0.0;
-            self.max = self.period;
-            self.full_period = true;
+            self.set_full();
             return;
         }
 
@@ -208,9 +219,7 @@ impl PeriodicExtent1d {
             self.max = -BIG_DOUBLE;
         } else if tol::in_tol(self.max - self.min, tol::tol3d(self.period.scaled_zero())) {
             // Given Point Interval, Return Full Interval
-            self.full_period = true;
-            self.min = 0.0;
-            self.max = self.period;
+            self.set_full();
         } else {
             core::mem::swap(&mut self.min, &mut self.max);
         }
@@ -226,7 +235,7 @@ impl PeriodicExtent1d {
     /// `[0, period]`, or when the span is disjoint from the extent (the union is not an
     /// interval). The extent is unchanged then.
     pub fn add_interval(&mut self, from: f64, to: f64, forward: bool) -> Result<()> {
-        const OP: &str = "geom::periodic_extent1d::add_interval";
+        const OP: &str = "geom::periodic_extent1d::PeriodicExtent1d::add_interval";
         let (mut from, mut to) = (from, to);
 
         // check input
@@ -263,22 +272,25 @@ impl PeriodicExtent1d {
             return Ok(());
         }
 
-        // case 0) min < max && from < to; 1) min < max && from > to;
-        //      2) min > max && from < to; 3) min > max && from > to
+        // upstream case 0) min < max && from < to; 1) min < max && from > to;
+        //               2) min > max && from < to; 3) min > max && from > to
         // `!(a <= b)`, i.e. also true for NaN, as upstream's `(a <= b) ? 0 : n`.
         let not_le = |a: f64, b: f64| matches!(a.partial_cmp(&b), Some(Ordering::Greater) | None);
-        let mut case_id: u32 =
-            2 * u32::from(not_le(self.min, self.max)) + u32::from(not_le(from, to));
-        // map case 2 into 1
-        if case_id == 2 {
-            case_id = 1;
-            core::mem::swap(&mut self.min, &mut from);
-            core::mem::swap(&mut self.max, &mut to);
-            swapped = true;
-        }
+        let case = match (not_le(self.min, self.max), not_le(from, to)) {
+            (false, false) => SeamCase::Neither,
+            (false, true) => SeamCase::SpanOnly,
+            (true, false) => {
+                // map case 2 into 1
+                core::mem::swap(&mut self.min, &mut from);
+                core::mem::swap(&mut self.max, &mut to);
+                swapped = true;
+                SeamCase::SpanOnly
+            }
+            (true, true) => SeamCase::Both,
+        };
 
-        match case_id {
-            0 => {
+        match case {
+            SeamCase::Neither => {
                 // disjoint cases
                 if (to < self.min - sz) || (from > self.max + sz) {
                     return Err(sm_err(OP));
@@ -290,7 +302,7 @@ impl PeriodicExtent1d {
                     self.max = to;
                 }
             }
-            1 => {
+            SeamCase::SpanOnly => {
                 // disjoint case
                 if (from > self.max + sz) && (to < self.min - sz) {
                     if swapped {
@@ -316,7 +328,7 @@ impl PeriodicExtent1d {
                     }
                 }
             }
-            3 => {
+            SeamCase::Both => {
                 if from < self.min {
                     self.min = from;
                 }
@@ -329,8 +341,6 @@ impl PeriodicExtent1d {
                     return Ok(());
                 }
             }
-            // Upstream asserts (compiled out); unreachable.
-            _ => {}
         }
 
         Ok(())
@@ -406,9 +416,7 @@ impl PeriodicExtent1d {
                 self.full_period = false;
             } else {
                 // Full period inv
-                self.min = 0.0;
-                self.max = period;
-                self.full_period = true;
+                self.set_full();
             }
         } else {
             self.min = min;
@@ -418,7 +426,7 @@ impl PeriodicExtent1d {
 
         if bad {
             return Err(SolidError::InvalidInput {
-                operation: "geom::periodic_extent1d::set_min_max",
+                operation: "geom::periodic_extent1d::PeriodicExtent1d::set_min_max",
                 reason: "min and max are not both within [0, period]",
             });
         }

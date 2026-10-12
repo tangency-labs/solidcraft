@@ -26,7 +26,6 @@
 //! | [`Matrix::eigen_system_jacobi`]        | `EigenSystemJacobiSolver`                  |
 //! | [`Matrix::compute_3x3_eigen_vectors`]  | `Compute3x3EigenVectors`                   |
 //! | `sort_eigen_system` (private)          | `sm_SortEigenSystem`                       |
-//! | `sm_sqrt` (private)                    | `sm_sqrt` (co-port, unit `geom.vector3d`)  |
 //!
 //! The other `SmMatrix` members (`Add`, `Multiply`, `Invert`, `Transpose`, SVD,
 //! `Rank`, `MakeRowEchelon`, `SwapRows`, 3x3 determinant / eigenvalues, ...) are not
@@ -62,7 +61,8 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::tol::{in_tol, scaled_zero};
-use crate::math::{Vec3, EFF_ZERO};
+use crate::geom::vector3d::{sqrt, Vec3};
+use crate::math::EFF_ZERO;
 
 /// Upstream status `SM_ERR`.
 const SM_ERR: i32 = 1001;
@@ -85,17 +85,6 @@ fn sm_err(operation: &'static str) -> SolidError {
         operation,
         code: SM_ERR,
         entity: None,
-    }
-}
-
-// CO-PORT(geom.vector3d): sm_sqrt
-/// `smos_Sqrt` (`sm_sqrt`): `0` for `x <= 0` (upstream also logs an error below
-/// `-SM_EFF_ZERO_SQ`), else `sqrt(x)`.
-fn sm_sqrt(x: f64) -> f64 {
-    if x <= 0.0 {
-        0.0
-    } else {
-        x.sqrt()
     }
 }
 
@@ -266,24 +255,18 @@ impl Matrix {
     /// within `SM_EFF_ZERO` (`IsSymmetric`).
     #[must_use]
     pub fn is_symmetric(&self) -> bool {
-        let mut rtn = self.rows == self.cols && self.rows > 0;
-        if rtn {
-            'rows: for ii in 0..self.rows {
-                for jj in ii + 1..self.cols {
-                    let upper = self.get(ii, jj, "geom::matrix::Matrix::is_symmetric");
-                    let lower = self.get(jj, ii, "geom::matrix::Matrix::is_symmetric");
-                    let (Ok(a), Ok(b)) = (upper, lower) else {
-                        rtn = false;
-                        break 'rows;
-                    };
-                    if !is_zero(a - b) {
-                        rtn = false;
-                        break 'rows;
-                    }
-                }
-            }
-        }
-        rtn
+        const OP: &str = "geom::matrix::Matrix::is_symmetric";
+        // row by row, stopping at the first pair that differs (NaN differs)
+        self.rows == self.cols
+            && self.rows > 0
+            && (0..self.rows).all(|ii| {
+                (ii + 1..self.cols).all(|jj| {
+                    matches!(
+                        (self.get(ii, jj, OP), self.get(jj, ii, OP)),
+                        (Ok(a), Ok(b)) if is_zero(a - b)
+                    )
+                })
+            })
     }
 
     /// Sets every element to zero (`Clear`).
@@ -586,12 +569,12 @@ impl Matrix {
                             t = a_pq / h;
                         } else {
                             let theta = h / 2.0 / a_pq;
-                            t = 1.0 / (theta.abs() + sm_sqrt(1.0 + theta * theta));
+                            t = 1.0 / (theta.abs() + sqrt(1.0 + theta * theta));
                             if theta < 0.0 {
                                 t = -t;
                             }
                         }
-                        let c = 1.0 / sm_sqrt(1.0 + t * t);
+                        let c = 1.0 / sqrt(1.0 + t * t);
                         let s = t * c;
                         let tau = s / (1.0 + c);
                         h = t * a_pq;
@@ -662,7 +645,6 @@ impl Matrix {
         let vv = &st.vectors;
         let value = |i: usize| st.values.get(i).copied().ok_or_else(|| out_of_range(OP));
         let values = [value(0)?, value(1)?, value(2)?];
-        // CO-PORT(geom.vector3d): SmVector3d::Set
         let col = |c: usize| -> Result<Vec3> {
             Ok(Vec3::new(
                 vv.get(0, c, OP)?,

@@ -34,6 +34,7 @@
 //! | [`MarkLock::release`]                     | `SmNewMarkAndLock::~SmNewMarkAndLock`           |
 //! | [`MarkLock::mark_type`], [`MarkLock::mark_type1`], [`MarkLock::mark_type2`] | `GetMarkType`, `GetMarkType1`, `GetMarkType2` |
 //! | [`MarkLock::context`]                     | `SmNewMarkAndLock::GetContext`                  |
+//! | [`MarkLock::context2`]                    | `SmNewMarkAndLock::GetContext2`                 |
 //! | [`MarkLock::new_mark`]                    | `SmNewMarkAndLock::NewMark`                     |
 //! | [`MarkLock::set_context`]                 | `SmNewMarkAndLock::SetContext(SmContext*, SmMarkType)` |
 //! | [`MarkLock::set_context_pair`]            | `SmNewMarkAndLock::SetContext(SmContext*, SmContext*)` |
@@ -174,24 +175,21 @@ impl Default for Context {
 
 impl Context {
     /// Creates a context (`SmContext::SmContext(double, double)`): every mark at 1 and
-    /// unlocked, not in a Boolean, no callbacks; the model size estimate and its zone
-    /// tolerance set by [`Context::set_this_model_size_estimate`]. Pass
+    /// unlocked, not in a Boolean, no callbacks; the zone tolerance follows from the
+    /// model size estimate as in [`Context::set_this_model_size_estimate`]. Pass
     /// [`tol::USE_DEFAULT`] for the system values.
     #[must_use]
     pub fn new(model_size_estimate: f64, large_small_size_ratio: f64) -> Self {
-        let mut c = Self {
+        Self {
             current_marks: [1; 5],
             mark_locks: [false; 5],
             doing_boolean: false,
-            model_size_estimate: tol::USE_DEFAULT,
-            large_small_size_ratio: tol::USE_DEFAULT,
-            zone_tol_3d: tol::ZONE_TOL_3D,
+            model_size_estimate,
+            large_small_size_ratio,
+            zone_tol_3d: tol::size_estimate_to_zone_tol_3d(model_size_estimate),
             user_notify_callback: None,
             sys_notify_callback: None,
-        };
-        c.large_small_size_ratio = large_small_size_ratio;
-        c.set_this_model_size_estimate(model_size_estimate);
-        c
+        }
     }
 
     /// Whether a Boolean operation is running (`GetDoingBoolean`).
@@ -373,25 +371,31 @@ fn unlocked_mark(ctx: &Context, mask: i32) -> MarkType {
         .unwrap_or(MarkType::MarkIo)
 }
 
-const OP_LOCK: &str = "geom::context::MarkLock";
+/// `InvalidInput` for a context index outside the caller's slice.
+fn index_error(operation: &'static str) -> SolidError {
+    SolidError::InvalidInput {
+        operation,
+        reason: "context index out of range",
+    }
+}
 
 /// The context at `index` in `contexts`.
-fn ctx_at(contexts: &mut [Context], index: usize) -> Result<&mut Context> {
-    contexts.get_mut(index).ok_or(SolidError::InvalidInput {
-        operation: OP_LOCK,
-        reason: "context index out of range",
-    })
+fn ctx_at<'a>(
+    contexts: &'a mut [Context],
+    index: usize,
+    operation: &'static str,
+) -> Result<&'a mut Context> {
+    contexts
+        .get_mut(index)
+        .ok_or_else(|| index_error(operation))
 }
 
 /// Fails when a bound context index is outside `contexts`.
-fn check_index(contexts: &[Context], index: usize) -> Result<()> {
+fn check_index(contexts: &[Context], index: usize, operation: &'static str) -> Result<()> {
     if index < contexts.len() {
         Ok(())
     } else {
-        Err(SolidError::InvalidInput {
-            operation: OP_LOCK,
-            reason: "context index out of range",
-        })
+        Err(index_error(operation))
     }
 }
 
@@ -430,7 +434,8 @@ impl MarkLock {
     /// [`ALL_MARKS`]), advances and locks it (`SmNewMarkAndLock(const SmContext*,
     /// SmBitArray)`).
     pub fn new(contexts: &mut [Context], ctx: usize, mask: i32) -> Result<Self> {
-        let c = ctx_at(contexts, ctx)?;
+        const OP: &str = "geom::context::MarkLock::new";
+        let c = ctx_at(contexts, ctx, OP)?;
         let mark_type1 = unlocked_mark(c, mask);
         c.new_mark(mark_type1);
         lock_mark(c, mark_type1);
@@ -448,17 +453,18 @@ impl MarkLock {
     /// `contexts[ctx2]` but the first mark is advanced again in `contexts[ctx1]` and
     /// the *first* mark type is locked in `contexts[ctx2]`.
     pub fn new_pair(contexts: &mut [Context], ctx1: usize, ctx2: usize) -> Result<Self> {
-        check_index(contexts, ctx2)?;
-        let c1 = ctx_at(contexts, ctx1)?;
+        const OP: &str = "geom::context::MarkLock::new_pair";
+        check_index(contexts, ctx2, OP)?;
+        let c1 = ctx_at(contexts, ctx1, OP)?;
         let mark_type1 = unlocked_mark(c1, ALL_MARKS);
         c1.new_mark(mark_type1);
         lock_mark(c1, mark_type1);
         let mark_type2 = if ctx1 == ctx2 {
             mark_type1
         } else {
-            let m2 = unlocked_mark(ctx_at(contexts, ctx2)?, ALL_MARKS);
-            ctx_at(contexts, ctx1)?.new_mark(mark_type1);
-            lock_mark(ctx_at(contexts, ctx2)?, mark_type1);
+            let m2 = unlocked_mark(ctx_at(contexts, ctx2, OP)?, ALL_MARKS);
+            ctx_at(contexts, ctx1, OP)?.new_mark(mark_type1);
+            lock_mark(ctx_at(contexts, ctx2, OP)?, mark_type1);
             m2
         };
         Ok(Self {
@@ -472,14 +478,15 @@ impl MarkLock {
     /// Unlocks the claimed marks that are still locked and unbinds the lock
     /// (`~SmNewMarkAndLock`).
     pub fn release(&mut self, contexts: &mut [Context]) -> Result<()> {
+        const OP: &str = "geom::context::MarkLock::release";
         if let Some(i) = self.context1 {
-            let c = ctx_at(contexts, i)?;
+            let c = ctx_at(contexts, i, OP)?;
             if c.is_mark_locked(self.mark_type1) {
                 unlock_mark(c, self.mark_type1);
             }
         }
         if let Some(i) = self.context2 {
-            let c = ctx_at(contexts, i)?;
+            let c = ctx_at(contexts, i, OP)?;
             if c.is_mark_locked(self.mark_type2) {
                 unlock_mark(c, self.mark_type2);
             }
@@ -521,14 +528,15 @@ impl MarkLock {
     /// Advances the claimed mark(s) while keeping them locked, invalidating every
     /// mark set so far (`SmNewMarkAndLock::NewMark`).
     pub fn new_mark(&self, contexts: &mut [Context]) -> Result<()> {
+        const OP: &str = "geom::context::MarkLock::new_mark";
         let i1 = self.context1.ok_or(SolidError::InvalidInput {
-            operation: "geom::context::MarkLock::new_mark",
+            operation: OP,
             reason: "no context bound",
         })?;
-        ctx_at(contexts, i1)?.new_mark(self.mark_type1);
+        ctx_at(contexts, i1, OP)?.new_mark(self.mark_type1);
         if let Some(i2) = self.context2 {
             if i1 != i2 {
-                ctx_at(contexts, i2)?.new_mark(self.mark_type2);
+                ctx_at(contexts, i2, OP)?.new_mark(self.mark_type2);
             }
         }
         Ok(())
@@ -544,14 +552,15 @@ impl MarkLock {
         ctx: usize,
         mask: i32,
     ) -> Result<MarkType> {
-        check_index(contexts, ctx)?;
+        const OP: &str = "geom::context::MarkLock::set_context";
+        check_index(contexts, ctx, OP)?;
         if let Some(i) = self.context1 {
             if self.mark_type1 != MarkType::NoMark {
-                unlock_mark(ctx_at(contexts, i)?, self.mark_type1);
+                unlock_mark(ctx_at(contexts, i, OP)?, self.mark_type1);
             }
         }
         self.context1 = Some(ctx);
-        let c = ctx_at(contexts, ctx)?;
+        let c = ctx_at(contexts, ctx, OP)?;
         self.mark_type1 = unlocked_mark(c, mask);
         lock_mark(c, self.mark_type1);
         Ok(self.mark_type1)
@@ -566,27 +575,28 @@ impl MarkLock {
         ctx1: usize,
         ctx2: usize,
     ) -> Result<MarkType> {
-        check_index(contexts, ctx1)?;
-        check_index(contexts, ctx2)?;
+        const OP: &str = "geom::context::MarkLock::set_context_pair";
+        check_index(contexts, ctx1, OP)?;
+        check_index(contexts, ctx2, OP)?;
         if let Some(i) = self.context1 {
             if self.mark_type1 != MarkType::NoMark {
-                unlock_mark(ctx_at(contexts, i)?, self.mark_type1);
+                unlock_mark(ctx_at(contexts, i, OP)?, self.mark_type1);
             }
         }
         if let Some(i2) = self.context2 {
             if self.context1 != Some(i2) && self.mark_type2 != MarkType::NoMark {
-                unlock_mark(ctx_at(contexts, i2)?, self.mark_type2);
+                unlock_mark(ctx_at(contexts, i2, OP)?, self.mark_type2);
             }
         }
         self.context1 = Some(ctx1);
         self.context2 = Some(ctx2);
-        let c1 = ctx_at(contexts, ctx1)?;
+        let c1 = ctx_at(contexts, ctx1, OP)?;
         self.mark_type1 = unlocked_mark(c1, ALL_MARKS);
         lock_mark(c1, self.mark_type1);
         if ctx1 == ctx2 {
             self.mark_type2 = self.mark_type1;
         } else {
-            let c2 = ctx_at(contexts, ctx2)?;
+            let c2 = ctx_at(contexts, ctx2, OP)?;
             self.mark_type2 = unlocked_mark(c2, ALL_MARKS);
             lock_mark(c2, self.mark_type2);
         }

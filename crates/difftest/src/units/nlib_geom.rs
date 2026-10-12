@@ -26,7 +26,7 @@ use solidcore::nurbs::geom::{
     dist_signed_pt_plane, dist_sq_pt_pt, isect_line_line, isect_line_plane, net_bbox,
     normalize, plane_pt_normal_to_implicit, polygon_bbox, project_pt_line, project_pt_plane,
     pt_along_vector, rotation_matrix_about_axis, transform_matrix_from_axes, vector_diff_cpts,
-    vectors_angle, vectors_cos_angle, ColinearDim, Interval, LinePlaneIsect, LineSeg, MinMaxBox,
+    vectors_angle, vectors_cos_angle, ColinearDim, Frame, Interval, LinePlaneIsect, LineSeg, MinMaxBox,
     Plane, Rectangle,
 };
 use solidcore::nurbs::math::{combine2_pts, CPoint, RealMatrix, NOW, NOZ};
@@ -588,14 +588,8 @@ fn rust_flat(i: &Inputs) -> SolidResult<Vec<f64>> {
             push_matrix(
                 &mut o,
                 &transform_matrix_from_axes(
-                    v3(*o1),
-                    v3(*x1),
-                    v3(*y1),
-                    v3(*z1),
-                    v3(*o2),
-                    v3(*x2),
-                    v3(*y2),
-                    v3(*z2),
+                    Frame::new(v3(*o1), v3(*x1), v3(*y1), v3(*z1)),
+                    Frame::new(v3(*o2), v3(*x2), v3(*y2), v3(*z2)),
                 ),
             )?;
         }
