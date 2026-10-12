@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **21** (18,583 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier` |
+| Green | **22** (19,121 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic` |
 | Partial | **6** (6,070 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.object` |
-| Ported (green + partial) | 27 units, 24,653 upstream lines (6.4%); about 28,000 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 4 (3,953 lines): `nlib.basis_adv`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.grid` |
+| Ported (green + partial) | 28 units, 25,191 upstream lines (6.5%); about 28,000 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 3 (3,415 lines): `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.grid` |
 | Blocked | 0 |
 | Todo | 229 (359,297 lines) |
 
