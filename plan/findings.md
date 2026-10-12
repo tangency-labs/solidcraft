@@ -468,3 +468,43 @@ upstream surfaces `Surface.sms` (thinly closed in u), `offset_nurb.sms` and
 - **`N_SrfIsClosed` with `NL_UVDIR`** (or any flag but `NL_UDIR`/`NL_VDIR`) is `false`.
 - No `UNPORTED(nlib.srf_basic)` stubs existed to wire. `nlib.math`'s power-basis
   routines still take the net directly; a `Surface` method may forward to them.
+
+## nlib.basis_basic (green; no disagreements)
+
+2596 default cases (1096 fixture + 1500 generated) and a 201,096-case run
+(`--seeds 200000`) agree bit for bit with upstream (`max_rel_err = 0`). Fixtures use the
+knot vectors of every `.smc`/`.sms` file in `pt_TestFiles`, the `smTopoTest.cpp` and
+SM_API_test rectangle/polygon layouts, and the examples in the upstream doc comments.
+Upstream behaviour worth knowing:
+
+- **Endless loops upstream.** `N_BasisFindGlobalMax` loops forever when its bracketing step
+  `(U[i+p+1]-U[i])/(10p)` is below half an ulp of the knots (huge knot values, tiny span).
+  `N_GetCompatibleKnotVectorToTol` loops forever when an iteration matches no knot
+  (`tol <= 0`, NaN knots). `N_MakeKnotsCompatible` loops forever on NaN knots. Rust returns
+  `SolidError::InvalidInput` in exactly these states (the loop state is unchanged, so
+  upstream would repeat it forever). The ffi wrappers reject these inputs.
+- **`N_GetCompatibleKnotVectorToTol` reads `U[-1]`** when a vector's first knot is above
+  the current smallest knot (the "move to average" test runs for vectors with no match).
+  The read never changes the result. Rust skips the test for those vectors. The shim
+  gives each vector a leading pad slot. It also writes into a buffer of `sum(m)+1` slots
+  per vector, which a vector with fewer than `k-1` knots can overflow. Rust returns
+  `InvalidInput` there, and the ffi wrapper requires at least `n_vec - 1` knots per vector.
+- **`N_GetCompatibleKnotVectorToTol` needs a common parameter range.** Vectors with
+  different end knots run out at different times. Upstream then fails with `NL_INP_ERR`
+  (14), and Rust does the same. Multiplicities *are* carried over between vectors (each
+  distinct knot gets the highest multiplicity it has anywhere), unlike the
+  `N_GetCompatibleKnotVector` doc comment says.
+- **`N_MakeKnotsCompatible` reads past `U[m]`** on degree-0 vectors whose ends differ by
+  less than `NL_PTOL` (so no rescale happens). It can also read past `U[m]` with inner
+  knots within `NL_PTOL` of an end, or with unclamped vectors. Its output buffers are
+  caller-allocated and unbounded. Rust returns `InvalidInput` for out-of-range reads. The
+  shim pads both vectors with `+inf` entries so upstream stays in bounds and terminates.
+  The generator keeps to degree >= 1 for the "ends within `NL_PTOL`" mode. It also
+  pushes the end knot `U[m]` of the shorter-ended vector into the other's insert list
+  when the ends differ by less than `NL_PTOL`. Rust does the same, faithfully.
+- **`N_BasisDerivs` int factor.** The factor `r *= (p-k)` is an `int`, and it is computed
+  one step past the last row it scales. It overflows (UB) for `p >= 13` once
+  `der >= 10`, for example. Rust returns `InvalidInput`, and the ffi wrapper rejects these inputs.
+- **`N_BasisFindAllSpanMaxima` with degree 1 or a `p`-fold inner knot** returns fixed
+  values (`max = 1` at `U[i+1]`) without searching. Degree 0 goes through the Newton
+  path with `du = span/0 = inf`. Rust does the same, faithfully.
