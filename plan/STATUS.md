@@ -11,12 +11,12 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **47** (51,120 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common` |
+| Green | **48** (53,680 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb` |
 | Partial | **11** (11,041 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1` |
-| Ported (green + partial) | 58 units, 62,161 upstream lines (16.0%); about 59,800 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
-| Claimed | 2 (4,282 lines): `nlib.crv_adv_p2`, `nlib.srf_nurb` |
+| Ported (green + partial) | 59 units, 64,721 upstream lines (16.7%); about 70,100 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 1 (1,722 lines): `nlib.crv_adv_p2` |
 | Blocked | 0 |
-| Todo | 202 (325,742 lines) |
+| Todo | 200 (321,460 lines) |
 
 ## What Wave 0 produced
 
