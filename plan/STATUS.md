@@ -1,6 +1,6 @@
 # solidcore status
 
-Last updated: 2026-10-12, Wave 1 in progress (after style review batch #6). Update a
+Last updated: 2026-10-12, Wave 1 in progress (after style review batch #7). Update a
 summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
@@ -13,10 +13,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **34** (34,567 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit` |
 | Partial | **12** (12,568 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nlib.crv_nurb` |
-| Ported (green + partial) | 46 units, 47,135 upstream lines (12.2%); about 47,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 3 (3,334 lines): `nlib.crv_fit_p2`, `nlib.srf_fit`, `topology.topology` |
+| Ported (green + partial) | 46 units, 47,135 upstream lines (12.2%); about 54,700 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 6 (8,011 lines): `nlib.crv_fit_p2`, `nlib.srf_fit`, `topology.topology`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv` |
 | Blocked | 0 |
-| Todo | 211 (337,434 lines) |
+| Todo | 208 (332,757 lines) |
 
 ## What Wave 0 produced
 
@@ -84,6 +84,14 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `nlib.funcs_adv` | `nurbs::funcs_adv` | 2080 cases (80 fixture incl. 6 pt_TestFiles .smc curves + 2000 generated), max_rel_err 0 | bit-identical; the three upstream products share one generic body; inputs rescaled in place as upstream |
 | `nlib.crv_tool_p1` | `nurbs::crv_tool::p1` | 2143 cases (143 fixture on the six pt_TestFiles .smc curves, in-place and out-of-place C++ forms + 2000 generated), max_rel_err 0 | bit-identical; promoted from partial when `nlib.crv_nurb` wired `N_CrvGetMinMaxWeightsAndPts` (rational `N_CrvRemoveKnot`) |
 | `nlib.srf_fit` | `nurbs::srf_fit` | 1556 cases (56 fixture on the TestSmCreateSurfaceFromPoints 5x7 grid and the 11 PointSet sections + 1500 generated), max_rel_err 0 | bit-identical; a 30,056-case run was also clean; N_FitSrfInterpParams always returns NL_NO, LstSqApprox ruling overwrites the caller grid (copy in Rust) |
+| `geom.tol` | `geom::tol` | 3440 cases, max_rel_err 0 | bit-identical; `SmRelation` pointer-hash order sorted on both sides |
+| `geom.context` | `geom::context` | 2013 cases (13 fixture scripts + 2000 generated), max_rel_err 0 | bit-identical; wired the `Option<&Context>` overloads of `geom.tol` |
+| `nlib.geom` | `nurbs::geom` | 3173 cases (173 fixture + 3000 generated), max_rel_err 0 | bit-identical |
+| `geom.vector3d` | `geom::vector3d` | 6114 cases (114 fixture from my_test_vector3d + edge cases, 6000 generated), max_rel_err 0 | bit-identical; `Vec3` lives here |
+| `nlib.iges` | `nurbs::iges` | 2029 cases (29 fixture + 2000 generated), max_rel_err 0 | bit-identical; entity data passed as `Entity126` / `Entity128` |
+| `nlib.srf_tool_p1` | `nurbs::srf_tool::p1` | 3132 cases (132 fixture + 3000 generated), max_rel_err 0 | bit-identical; `extract_patch` takes a `Rectangle` |
+| `nlib.crv_fit_p1` | `nurbs::crv_fit::p1` | 2084 cases (84 fixture + 2000 generated), max_rel_err 0 | bit-identical; `M[2i+1][-1]` write ported as is (findings.md) |
+| `geom.point_set` | `geom::point_set` | 2029 cases (29 fixture + 2000 generated), max_rel_err 0 | bit-identical; unprojected tight-box angles and centroid block quirk kept (findings.md) |
 
 ## Partial units
 
@@ -99,22 +107,34 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `nlib.crv_basic` | `nurbs::crv_basic` | 3417 cases (417 fixture incl. the six pt_TestFiles .smc curves, .sms cross-boundary derivatives, SM_API_test rectangle/polygon segments, my_test_reversed_line_join lines + 3000 generated), 3139 bit-identical; a 30,000-case run was also clean | 278 (`nlib.crv_tool_p2`: every `N_CrvsAreCoincident` case, via `N_CrvsMakeCompatible`) |
 | `geom.a_object` | `geom::a_object` | 2040 cases (40 fixture + 2000 generated), 1871 bit-identical; a 50,040-case run was also clean | 169 (`topology.brep_cache` 131: new `SmBrepCache`; `topology.shell` 37: `SmRegion::IsVoid`; `topology.topology` 1: `SmSAGObject::Notify`) |
 | `nlib.crv_nurb` | `nurbs::crv_nurb` | 2871 cases (871 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/polygon/circle and reversed-line curves, edge cases + 2000 generated incl. exact circles, lines, degenerate and closed curves), 2852 bit-identical | 19 (`nlib.crv_geom`: `N_CrvGetDegenSegs` cases that reach `N_CrvArcLength`) |
+| `geom.tools` | `geom::tools` | 913 cases, 721 bit-identical | 192 (`curve.curve_p2` 68, `topology.brep_p1` 64, `topology.vertex` 60) |
+| `geom.transform` | `geom::transform` | 3042 cases, 2786 bit-identical | 256 (`surface.volume_p1` / `_p2`) |
+| `geom.global_solver` | `geom::global_solver` | 620 cases, 611 bit-identical | 9 (`curve.curve_p2`) |
+| `curve.hermite_curve` | `curve::hermite_curve` | 2131 cases (131 fixture + 2000 generated), 2038 bit-identical | 93 (`curve.curve_p2`: `SmCurve::IsKindOf`) |
 
 ## Ready set
 
-Ready (todo, every dependency green/partial): `nlib.crv_fit_p2` (layer 6, 1586 lines), `nlib.srf_fit` (layer 6, 1359 lines), `topology.topology` (layer 7, 389 lines). Waiting on a claimed unit:
+Ready (todo, every dependency green/partial): none. Waiting on a claimed unit:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 7 | `nlib.crv_geom` | 729 | `nlib.crv_nurb` |
-| 7 | `nlib.crv_tool_p2` | 1748 | `nlib.crv_nurb` |
-| 7 | `nurbs.nurbs_crv` | 2200 | `nlib.crv_nurb` |
-
+| 7 | `nlib.crv_fit_p3` | 1234 | `nlib.crv_fit_p2` |
+| 8 | `nlib.crv_adv_p1` | 2031 | `nlib.crv_geom` |
+| 8 | `nlib.crv_common` | 803 | `nlib.crv_geom` |
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 40 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 46 ported
   units is bit-identical (`max_rel_err = 0`).
+- `nlib.crv_nurb`: `N_CrvGetMinMaxWeightsAndPts` always returns `pmax = 0`; the two
+  `N_CrvReverse` codings (in place / new curve) agree only when `m = n + p + 1` (both
+  kept as `reverse` / `reversed`); `N_CrvGetType` reports degree-1 non-line polylines
+  as free-form.
+- `geom.point_set`: `SetUpTightPseudoBox` discards its plane projections (angles use
+  raw points); `SetUpCentroid` drops the last 50 points when the size is a multiple of
+  50, so `GetCentroid` depends on call order (both kept).
+- `curve.hermite_curve`: `Evaluate` leaves entry `num_derivs` unset for
+  `num_derivs >= 4` (port and shim return zero there).
 - `nlib.crv_tool_p1`: green since `nlib.crv_nurb` landed
   (`N_CrvGetMinMaxWeightsAndPts` always returns `pmax = 0`); `N_CrvRemoveKnot` can
   finish a removal and still return its error flag; the insert/split/refine routines
@@ -317,25 +337,60 @@ clippy (with and without `cpp`), tests, `cargo doc -D warnings` and the wasm32 c
   `# Errors` sections; `equals` is one short-circuiting chain; `is_planar` skips
   non-normalisable corners with `let ... else` (same sums and comparisons).
 
-## Resume note (2026-10-12, after style review batch #6)
+## Style review batch #7 (2026-10-12)
+
+Reviewed `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_tool_p1`, `nlib.crv_fit_p1`,
+`curve.hermite_curve` and `geom.a_object` against AGENTS.md. Numerics and operation
+order were not changed; every unit re-ran difftest at `--seeds 2000` before and after
+merging main with unchanged counts and `max_rel_err = 0` (`nlib.crv_tool_p1` is now
+green with 2143 cases since `nlib.crv_nurb` landed), plus fmt, clippy (with `cpp`),
+tests and the wasm32 check.
+
+- `nlib.iges`: **API change** `iges_126_curve(&Entity126 { k, m, t, w, pts, v })` and
+  `iges_128_surface(&Entity128 { k1, k2, m1, m2, s, t, w, pts, u, v })` replace six /
+  ten positional arguments (the IGES entity data as named fields).
+- `nlib.srf_tool_p1`: **API change** `extract_patch(sur, rect: Rectangle)` replaces
+  four corner floats (the rectangle is also what the result is reparametrised to);
+  `OP_*` paths inlined; `KnotVector` imported; `span_ul`/`span_ur`/`span_vl`/`span_vr`
+  instead of `sul`/`sur_`/...
+- `nlib.crv_tool_p1`, `nlib.crv_fit_p1`: `OP_*` operation paths inlined into each
+  routine's local `OP`.
+- `curve.hermite_curve`: `mut pseudo_box` parameter instead of a rebinding; direct
+  dimension test in `approx_eq`.
+- `geom.a_object`: **API change** the `boolean_op` const module became the
+  `BooleanOperation` enum (all `SmBooleanOperationType` values, `from_code`); region
+  propagation matches on it, the DIFFERENCE/SLICE/... comment now sits on the default
+  arm. `SolidError::sm_err` instead of a hand-built `Upstream`; `assert_valid` is one
+  expression; `Attribute` imported.
+- Not changed (judged faithful structure, not transliteration): the u/v twin loops of
+  the surface tools, `notify`'s seven positional arguments (same shape as
+  `geom::object::notify`), the rational weight check of `remove_knot`.
+
+## Resume note (2026-10-12, after style review batch #7)
 
 - `main` is pushed to `origin` (github.com/bherbruck/solidcore). Six units are
-  claimed (`nlib.crv_fit_p1`, `geom.a_object`, `curve.hermite_curve`,
-  `geom.point_set`, `nlib.crv_nurb`, `nlib.funcs_adv`); check `git worktree list`
-  before you claim. Nothing is ready until one of them lands (see Ready set).
-- Batch #6 API changes for older worktrees: `classify_solution_end` returns
-  `EndClass`, `GlobalSolve::solve_it` takes a `SolveRequest`. Earlier ones still apply:
-  `Axis2Placement::from_to`, `SurfaceIndices`, `nurbs::geom::Frame`, the
-  `geom_utility_p2` options structs.
-- Use `SolidError::sm_err` / `error::SM_ERR` for upstream `SM_ERR` in new code.
+  claimed (`nlib.crv_fit_p2`, `nlib.srf_fit`, `topology.topology`, `nlib.crv_geom`,
+  `nlib.crv_tool_p2`, `nurbs.nurbs_crv`); check `git worktree list` before you claim.
+  Nothing is ready until one of them lands (see Ready set).
+- Batch #7 API changes for older worktrees: `iges_126_curve` / `iges_128_surface` take
+  `Entity126` / `Entity128`, `srf_tool::p1::extract_patch` takes a `Rectangle`,
+  `a_object::boolean_op::*` is `a_object::BooleanOperation`. Earlier ones still apply:
+  `EndClass`, `SolveRequest`, `Axis2Placement::from_to`, `SurfaceIndices`,
+  `nurbs::geom::Frame`, the `geom_utility_p2` options structs.
+- Use `SolidError::sm_err` / `error::SM_ERR` for upstream `SM_ERR` in new code; twelve
+  older files still carry a private copy (`grep -rn "const SM_ERR\|fn sm_err"
+  crates/solidcore/src`). Six files still define a private `invalid(op, reason)`
+  helper; a shared `SolidError` constructor would remove them.
 - Remaining partial waits: `geom.tree` on `nurbs.b_spline_surface_p1`/
   `surface.surface_cache_p1`, `geom.attribute` on `topology.shell`, `geom.object` on the
   topology units, `geom.grid` on the surface caches, `geom.solution_array` and
   `geom.tools` on curve/surface/edge/face/vertex geometry, `geom.transform` on
-  `surface.volume_p1`/`_p2`, `geom.global_solver` on `curve.curve_p2`,
-  `nlib.crv_basic` on `nlib.crv_tool_p2`, `nlib.crv_tool_p1` on `nlib.crv_nurb`.
-- Style review batch #7: `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_tool_p1` and the
-  units that merge next; optionally the `SM_ERR` migration of the remaining twelve files.
+  `surface.volume_p1`/`_p2`, `geom.global_solver` and `curve.hermite_curve` on
+  `curve.curve_p2`, `geom.a_object` on `topology.brep_cache`/`topology.shell`/
+  `topology.topology`, `nlib.crv_basic` on `nlib.crv_tool_p2`, `nlib.crv_nurb` on
+  `nlib.crv_geom`.
+- Style review batch #8: `geom.point_set`, `nlib.funcs_adv`, `nlib.crv_nurb` and the
+  units that merge next; optionally the shared `SM_ERR` / `invalid` helper migration.
 
 ## Known problems
 
