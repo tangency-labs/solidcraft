@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **23** (19,482 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv` |
-| Partial | **6** (6,070 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.object` |
-| Ported (green + partial) | 29 units, 25,552 upstream lines (6.6%); about 32,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 4 (5,915 lines): `geom.geom_utility_p1`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic` |
+| Partial | **7** (6,946 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.object`, `geom.grid` |
+| Ported (green + partial) | 30 units, 26,428 upstream lines (6.8%); about 32,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 3 (5,039 lines): `geom.geom_utility_p1`, `geom.solution_array`, `nlib.crv_basic` |
 | Blocked | 0 |
 | Todo | 227 (356,436 lines) |
 
@@ -89,6 +89,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), 3815 bit-identical | 233 (`geom.geom_utility_p1`: `AreCoaxial` -> `smgu_LinePointDistance`) |
 | `geom.geom_utility_p2` | `geom::geom_utility::p2` | 3270 cases (70 fixture + 3200 generated), 740 bit-identical | 2530 (`geom.geom_utility_p1`: segment/point, line, plane, determinant and best-fit-line helpers) |
 | `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
+| `geom.grid` | `geom::grid` | 615 cases (15 fixture + 600 generated), 613 bit-identical; a 30,015-case run was also clean | 2 (`surface.surface_cache_p1` 1: `SmSurfaceGridElement::Init`; `surface.surface_p2` 1: `ExpandHierarchy`) |
 
 ## Ready set
 
