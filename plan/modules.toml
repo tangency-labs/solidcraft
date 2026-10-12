@@ -621,10 +621,10 @@ depends_on = ["nlib.crv_fit_p1", "nlib.funcs_basic", "nlib.geom", "nlib.knots", 
 est_lines = 1359
 layer = 6
 tests = ["SM_API_test:TestSmCreateSurfaceFromPoints", "SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-nlib.srf_fit-a1"
 claimed_at = "2026-10-12T21:12:59Z"
-notes = "5 fns; largest: N_FitSrfLstSqApprox, N_FitSrfToPtsKnots, N_FitSrfInterpParams, N_FitSrfFuncInterp; 211 upstream test entry points reach this unit"
+notes = "5 fns; largest: N_FitSrfLstSqApprox, N_FitSrfToPtsKnots, N_FitSrfInterpParams, N_FitSrfFuncInterp; 211 upstream test entry points reach this unit. difftest: 1556 cases (56 fixture from TestSmCreateSurfaceFromPoints grid + PointSet sections + 1500 generated), 0 deferred, max_rel_err 0 (bit-identical); a 30,056-case run was also clean"
 
 [[unit]]
 id = "nlib.crv_fit_p3"
