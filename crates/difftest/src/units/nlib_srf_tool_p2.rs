@@ -42,18 +42,18 @@ pub struct Runner;
 
 /// An inline surface (storage = indices in use).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct InlineSrf {
-    net: Vec<Vec<[f64; 4]>>,
-    p: usize,
-    q: usize,
-    u: Vec<f64>,
-    v: Vec<f64>,
+pub(crate) struct InlineSrf {
+    pub(crate) net: Vec<Vec<[f64; 4]>>,
+    pub(crate) p: usize,
+    pub(crate) q: usize,
+    pub(crate) u: Vec<f64>,
+    pub(crate) v: Vec<f64>,
 }
 
 /// A surface input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-enum SrfIn {
+pub(crate) enum SrfIn {
     /// An upstream `.sms` file (absolute path after fixture expansion).
     File { sms: String },
     /// Inline data.
@@ -100,7 +100,7 @@ impl Inputs {
     }
 }
 
-fn harness(msg: impl Into<String>) -> HarnessError {
+pub(crate) fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
@@ -144,7 +144,7 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     Ok(InlineSrf { net, p, q, u, v })
 }
 
-fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
+pub(crate) fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
     match s {
         SrfIn::File { sms } => read_sms(sms),
         SrfIn::Inline(i) => Ok(i.clone()),
@@ -162,7 +162,7 @@ fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
     Ok((n, m))
 }
 
-fn encode(s: &InlineSrf, o: &mut Vec<f64>) -> Result<(), HarnessError> {
+pub(crate) fn encode(s: &InlineSrf, o: &mut Vec<f64>) -> Result<(), HarnessError> {
     let (n, m) = shape(s)?;
     o.extend([n as f64, m as f64, s.p as f64, s.q as f64]);
     o.extend(s.net.iter().flatten().flatten());
@@ -171,7 +171,7 @@ fn encode(s: &InlineSrf, o: &mut Vec<f64>) -> Result<(), HarnessError> {
     Ok(())
 }
 
-fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
+pub(crate) fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
@@ -183,7 +183,7 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
 
 // ---- output layout ----------------------------------------------------------------
 
-fn take<'a>(flat: &'a [f64], at: &mut usize, k: usize) -> Result<&'a [f64], HarnessError> {
+pub(crate) fn take<'a>(flat: &'a [f64], at: &mut usize, k: usize) -> Result<&'a [f64], HarnessError> {
     let part = flat
         .get(*at..*at + k)
         .ok_or_else(|| harness(format!("record too short ({} values)", flat.len())))?;
@@ -191,7 +191,7 @@ fn take<'a>(flat: &'a [f64], at: &mut usize, k: usize) -> Result<&'a [f64], Harn
     Ok(part)
 }
 
-fn count(x: f64) -> Result<usize, HarnessError> {
+pub(crate) fn count(x: f64) -> Result<usize, HarnessError> {
     if x.fract() != 0.0 || !(0.0..=1e7).contains(&x) {
         return Err(harness(format!("bad count {x} in record")));
     }
@@ -200,7 +200,7 @@ fn count(x: f64) -> Result<usize, HarnessError> {
 
 /// Splits a surface dump starting at `at` into `<pfx>dims`, `<pfx>net`, `<pfx>u`,
 /// `<pfx>v`.
-fn split_srf(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+pub(crate) fn split_srf(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 6)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m, r, s) = (dim(0)?, dim(1)?, dim(4)?, dim(5)?);
@@ -286,7 +286,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- Rust side --------------------------------------------------------------------
 
 /// `0` for `Ok`, the `NL_*_ERR` number for an NLib error, `-1` otherwise.
-fn status<T>(r: &SolidResult<T>) -> f64 {
+pub(crate) fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
@@ -294,7 +294,7 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
     }
 }
 
-fn dump(o: &mut Vec<f64>, s: &Surface) {
+pub(crate) fn dump(o: &mut Vec<f64>, s: &Surface) {
     let (n, m, r, ss) = s.array_sizes();
     let (p, q) = s.degrees();
     o.extend([n, m, p, q, r, ss].map(|k| k as f64));
@@ -307,7 +307,7 @@ fn dump(o: &mut Vec<f64>, s: &Surface) {
     o.extend_from_slice(s.v_knots());
 }
 
-fn direction(dir: i32) -> Result<Direction, HarnessError> {
+pub(crate) fn direction(dir: i32) -> Result<Direction, HarnessError> {
     Direction::from_flag(dir).ok_or_else(|| harness(format!("bad direction flag {dir}")))
 }
 
@@ -351,7 +351,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- generation -------------------------------------------------------------------
 
-fn coord(rng: &mut Rng) -> f64 {
+pub(crate) fn coord(rng: &mut Rng) -> f64 {
     match rng.below(10) {
         0 => 0.0,
         1 => rng.uniform(-1e4, 1e4),
@@ -362,7 +362,7 @@ fn coord(rng: &mut Rng) -> f64 {
 
 /// A valid clamped knot vector for degree `p` with `cnt` knots over `[a, b]`:
 /// interior knots random or on a coarse grid (giving multiplicities up to `p`).
-fn knots(rng: &mut Rng, cnt: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
+pub(crate) fn knots(rng: &mut Rng, cnt: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
     let interior = cnt.saturating_sub(2 * p + 2);
     let grid = rng.chance(0.4);
     let steps = 2 + rng.below(4);
@@ -392,7 +392,7 @@ fn knots(rng: &mut Rng, cnt: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
 }
 
 /// `N_KnotVectorIsValid`-style check (runs of equal knots).
-fn knots_valid(u: &[f64], p: usize) -> bool {
+pub(crate) fn knots_valid(u: &[f64], p: usize) -> bool {
     let (Some(&first), Some(&last)) = (u.first(), u.last()) else {
         return false;
     };
@@ -409,7 +409,7 @@ fn knots_valid(u: &[f64], p: usize) -> bool {
             .all(|&(x, k)| if x == first || x == last { k == p + 1 } else { k <= p })
 }
 
-fn weight(rng: &mut Rng) -> f64 {
+pub(crate) fn weight(rng: &mut Rng) -> f64 {
     match rng.below(10) {
         0..=2 => 1.0,
         3 => rng.uniform(0.01, 0.1),
@@ -417,7 +417,7 @@ fn weight(rng: &mut Rng) -> f64 {
     }
 }
 
-fn domain(rng: &mut Rng) -> (f64, f64) {
+pub(crate) fn domain(rng: &mut Rng) -> (f64, f64) {
     match rng.below(4) {
         0 => (0.0, 1.0),
         1 => (rng.uniform(-5.0, 0.0), rng.uniform(0.5, 5.0)),
@@ -427,7 +427,7 @@ fn domain(rng: &mut Rng) -> (f64, f64) {
 }
 
 /// A random valid clamped surface.
-fn gen_srf(rng: &mut Rng) -> InlineSrf {
+pub(crate) fn gen_srf(rng: &mut Rng) -> InlineSrf {
     let deg = |rng: &mut Rng| {
         if rng.chance(0.05) {
             5 + rng.below(4) as usize
@@ -473,7 +473,7 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
 
 /// A parameter for knots `k`: an interior knot, a random interior value, an end, a
 /// value just inside an end, or (when `outside`) a value beyond the domain.
-fn param(rng: &mut Rng, k: &[f64], outside: bool) -> f64 {
+pub(crate) fn param(rng: &mut Rng, k: &[f64], outside: bool) -> f64 {
     let a = k.first().copied().unwrap_or(0.0);
     let b = k.last().copied().unwrap_or(1.0);
     let interior: Vec<f64> = k.iter().copied().filter(|&x| x > a && x < b).collect();
@@ -511,7 +511,7 @@ fn gen_dir(rng: &mut Rng) -> i32 {
 }
 
 /// Back from a Rust surface to an inline input.
-fn inline(s: &Surface) -> InlineSrf {
+pub(crate) fn inline(s: &Surface) -> InlineSrf {
     let (p, q) = s.degrees();
     InlineSrf {
         net: s.rows().map(|row| row.iter().map(|c| c.to_array()).collect()).collect(),
@@ -524,7 +524,7 @@ fn inline(s: &Surface) -> InlineSrf {
 
 /// A random surface, often with knots inserted (in either direction) so that some of
 /// its knots are removable.
-fn gen_removable(rng: &mut Rng) -> InlineSrf {
+pub(crate) fn gen_removable(rng: &mut Rng) -> InlineSrf {
     let s = gen_srf(rng);
     if rng.chance(0.3) {
         return s;
@@ -548,7 +548,7 @@ fn gen_removable(rng: &mut Rng) -> InlineSrf {
     inline(&sur)
 }
 
-fn gen_tol(rng: &mut Rng) -> f64 {
+pub(crate) fn gen_tol(rng: &mut Rng) -> f64 {
     match rng.below(10) {
         0 => 0.0,
         1 => -1.0,
