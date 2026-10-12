@@ -192,10 +192,24 @@ impl Curve {
     /// was the last one to set upstream's error flag (see the module deviations).
     pub fn remove_knots(&self, tol: f64) -> Result<Curve> {
         const OP: &str = "nurbs::crv_tool::p2::Curve::remove_knots";
+        self.remove_knots_constrained(tol, |_, _| false, OP)
+    }
+
+    /// The body of `N_CrvRemoveKnots`, shared with `N_CrvRemoveKnotsDerivConstraints`
+    /// (`nurbs::crv_adv::p2`), which is the same routine plus a constraint check:
+    /// `blocked(r, n)` is called with the index `r` of the knot with the smallest
+    /// error bound and the current highest control point index `n`; when it returns
+    /// `true` the knot is marked not removable before its error is checked.
+    pub(crate) fn remove_knots_constrained(
+        &self,
+        tol: f64,
+        blocked: impl Fn(isize, isize) -> bool,
+        op: &'static str,
+    ) -> Result<Curve> {
         let pu = self.degree();
-        let p = sx(pu, OP)?;
-        let mut n = sx(self.n(), OP)?;
-        let mut m = sx(self.m(), OP)?;
+        let p = sx(pu, op)?;
+        let mut n = sx(self.n(), op)?;
+        let mut m = sx(self.m(), op)?;
         let ns = n;
         let up = self.knots();
         let rational = self.is_rational();
@@ -208,19 +222,19 @@ impl Curve {
             tol
         };
 
-        let lto = REMOVAL_PARAM_TOL * (get(up, m, OP)? - get(up, 0, OP)?).abs();
+        let lto = REMOVAL_PARAM_TOL * (get(up, m, op)? - get(up, 0, op)?).abs();
 
         // Work on a copy of the curve.
         let mut qw = self.cpts().to_vec();
         let mut uq = self.knots().to_vec();
 
         // Get local memory.
-        let mut rw: Vec<CPoint> = storage(2 * p, OP)?;
-        let mut br: Vec<f64> = storage(m, OP)?;
-        let mut sr: Vec<isize> = storage(m, OP)?;
-        let mut er: Vec<f64> = storage(m, OP)?;
-        let mut te: Vec<f64> = storage(m, OP)?;
-        let mut max: Vec<f64> = storage(p + 1, OP)?;
+        let mut rw: Vec<CPoint> = storage(2 * p, op)?;
+        let mut br: Vec<f64> = storage(m, op)?;
+        let mut sr: Vec<isize> = storage(m, op)?;
+        let mut er: Vec<f64> = storage(m, op)?;
+        let mut te: Vec<f64> = storage(m, op)?;
+        let mut max: Vec<f64> = storage(p + 1, op)?;
 
         // Initialize.
         br.fill(BIGD);
@@ -230,20 +244,20 @@ impl Curve {
 
         // The removal error bound of `U[r]` (multiplicity `s`) on the current curve.
         let max_err = |qw: &[CPoint], uq: &[f64], n: isize, m: isize, r: isize, s: isize| {
-            let c = Curve::with_indices(qw.to_vec(), ux(n, OP)?, pu, uq.to_vec(), ux(m, OP)?)?;
-            c.remove_knot_max_err(ux(r, OP)?, ux(s, OP)?)
+            let c = Curve::with_indices(qw.to_vec(), ux(n, op)?, pu, uq.to_vec(), ux(m, op)?)?;
+            c.remove_knot_max_err(ux(r, op)?, ux(s, op)?)
         };
 
         // Compute knot removal errors for each distinct knot.
         let mut r = p + 1;
         while r <= n {
             let i = r;
-            while r <= n && get(&uq, r, OP)? == get(&uq, r + 1, OP)? {
+            while r <= n && get(&uq, r, op)? == get(&uq, r + 1, op)? {
                 r += 1;
             }
-            set(&mut sr, r, r - i + 1, OP)?;
-            let b = self.remove_knot_max_err(ux(r, OP)?, ux(r - i + 1, OP)?)?;
-            set(&mut br, r, b, OP)?;
+            set(&mut sr, r, r - i + 1, op)?;
+            let b = self.remove_knot_max_err(ux(r, op)?, ux(r - i + 1, op)?)?;
+            set(&mut br, r, b, op)?;
             error = None;
             r += 1;
         }
@@ -254,14 +268,14 @@ impl Curve {
         // Try to remove each knot.
         loop {
             // Find knot with smallest error.
-            let mut b = get(&br, p + 1, OP)?;
-            let mut s = get(&sr, p + 1, OP)?;
+            let mut b = get(&br, p + 1, op)?;
+            let mut s = get(&sr, p + 1, op)?;
             r = p + 1;
             for i in (p + 2)..(m - p) {
-                let bi = get(&br, i, OP)?;
+                let bi = get(&br, i, op)?;
                 if bi < b {
                     b = bi;
-                    s = get(&sr, i, OP)?;
+                    s = get(&sr, i, op)?;
                     r = i;
                 }
             }
@@ -269,6 +283,12 @@ impl Curve {
             // If no more removable knot -> finished.
             if b == BIGD || b == NOT_REMOVABLE {
                 break;
+            }
+
+            // Check constraints.
+            if blocked(r, n) {
+                set(&mut br, r, NOT_REMOVABLE, op)?;
+                continue;
             }
 
             // Check error of removal.
@@ -279,35 +299,35 @@ impl Curve {
                 // Compute maximums of basis functions over each span.
                 k = (p + s + 1) / 2;
                 l = r - k + p + 1;
-                let alf = (get(&uq, r, OP)? - get(&uq, r - k, OP)?)
-                    / (get(&uq, r - k + p + 1, OP)? - get(&uq, r - k, OP)?);
-                let bet = (get(&uq, r, OP)? - get(&uq, r - k + 1, OP)?)
-                    / (get(&uq, r - k + p + 2, OP)? - get(&uq, r - k + 1, OP)?);
+                let alf = (get(&uq, r, op)? - get(&uq, r - k, op)?)
+                    / (get(&uq, r - k + p + 1, op)? - get(&uq, r - k, op)?);
+                let bet = (get(&uq, r, op)? - get(&uq, r - k + 1, op)?)
+                    / (get(&uq, r - k + p + 2, op)? - get(&uq, r - k + 1, op)?);
                 let omb = 1.0 - bet;
                 lam = alf / (alf + bet);
                 oml = 1.0 - lam;
 
-                let knt = KnotVector::new(&uq, ux(m, OP)?)?;
-                let left = min_max_or_default(&knt, r - k, pu, lto, &mut error, OP)?;
-                let right = min_max_or_default(&knt, r - k + 1, pu, lto, &mut error, OP)?;
-                combine_bounds(&mut max, left, right, lam, alf, oml, omb, p, false, OP)?;
+                let knt = KnotVector::new(&uq, ux(m, op)?)?;
+                let left = min_max_or_default(&knt, r - k, pu, lto, &mut error, op)?;
+                let right = min_max_or_default(&knt, r - k + 1, pu, lto, &mut error, op)?;
+                combine_bounds(&mut max, left, right, lam, alf, oml, omb, p, false, op)?;
             } else {
                 // Compute maximum of basis function.
                 k = (p + s) / 2;
                 l = r - k + p;
 
-                let knt = KnotVector::new(&uq, ux(m, OP)?)?;
-                let (_, mx) = min_max_or_default(&knt, r - k, pu, lto, &mut error, OP)?;
+                let knt = KnotVector::new(&uq, ux(m, op)?)?;
+                let (_, mx) = min_max_or_default(&knt, r - k, pu, lto, &mut error, op)?;
                 for i in 0..=p {
-                    set(&mut max, i, get(&mx, i, OP)?, OP)?;
+                    set(&mut max, i, get(&mx, i, op)?, op)?;
                 }
             }
 
             // Check the error.
             for i in r - k..=l {
-                if get(&uq, i, OP)? != get(&uq, i + 1, OP)? {
-                    let t = get(&er, i, OP)? + get(&max, i - r + k, OP)? * b;
-                    set(&mut te, i, t, OP)?;
+                if get(&uq, i, op)? != get(&uq, i + 1, op)? {
+                    let t = get(&er, i, op)? + get(&max, i - r + k, op)? * b;
+                    set(&mut te, i, t, op)?;
                     if t > tol {
                         rmf = false;
                         break;
@@ -318,13 +338,13 @@ impl Curve {
             // If error test passed -> update error vector and remove knot.
             if !rmf {
                 // Knot is not removable.
-                set(&mut br, r, NOT_REMOVABLE, OP)?;
+                set(&mut br, r, NOT_REMOVABLE, op)?;
                 continue;
             }
 
             for i in r - k..=l {
-                if get(&uq, i, OP)? != get(&uq, i + 1, OP)? {
-                    set(&mut er, i, get(&te, i, OP)?, OP)?;
+                if get(&uq, i, op)? != get(&uq, i + 1, op)? {
+                    set(&mut er, i, get(&te, i, op)?, op)?;
                 }
             }
 
@@ -337,21 +357,21 @@ impl Curve {
             let mut ii: isize = 1;
             let mut jj = last - off;
 
-            set(&mut rw, 0, get(&qw, off, OP)?, OP)?;
-            set(&mut rw, last + 1 - off, get(&qw, last + 1, OP)?, OP)?;
+            set(&mut rw, 0, get(&qw, off, op)?, op)?;
+            set(&mut rw, last + 1 - off, get(&qw, last + 1, op)?, op)?;
 
             // Get new control points for one removal step.
-            let ur = get(&uq, r, OP)?;
+            let ur = get(&uq, r, op)?;
             while j - i > 0 {
-                let alf = (get(&uq, i + p + 1, OP)? - get(&uq, i, OP)?) / (ur - get(&uq, i, OP)?);
+                let alf = (get(&uq, i + p + 1, op)? - get(&uq, i, op)?) / (ur - get(&uq, i, op)?);
                 let oma = 1.0 - alf;
                 let bet =
-                    (get(&uq, j + p + 1, OP)? - get(&uq, j, OP)?) / (get(&uq, j + p + 1, OP)? - ur);
+                    (get(&uq, j + p + 1, op)? - get(&uq, j, op)?) / (get(&uq, j + p + 1, op)? - ur);
                 let omb = 1.0 - bet;
-                let c = CPoint::combine2(alf, get(&qw, i, OP)?, oma, get(&rw, ii - 1, OP)?);
-                set(&mut rw, ii, c, OP)?;
-                let c = CPoint::combine2(bet, get(&qw, j, OP)?, omb, get(&rw, jj + 1, OP)?);
-                set(&mut rw, jj, c, OP)?;
+                let c = CPoint::combine2(alf, get(&qw, i, op)?, oma, get(&rw, ii - 1, op)?);
+                set(&mut rw, ii, c, op)?;
+                let c = CPoint::combine2(bet, get(&qw, j, op)?, omb, get(&rw, jj + 1, op)?);
+                set(&mut rw, jj, c, op)?;
                 i += 1;
                 j -= 1;
                 ii += 1;
@@ -365,8 +385,8 @@ impl Curve {
                 let mut wmin = BIGD;
                 let mut wmax = SMAD;
                 while j - i > 0 {
-                    let wi = get(&rw, i - off, OP)?.w;
-                    let wj = get(&rw, j - off, OP)?.w;
+                    let wi = get(&rw, i - off, op)?.w;
+                    let wj = get(&rw, j - off, op)?.w;
                     if wi < wmin {
                         wmin = wi;
                     }
@@ -383,52 +403,52 @@ impl Curve {
                     j -= 1;
                 }
                 if wmin < WEIGHT_MIN || wmax > WEIGHT_MAX {
-                    set(&mut br, r, NOT_REMOVABLE, OP)?;
+                    set(&mut br, r, NOT_REMOVABLE, op)?;
                     continue;
                 }
             }
 
             // Save new control points.
             if (p + s) % 2 != 0 {
-                let c = CPoint::combine2(lam, get(&rw, jj + 1, OP)?, oml, get(&rw, ii - 1, OP)?);
-                set(&mut rw, jj + 1, c, OP)?;
+                let c = CPoint::combine2(lam, get(&rw, jj + 1, op)?, oml, get(&rw, ii - 1, op)?);
+                set(&mut rw, jj + 1, c, op)?;
             }
 
             i = first;
             j = last;
             while j - i > 0 {
-                set(&mut qw, i, get(&rw, i - off, OP)?, OP)?;
-                set(&mut qw, j, get(&rw, j - off, OP)?, OP)?;
+                set(&mut qw, i, get(&rw, i - off, op)?, op)?;
+                set(&mut qw, j, get(&rw, j - off, op)?, op)?;
                 i += 1;
                 j -= 1;
             }
 
             // Shift down some parameters.
             if s == 1 {
-                let v = max2(get(&er, r - 1, OP)?, get(&er, r, OP)?);
-                set(&mut er, r - 1, v, OP)?;
+                let v = max2(get(&er, r - 1, op)?, get(&er, r, op)?);
+                set(&mut er, r - 1, v, op)?;
             }
             if s > 1 {
-                let v = get(&sr, r, OP)? - 1;
-                set(&mut sr, r - 1, v, OP)?;
+                let v = get(&sr, r, op)? - 1;
+                set(&mut sr, r - 1, v, op)?;
             }
             for i in r + 1..=m {
-                let v = get(&br, i, OP)?;
-                set(&mut br, i - 1, v, OP)?;
-                let v = get(&sr, i, OP)?;
-                set(&mut sr, i - 1, v, OP)?;
-                let v = get(&er, i, OP)?;
-                set(&mut er, i - 1, v, OP)?;
+                let v = get(&br, i, op)?;
+                set(&mut br, i - 1, v, op)?;
+                let v = get(&sr, i, op)?;
+                set(&mut sr, i - 1, v, op)?;
+                let v = get(&er, i, op)?;
+                set(&mut er, i - 1, v, op)?;
             }
 
             // Shift down knots and control points.
             for i in r + 1..=m {
-                let v = get(&uq, i, OP)?;
-                set(&mut uq, i - 1, v, OP)?;
+                let v = get(&uq, i, op)?;
+                set(&mut uq, i - 1, v, op)?;
             }
             for i in fout + 1..=n {
-                let v = get(&qw, i, OP)?;
-                set(&mut qw, i - 1, v, OP)?;
+                let v = get(&qw, i, op)?;
+                set(&mut qw, i - 1, v, op)?;
             }
 
             n -= 1;
@@ -443,15 +463,15 @@ impl Curve {
             let k = (r - p).max(p + 1);
             let l = n.min(r + p - s);
             for i in k..=l {
-                if get(&uq, i, OP)? != get(&uq, i + 1, OP)? && get(&br, i, OP)? != NOT_REMOVABLE {
-                    let e = max_err(&qw, &uq, n, m, i, get(&sr, i, OP)?)?;
-                    set(&mut br, i, e, OP)?;
+                if get(&uq, i, op)? != get(&uq, i + 1, op)? && get(&br, i, op)? != NOT_REMOVABLE {
+                    let e = max_err(&qw, &uq, n, m, i, get(&sr, i, op)?)?;
+                    set(&mut br, i, e, op)?;
                     error = None;
                 }
             }
         }
 
-        let mut out = Curve::with_indices(qw, ux(n, OP)?, pu, uq, ux(m, OP)?)?;
+        let mut out = Curve::with_indices(qw, ux(n, op)?, pu, uq, ux(m, op)?)?;
 
         // Compact output curve.
         if n < ns {
