@@ -257,9 +257,9 @@ depends_on = ["geom.matrix", "geom.tol", "geom.vector2d", "geom.vector3d"]
 est_lines = 1617
 layer = 3
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-geom.geom_utility_p2-a1"
+claimed_at = "2026-10-12T20:00:30Z"
 notes = "16 fns; largest: smgu_SphereCircleSphereCircleIntersect, smgu_EvaluateCurveContinuity, smgu_SegmentSegmentIntersect, smgu_SegmentSegmentPerpspectiveIntersect; cycle back-edges (call into later units; stub or co-port): geom.geom_utility_p1(28); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
