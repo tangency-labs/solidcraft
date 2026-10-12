@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **26** (23,756 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2` |
-| Partial | **10** (10,493 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver` |
-| Ported (green + partial) | 36 units, 34,249 upstream lines (8.8%); about 37,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 1 (1,508 lines): `geom.pseudo_box` |
+| Green | **28** (26,386 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box` |
+| Partial | **9** (9,371 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver` |
+| Ported (green + partial) | 37 units, 35,757 upstream lines (9.2%); about 37,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 5 (6,746 lines): `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `geom.a_object` |
 | Blocked | 0 |
 | Todo | 223 (352,146 lines) |
 
@@ -79,6 +79,8 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `geom.geom_utility_p1` | `geom::geom_utility::p1` | 4185 cases (185 fixture incl. SM_API_test rectangle/polygon, FitCrvPoints.pts, Points.pts, PointSet sections + 4000 generated), max_rel_err 0 | bit-identical; file-static helpers tested via a namespaced compile of SmGeomUtility.cpp; best-fit-line eigenvector, silhouette and FALSE-status quirks in findings.md |
 | `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), max_rel_err 0 | bit-identical; promoted from partial when `AreCoaxial` was wired to `geom.geom_utility_p1` |
 | `geom.geom_utility_p2` | `geom::geom_utility::p2` | 3270 cases (70 fixture + 3200 generated), max_rel_err 0 | bit-identical; promoted from partial when its p1 back-edges were wired; `PointSetType` is p1's |
+| `geom.extent3d` | `geom::extent3d` | 3086 cases (86 fixture + 3000 generated), max_rel_err 0 | bit-identical; promoted from partial when `geom.pseudo_box` wired `Circumscribe` (axis-map quirk in findings.md) |
+| `geom.pseudo_box` | `geom::pseudo_box` | 3011 cases (11 fixture incl. my_test_pseudobox + 3000 generated programs on 4 box registers), max_rel_err 0 | bit-identical; wired extent3d Circumscribe, tol GetScaledZero(SmPseudoBox), transform EvaluateBoundingBoxSimple (aligned branch) |
 
 ## Partial units
 
@@ -86,7 +88,6 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 
 | Unit | Rust module | difftest | Deferred on |
 |---|---|---|---|
-| `geom.extent3d` | `geom::extent3d` | 3086 cases, 3082 bit-identical | 4 (`geom.pseudo_box`) |
 | `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
 | `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
@@ -101,11 +102,8 @@ Ready (todo, every dependency green/partial): `nlib.crv_fit_p1` (1707), `nlib.cr
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 6 | `curve.hermite_curve` | 383 | `geom.pseudo_box` |
-| 6 | `geom.point_set` | 694 | `geom.pseudo_box` |
 | 6 | `geom.a_object` | 935 | `geom.transform` |
 
-`geom.pseudo_box` also unblocks the 4 deferred `geom.extent3d` cases.
 
 ## Recent findings (details in `plan/findings.md`)
 

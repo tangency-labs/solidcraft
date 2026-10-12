@@ -10,10 +10,10 @@ depends_on = []
 est_lines = 1122
 layer = 0
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle"]
-status = "partial"
+status = "green"
 claimed_by = "swarm-geom.extent3d-a1"
 claimed_at = "2026-10-12T19:22:46Z"
-notes = "difftest: 3086 cases, 3082 pass bit-identical, 4 deferred (geom.pseudo_box 4: Circumscribe); geom.extent1d intervals wired; co-ports sm_sqrt/sm_asin/GetMaxDimension (geom.vector3d). 67 fns; largest: SmExtent3d::IntersectLine, SmExtent3d::Circumscribe, SmExtent3d::ApproximateUnbounded, SmExtent3d::ComputeConeBoundTo; cycle back-edges (call into later units; stub or co-port): geom.vector3d(51), geom.extent1d(9), geom.pseudo_box(4); unit-SCC #22 (220 units); 318 upstream test entry points reach this unit"
+notes = "GREEN: difftest 3086 cases, all bit-identical, 0 deferred (Circumscribe wired by geom.pseudo_box); geom.extent1d intervals wired; co-ports sm_sqrt/sm_asin/GetMaxDimension (geom.vector3d). 67 fns; largest: SmExtent3d::IntersectLine, SmExtent3d::Circumscribe, SmExtent3d::ApproximateUnbounded, SmExtent3d::ComputeConeBoundTo; cycle back-edges (call into later units; stub or co-port): geom.vector3d(51), geom.extent1d(9), geom.pseudo_box(4); unit-SCC #22 (220 units); 318 upstream test entry points reach this unit"
 
 [[unit]]
 id = "geom.vector2d"
@@ -452,10 +452,10 @@ depends_on = ["geom.extent1d", "geom.extent3d", "geom.geom_utility_p1", "geom.ge
 est_lines = 1508
 layer = 5
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-geom.pseudo_box-a1"
 claimed_at = "2026-10-12T20:40:41Z"
-notes = "44 fns; largest: SmPseudoBox::ProjectToPlane, SmPseudoBox::IntersectLine, SmPseudoBox::AreDisjoint, SmPseudoBox::DistanceToPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "GREEN: difftest 3011 cases (11 fixture incl. my_test_pseudobox and the SmTol test box + 3000 generated programs on 4 box registers), all bit-identical, 0 deferred, max_rel_err 0, perturb SENSITIVE; wired UNPORTED(geom.pseudo_box) in geom.extent3d (Circumscribe / SmExtent3d(SmPseudoBox); promoted to green), geom.tol (GetScaledZero(SmPseudoBox)) and geom.transform (EvaluateBoundingBoxSimple: 113 cases undeferred, still partial on surface.volume_p1/p2); Circumscribe axis-map quirk in findings.md; 44 fns; largest: SmPseudoBox::ProjectToPlane, SmPseudoBox::IntersectLine, SmPseudoBox::AreDisjoint, SmPseudoBox::DistanceToPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "geom.tools"
@@ -481,7 +481,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-geom.transform-a1"
 claimed_at = "2026-10-12T20:43:11Z"
-notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 3042 cases (42 fixtures + 3000 generated), 2673 pass, 369 deferred (geom.pseudo_box 113, surface.volume_p1 253, surface.volume_p2 3), max_rel_err 0; 20k-seed run clean"
+notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 3042 cases (42 fixtures + 3000 generated), 2786 pass, 256 deferred (surface.volume_p1 253, surface.volume_p2 3; geom.pseudo_box wired), max_rel_err 0; 20k-seed run clean"
 
 [[unit]]
 id = "nlib.crv_fit_p1"
