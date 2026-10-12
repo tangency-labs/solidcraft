@@ -46,13 +46,13 @@ use crate::nurbs::srf_basic::{Direction, Surface};
 const PATCH_SNAP_TOL: f64 = 1.0e-08;
 
 /// A control net, `Pw[i][j]`.
-type Net = Vec<Vec<CPoint>>;
+pub(super) type Net = Vec<Vec<CPoint>>;
 
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
+pub(super) fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
     SolidError::Nlib { operation, code }
 }
 
-fn oob(operation: &'static str) -> SolidError {
+pub(super) fn oob(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
         operation,
         reason: "index out of range (invalid surface)",
@@ -60,67 +60,71 @@ fn oob(operation: &'static str) -> SolidError {
 }
 
 /// Upstream's signed index as `usize`.
-fn ix(i: isize, op: &'static str) -> Result<usize> {
+pub(super) fn ix(i: isize, op: &'static str) -> Result<usize> {
     usize::try_from(i).map_err(|_| oob(op))
 }
 
 /// `usize` as upstream's signed index.
-fn sx(i: usize, op: &'static str) -> Result<isize> {
+pub(super) fn sx(i: usize, op: &'static str) -> Result<isize> {
     isize::try_from(i).map_err(|_| oob(op))
 }
 
 /// `v[i]`.
-fn at<T: Copy>(v: &[T], i: isize, op: &'static str) -> Result<T> {
+pub(super) fn at<T: Copy>(v: &[T], i: isize, op: &'static str) -> Result<T> {
     v.get(ix(i, op)?).copied().ok_or_else(|| oob(op))
 }
 
 /// `v[i] = x`.
-fn put<T>(v: &mut [T], i: isize, x: T, op: &'static str) -> Result<()> {
+pub(super) fn put<T>(v: &mut [T], i: isize, x: T, op: &'static str) -> Result<()> {
     let slot = v.get_mut(ix(i, op)?).ok_or_else(|| oob(op))?;
     *slot = x;
     Ok(())
 }
 
 /// `w[i][j]`.
-fn at2<T: Copy>(w: &[Vec<T>], i: isize, j: isize, op: &'static str) -> Result<T> {
+pub(super) fn at2<T: Copy>(w: &[Vec<T>], i: isize, j: isize, op: &'static str) -> Result<T> {
     let row = w.get(ix(i, op)?).ok_or_else(|| oob(op))?;
     at(row, j, op)
 }
 
 /// `w[i][j] = x`.
-fn put2<T>(w: &mut [Vec<T>], i: isize, j: isize, x: T, op: &'static str) -> Result<()> {
+pub(super) fn put2<T>(w: &mut [Vec<T>], i: isize, j: isize, x: T, op: &'static str) -> Result<()> {
     let row = w.get_mut(ix(i, op)?).ok_or_else(|| oob(op))?;
     put(row, j, x, op)
 }
 
 /// A zero-filled `(n+1) x (m+1)` array (upstream allocates uninitialised storage).
-fn zeros2<T: Clone + Default>(n: isize, m: isize, op: &'static str) -> Result<Vec<Vec<T>>> {
+pub(super) fn zeros2<T: Clone + Default>(
+    n: isize,
+    m: isize,
+    op: &'static str,
+) -> Result<Vec<Vec<T>>> {
     let rows = ix(n.checked_add(1).ok_or_else(|| oob(op))?, op)?;
     let cols = ix(m.checked_add(1).ok_or_else(|| oob(op))?, op)?;
     Ok(vec![vec![T::default(); cols]; rows])
 }
 
 /// A zero-filled array of `k + 1` entries.
-fn zeros1<T: Clone + Default>(k: isize, op: &'static str) -> Result<Vec<T>> {
+pub(super) fn zeros1<T: Clone + Default>(k: isize, op: &'static str) -> Result<Vec<T>> {
     let len = ix(k.checked_add(1).ok_or_else(|| oob(op))?, op)?;
     Ok(vec![T::default(); len])
 }
 
 /// Local notation of a surface (`N_SrfGetCPtsDegreesAndKnots`), indices signed.
-struct Local<'a> {
-    n: isize,
-    m: isize,
-    p: isize,
-    q: isize,
-    r: isize,
-    s: isize,
-    pw: Net,
-    u: &'a [f64],
-    v: &'a [f64],
+pub(super) struct Local<'a> {
+    pub(super) n: isize,
+    pub(super) m: isize,
+    pub(super) p: isize,
+    pub(super) q: isize,
+    pub(super) r: isize,
+    pub(super) s: isize,
+    pub(super) pw: Net,
+    pub(super) u: &'a [f64],
+    pub(super) v: &'a [f64],
 }
 
 impl<'a> Local<'a> {
-    fn of(sur: &'a Surface, op: &'static str) -> Result<Self> {
+    pub(super) fn of(sur: &'a Surface, op: &'static str) -> Result<Self> {
         let idx = sur.indices();
         Ok(Self {
             n: sx(idx.n, op)?,
@@ -137,7 +141,7 @@ impl<'a> Local<'a> {
 }
 
 /// A surface from a net, signed degrees and knots.
-fn surface(
+pub(super) fn surface(
     net: Net,
     p: isize,
     q: isize,
@@ -149,7 +153,12 @@ fn surface(
 }
 
 /// `(span, multiplicity)` of `t` for degree `p` (`N_BasisFindSpanAndMult`, `NL_LEFT`).
-fn span_mult(knots: &[f64], p: isize, t: f64, op: &'static str) -> Result<(isize, isize)> {
+pub(super) fn span_mult(
+    knots: &[f64],
+    p: isize,
+    t: f64,
+    op: &'static str,
+) -> Result<(isize, isize)> {
     let kv = KnotVector::from_slice(knots)?;
     let (sp, ml) = kv.find_span_and_mult(ix(p, op)?, t, Side::Left)?;
     Ok((sx(sp, op)?, sx(ml, op)?))
@@ -162,7 +171,7 @@ fn span(knots: &[f64], p: isize, t: f64, op: &'static str) -> Result<isize> {
 }
 
 /// `N_KnotVectorIsEndParam` as an error: `NL_PAR_ERR` when `t <= U[0]` or `t >= U[m]`.
-fn check_interior(knots: &[f64], t: f64, op: &'static str) -> Result<()> {
+pub(super) fn check_interior(knots: &[f64], t: f64, op: &'static str) -> Result<()> {
     let kv = KnotVector::from_slice(knots)?;
     if kv.is_end_param(t) {
         return Err(nlib(op, NlibCode::Parameter));
