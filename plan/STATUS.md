@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **13** (11,063 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial` |
-| Partial | **3** (3,301 lines): `geom.extent3d`, `geom.tree`, `geom.attribute` |
-| Ported (green + partial) | 16 units, 14,364 upstream lines (3.7%); about 20,200 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 9 (8,156 lines): `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
+| Partial | **4** (3,780 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement` |
+| Ported (green + partial) | 17 units, 14,843 upstream lines (3.8%); about 20,200 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 8 (7,677 lines): `nlib.basis_basic`, `nlib.srf_basic`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
 | Blocked | 0 |
 | Todo | 235 (365,383 lines) |
 
@@ -76,18 +76,19 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.extent3d` | `geom::extent3d` | 3086 cases, 3082 bit-identical | 4 (`geom.pseudo_box`) |
 | `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
+| `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), 3815 bit-identical | 233 (`geom.geom_utility_p1`: `AreCoaxial` -> `smgu_LinePointDistance`) |
 
 ## Ready set
 
-No `todo` unit is ready: every unit whose `depends_on` are all green or partial has been
-claimed. These units become ready as soon as the listed claimed units land:
+Ready now: `geom.geom_utility_p1` (layer 4, 2178 lines; unblocks `geom.axis2_placement`'s
+233 deferred `AreCoaxial` cases). These units become ready as soon as the listed claimed
+units land:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
 | 3 | `nlib.basis_adv` | 361 | `nlib.basis_basic` |
 | 3 | `nlib.bezier` | 1154 | `nlib.srf_basic` |
 | 3 | `nlib.funcs_basic` | 538 | `nlib.basis_basic` |
-| 4 | `geom.geom_utility_p1` | 2178 | `geom.axis2_placement` |
 | 4 | `geom.grid` | 876 | `geom.object` |
 | 4 | `geom.polar_box` | 979 | `geom.extent2d` |
 | 4 | `geom.solution_array` | 1319 | `geom.object` |
