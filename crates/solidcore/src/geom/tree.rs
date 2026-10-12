@@ -1,0 +1,1605 @@
+//! Binary trees of axis-aligned boxes: object spatial trees (insert, remove and
+//! box queries over a set of bounded objects) and the node relations of surface
+//! subdivision trees (leaf neighbours, mark/class propagation).
+//!
+//! Upstream: `source/SMLib/src/SmTree.cpp`, `source/SMLib/inc/SmTree.h`.
+//!
+//! | Rust                                   | Upstream                                        |
+//! |----------------------------------------|-------------------------------------------------|
+//! | [`Tree`]                               | `SmTree`                                        |
+//! | [`Tree::new`]                          | `SmTree(SmObject*)`                             |
+//! | [`Tree::from_point`]                   | `SmTree(const SmPoint3d&, double, SmTreeNode*, SmObjectList*)` |
+//! | [`Tree::new_spatial`]                  | `SmTree(const SmExtent3d&, ULONG, ULONG)`       |
+//! | `Drop` (implicit)                      | `~SmTree`                                       |
+//! | [`Tree::owner`]                        | `SmTree::GetOwner`, `SmTreeNode::GetOwner`      |
+//! | [`Tree::set_owner_object`]             | `SmTree::SetOwnerObject`                        |
+//! | [`Tree::owner_object`]                 | `SmTree::GetOwnerObject`                        |
+//! | [`Tree::node_owner_object`]            | `SmTreeNode::GetOwnerObject`                    |
+//! | [`Tree::top_node`]                     | `SmTree::GetTopNode`                            |
+//! | [`Tree::TYPE`], [`Tree::type_code`]    | `SmTree::GetType` (`SmTree_TYPE`)               |
+//! | [`Tree::type_string`]                  | `SmTree::GetTypeString`                         |
+//! | [`Tree::is_kind_of`]                   | `SmTree::IsKindOf`                              |
+//! | [`Tree::add_to_spatial_tree`]          | `SmTree::AddToSpatialTree`                      |
+//! | [`Tree::rm_from_spatial_tree`]         | `SmTree::RmFromSpatialTree`                     |
+//! | [`Tree::all_tree_nodes`]               | `SmTree::GetAllTreeNodes`                       |
+//! | [`Tree::find_node`]                    | `SmTree::FindNode`                              |
+//! | [`Tree::node_object_list`]             | `SmTreeNode::GetObjectList(SmTArray<SmObjectList*>&)` |
+//! | [`Tree::object_list`]                  | `SmTree::GetObjectList`                         |
+//! | [`Tree::objects_in_box`]               | `SmTree::GetObjectsInBox`                       |
+//! | [`Tree::intersects_box`]               | `SmTree::IntersectsBox`                         |
+//! | [`Tree::find_object`]                  | `SmObjectList::FindObject`                      |
+//! | [`Tree::first_bezier_patch`]           | `SmTreeNode::GetFirstBezierPatch`               |
+//! | [`Tree::propagate_to_parents`]         | `SmTreeNode::PropagateToParents`                |
+//! | [`Tree::neighbors`]                    | `SmTreeNode::GetNeighbors`                      |
+//! | [`Tree::left_neighbors`] .. [`Tree::top_neighbors`] | `SmTreeNode::GetLeftNeighbors` .. `GetTopNeighbors` |
+//! | `right_side` .. `bot_side` (private)   | `SmTreeNode::GetRightSide`, `GetLeftSide`, `GetTopSide`, `GetBotSide` |
+//! | [`TreeNode`], [`TreeNode::new`]        | `SmTreeNode`, `SmTreeNode()`                    |
+//! | [`TreeNode::bounding_box`]             | `SmTreeNode::GetBoundingBox`                    |
+//! | [`ObjectList`]                         | `SmObjectList`                                  |
+//! | [`SurfaceAux`]                         | the `SmBezierAux2d` fields read here (`m_eSplitDir`, `m_bIsMarked`, `m_eNodeClass`, `m_pFace`, `mBA_pSurface`) |
+//! | [`AuxDataType`], [`NodeGeomType`], [`SplitDir`], [`NodeClass`] | `SmAuxDataType`, `SmNodeGeomType`, `SmSurfParamType` (U/V), `SmNodeClassType` |
+//! | `distance_between`, `max_dimension3` (private) | `SmVector3d::DistanceBetween`, `SmVector3d::GetMaxDimension` (co-ports, unit `geom.vector3d`) |
+//!
+//! Deviations:
+//! - Pointers become arena indices: nodes live in [`Tree::nodes`] ([`NodeId`]) and
+//!   object-list items in [`Tree::lists`] ([`ListId`]), both in allocation order,
+//!   exactly the order of upstream's `SmMemBlockMgr::GetActiveElements`. Resetting
+//!   a memory manager clears its arena. Block-size arguments have no counterpart.
+//! - Objects are a caller-chosen `Copy + PartialEq` handle `O` (upstream
+//!   `SmObject*`); a null object pointer is `None`.
+//! - `SmTreeNode::m_pData` is [`NodeData`]: the head of an object list, the
+//!   [`SurfaceAux`] subdivision data, or nothing. Code that would cast `m_pData` to
+//!   the wrong type (undefined behaviour upstream) returns
+//!   [`SolidError::InvalidInput`]; so does any use of a missing node/list id, a
+//!   missing top node or a cyclic object list.
+//! - The single-point constructor always allocates its node (and object-list
+//!   item) in the tree's arenas; upstream can also use caller-owned memory, which
+//!   is then invisible to `GetAllTreeNodes`/`GetNodeCount`.
+//! - The tree owner is a [`TreeOwner`] kind. `GetOwnerObject` and
+//!   `GetFirstBezierPatch` call into the curve/surface caches and B-spline
+//!   surfaces, which are not ported yet; those paths return
+//!   [`SolidError::Unported`] (see the `UNPORTED` markers).
+//! - `SM_ASSERT`, `WARN` (bad split-direction data) and debug drawing are not
+//!   ported; a `WARN` branch simply adds nothing, as upstream.
+
+use crate::error::{Result, SolidError};
+use crate::geom::extent3d::Extent3d;
+use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ};
+
+/// `SmTree_TYPE` (`CONT_BASE_TYPE + 150`).
+const SM_TREE_TYPE: i32 = 12150;
+/// `SmObject_TYPE` (`OS_BASE_TYPE + 1`).
+const SM_OBJECT_TYPE: i32 = 11001;
+
+/// Index of a node in [`Tree::nodes`] (upstream `SmTreeNode*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId(pub usize);
+
+/// Index of an object-list item in [`Tree::lists`] (upstream `SmObjectList*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ListId(pub usize);
+
+/// Kind of auxiliary data a node carries (`SmAuxDataType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum AuxDataType {
+    /// `SM_AD_NONE`.
+    #[default]
+    None,
+    /// `SM_AD_BEZIER_CURVE` (`SmBezierSpan`).
+    BezierCurve,
+    /// `SM_AD_CURVE_DATA` (`SmBezierAux1d`).
+    CurveData,
+    /// `SM_AD_BEZIER_SURFACE` (`SmBezierPatch`).
+    BezierSurface,
+    /// `SM_AD_BEZIER_SURFACE_HEAD` (`SmBezierAux2d`).
+    BezierSurfaceHead,
+    /// `SM_AD_SURFACE_DATA` (unused upstream).
+    SurfaceData,
+    /// `SM_AD_AUX_DATA` (`SmBezierAux2d`).
+    AuxData,
+    /// `SM_AD_CUBEAUX_DATA` (unused upstream).
+    CubeAuxData,
+    /// `SM_AD_OBJECT_LIST` (`SmObjectList`).
+    ObjectList,
+}
+
+impl AuxDataType {
+    /// Upstream enum value (`SM_AD_NONE` = 0 .. `SM_AD_OBJECT_LIST` = 8).
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        match self {
+            Self::None => 0,
+            Self::BezierCurve => 1,
+            Self::CurveData => 2,
+            Self::BezierSurface => 3,
+            Self::BezierSurfaceHead => 4,
+            Self::SurfaceData => 5,
+            Self::AuxData => 6,
+            Self::CubeAuxData => 7,
+            Self::ObjectList => 8,
+        }
+    }
+
+    /// The type with upstream enum value `code`, if any.
+    #[must_use]
+    pub const fn from_code(code: i32) -> Option<Self> {
+        Some(match code {
+            0 => Self::None,
+            1 => Self::BezierCurve,
+            2 => Self::CurveData,
+            3 => Self::BezierSurface,
+            4 => Self::BezierSurfaceHead,
+            5 => Self::SurfaceData,
+            6 => Self::AuxData,
+            7 => Self::CubeAuxData,
+            8 => Self::ObjectList,
+            _ => return None,
+        })
+    }
+
+    /// True for the surface subdivision kinds (`SM_AD_BEZIER_SURFACE`,
+    /// `SM_AD_BEZIER_SURFACE_HEAD`, `SM_AD_AUX_DATA`), whose data is a
+    /// `SmBezierAux2d`.
+    #[must_use]
+    pub const fn is_surface_subdivision(self) -> bool {
+        matches!(
+            self,
+            Self::BezierSurface | Self::BezierSurfaceHead | Self::AuxData
+        )
+    }
+}
+
+/// Geometry represented by a node (`SmNodeGeomType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum NodeGeomType {
+    /// `SM_NG_NONE`: initialization default.
+    #[default]
+    None,
+    /// `SM_NG_DEFAULT`: every tree except the following.
+    Default,
+    /// `SM_NG_LINE_SEG`: curve and poly-edge tree nodes.
+    LineSeg,
+    /// `SM_NG_POLYGON`: surface and poly-face tree nodes.
+    Polygon,
+}
+
+impl NodeGeomType {
+    /// Upstream enum value (`SM_NG_NONE` = 0 .. `SM_NG_POLYGON` = 3).
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        match self {
+            Self::None => 0,
+            Self::Default => 1,
+            Self::LineSeg => 2,
+            Self::Polygon => 3,
+        }
+    }
+
+    /// The type with upstream enum value `code`, if any.
+    #[must_use]
+    pub const fn from_code(code: i32) -> Option<Self> {
+        Some(match code {
+            0 => Self::None,
+            1 => Self::Default,
+            2 => Self::LineSeg,
+            3 => Self::Polygon,
+            _ => return None,
+        })
+    }
+}
+
+/// Direction in which a subdivision node's children split its domain
+/// (`SmBezierAux2d::m_eSplitDir`, an `SmSurfParamType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SplitDir {
+    /// `SM_SP_U`: split in u into left (child 1) and right (child 2).
+    U,
+    /// `SM_SP_V`: split in v into bottom (child 1) and top (child 2).
+    V,
+    /// `SM_SP_UNKNOWN` (or any other `SmSurfParamType`): not split / unknown.
+    #[default]
+    Unknown,
+}
+
+/// Classification of a subdivision node against the trim boundary
+/// (`SmNodeClassType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum NodeClass {
+    /// `SM_NC_UNKNOWN`.
+    #[default]
+    Unknown,
+    /// `SM_NC_INSIDE`.
+    Inside,
+    /// `SM_NC_OUTSIDE`.
+    Outside,
+    /// `SM_NC_ON_BOUNDARY`.
+    OnBoundary,
+}
+
+impl NodeClass {
+    /// Upstream enum value (`SM_NC_UNKNOWN` = 0 .. `SM_NC_ON_BOUNDARY` = 3).
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        match self {
+            Self::Unknown => 0,
+            Self::Inside => 1,
+            Self::Outside => 2,
+            Self::OnBoundary => 3,
+        }
+    }
+}
+
+/// The surface subdivision data of a node read by this module (the
+/// corresponding fields of upstream `SmBezierAux2d`; the surface cache units own
+/// the rest).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SurfaceAux<O> {
+    /// `m_eSplitDir`: how this node's children split its domain.
+    pub split_dir: SplitDir,
+    /// `m_bIsMarked`: traversal mark.
+    pub is_marked: bool,
+    /// `m_eNodeClass`: classification against the trim boundary.
+    pub node_class: NodeClass,
+    /// `m_pFace`: face of an inside node.
+    pub face: Option<O>,
+    /// `mBA_pSurface`: subdivided surface of this node's domain, if any.
+    pub surface: Option<O>,
+}
+
+/// Auxiliary data of a node (`SmTreeNode::m_pData`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum NodeData<O> {
+    /// Null data pointer.
+    #[default]
+    None,
+    /// Head of the node's linked list of object-list items (`SmObjectList*`).
+    ObjectList(Option<ListId>),
+    /// Surface subdivision data (`SmBezierAux2d*` / `SmBezierPatch*`).
+    Surface(SurfaceAux<O>),
+}
+
+/// One item of a node's linked list of objects (`SmObjectList`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjectList<O> {
+    /// `m_pNext`: next item of the list.
+    pub next: Option<ListId>,
+    /// `m_sBBox`: the object's bounding box.
+    pub bbox: Extent3d,
+    /// `m_pObject`: the object (`None` = null pointer).
+    pub object: Option<O>,
+}
+
+/// One node of a [`Tree`] (`SmTreeNode`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TreeNode<O> {
+    /// `m_pParent`.
+    pub parent: Option<NodeId>,
+    /// `m_pChild1`: bottom or left child.
+    pub child1: Option<NodeId>,
+    /// `m_pChild2`: top or right child.
+    pub child2: Option<NodeId>,
+    /// `m_sBBox`: this node's bounding box.
+    pub bbox: Extent3d,
+    /// `m_eAuxDataType`: kind of [`TreeNode::data`].
+    pub aux_type: AuxDataType,
+    /// `m_pData`: auxiliary data.
+    pub data: NodeData<O>,
+    /// `m_eGeomType`: geometry type represented by the node.
+    pub geom_type: NodeGeomType,
+}
+
+impl<O> Default for TreeNode<O> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<O> TreeNode<O> {
+    /// A detached node with an "inside out" box and no data (`SmTreeNode()`).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            parent: None,
+            child1: None,
+            child2: None,
+            bbox: Extent3d::new(),
+            aux_type: AuxDataType::None,
+            data: NodeData::None,
+            geom_type: NodeGeomType::None,
+        }
+    }
+
+    /// A node as handed out by upstream's `SmMemBlockMgr` (zero-filled memory:
+    /// all-zero box, no links, no data).
+    const fn zeroed() -> Self {
+        Self {
+            parent: None,
+            child1: None,
+            child2: None,
+            bbox: Extent3d::from_bounds(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            aux_type: AuxDataType::None,
+            data: NodeData::None,
+            geom_type: NodeGeomType::None,
+        }
+    }
+
+    /// This node's bounding box (`GetBoundingBox`).
+    #[must_use]
+    pub const fn bounding_box(&self) -> &Extent3d {
+        &self.bbox
+    }
+
+    /// The head of this node's object list, read from [`TreeNode::data`]
+    /// whatever [`TreeNode::aux_type`] says (upstream reads `m_pData` directly).
+    #[must_use]
+    pub const fn list_head(&self) -> Option<ListId> {
+        match self.data {
+            NodeData::ObjectList(h) => h,
+            NodeData::None | NodeData::Surface(_) => None,
+        }
+    }
+}
+
+/// Kind of object that owns a tree (`SmTree::m_pOwner`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TreeOwner {
+    /// An `SmCurveCache`.
+    CurveCache,
+    /// An `SmSurfaceCache`.
+    SurfaceCache,
+    /// An `SmTrimSrfCache` (an `SmSurfaceCache`).
+    TrimSrfCache,
+    /// An `SmTessSrfCache` (an `SmTrimSrfCache`).
+    TessSrfCache,
+    /// An `SmBrepCache`.
+    BrepCache,
+    /// Any other object.
+    Other,
+}
+
+/// Result of [`Tree::first_bezier_patch`] (upstream `gw_SURFACE*`). Every path
+/// that yields a patch calls into a unit that is not ported yet, so this type
+/// has no values until those units land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BezierPatchRef {}
+
+/// A binary tree of boxes (`SmTree`): an object spatial tree, a single point
+/// tree, or the skeleton of a curve/surface subdivision tree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tree<O> {
+    /// `m_lMaxElementsPerNode`: list length that triggers a leaf split.
+    max_elements_per_node: u64,
+    /// `m_dMinSizeRatio`: smallest node size as a fraction of the top node.
+    min_size_ratio: f64,
+    /// `m_dNodeReduction`: child box size reduction when splitting.
+    node_reduction: f64,
+    /// `m_pOwner`.
+    owner: Option<TreeOwner>,
+    /// `m_pTopNode`.
+    top: Option<NodeId>,
+    /// `m_sNodeMgr`: every node, in allocation order.
+    nodes: Vec<TreeNode<O>>,
+    /// `m_sListMgr`: every object-list item, in allocation order.
+    lists: Vec<ObjectList<O>>,
+}
+
+/// `smos_Sqrt`: `0` for `x <= 0`, else `sqrt(x)`.
+// CO-PORT(geom.vector3d): sm_sqrt
+fn sqrt(x: f64) -> f64 {
+    if x <= 0.0 {
+        0.0
+    } else {
+        x.sqrt()
+    }
+}
+
+/// `SmVector3d::DistanceBetween`.
+// CO-PORT(geom.vector3d): SmVector3d::DistanceBetween
+fn distance_between(a: Point3, b: Point3) -> f64 {
+    sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z))
+}
+
+/// `SmVector3d::GetMaxDimension`: the largest absolute coordinate.
+// CO-PORT(geom.vector3d): SmVector3d::GetMaxDimension
+fn max_dimension3(v: Vec3) -> f64 {
+    let mut d = if v.x.abs() > v.y.abs() {
+        v.x.abs()
+    } else {
+        v.y.abs()
+    };
+    if v.z.abs() > d {
+        d = v.z.abs();
+    }
+    d
+}
+
+/// C `int` expression `1 << count` widened to `ULONG` (sign-extended, as on
+/// LP64 targets).
+fn int_bit(count: u64) -> u64 {
+    i64::from(1i32.wrapping_shl(count as u32)) as u64
+}
+
+/// Which child of its parent a subdivision node is (the `bLeft`/`bRight`/`bBot`/
+/// `bTop` flags of the neighbour searches).
+enum ChildSide {
+    Left,
+    Right,
+    Bot,
+    Top,
+    Bad,
+}
+
+impl<O: Copy + PartialEq> Tree<O> {
+    /// `SmTree_TYPE`.
+    pub const TYPE: i32 = SM_TREE_TYPE;
+
+    /// An empty tree (no nodes) owned by `owner` (`SmTree(SmObject*)`).
+    #[must_use]
+    pub const fn new(owner: Option<TreeOwner>) -> Self {
+        Self {
+            max_elements_per_node: 10,
+            min_size_ratio: 100.0,
+            node_reduction: 0.4545,
+            owner,
+            top: None,
+            nodes: Vec::new(),
+            lists: Vec::new(),
+        }
+    }
+
+    /// A one-node tree whose box is `point` grown by `point_size` in every
+    /// direction (`SmTree(const SmPoint3d&, double, ...)`). With
+    /// `with_object_list` the node gets one object-list item with a null object
+    /// and a point-sized box at `point` (upstream `pOptExistingObjectList`).
+    #[must_use]
+    pub fn from_point(point: Point3, point_size: f64, with_object_list: bool) -> Self {
+        let mut tree = Self::new(None);
+        let mut node = TreeNode::zeroed();
+        node.aux_type = AuxDataType::None;
+        node.data = NodeData::None;
+        node.child1 = None;
+        node.child2 = None;
+        node.parent = None;
+        node.bbox = Extent3d::from_point(point);
+        node.bbox.expand_absolute(point_size);
+        if with_object_list {
+            tree.lists.push(ObjectList {
+                next: None,
+                bbox: Extent3d::from_point(point),
+                object: None,
+            });
+            node.data = NodeData::ObjectList(Some(ListId(0)));
+            node.aux_type = AuxDataType::ObjectList;
+        }
+        tree.nodes.push(node);
+        tree.top = Some(NodeId(0));
+        tree
+    }
+
+    /// A spatial tree with one empty object-list node whose box is
+    /// `spatial_box` (`SmTree(const SmExtent3d&, ULONG, ULONG)`). The box should
+    /// contain every object added later; [`Tree::add_to_spatial_tree`] rebuilds
+    /// the tree (expensively) when it does not.
+    #[must_use]
+    pub fn new_spatial(spatial_box: &Extent3d) -> Self {
+        let mut tree = Self::new(None);
+        let mut node = TreeNode::zeroed();
+        node.aux_type = AuxDataType::ObjectList;
+        node.data = NodeData::ObjectList(None);
+        node.bbox = *spatial_box;
+        tree.nodes.push(node);
+        tree.top = Some(NodeId(0));
+        tree
+    }
+
+    /// `SmTree_TYPE` (`GetType`).
+    #[must_use]
+    pub const fn type_code(&self) -> i32 {
+        Self::TYPE
+    }
+
+    /// `"SmTree_TYPE"` (`GetTypeString`).
+    #[must_use]
+    pub const fn type_string(&self) -> &'static str {
+        "SmTree_TYPE"
+    }
+
+    /// True for `SmTree_TYPE` and its base `SmObject_TYPE` (`IsKindOf`).
+    #[must_use]
+    pub const fn is_kind_of(&self, t: i32) -> bool {
+        // CO-PORT(geom.object): SmObject::IsKindOf (SM_COMMON_BASE: t == SmObject_TYPE)
+        t == SM_TREE_TYPE || t == SM_OBJECT_TYPE
+    }
+
+    /// The owning cache, if any (`GetOwner`).
+    #[must_use]
+    pub const fn owner(&self) -> Option<TreeOwner> {
+        self.owner
+    }
+
+    /// Sets the owner (`SetOwnerObject`).
+    pub fn set_owner_object(&mut self, owner: Option<TreeOwner>) {
+        self.owner = owner;
+    }
+
+    /// The curve or surface the tree was built for, when the owner is a curve
+    /// or surface cache (`SmTree::GetOwnerObject`).
+    pub fn owner_object(&self) -> Result<Option<O>> {
+        match self.owner {
+            // UNPORTED(curve.curve_cache): SmCurveCache::GetCurve
+            Some(TreeOwner::CurveCache) => Err(SolidError::Unported {
+                upstream: "SmCurveCache::GetCurve",
+                unit: "curve.curve_cache",
+            }),
+            // UNPORTED(surface.surface_cache_p1): SmSurfaceCache::GetSurface
+            Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => {
+                Err(SolidError::Unported {
+                    upstream: "SmSurfaceCache::GetSurface",
+                    unit: "surface.surface_cache_p1",
+                })
+            }
+            Some(TreeOwner::BrepCache | TreeOwner::Other) | None => Ok(None),
+        }
+    }
+
+    /// [`Tree::owner_object`] seen from a node (`SmTreeNode::GetOwnerObject`).
+    pub fn node_owner_object(&self, node: NodeId) -> Result<Option<O>> {
+        self.node(node)?;
+        self.owner_object()
+    }
+
+    /// The top node (`GetTopNode`); `None` for an empty tree.
+    #[must_use]
+    pub const fn top_node(&self) -> Option<NodeId> {
+        self.top
+    }
+
+    /// Every node, in allocation order.
+    #[must_use]
+    pub fn nodes(&self) -> &[TreeNode<O>] {
+        &self.nodes
+    }
+
+    /// Every object-list item, in allocation order.
+    #[must_use]
+    pub fn lists(&self) -> &[ObjectList<O>] {
+        &self.lists
+    }
+
+    /// The node `id`.
+    pub fn node(&self, id: NodeId) -> Result<&TreeNode<O>> {
+        self.nodes.get(id.0).ok_or(SolidError::InvalidInput {
+            operation: "geom::tree::Tree::node",
+            reason: "node id out of range",
+        })
+    }
+
+    /// The node `id`, mutable.
+    pub fn node_mut(&mut self, id: NodeId) -> Result<&mut TreeNode<O>> {
+        self.nodes.get_mut(id.0).ok_or(SolidError::InvalidInput {
+            operation: "geom::tree::Tree::node_mut",
+            reason: "node id out of range",
+        })
+    }
+
+    /// The object-list item `id`.
+    pub fn list(&self, id: ListId) -> Result<&ObjectList<O>> {
+        self.lists.get(id.0).ok_or(SolidError::InvalidInput {
+            operation: "geom::tree::Tree::list",
+            reason: "object list id out of range",
+        })
+    }
+
+    /// The object-list item `id`, mutable.
+    pub fn list_mut(&mut self, id: ListId) -> Result<&mut ObjectList<O>> {
+        self.lists.get_mut(id.0).ok_or(SolidError::InvalidInput {
+            operation: "geom::tree::Tree::list_mut",
+            reason: "object list id out of range",
+        })
+    }
+
+    /// Appends `node` to the node arena and returns its id (upstream
+    /// `m_sNodeMgr.GetNewElement()` followed by field initialisation).
+    pub fn add_node(&mut self, node: TreeNode<O>) -> NodeId {
+        self.nodes.push(node);
+        NodeId(self.nodes.len() - 1)
+    }
+
+    /// Makes `top` the top node (upstream assigns `m_pTopNode`).
+    pub fn set_top_node(&mut self, top: Option<NodeId>) {
+        self.top = top;
+    }
+
+    /// The top node id, or an error for an empty tree (upstream dereferences
+    /// the null top node).
+    fn top_id(&self, operation: &'static str) -> Result<NodeId> {
+        self.top.ok_or(SolidError::InvalidInput {
+            operation,
+            reason: "tree has no top node",
+        })
+    }
+
+    /// The subdivision data of `id` (upstream casts `m_pData` to
+    /// `SmBezierAux2d*`).
+    fn surface_aux(&self, id: NodeId, operation: &'static str) -> Result<&SurfaceAux<O>> {
+        match &self.node(id)?.data {
+            NodeData::Surface(a) => Ok(a),
+            NodeData::None | NodeData::ObjectList(_) => Err(SolidError::InvalidInput {
+                operation,
+                reason: "node has no surface subdivision data",
+            }),
+        }
+    }
+
+    /// Mutable [`Tree::surface_aux`].
+    fn surface_aux_mut(
+        &mut self,
+        id: NodeId,
+        operation: &'static str,
+    ) -> Result<&mut SurfaceAux<O>> {
+        match &mut self.node_mut(id)?.data {
+            NodeData::Surface(a) => Ok(a),
+            NodeData::None | NodeData::ObjectList(_) => Err(SolidError::InvalidInput {
+                operation,
+                reason: "node has no surface subdivision data",
+            }),
+        }
+    }
+
+    /// The items of the linked list starting at `head`, in list order.
+    fn walk_list(&self, head: Option<ListId>, operation: &'static str) -> Result<Vec<ListId>> {
+        let mut out = Vec::new();
+        let mut cur = head;
+        while let Some(id) = cur {
+            if out.len() >= self.lists.len() {
+                return Err(SolidError::InvalidInput {
+                    operation,
+                    reason: "object list is cyclic",
+                });
+            }
+            out.push(id);
+            cur = self.list(id)?.next;
+        }
+        Ok(out)
+    }
+
+    /// Searches the list starting at `head` for `object`
+    /// (`SmObjectList::FindObject`). Returns whether it was found and the item
+    /// before the last one visited: when found, the item before the match
+    /// (`None` when the match is `head`); when not found, the last item.
+    pub fn find_object(&self, head: ListId, object: Option<O>) -> Result<(bool, Option<ListId>)> {
+        let mut prev = None;
+        let mut cur = Some(head);
+        let mut steps = 0usize;
+        while let Some(id) = cur {
+            let item = self.list(id)?;
+            if item.object == object {
+                return Ok((true, prev));
+            }
+            steps += 1;
+            if steps > self.lists.len() {
+                return Err(SolidError::InvalidInput {
+                    operation: "geom::tree::Tree::find_object",
+                    reason: "object list is cyclic",
+                });
+            }
+            prev = Some(id);
+            cur = item.next;
+        }
+        Ok((false, prev))
+    }
+
+    /// Adds `object` with box `extent` to the spatial tree, splitting a leaf
+    /// whose list grows past the element limit (`AddToSpatialTree`). When
+    /// `extent` is not inside the top node's box, the whole tree is first
+    /// rebuilt around a grown box (expensive). `object = None` only performs that
+    /// size check. An object already stored in the node that would hold it gets
+    /// its box enlarged instead.
+    pub fn add_to_spatial_tree(
+        &mut self,
+        extent: &Extent3d,
+        object: Option<O>,
+        geom_type: NodeGeomType,
+    ) -> Result<()> {
+        const OP: &str = "geom::tree::Tree::add_to_spatial_tree";
+        let top = self.top_id(OP)?;
+
+        // rebuild the tree with a larger box when the extent sticks out
+        if !extent.is_contained_by(&self.node(top)?.bbox, EFF_ZERO) {
+            let all = self.object_list()?;
+            let mut union = *extent;
+            let mut objects = Vec::with_capacity(all.len());
+            let mut extents = Vec::with_capacity(all.len());
+            for id in all {
+                let item = self.list(id)?;
+                objects.push(item.object);
+                extents.push(item.bbox);
+                union = union.union(&item.bbox);
+            }
+
+            let size = union.size();
+            let tol = EFF_ZERO_SQ * max_dimension3(size);
+            union.expand_absolute(tol);
+            union.add_point(union.max() + 0.15 * size);
+            union.add_point(union.min() - 0.15 * size);
+
+            self.lists.clear();
+            self.nodes.clear();
+
+            let mut node = TreeNode::zeroed();
+            node.aux_type = AuxDataType::ObjectList;
+            node.data = NodeData::ObjectList(None);
+            node.bbox = union;
+            node.geom_type = geom_type;
+            self.nodes.push(node);
+            self.top = Some(NodeId(0));
+
+            for (bbox, obj) in extents.iter().zip(objects) {
+                // upstream ignores the status of the re-insertions
+                let _status = self.add_to_spatial_tree(bbox, obj, geom_type);
+            }
+        }
+
+        let Some(object) = object else {
+            return Ok(());
+        };
+
+        let found = self.find_node(extent)?.ok_or(SolidError::InvalidInput {
+            operation: OP,
+            reason: "no node contains the object box",
+        })?;
+
+        let head = self.node(found)?.list_head();
+        let (contains, prev) = match head {
+            Some(h) => self.find_object(h, Some(object))?,
+            None => (false, None),
+        };
+        if contains {
+            let this = match prev {
+                None => head,
+                Some(p) => self.list(p)?.next,
+            };
+            if let Some(t) = this {
+                let item = self.list_mut(t)?;
+                item.bbox = item.bbox.union(extent);
+            }
+            return Ok(());
+        }
+
+        // new list item at the front of the found node's list
+        let new_id = ListId(self.lists.len());
+        self.lists.push(ObjectList {
+            next: head,
+            bbox: *extent,
+            object: Some(object),
+        });
+        self.node_mut(found)?.data = NodeData::ObjectList(Some(new_id));
+
+        let count = self.walk_list(Some(new_id), OP)?.len() as u64;
+
+        let found_node = *self.node(found)?;
+        let split = if found_node.child1.is_some() || count < self.max_elements_per_node {
+            false
+        } else {
+            let top_ext = self.node(self.top_id(OP)?)?.bbox;
+            let curr_ext = found_node.bbox;
+            let top_dist = distance_between(top_ext.max(), top_ext.min());
+            let curr_dist = distance_between(curr_ext.max(), curr_ext.min());
+            // keep upstream's comparison (NaN distances split)
+            let too_small = top_dist > curr_dist * self.min_size_ratio;
+            !too_small
+        };
+
+        if split {
+            let curr_ext = found_node.bbox;
+            let child1 = NodeId(self.nodes.len());
+            let child2 = NodeId(self.nodes.len() + 1);
+            for _ in 0..2 {
+                let mut child = TreeNode::zeroed();
+                child.parent = Some(found);
+                child.aux_type = AuxDataType::ObjectList;
+                child.data = NodeData::ObjectList(None);
+                child.geom_type = geom_type;
+                self.nodes.push(child);
+            }
+            {
+                let f = self.node_mut(found)?;
+                f.child1 = Some(child1);
+                f.child2 = Some(child2);
+            }
+
+            let diff = curr_ext.max() - curr_ext.min();
+            let mut new_min = curr_ext.min();
+            let mut new_max = curr_ext.max();
+            let red = self.node_reduction;
+            if diff.x >= diff.y && diff.x >= diff.z {
+                new_max.x -= diff.x * red;
+                new_min.x += diff.x * red;
+            } else if diff.y >= diff.x && diff.y >= diff.z {
+                new_max.y -= diff.y * red;
+                new_min.y += diff.y * red;
+            } else {
+                new_max.z -= diff.z * red;
+                new_min.z += diff.z * red;
+            }
+            // upstream ignores SetMinMax's status (the box then stays zeroed)
+            let _status = self
+                .node_mut(child1)?
+                .bbox
+                .set_min_max(curr_ext.min(), new_max);
+            let _status = self
+                .node_mut(child2)?
+                .bbox
+                .set_min_max(new_min, curr_ext.max());
+
+            // move the old leaf's objects to the smallest containing nodes
+            let items = self.node_object_list(found)?;
+            self.node_mut(found)?.data = NodeData::ObjectList(None);
+            for id in items {
+                self.list_mut(id)?.next = None;
+                let bbox = self.list(id)?.bbox;
+                let fnd = self.find_node(&bbox)?.ok_or(SolidError::InvalidInput {
+                    operation: OP,
+                    reason: "no node contains the object box",
+                })?;
+                let fnd_head = self.node(fnd)?.list_head();
+                self.list_mut(id)?.next = fnd_head;
+                self.node_mut(fnd)?.data = NodeData::ObjectList(Some(id));
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes `object` from the node holding `extent` or, failing that, from
+    /// one of that node's ancestors (`RmFromSpatialTree`). Returns whether it
+    /// was found and removed; `false` for a tree that is not an object tree.
+    pub fn rm_from_spatial_tree(&mut self, extent: &Extent3d, object: Option<O>) -> Result<bool> {
+        let Some(top) = self.top else {
+            return Ok(false);
+        };
+        if self.node(top)?.aux_type != AuxDataType::ObjectList {
+            return Ok(false);
+        }
+        let Some(found) = self.find_node(extent)? else {
+            return Ok(false);
+        };
+
+        let mut cur = Some(found);
+        while let Some(id) = cur {
+            let node = *self.node(id)?;
+            let head = if node.aux_type == AuxDataType::ObjectList {
+                node.list_head()
+            } else {
+                None
+            };
+            if let Some(h) = head {
+                let (ok, prev) = self.find_object(h, object)?;
+                if ok {
+                    if let Some(p) = prev {
+                        let skip = self.list(p)?.next;
+                        let after = match skip {
+                            Some(s) => self.list(s)?.next,
+                            None => None,
+                        };
+                        self.list_mut(p)?.next = after;
+                    } else {
+                        let after = self.list(h)?.next;
+                        self.node_mut(id)?.data = NodeData::ObjectList(after);
+                    }
+                    return Ok(true);
+                }
+            }
+            cur = node.parent;
+        }
+        Ok(false)
+    }
+
+    /// Every node id in allocation order (`GetAllTreeNodes`).
+    #[must_use]
+    pub fn all_tree_nodes(&self) -> Vec<NodeId> {
+        (0..self.nodes.len()).map(NodeId).collect()
+    }
+
+    /// The smallest node whose box contains `bbox` (within `EFF_ZERO`), leaf or
+    /// internal (`FindNode`). A childless top node is returned unchecked;
+    /// `None` when `bbox` does not fit the tree.
+    pub fn find_node(&self, bbox: &Extent3d) -> Result<Option<NodeId>> {
+        const OP: &str = "geom::tree::Tree::find_node";
+        let mut id = self.top_id(OP)?;
+        loop {
+            let node = self.node(id)?;
+            let Some(c1) = node.child1 else {
+                return Ok(Some(id));
+            };
+            if bbox.is_contained_by(&self.node(c1)?.bbox, EFF_ZERO) {
+                id = c1;
+                continue;
+            }
+            let c2 = node.child2.ok_or(SolidError::InvalidInput {
+                operation: OP,
+                reason: "node has child 1 but no child 2",
+            })?;
+            if bbox.is_contained_by(&self.node(c2)?.bbox, EFF_ZERO) {
+                id = c2;
+                continue;
+            }
+            if !bbox.is_contained_by(&node.bbox, EFF_ZERO) {
+                return Ok(None);
+            }
+            return Ok(Some(id));
+        }
+    }
+
+    /// The object-list items of `node`, in list order
+    /// (`SmTreeNode::GetObjectList`); fails for a node that is not an object
+    /// list node.
+    pub fn node_object_list(&self, node: NodeId) -> Result<Vec<ListId>> {
+        const OP: &str = "geom::tree::Tree::node_object_list";
+        let n = self.node(node)?;
+        if n.aux_type != AuxDataType::ObjectList {
+            return Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "node is not an object list node",
+            });
+        }
+        self.walk_list(n.list_head(), OP)
+    }
+
+    /// Every object-list item of every object-list node, nodes in allocation
+    /// order, each node's items in list order (`SmTree::GetObjectList`).
+    pub fn object_list(&self) -> Result<Vec<ListId>> {
+        let mut out = Vec::new();
+        for node in &self.nodes {
+            if node.aux_type != AuxDataType::ObjectList {
+                continue;
+            }
+            out.extend(self.walk_list(node.list_head(), "geom::tree::Tree::object_list")?);
+        }
+        Ok(out)
+    }
+
+    /// Objects whose boxes touch `bbox`, in depth-first order (child 2 before
+    /// child 1) (`GetObjectsInBox`).
+    pub fn objects_in_box(&self, bbox: &Extent3d) -> Result<Vec<Option<O>>> {
+        const OP: &str = "geom::tree::Tree::objects_in_box";
+        let mut out = Vec::new();
+        let mut stack = vec![self.top_id(OP)?];
+        while let Some(id) = stack.pop() {
+            let node = self.node(id)?;
+            if !node.bbox.are_disjoint(bbox, 0.0) {
+                for item in self.walk_list(node.list_head(), OP)? {
+                    let item = self.list(item)?;
+                    if !item.bbox.are_disjoint(bbox, 0.0) {
+                        out.push(item.object);
+                    }
+                }
+                if let Some(c1) = node.child1 {
+                    stack.push(c1);
+                    stack.push(node.child2.ok_or(SolidError::InvalidInput {
+                        operation: OP,
+                        reason: "node has child 1 but no child 2",
+                    })?);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// True when some leaf box touches `bbox` (`IntersectsBox`).
+    pub fn intersects_box(&self, bbox: &Extent3d) -> Result<bool> {
+        const OP: &str = "geom::tree::Tree::intersects_box";
+        let mut stack = vec![self.top_id(OP)?];
+        while let Some(id) = stack.pop() {
+            let node = self.node(id)?;
+            if !node.bbox.are_disjoint(bbox, 0.0) {
+                match node.child1 {
+                    None => return Ok(true),
+                    Some(c1) => {
+                        stack.push(c1);
+                        stack.push(node.child2.ok_or(SolidError::InvalidInput {
+                            operation: OP,
+                            reason: "node has child 1 but no child 2",
+                        })?);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// The Bezier patch describing `node`'s shape, falling back to ancestors
+    /// (`GetFirstBezierPatch`). `None` for nodes that are not surface
+    /// subdivision nodes or have no shape.
+    pub fn first_bezier_patch(&self, node: NodeId) -> Result<Option<BezierPatchRef>> {
+        let n = self.node(node)?;
+        if n.aux_type == AuxDataType::BezierSurface {
+            // UNPORTED(surface.surface_cache_p1): SmBezierPatch::GetBezierPtr
+            return Err(SolidError::Unported {
+                upstream: "SmBezierPatch::GetBezierPtr",
+                unit: "surface.surface_cache_p1",
+            });
+        }
+        if n.aux_type.is_surface_subdivision() {
+            let owner_surface = self.owner_object()?;
+            // (SM_ASSERT on SmSurface::IsKindOf, unit surface.surface_p2, not ported: debug only)
+            let aux = self.surface_aux(node, "geom::tree::Tree::first_bezier_patch")?;
+            if aux.surface.is_some() && (n.parent.is_none() || owner_surface != aux.surface) {
+                // UNPORTED(nurbs.b_spline_surface_p1): SmBSplineSurface::GetGwNurbPointer
+                return Err(SolidError::Unported {
+                    upstream: "SmBSplineSurface::GetGwNurbPointer",
+                    unit: "nurbs.b_spline_surface_p1",
+                });
+            } else if let Some(p) = n.parent {
+                if owner_surface != aux.surface {
+                    return self.first_bezier_patch(p);
+                }
+            }
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
+    /// After `node`'s mark or class changed, updates its ancestors
+    /// (`PropagateToParents`): a parent is marked when both children are, on the
+    /// boundary when a child is, inside when both are, outside when this child
+    /// is outside and its sibling inside. Stops at the first unchanged parent.
+    pub fn propagate_to_parents(&mut self, node: NodeId) -> Result<()> {
+        const OP: &str = "geom::tree::Tree::propagate_to_parents";
+        let mut cur = node;
+        loop {
+            let n = *self.node(cur)?;
+            if !n.aux_type.is_surface_subdivision() {
+                return Ok(());
+            }
+            let Some(parent) = n.parent else {
+                return Ok(());
+            };
+            let p = *self.node(parent)?;
+            let sibling = if p.child1 == Some(cur) {
+                p.child2
+            } else {
+                p.child1
+            }
+            .ok_or(SolidError::InvalidInput {
+                operation: OP,
+                reason: "node has no sibling",
+            })?;
+            let this_aux = *self.surface_aux(cur, OP)?;
+            let sib_aux = *self.surface_aux(sibling, OP)?;
+            let parent_aux = self.surface_aux_mut(parent, OP)?;
+            let mut changed = false;
+
+            if this_aux.is_marked && sib_aux.is_marked && !parent_aux.is_marked {
+                parent_aux.is_marked = true;
+                changed = true;
+            }
+
+            if this_aux.node_class == NodeClass::OnBoundary {
+                if parent_aux.node_class != NodeClass::OnBoundary {
+                    parent_aux.node_class = NodeClass::OnBoundary;
+                    changed = true;
+                }
+            } else if this_aux.node_class == NodeClass::Inside
+                && sib_aux.node_class == NodeClass::Inside
+            {
+                if parent_aux.node_class != NodeClass::Inside {
+                    parent_aux.node_class = NodeClass::Inside;
+                    parent_aux.face = this_aux.face;
+                    changed = true;
+                }
+            } else if this_aux.node_class == NodeClass::Outside
+                && sib_aux.node_class == NodeClass::Inside
+                && parent_aux.node_class != NodeClass::Outside
+            {
+                parent_aux.node_class = NodeClass::Outside;
+                changed = true;
+            }
+
+            if !changed {
+                return Ok(());
+            }
+            cur = parent;
+        }
+    }
+
+    /// Appends the left, right, bottom and top leaf neighbours of `node`
+    /// (`GetNeighbors`); nothing for non-subdivision nodes.
+    pub fn neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
+        if !self.node(node)?.aux_type.is_surface_subdivision() {
+            return Ok(());
+        }
+        self.left_neighbors(node, out)?;
+        self.right_neighbors(node, out)?;
+        self.bot_neighbors(node, out)?;
+        self.top_neighbors(node, out)
+    }
+
+    /// Appends the leaf nodes left of `node` (`GetLeftNeighbors`).
+    pub fn left_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
+        self.left_neighbors_bits(node, out, 0, 0)
+    }
+
+    /// Appends the leaf nodes right of `node` (`GetRightNeighbors`).
+    pub fn right_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
+        self.right_neighbors_bits(node, out, 0, 0)
+    }
+
+    /// Appends the leaf nodes below `node` (`GetBotNeighbors`).
+    pub fn bot_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
+        self.bot_neighbors_bits(node, out, 0, 0)
+    }
+
+    /// Appends the leaf nodes above `node` (`GetTopNeighbors`).
+    pub fn top_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
+        self.top_neighbors_bits(node, out, 0, 0)
+    }
+
+    /// Where `node` sits under its parent `parent` (per the parent's split
+    /// direction).
+    fn child_side(&self, node: NodeId, parent: NodeId, op: &'static str) -> Result<ChildSide> {
+        let p = self.node(parent)?;
+        let split = self.surface_aux(parent, op)?.split_dir;
+        let is1 = p.child1 == Some(node);
+        let is2 = p.child2 == Some(node);
+        Ok(if split == SplitDir::U && is1 {
+            ChildSide::Left
+        } else if split == SplitDir::U && is2 {
+            ChildSide::Right
+        } else if split == SplitDir::V && is1 {
+            ChildSide::Bot
+        } else if split == SplitDir::V && is2 {
+            ChildSide::Top
+        } else {
+            ChildSide::Bad
+        })
+    }
+
+    /// Child 1 (`first`) or child 2 of `id`; error when missing (upstream
+    /// dereferences null).
+    fn child(&self, id: NodeId, first: bool, op: &'static str) -> Result<NodeId> {
+        let n = self.node(id)?;
+        if first { n.child1 } else { n.child2 }.ok_or(SolidError::InvalidInput {
+            operation: op,
+            reason: "missing child node",
+        })
+    }
+
+    /// `GetLeftNeighbors` with the recursion's split bits/count.
+    fn left_neighbors_bits(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        mut bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        const OP: &str = "geom::tree::Tree::left_neighbors";
+        let n = self.node(node)?;
+        if !n.aux_type.is_surface_subdivision() {
+            return Ok(());
+        }
+        if count == 0 {
+            bits = 0;
+        }
+        let Some(parent) = n.parent else {
+            return Ok(());
+        };
+        match self.child_side(node, parent, OP)? {
+            ChildSide::Left => self.left_neighbors_bits(parent, out, bits, count),
+            ChildSide::Right => {
+                let sib = self.child(parent, true, OP)?;
+                self.right_side(sib, out, bits, count, 0, 0)
+            }
+            ChildSide::Bot => self.left_neighbors_bits(parent, out, bits, count + 1),
+            ChildSide::Top => {
+                self.left_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
+            }
+            ChildSide::Bad => Ok(()),
+        }
+    }
+
+    /// `GetRightNeighbors` with the recursion's split bits/count.
+    fn right_neighbors_bits(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        mut bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        const OP: &str = "geom::tree::Tree::right_neighbors";
+        let n = self.node(node)?;
+        if !n.aux_type.is_surface_subdivision() {
+            return Ok(());
+        }
+        if count == 0 {
+            bits = 0;
+        }
+        let Some(parent) = n.parent else {
+            return Ok(());
+        };
+        match self.child_side(node, parent, OP)? {
+            ChildSide::Left => {
+                let sib = self.child(parent, false, OP)?;
+                self.left_side(sib, out, bits, count, 0, 0)
+            }
+            ChildSide::Right => self.right_neighbors_bits(parent, out, bits, count),
+            ChildSide::Bot => self.right_neighbors_bits(parent, out, bits, count + 1),
+            ChildSide::Top => {
+                self.right_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
+            }
+            ChildSide::Bad => Ok(()),
+        }
+    }
+
+    /// `GetBotNeighbors` with the recursion's split bits/count.
+    fn bot_neighbors_bits(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        mut bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        const OP: &str = "geom::tree::Tree::bot_neighbors";
+        let n = self.node(node)?;
+        if !n.aux_type.is_surface_subdivision() {
+            return Ok(());
+        }
+        if count == 0 {
+            bits = 0;
+        }
+        let Some(parent) = n.parent else {
+            return Ok(());
+        };
+        match self.child_side(node, parent, OP)? {
+            ChildSide::Left => self.bot_neighbors_bits(parent, out, bits, count + 1),
+            ChildSide::Right => {
+                self.bot_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
+            }
+            ChildSide::Bot => self.bot_neighbors_bits(parent, out, bits, count),
+            ChildSide::Top => {
+                let sib = self.child(parent, true, OP)?;
+                self.top_side(sib, out, bits, count, 0, 0)
+            }
+            ChildSide::Bad => Ok(()),
+        }
+    }
+
+    /// `GetTopNeighbors` with the recursion's split bits/count.
+    fn top_neighbors_bits(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        mut bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        const OP: &str = "geom::tree::Tree::top_neighbors";
+        let n = self.node(node)?;
+        if !n.aux_type.is_surface_subdivision() {
+            return Ok(());
+        }
+        if count == 0 {
+            bits = 0;
+        }
+        let Some(parent) = n.parent else {
+            return Ok(());
+        };
+        match self.child_side(node, parent, OP)? {
+            ChildSide::Left => self.top_neighbors_bits(parent, out, bits, count + 1),
+            ChildSide::Right => {
+                self.top_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
+            }
+            ChildSide::Bot => {
+                let sib = self.child(parent, false, OP)?;
+                self.bot_side(sib, out, bits, count, 0, 0)
+            }
+            ChildSide::Top => self.top_neighbors_bits(parent, out, bits, count),
+            ChildSide::Bad => Ok(()),
+        }
+    }
+
+    /// Whether the descendants `(bits << 1) | 0` and `(bits << 1) | 1` one split
+    /// below `(bits, count)` line up with the target `(target_bits,
+    /// target_count)` (the `bChild1`/`bChild2` tests of the `Get*Side` functions).
+    fn split_targets(target_bits: u64, target_count: u64, bits: u64, count: u64) -> (bool, bool) {
+        if count + 1 > target_count {
+            return (true, true);
+        }
+        let want = target_bits.wrapping_shr((target_count - (count + 1)) as u32);
+        ((bits << 1) == want, ((bits << 1) | 1) == want)
+    }
+
+    /// Shared body of the four `Get*Side` functions: `through` is the split
+    /// direction that passes straight to child `through_first` (1) or 2; the
+    /// other direction filters children by the target bits.
+    fn side(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        target: (u64, u64),
+        mut bits: u64,
+        count: u64,
+        through: (SplitDir, bool),
+        op: &'static str,
+    ) -> Result<()> {
+        let n = self.node(node)?;
+        if !n.aux_type.is_surface_subdivision() {
+            return Ok(());
+        }
+        if count == 0 {
+            bits = 0;
+        }
+        let split = self.surface_aux(node, op)?.split_dir;
+        let cross = match through.0 {
+            SplitDir::U => SplitDir::V,
+            SplitDir::V => SplitDir::U,
+            SplitDir::Unknown => SplitDir::Unknown,
+        };
+        if n.child1.is_none() {
+            out.push(node);
+        } else if split == through.0 {
+            let c = self.child(node, through.1, op)?;
+            self.side(c, out, target, bits, count, through, op)?;
+        } else if split == cross {
+            let (b1, b2) = Self::split_targets(target.0, target.1, bits, count);
+            if b1 {
+                let c1 = self.child(node, true, op)?;
+                self.side(c1, out, target, bits << 1, count + 1, through, op)?;
+            }
+            if b2 {
+                let c2 = self.child(node, false, op)?;
+                self.side(c2, out, target, (bits << 1) | 1, count + 1, through, op)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `GetRightSide`: right-most descendants matching the target bits.
+    fn right_side(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        target_bits: u64,
+        target_count: u64,
+        bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        self.side(
+            node,
+            out,
+            (target_bits, target_count),
+            bits,
+            count,
+            (SplitDir::U, false),
+            "geom::tree::Tree::right_side",
+        )
+    }
+
+    /// `GetLeftSide`: left-most descendants matching the target bits.
+    fn left_side(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        target_bits: u64,
+        target_count: u64,
+        bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        self.side(
+            node,
+            out,
+            (target_bits, target_count),
+            bits,
+            count,
+            (SplitDir::U, true),
+            "geom::tree::Tree::left_side",
+        )
+    }
+
+    /// `GetTopSide`: top-most descendants matching the target bits.
+    fn top_side(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        target_bits: u64,
+        target_count: u64,
+        bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        self.side(
+            node,
+            out,
+            (target_bits, target_count),
+            bits,
+            count,
+            (SplitDir::V, false),
+            "geom::tree::Tree::top_side",
+        )
+    }
+
+    /// `GetBotSide`: bottom-most descendants matching the target bits.
+    fn bot_side(
+        &self,
+        node: NodeId,
+        out: &mut Vec<NodeId>,
+        target_bits: u64,
+        target_count: u64,
+        bits: u64,
+        count: u64,
+    ) -> Result<()> {
+        self.side(
+            node,
+            out,
+            (target_bits, target_count),
+            bits,
+            count,
+            (SplitDir::V, true),
+            "geom::tree::Tree::bot_side",
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ext(a: [f64; 3], b: [f64; 3]) -> Extent3d {
+        Extent3d::from_points(Vec3::new(a[0], a[1], a[2]), Vec3::new(b[0], b[1], b[2]))
+    }
+
+    fn unit_box() -> Extent3d {
+        ext([0.0; 3], [1.0; 3])
+    }
+
+    #[test]
+    fn spatial_insert_and_query() {
+        let mut t: Tree<u32> = Tree::new_spatial(&ext([0.0; 3], [10.0; 3]));
+        for i in 0..30u32 {
+            let x = f64::from(i) * 0.3;
+            t.add_to_spatial_tree(
+                &ext([x, 0.0, 0.0], [x + 0.1, 0.1, 0.1]),
+                Some(i),
+                NodeGeomType::Default,
+            )
+            .unwrap();
+        }
+        assert!(t.nodes().len() > 1, "a leaf with 10+ objects is split");
+        assert_eq!(t.object_list().unwrap().len(), 30);
+        let hits = t.objects_in_box(&ext([0.0; 3], [0.35, 1.0, 1.0])).unwrap();
+        let mut ids: Vec<u32> = hits.into_iter().flatten().collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![0, 1]);
+        assert!(t.intersects_box(&unit_box()).unwrap());
+        assert!(!t.intersects_box(&ext([20.0; 3], [21.0; 3])).unwrap());
+    }
+
+    #[test]
+    fn re_adding_grows_box_and_remove() {
+        let mut t: Tree<u32> = Tree::new_spatial(&ext([0.0; 3], [10.0; 3]));
+        t.add_to_spatial_tree(&unit_box(), Some(7), NodeGeomType::Default)
+            .unwrap();
+        t.add_to_spatial_tree(&ext([0.5; 3], [2.0; 3]), Some(7), NodeGeomType::Default)
+            .unwrap();
+        assert_eq!(t.lists().len(), 1);
+        assert_eq!(t.lists()[0].bbox, ext([0.0; 3], [2.0; 3]));
+        assert!(t.rm_from_spatial_tree(&unit_box(), Some(7)).unwrap());
+        assert!(!t.rm_from_spatial_tree(&unit_box(), Some(7)).unwrap());
+        assert!(t.object_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn outside_box_rebuilds() {
+        let mut t: Tree<u32> = Tree::new_spatial(&unit_box());
+        t.add_to_spatial_tree(&unit_box(), Some(1), NodeGeomType::LineSeg)
+            .unwrap();
+        t.add_to_spatial_tree(&ext([5.0; 3], [6.0; 3]), Some(2), NodeGeomType::LineSeg)
+            .unwrap();
+        let top = t.node(t.top_node().unwrap()).unwrap();
+        assert_eq!(top.geom_type, NodeGeomType::LineSeg);
+        assert!(ext([5.0; 3], [6.0; 3]).is_contained_by(&top.bbox, 0.0));
+        assert_eq!(t.object_list().unwrap().len(), 2);
+        // extent-only check
+        t.add_to_spatial_tree(&ext([-9.0; 3], [0.0; 3]), None, NodeGeomType::Default)
+            .unwrap();
+        assert_eq!(t.object_list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn empty_tree_errors_and_point_tree() {
+        let t: Tree<u32> = Tree::new(None);
+        assert!(t.find_node(&unit_box()).is_err());
+        assert!(t.objects_in_box(&unit_box()).is_err());
+        let mut t2 = t.clone();
+        assert!(!t2.rm_from_spatial_tree(&unit_box(), Some(1)).unwrap());
+        let p: Tree<u32> = Tree::from_point(Vec3::new(1.0, 2.0, 3.0), 0.5, true);
+        assert_eq!(p.nodes()[0].bbox, ext([0.5, 1.5, 2.5], [1.5, 2.5, 3.5]));
+        assert_eq!(
+            p.objects_in_box(&ext([0.0; 3], [5.0; 3])).unwrap(),
+            vec![None]
+        );
+        assert_eq!(p.type_string(), "SmTree_TYPE");
+        assert!(p.is_kind_of(Tree::<u32>::TYPE) && !p.is_kind_of(1));
+    }
+
+    fn surf(split: SplitDir) -> NodeData<u32> {
+        NodeData::Surface(SurfaceAux {
+            split_dir: split,
+            ..SurfaceAux::default()
+        })
+    }
+
+    /// 2x2 grid: root split U into left (L) / right (R), both split V.
+    fn grid() -> (Tree<u32>, [NodeId; 7]) {
+        let mut t: Tree<u32> = Tree::new(None);
+        let mk = |t: &mut Tree<u32>, parent: Option<NodeId>, split| {
+            t.add_node(TreeNode {
+                parent,
+                aux_type: AuxDataType::AuxData,
+                data: surf(split),
+                ..TreeNode::new()
+            })
+        };
+        let root = mk(&mut t, None, SplitDir::U);
+        let l = mk(&mut t, Some(root), SplitDir::V);
+        let r = mk(&mut t, Some(root), SplitDir::V);
+        let lb = mk(&mut t, Some(l), SplitDir::Unknown);
+        let lt = mk(&mut t, Some(l), SplitDir::Unknown);
+        let rb = mk(&mut t, Some(r), SplitDir::Unknown);
+        let rt = mk(&mut t, Some(r), SplitDir::Unknown);
+        t.node_mut(root).unwrap().child1 = Some(l);
+        t.node_mut(root).unwrap().child2 = Some(r);
+        t.node_mut(l).unwrap().child1 = Some(lb);
+        t.node_mut(l).unwrap().child2 = Some(lt);
+        t.node_mut(r).unwrap().child1 = Some(rb);
+        t.node_mut(r).unwrap().child2 = Some(rt);
+        t.set_top_node(Some(root));
+        (t, [root, l, r, lb, lt, rb, rt])
+    }
+
+    #[test]
+    fn grid_neighbors() {
+        let (t, [_, _, _, lb, lt, rb, rt]) = grid();
+        let mut v = Vec::new();
+        t.right_neighbors(lb, &mut v).unwrap();
+        assert_eq!(v, vec![rb]);
+        v.clear();
+        t.left_neighbors(rt, &mut v).unwrap();
+        assert_eq!(v, vec![lt]);
+        v.clear();
+        t.neighbors(lt, &mut v).unwrap();
+        assert_eq!(v, vec![rt, lb]);
+    }
+
+    #[test]
+    fn propagate_marks_and_classes() {
+        let (mut t, [root, l, _, lb, lt, _, _]) = grid();
+        for (id, face) in [(lb, 3), (lt, 3)] {
+            if let NodeData::Surface(a) = &mut t.node_mut(id).unwrap().data {
+                a.is_marked = true;
+                a.node_class = NodeClass::Inside;
+                a.face = Some(face);
+            }
+        }
+        t.propagate_to_parents(lb).unwrap();
+        let la = t.surface_aux(l, "t").unwrap();
+        assert!(la.is_marked);
+        assert_eq!(la.node_class, NodeClass::Inside);
+        assert_eq!(la.face, Some(3));
+        let ra = t.surface_aux(root, "t").unwrap();
+        assert!(!ra.is_marked);
+        assert_eq!(ra.node_class, NodeClass::Unknown);
+    }
+
+    #[test]
+    fn bezier_patch_and_owner() {
+        let (mut t, [root, ..]) = grid();
+        assert_eq!(t.first_bezier_patch(root).unwrap(), None);
+        t.set_owner_object(Some(TreeOwner::SurfaceCache));
+        assert!(matches!(
+            t.first_bezier_patch(root),
+            Err(SolidError::Unported { .. })
+        ));
+        t.node_mut(root).unwrap().aux_type = AuxDataType::BezierSurface;
+        assert!(t.first_bezier_patch(root).is_err());
+        t.set_owner_object(Some(TreeOwner::BrepCache));
+        assert_eq!(t.owner_object().unwrap(), None);
+    }
+}
