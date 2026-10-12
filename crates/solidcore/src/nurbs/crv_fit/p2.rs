@@ -49,19 +49,13 @@ use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_fit::p1::{
     interp_knot_vector, knot_vector_approx, param_values, DerivEnd, FitPoint, ParamMethod,
 };
+use crate::nurbs::fit_arrays::{
+    alloc, at, at_mut, banded, basis, curve, full, head, hi, idx, mget, mset, out_of_range, put,
+    sg, Block,
+};
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::{blend_pt, translate_sum2_pts, CPoint, MatrixType, RealMatrix};
-
-const OP_FUNC: &str = "nurbs::crv_fit::p2::func_interp_given_params";
-const OP_INTERP: &str = "nurbs::crv_fit::p2::interp";
-const OP_LST_SQ: &str = "nurbs::crv_fit::p2::approx_lst_sq";
-const OP_MATRIX: &str = "nurbs::crv_fit::p2::cpts_with_matrix";
-const OP_DERIV_MATRIX: &str = "nurbs::crv_fit::p2::deriv_matrix";
-const OP_WEIGHTED: &str = "nurbs::crv_fit::p2::weighted_lst_sq_knots";
-const OP_KNOTS_DERIVS: &str = "nurbs::crv_fit::p2::knots_derivs";
-const OP_HIGH_END: &str = "nurbs::crv_fit::p2::knots_high_end_derivs";
-const OP_CALC_MATRIX: &str = "nurbs::crv_fit::p2::calc_matrix";
+use crate::nurbs::math::{blend_pt, translate_sum2_pts, CPoint, RealMatrix};
 
 mod sealed {
     pub trait Sealed {}
@@ -127,156 +121,6 @@ impl MatrixEnds {
     }
 }
 
-// ---- helpers ----------------------------------------------------------------------
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-fn out_of_range(op: &'static str) -> SolidError {
-    invalid(op, "index outside the arrays upstream would access")
-}
-
-/// `usize` -> signed index (upstream `NL_INDEX` arithmetic).
-fn sg(x: usize, op: &'static str) -> Result<i64> {
-    i64::try_from(x).map_err(|_| invalid(op, "size overflow"))
-}
-
-/// Highest index of a slice (`len - 1`), `InvalidInput` when empty.
-fn hi<T>(a: &[T], op: &'static str, what: &'static str) -> Result<i64> {
-    match a.len().checked_sub(1) {
-        Some(n) => sg(n, op),
-        None => Err(invalid(op, what)),
-    }
-}
-
-fn idx(i: i64, op: &'static str) -> Result<usize> {
-    usize::try_from(i).map_err(|_| out_of_range(op))
-}
-
-fn at<T: Copy>(a: &[T], i: i64, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i).copied())
-        .ok_or_else(|| out_of_range(op))
-}
-
-fn at_mut<'a, T>(a: &'a mut [T], i: i64, op: &'static str) -> Result<&'a mut T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| out_of_range(op))
-}
-
-fn put<T>(a: &mut [T], i: i64, v: T, op: &'static str) -> Result<()> {
-    *at_mut(a, i, op)? = v;
-    Ok(())
-}
-
-/// A vector of `n + 1` entries `v` (`n` an upstream highest index).
-fn alloc<T: Clone>(n: i64, v: T, op: &'static str) -> Result<Vec<T>> {
-    let len = n
-        .checked_add(1)
-        .and_then(|l| usize::try_from(l).ok())
-        .ok_or_else(|| out_of_range(op))?;
-    Ok(vec![v; len])
-}
-
-/// The first `n + 1` entries of a slice (upstream passes the slice with highest
-/// index `n`).
-fn head<'a, T>(a: &'a [T], n: i64, op: &'static str) -> Result<&'a [T]> {
-    let len = idx(n, op)?.checked_add(1).ok_or_else(|| out_of_range(op))?;
-    a.get(..len).ok_or_else(|| out_of_range(op))
-}
-
-/// Upstream's zero-filled row-major block of `rows x cols` reals
-/// (`N_AllocReal2dArray` plus its zeroing loops), indexed as `B[i][j]` = element
-/// `i*cols + j`.
-struct Block {
-    cols: i64,
-    data: Vec<f64>,
-}
-
-impl Block {
-    /// Block for highest indexes `n`, `m` (`(n+1) x (m+1)`).
-    fn new(n: i64, m: i64, op: &'static str) -> Result<Self> {
-        let cols = m.checked_add(1).ok_or_else(|| out_of_range(op))?;
-        let len = n
-            .checked_add(1)
-            .and_then(|r| r.checked_mul(cols))
-            .ok_or_else(|| out_of_range(op))?;
-        Ok(Self {
-            cols,
-            data: alloc(len - 1, 0.0, op)?,
-        })
-    }
-
-    fn flat(&self, i: i64, j: i64, op: &'static str) -> Result<i64> {
-        i.checked_mul(self.cols)
-            .and_then(|r| r.checked_add(j))
-            .ok_or_else(|| out_of_range(op))
-    }
-
-    fn get(&self, i: i64, j: i64, op: &'static str) -> Result<f64> {
-        at(&self.data, self.flat(i, j, op)?, op)
-    }
-
-    fn set(&mut self, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-        let k = self.flat(i, j, op)?;
-        put(&mut self.data, k, v, op)
-    }
-}
-
-/// Element `(i, j)` of a matrix's storage block addressed as upstream's `RM[i][j]`
-/// (row pointers into one row-major block): `j` may leave row `i`.
-fn mat_slot(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<(usize, usize)> {
-    let (_, cols) = cm.storage_shape().ok_or_else(|| out_of_range(op))?;
-    let cols = sg(cols, op)?;
-    let k = i
-        .checked_mul(cols)
-        .and_then(|r| r.checked_add(j))
-        .ok_or_else(|| out_of_range(op))?;
-    if k < 0 || cols == 0 {
-        return Err(out_of_range(op));
-    }
-    Ok((idx(k / cols, op)?, idx(k % cols, op)?))
-}
-
-fn mset(cm: &mut RealMatrix, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.set(r, c, v).map_err(|_| out_of_range(op))
-}
-
-fn mget(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<f64> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.get(r, c).map_err(|_| out_of_range(op))
-}
-
-/// Banded `(n+1) x (n+1)` matrix with bandwidth `bw` (`N_SetRealMatrix`); the storage
-/// is zero-filled, which is what upstream's explicit zeroing loops produce.
-fn banded(n: i64, bw: i64, op: &'static str) -> Result<RealMatrix> {
-    RealMatrix::new(idx(n, op)?, idx(n, op)?, MatrixType::Banded, idx(bw, op)?)
-}
-
-/// Full `(n+1) x (m+1)` matrix (`N_SetRealMatrix(.., NL_MT_FULL, bw)`), zero-filled.
-fn full(n: i64, m: i64, bw: i64, op: &'static str) -> Result<RealMatrix> {
-    RealMatrix::new(idx(n, op)?, idx(m, op)?, MatrixType::Full, idx(bw, op)?)
-}
-
-fn curve(pw: Vec<CPoint>, p: i64, uc: Vec<f64>, op: &'static str) -> Result<Curve> {
-    Curve::new(pw, idx(p, op)?, uc)
-}
-
-/// `N[p]` of the basis functions at `u` and the span index (`N_BasisEval`, `NL_LEFT`).
-fn basis(knt: &KnotVector<'_>, p: i64, u: f64, op: &'static str) -> Result<(i64, Vec<f64>)> {
-    let b = knt.basis_eval(idx(p, op)?, u, Side::Left)?;
-    Ok((sg(b.span, op)?, b.values))
-}
-
 /// The interpolation matrix of `N_FitFuncInterpGivenParams` / `N_FitCrvInterp` for
 /// parameters `u[0..=n]` and degree `p >= 2`, LU-decomposed.
 fn interp_matrix(
@@ -318,13 +162,13 @@ fn interp_matrix(
 /// `InvalidInput` for empty `f`, fewer than `n + 1` parameters, or `p == 0` (upstream
 /// asks `N_SetRealMatrix` for bandwidth `-1`).
 pub fn func_interp_given_params(f: &[f64], p: usize, u: &[f64]) -> Result<CurveFunction> {
-    const OP: &str = OP_FUNC;
+    const OP: &str = "nurbs::crv_fit::p2::func_interp_given_params";
     let n = hi(f, OP, "no values")?;
     let p = sg(p, OP)?;
 
     // Check for function memory.
     if p > n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Compute knot vector.
@@ -352,13 +196,13 @@ pub fn func_interp_given_params(f: &[f64], p: usize, u: &[f64]) -> Result<CurveF
 /// [`NlibCode::Input`] when `p > n`; errors of [`KnotVector::basis_eval`], of the LU
 /// decomposition and of the solve; `InvalidInput` for empty `a` or `p == 0`.
 pub fn interp(a: &[Vec3], p: usize, par: ParamMethod) -> Result<Curve> {
-    const OP: &str = OP_INTERP;
+    const OP: &str = "nurbs::crv_fit::p2::interp";
     let n = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
 
     // Check for curve memory.
     if p > n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Get parameters and compute knot vector.
@@ -392,16 +236,15 @@ pub fn interp(a: &[Vec3], p: usize, par: ParamMethod) -> Result<Curve> {
 /// [`KnotVector::basis_eval`], of the LU decomposition and of the solve;
 /// `InvalidInput` for empty `a` or `p == 0` where upstream would index outside its
 /// arrays.
-#[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
 pub fn approx_lst_sq(a: &[Vec3], n: usize, p: usize, par: ParamMethod) -> Result<Curve> {
-    const OP: &str = OP_LST_SQ;
+    const OP: &str = "nurbs::crv_fit::p2::approx_lst_sq";
     let m = hi(a, OP, "no data points")?;
     let n = sg(n, OP)?;
     let p = sg(p, OP)?;
 
     // Check for curve memory.
     if n < 2 || p > n || m < n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let mut pw = alloc(n, CPoint::default(), OP)?;
     let (q0, qm) = (at(a, 0, OP)?, at(a, m, OP)?);
@@ -471,7 +314,7 @@ pub fn approx_lst_sq(a: &[Vec3], n: usize, p: usize, par: ParamMethod) -> Result
     }
 
     if sj < n - 2 || at(&end, 0, OP)? == -1 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     for i in 0.max(ej + 1)..=n - 2 {
         put(&mut end, i, m - 2, OP)?;
@@ -546,7 +389,6 @@ pub struct WeightedData<'a, P> {
 /// [`basis_derivs`], of the LU decompositions, inverses, products and solves;
 /// `InvalidInput` for empty points, too few weights, derivatives, indices or
 /// parameters, or other accesses outside upstream's arrays.
-#[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
 pub fn weighted_lst_sq_knots<P: LstSqPoint>(
     data: &WeightedData<'_, P>,
     u: &[f64],
@@ -554,7 +396,7 @@ pub fn weighted_lst_sq_knots<P: LstSqPoint>(
     n: usize,
     p: usize,
 ) -> Result<Curve> {
-    const OP: &str = OP_WEIGHTED;
+    const OP: &str = "nurbs::crv_fit::p2::weighted_lst_sq_knots";
     let e = data.points;
     let wp = data.point_weights;
     let f = data.derivs;
@@ -597,13 +439,13 @@ pub fn weighted_lst_sq_knots<P: LstSqPoint>(
     let mcur = n + p + 1;
 
     if mc >= n || (mc + n) >= (mu + 1) {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if n < 1 || p > n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if mknt != mcur {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Check for curve memory.
@@ -678,7 +520,7 @@ pub fn weighted_lst_sq_knots<P: LstSqPoint>(
     }
 
     if sj < n || at(&end, 0, OP)? == -1 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Compute WN, NTWN and LU-decompose NTWN.
@@ -806,7 +648,7 @@ pub fn cpts_with_matrix<P: FitPoint>(a: &[P], p: usize, cm: &RealMatrix) -> Resu
 
     // Solve system of linear equations.
     if a.len() <= cm.n() {
-        return Err(out_of_range(OP_MATRIX));
+        return Err(out_of_range("nurbs::crv_fit::p2::cpts_with_matrix"));
     }
     P::for_back(cm, a)
 }
@@ -828,7 +670,7 @@ pub fn deriv_matrix<P: FitPoint>(
     whr: DerivEnd,
     cm: &RealMatrix,
 ) -> Result<Vec<CPoint>> {
-    const OP: &str = OP_DERIV_MATRIX;
+    const OP: &str = "nurbs::crv_fit::p2::deriv_matrix";
     let k = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
     let uk = knt.knots();
@@ -872,7 +714,7 @@ pub fn deriv_matrix<P: FitPoint>(
 /// `InvalidInput` for empty `u`, or `p == 2` with a single parameter (upstream reads
 /// `u[1]`).
 pub fn knots_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
-    const OP: &str = OP_KNOTS_DERIVS;
+    const OP: &str = "nurbs::crv_fit::p2::knots_derivs";
     let k = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
 
@@ -935,7 +777,7 @@ pub fn knots_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
 ///
 /// `InvalidInput` for empty `u`.
 pub fn knots_high_end_derivs(u: &[f64], p: usize, k: usize, l: usize) -> Result<Vec<f64>> {
-    const OP: &str = OP_HIGH_END;
+    const OP: &str = "nurbs::crv_fit::p2::knots_high_end_derivs";
     let n = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
     let k = sg(k, OP)?;
@@ -982,7 +824,7 @@ pub fn calc_matrix(
     t: &[f64],
     itp: MatrixEnds,
 ) -> Result<RealMatrix> {
-    const OP: &str = OP_CALC_MATRIX;
+    const OP: &str = "nurbs::crv_fit::p2::calc_matrix";
     let n = hi(t, OP, "no parameters")?;
     let p = sg(p, OP)?;
 
@@ -1005,7 +847,7 @@ pub fn calc_matrix(
         let (j, nb) = basis(knt, p, ti, OP)?;
         let l = sp - i + j;
         if l < 0 || l + p >= bw {
-            return Err(nlib(OP, NlibCode::Equations));
+            return Err(SolidError::nlib(OP, NlibCode::Equations));
         }
         for kk in 0..=p {
             mset(cm, i, l + kk, at(&nb, kk, OP)?, OP)?;

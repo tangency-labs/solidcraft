@@ -56,9 +56,13 @@ use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::{basis_derivs, PTOL};
 use crate::nurbs::crv_basic::Curve;
+use crate::nurbs::fit_arrays::{
+    alloc, at, at_mut, banded, basis, copy_knots, curve, hi, idx, mget, mset, out_of_range, put,
+    sg, Block,
+};
 use crate::nurbs::geom::{dist_cpt_cpt_homo, dist_pt_pt};
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::{blend_pt, translate_sum2_pts, CPoint, MatrixType, RealMatrix};
+use crate::nurbs::math::{blend_pt, translate_sum2_pts, CPoint, RealMatrix};
 
 mod sealed {
     pub trait Sealed {}
@@ -197,159 +201,6 @@ impl DataDir {
     }
 }
 
-// ---- helpers ----------------------------------------------------------------------
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-fn out_of_range(op: &'static str) -> SolidError {
-    invalid(op, "index outside the arrays upstream would access")
-}
-
-/// `usize` -> signed index (upstream `NL_INDEX` arithmetic).
-fn sg(x: usize, op: &'static str) -> Result<i64> {
-    i64::try_from(x).map_err(|_| invalid(op, "size overflow"))
-}
-
-/// Highest index of a slice (`len - 1`), `InvalidInput` when empty.
-fn hi<T>(a: &[T], op: &'static str, what: &'static str) -> Result<i64> {
-    match a.len().checked_sub(1) {
-        Some(n) => sg(n, op),
-        None => Err(invalid(op, what)),
-    }
-}
-
-fn at<T: Copy>(a: &[T], i: i64, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i).copied())
-        .ok_or_else(|| out_of_range(op))
-}
-
-fn put<T>(a: &mut [T], i: i64, v: T, op: &'static str) -> Result<()> {
-    let slot = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| out_of_range(op))?;
-    *slot = v;
-    Ok(())
-}
-
-fn at_mut<'a, T>(a: &'a mut [T], i: i64, op: &'static str) -> Result<&'a mut T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| out_of_range(op))
-}
-
-/// A zero-filled vector of `n + 1` entries (`n` an upstream highest index).
-fn alloc<T: Clone>(n: i64, v: T, op: &'static str) -> Result<Vec<T>> {
-    let len = n
-        .checked_add(1)
-        .and_then(|l| usize::try_from(l).ok())
-        .ok_or_else(|| out_of_range(op))?;
-    Ok(vec![v; len])
-}
-
-fn idx(i: i64, op: &'static str) -> Result<usize> {
-    usize::try_from(i).map_err(|_| out_of_range(op))
-}
-
-/// Upstream's row-major block of `rows x cols` reals (`N_AllocReal2dArray`), indexed
-/// as `B[i][j]` = element `i*cols + j` of the block.
-struct Block {
-    cols: i64,
-    data: Vec<f64>,
-}
-
-impl Block {
-    /// Block for highest indexes `n`, `m` (`(n+1) x (m+1)`), zero-filled.
-    fn new(n: i64, m: i64, op: &'static str) -> Result<Self> {
-        let cols = m.checked_add(1).ok_or_else(|| out_of_range(op))?;
-        let len = n
-            .checked_add(1)
-            .and_then(|r| r.checked_mul(cols))
-            .ok_or_else(|| out_of_range(op))?;
-        Ok(Self {
-            cols,
-            data: alloc(len - 1, 0.0, op)?,
-        })
-    }
-
-    fn flat(&self, i: i64, j: i64) -> Option<i64> {
-        i.checked_mul(self.cols)?.checked_add(j)
-    }
-
-    fn get(&self, i: i64, j: i64, op: &'static str) -> Result<f64> {
-        at(
-            &self.data,
-            self.flat(i, j).ok_or_else(|| out_of_range(op))?,
-            op,
-        )
-    }
-
-    fn set(&mut self, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-        let k = self.flat(i, j).ok_or_else(|| out_of_range(op))?;
-        put(&mut self.data, k, v, op)
-    }
-}
-
-/// Element `(i, j)` of a matrix's storage block addressed as upstream's `RM[i][j]`
-/// (row pointers into one row-major block): `j` may leave row `i`.
-fn mat_slot(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<(usize, usize)> {
-    let (_, cols) = cm.storage_shape().ok_or_else(|| out_of_range(op))?;
-    let cols = sg(cols, op)?;
-    let k = i
-        .checked_mul(cols)
-        .and_then(|r| r.checked_add(j))
-        .ok_or_else(|| out_of_range(op))?;
-    if k < 0 || cols == 0 {
-        return Err(out_of_range(op));
-    }
-    Ok((idx(k / cols, op)?, idx(k % cols, op)?))
-}
-
-fn mset(cm: &mut RealMatrix, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.set(r, c, v).map_err(|_| out_of_range(op))
-}
-
-fn mget(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<f64> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.get(r, c).map_err(|_| out_of_range(op))
-}
-
-/// Banded `(n+1) x (n+1)` matrix with bandwidth `bw` (`N_SetRealMatrix`); the storage
-/// is zero-filled, which is what upstream's explicit zeroing loops produce.
-fn banded(n: i64, bw: i64, op: &'static str) -> Result<RealMatrix> {
-    RealMatrix::new(idx(n, op)?, idx(n, op)?, MatrixType::Banded, idx(bw, op)?)
-}
-
-/// Copy of `U[0..=last]` of a knot vector (upstream copies knot by knot).
-fn copy_knots(knt: &KnotVector<'_>, last: i64, op: &'static str) -> Result<Vec<f64>> {
-    let uk = knt.knots();
-    let mut uc = alloc(last, 0.0, op)?;
-    for i in 0..=last {
-        put(&mut uc, i, at(uk, i, op)?, op)?;
-    }
-    Ok(uc)
-}
-
-fn curve(pw: Vec<CPoint>, p: i64, uc: Vec<f64>, op: &'static str) -> Result<Curve> {
-    Curve::new(pw, idx(p, op)?, uc)
-}
-
-/// `N[p]` of the basis functions at `u` and the span index (`N_BasisEval`, `NL_LEFT`).
-fn basis(knt: &KnotVector<'_>, p: i64, u: f64, op: &'static str) -> Result<(i64, Vec<f64>)> {
-    let b = knt.basis_eval(idx(p, op)?, u, Side::Left)?;
-    Ok((sg(b.span, op)?, b.values))
-}
-
 // ---- parameters and knot vectors --------------------------------------------------
 
 /// Parameters `u[0..=n]` for global interpolation of the points `a[0..=n]`
@@ -485,7 +336,7 @@ pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>>
 
     // Check error.
     if p > k + 1 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Compute knot vector.
@@ -567,7 +418,7 @@ pub fn knot_vector_approx(u: &[f64], n: usize, p: usize) -> Result<Vec<f64>> {
 
     // Check state: as many or more sample points than control points.
     if n > m {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Set first and last p+1 knots to the first and last sample parameters.
@@ -638,7 +489,7 @@ pub fn interp_given_params<P: FitPoint>(
     let m = sg(knt.last_index(), OP)?;
     let mc = n + p + 1;
     if m != mc {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
     let mut pw = alloc(n, CPoint::default(), OP)?;
@@ -666,7 +517,7 @@ pub fn interp_given_params<P: FitPoint>(
         let (j, nb) = basis(knt, p, at(u, i, OP)?, OP)?;
         let l = sp - i + j;
         if l < 0 || l + p >= bw {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         for k in 0..=p {
             mset(&mut cm, i, l + k, at(&nb, k, OP)?, OP)?;
@@ -710,10 +561,10 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
     let n = kk + 2;
     let mc = n + p + 1;
     if p < 2 || p > kk + 2 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if m != mc {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
 
@@ -736,7 +587,7 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
         let (j, nb) = basis(knt, p, at(u, i - 1, OP)?, OP)?;
         let l = sp - i + j;
         if l < 0 || l + p >= bw {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         for k in 0..=p {
             mset(&mut cm, i, l + k, at(&nb, k, OP)?, OP)?;
@@ -789,10 +640,10 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
     let n = kk + 1;
     let mc = n + p + 1;
     if p < 2 || p > n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if m != mc {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
 
@@ -804,7 +655,7 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
         let (j, nb) = basis(knt, p, ui, OP)?;
         let l = if p == 2 { 0 } else { j - i - 1 };
         if l < 0 || l + p >= bw {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         for k in 0..=p {
             mset(cm, i, l + k, at(&nb, k, OP)?, OP)?;
@@ -886,10 +737,10 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
     let n = 2 * kk + 1;
     let mc = n + p + 1;
     if !(2..=3).contains(&p) {
-        return Err(nlib(OP, NlibCode::Degree));
+        return Err(SolidError::nlib(OP, NlibCode::Degree));
     }
     if m != mc {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
 
@@ -912,7 +763,7 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
         let ii = 2 * i;
         let l = j - ii - 1;
         if l < 0 || l + hp >= bw {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         for k in 0..=hp {
             mset(&mut cm, ii, l + k, at(nd0, k, OP)?, OP)?;
@@ -968,7 +819,7 @@ pub fn approx_knots<P: FitPoint>(
     let p = sg(p, OP)?;
 
     if n < p {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let mk = sg(knt.last_index(), OP)?;
 
@@ -986,10 +837,10 @@ pub fn approx_knots<P: FitPoint>(
 
     // Check error.
     if mk != mc {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if n < 2 || p > n || m < n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Compute coefficient matrix.
@@ -1034,7 +885,7 @@ pub fn approx_knots<P: FitPoint>(
     }
 
     if sj < n - 2 || at(&end, 0, OP)? == -1 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     for i in 0.max(ej + 1)..=n - 2 {
         put(&mut end, i, m - 2, OP)?;
@@ -1162,6 +1013,7 @@ pub fn derivs_matrix<P: FitPoint>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nurbs::math::MatrixType;
 
     fn pts(c: &[[f64; 3]]) -> Vec<Vec3> {
         c.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect()

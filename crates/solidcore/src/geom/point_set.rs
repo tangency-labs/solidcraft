@@ -153,19 +153,14 @@ impl Cache {
     }
 }
 
-/// `rX, rY, rZ` of `v.MakeUnitOrthoVectors(pYRef, rX, rY, rZ)` with the status
-/// ignored: a zero-length `v` only sets `rX` to `(0, 0, 1)`.
-fn make_unit_ortho_into(v: Vec3, y_ref: Option<Vec3>, x: &mut Vec3, y: &mut Vec3, z: &mut Vec3) {
-    match v.make_unit_ortho_vectors(y_ref) {
-        Ok([a, b, c]) => {
-            *x = a;
-            *y = b;
-            *z = c;
-        }
-        // Unitize failed: upstream stored (0, 0, 1) in rX and returned. The other
-        // failure (no perpendicular for a unit vector) cannot happen.
-        Err(_) => *x = Vec3::Z,
-    }
+/// `v.MakeUnitOrthoVectors(pYRef, rX, rY, rZ)` with the status ignored, as the new
+/// values of `[rX, rY, rZ]`: a zero-length `v` only sets `rX` to `(0, 0, 1)` and
+/// keeps the other two of `current`.
+fn unit_ortho(v: Vec3, y_ref: Option<Vec3>, current: [Vec3; 3]) -> [Vec3; 3] {
+    // Unitize failed: upstream stored (0, 0, 1) in rX and returned. The other
+    // failure (no perpendicular for a unit vector) cannot happen.
+    let [_, y, z] = current;
+    v.make_unit_ortho_vectors(y_ref).unwrap_or([Vec3::Z, y, z])
 }
 
 impl PointSet3d {
@@ -290,22 +285,12 @@ impl PointSet3d {
                     }
                 }
                 // Z = normal, X = tangent projected to the normal plane, Y = Z x X
-                make_unit_ortho_into(
-                    n,
-                    Some(tangent),
-                    &mut self.normal,
-                    &mut self.x_axis,
-                    &mut self.y_axis,
-                );
+                [self.normal, self.x_axis, self.y_axis] =
+                    unit_ortho(n, Some(tangent), [self.normal, self.x_axis, self.y_axis]);
             } else {
                 // use given normal as Z and compute any X and Y axes.
-                make_unit_ortho_into(
-                    n,
-                    None,
-                    &mut self.normal,
-                    &mut self.x_axis,
-                    &mut self.y_axis,
-                );
+                [self.normal, self.x_axis, self.y_axis] =
+                    unit_ortho(n, None, [self.normal, self.x_axis, self.y_axis]);
             }
             return Ok(());
         }
@@ -328,23 +313,13 @@ impl PointSet3d {
             }
             // currently normal = BestLine Tangent
             PointSetType::Linear => {
-                make_unit_ortho_into(
-                    n,
-                    None,
-                    &mut self.x_axis,
-                    &mut self.y_axis,
-                    &mut self.normal,
-                );
+                [self.x_axis, self.y_axis, self.normal] =
+                    unit_ortho(n, None, [self.x_axis, self.y_axis, self.normal]);
             }
             // currently normal = BestPlane Normal
             PointSetType::Planar | PointSetType::Scattered => {
-                make_unit_ortho_into(
-                    n,
-                    None,
-                    &mut self.normal,
-                    &mut self.x_axis,
-                    &mut self.y_axis,
-                );
+                [self.normal, self.x_axis, self.y_axis] =
+                    unit_ortho(n, None, [self.normal, self.x_axis, self.y_axis]);
             }
             PointSetType::Unknown => {}
         }
@@ -430,10 +405,9 @@ impl PointSet3d {
                     let _ = self.pbox.set_basis(self.x_axis, self.y_axis, self.normal);
                 }
                 Some(z) => {
-                    let (mut sx, mut sy) = (Vec3::ZERO, Vec3::ZERO);
-                    let zv = *z;
-                    make_unit_ortho_into(zv, None, z, &mut sx, &mut sy);
-                    let _ = self.pbox.set_basis(sx, sy, *z);
+                    let [sz, sx, sy] = unit_ortho(*z, None, [*z, Vec3::ZERO, Vec3::ZERO]);
+                    *z = sz;
+                    let _ = self.pbox.set_basis(sx, sy, sz);
                 }
             }
 
@@ -791,7 +765,7 @@ impl PointSequence {
         // The result depends on accum.
         Ok(match accum {
             -1..=1 => PointContainment::Outside,
-            4 | -4 | 3 | -3 | 5 | -5 => PointContainment::Inside,
+            -5..=-3 | 3..=5 => PointContainment::Inside,
             _ => PointContainment::Unknown,
         })
     }

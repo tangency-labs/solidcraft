@@ -9,7 +9,7 @@
 //! | [`SolidError::InvalidInput`]| `SM_ERR_INVALID_INPUT`                           |
 //! | [`SolidError::Upstream`]    | any other `SM_ERR_*` code, carried numerically   |
 //! | [`SM_ERR`], [`SM_ERR_WARNING`], [`SolidError::sm_err`] | `SM_ERR`, `SM_ERR_WARNING`, `SE(SM_ERR)` |
-//! | [`SolidError::Nlib`]        | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`)    |
+//! | [`SolidError::Nlib`], [`SolidError::nlib`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`) |
 //! | [`SolidError::Unported`]    | (none: call into a unit not ported yet)          |
 //! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
@@ -228,6 +228,13 @@ impl SolidError {
             code: SM_ERR,
             entity: None,
         }
+    }
+
+    /// [`SolidError::Nlib`] with the upstream error number `code` (NLib's
+    /// `N_ErrSet(.., code, ..)` followed by an error return).
+    #[must_use]
+    pub const fn nlib(operation: &'static str, code: NlibCode) -> Self {
+        Self::Nlib { operation, code }
     }
 
     /// The operation that produced this error (for [`SolidError::Unported`], the

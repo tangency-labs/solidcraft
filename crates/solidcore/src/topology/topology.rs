@@ -322,26 +322,38 @@ impl TopologyRecords for BTreeMap<ObjectKey, Topology> {
     }
 }
 
-const NOTIFY_OP: &str = "topology::topology::notify";
+/// The error of a notified object that has no [`Topology`] record.
+const NOT_TOPOLOGY: SolidError = SolidError::InvalidInput {
+    operation: "topology::topology::notify",
+    reason: "notified object is not a topology object",
+};
 
 fn record<R: TopologyRecords + ?Sized>(records: &R, key: ObjectKey) -> Result<Topology> {
-    records
-        .topology(key)
-        .copied()
-        .ok_or(SolidError::InvalidInput {
-            operation: NOTIFY_OP,
-            reason: "notified object is not a topology object",
-        })
+    records.topology(key).copied().ok_or(NOT_TOPOLOGY)
 }
 
 fn record_mut<R: TopologyRecords + ?Sized>(
     records: &mut R,
     key: ObjectKey,
 ) -> Result<&mut Topology> {
-    records.topology_mut(key).ok_or(SolidError::InvalidInput {
-        operation: NOTIFY_OP,
-        reason: "notified object is not a topology object",
-    })
+    records.topology_mut(key).ok_or(NOT_TOPOLOGY)
+}
+
+/// Carries the flags (unless `merge`), the three general marks (zeroed instead when
+/// `reset_marks`) and the user values of `src` to `dst`: one target of `Notify`.
+fn propagate(src: &Topology, dst: &mut Topology, merge: bool, reset_marks: bool) {
+    if !merge {
+        dst.set_all_flags(src.all_flags());
+    }
+    if reset_marks {
+        // init marks for next mark usage - don't copy marks
+        dst.marks[..3].fill(0);
+    } else {
+        dst.marks[..3].copy_from_slice(&src.marks[..3]);
+    }
+    dst.user_index1 = src.user_index1;
+    dst.user_index2 = src.user_index2;
+    dst.user_ptr1 = src.user_ptr1;
 }
 
 /// `SmTopology::Notify`: for splits, merges, copies and coincidences, carries the
@@ -421,38 +433,13 @@ pub fn notify<R: TopologyRecords + ?Sized>(
         r2.set_all_flags(f1 | r2.all_flags());
     }
 
-    // propagate the values to pOther1
-    if let (Some(t), Some(o1)) = (p_this, other1) {
-        if o1 != t {
-            let src = record(records, t)?;
-            let r1 = record_mut(records, o1)?;
-            if !merge {
-                r1.set_all_flags(src.all_flags());
+    // propagate the values to pOther1 (a copy resets its marks), then to pOther2
+    for (other, reset_marks) in [(other1, copy), (other2, false)] {
+        if let (Some(t), Some(o)) = (p_this, other) {
+            if o != t {
+                let src = record(records, t)?;
+                propagate(&src, record_mut(records, o)?, merge, reset_marks);
             }
-            if copy {
-                // init marks for next mark usage - don't copy marks
-                r1.marks[..3].fill(0);
-            } else {
-                r1.marks[..3].copy_from_slice(&src.marks[..3]);
-            }
-            r1.user_index1 = src.user_index1;
-            r1.user_index2 = src.user_index2;
-            r1.user_ptr1 = src.user_ptr1;
-        }
-    }
-
-    // propagate the values to pOther2
-    if let (Some(t), Some(o2)) = (p_this, other2) {
-        if o2 != t {
-            let src = record(records, t)?;
-            let r2 = record_mut(records, o2)?;
-            if !merge {
-                r2.set_all_flags(src.all_flags());
-            }
-            r2.marks[..3].copy_from_slice(&src.marks[..3]);
-            r2.user_index1 = src.user_index1;
-            r2.user_index2 = src.user_index2;
-            r2.user_ptr1 = src.user_ptr1;
         }
     }
 
@@ -650,7 +637,6 @@ impl TrackTopologyChanges {
             if !self.last_notify_callback {
                 // turn off SmObject::Notify() tracking
                 context.set_sys_notify_callback(None);
-                self.last_notify_callback = false;
             }
         }
     }

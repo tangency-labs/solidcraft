@@ -74,91 +74,14 @@ use crate::nurbs::geom::{
     dist_pt_pt, normalize, polygon_bbox, project_pt_plane, pt_along_vector, vector_diff_cpts,
     vectors_angle, vectors_cos_angle, Interval, MinMaxBox, Plane, LINE_TOL,
 };
+use crate::nurbs::index::{get, get2, oob, set, set2, sx};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{
     combine2_pts, float_op_is_bad, CPoint, FloatOp, RealMatrix, MAX_DERIVATIVE, MODEL_TOL, NOW, NOZ,
 };
 
-const OP_GREVILLE: &str = "nurbs::crv_nurb::greville_abscissa";
-const OP_CURVATURE: &str = "nurbs::crv_nurb::Curve::eval_curvature";
-const OP_EVAL: &str = "nurbs::crv_nurb::Curve::eval";
-const OP_DERIVS: &str = "nurbs::crv_nurb::Curve::derivs";
-const OP_FRENET: &str = "nurbs::crv_nurb::Curve::eval_frenet_frame";
-const OP_TRANSFORM: &str = "nurbs::crv_nurb::Curve::transform";
-const OP_LINE: &str = "nurbs::crv_nurb::line_from_pt_and_vector";
-const OP_PROJECT: &str = "nurbs::crv_nurb::Curve::project_onto_plane";
-const OP_REVERSE: &str = "nurbs::crv_nurb::Curve::reverse";
-const OP_LINEAR: &str = "nurbs::crv_nurb::Curve::linear_segs";
-const OP_DEGEN: &str = "nurbs::crv_nurb::Curve::degen_segs";
-const OP_TYPE: &str = "nurbs::crv_nurb::Curve::get_type";
-const OP_CURV_DERIV: &str = "nurbs::crv_nurb::Curve::curvature_deriv";
-const OP_CLOSED: &str = "nurbs::crv_nurb::Curve::is_closed_continuity";
-
 /// `NL_BIGD` (`DBL_MAX`).
 const BIGD: f64 = f64::MAX;
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (malformed curve or arguments)",
-    }
-}
-
-/// `usize` -> signed index.
-fn sx(u: usize, op: &'static str) -> Result<isize> {
-    isize::try_from(u).map_err(|_| oob(op))
-}
-
-/// `a[i]`.
-#[inline]
-fn get<T: Copy>(a: &[T], i: isize, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i))
-        .copied()
-        .ok_or_else(|| oob(op))
-}
-
-/// `a[i] = v`.
-#[inline]
-fn set<T>(a: &mut [T], i: isize, v: T, op: &'static str) -> Result<()> {
-    let slot = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| oob(op))?;
-    *slot = v;
-    Ok(())
-}
-
-/// `a[i][j]`.
-#[inline]
-fn get2<const N: usize>(a: &[[f64; N]], i: isize, j: isize, op: &'static str) -> Result<f64> {
-    let row = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i))
-        .ok_or_else(|| oob(op))?;
-    get(row, j, op)
-}
-
-/// `a[i][j] = v`.
-#[inline]
-fn set2<const N: usize>(
-    a: &mut [[f64; N]],
-    i: isize,
-    j: isize,
-    v: f64,
-    op: &'static str,
-) -> Result<()> {
-    let row = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| oob(op))?;
-    set(row, j, v, op)
-}
 
 /// The Greville abscissa of control point `idx`: the average of the `degree` knots
 /// `U[idx+1..=idx+degree]` (`N_CrvGetGrevilleAbscissa`).
@@ -166,21 +89,18 @@ fn set2<const N: usize>(
 /// Errors with [`NlibCode::Index`] when `degree < 1` or `idx + degree` exceeds the
 /// highest knot index.
 pub fn greville_abscissa(knots: &[f64], degree: usize, idx: usize) -> Result<f64> {
-    let count = knots.len().checked_sub(1);
+    const OP: &str = "nurbs::crv_nurb::greville_abscissa";
     if degree < 1 {
-        return Err(nlib(OP_GREVILLE, NlibCode::Index));
+        return Err(SolidError::nlib(OP, NlibCode::Index));
     }
-    match (idx.checked_add(degree), count) {
-        (Some(end), Some(count)) if end <= count => {}
-        _ => return Err(nlib(OP_GREVILLE, NlibCode::Index)),
-    }
+    let window = idx
+        .checked_add(degree)
+        .and_then(|end| knots.get(idx + 1..=end))
+        .ok_or(SolidError::nlib(OP, NlibCode::Index))?;
     // The Greville abscissa is the average of 'degree' knot values.
     let mut g = 0.0;
-    for ii in 1..=degree {
-        g += knots
-            .get(idx + ii)
-            .copied()
-            .ok_or_else(|| oob(OP_GREVILLE))?;
+    for &k in window {
+        g += k;
     }
     g /= degree as f64;
     Ok(g)
@@ -291,7 +211,8 @@ impl CurveType {
 pub fn line_from_pt_and_vector(p: Vec3, v: Vec3) -> Result<Curve> {
     let t = p + v;
     let pw = vec![CPoint::from_point(p), CPoint::from_point(t)];
-    Curve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).map_err(|_| oob(OP_LINE))
+    Curve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0])
+        .map_err(|_| oob("nurbs::crv_nurb::line_from_pt_and_vector"))
 }
 
 impl Curve {
@@ -303,11 +224,12 @@ impl Curve {
     /// radius) is not computable, and with the errors of [`Curve::derivs`],
     /// [`Curve::eval_frenet_frame`] and the tangent normalisation.
     pub fn eval_curvature(&self, u: f64, side: Side, circle: bool) -> Result<Curvature> {
+        const OP: &str = "nurbs::crv_nurb::Curve::eval_curvature";
         // Get derivatives.
         let d = self.derivs(u, side, 2)?;
-        let d0 = get(&d, 0, OP_CURVATURE)?;
-        let d1 = get(&d, 1, OP_CURVATURE)?;
-        let d2 = get(&d, 2, OP_CURVATURE)?;
+        let d0 = get(&d, 0, OP)?;
+        let d1 = get(&d, 1, OP)?;
+        let d2 = get(&d, 2, OP)?;
 
         // Get curvature.
         let a = d1.cross(d2);
@@ -315,14 +237,14 @@ impl Curve {
         let den = d1.length();
         let den = den * den * den;
         if float_op_is_bad(num, den, FloatOp::Division) {
-            return Err(nlib(OP_CURVATURE, NlibCode::Numerical));
+            return Err(SolidError::nlib(OP, NlibCode::Numerical));
         }
         let kap = num / den;
 
         // Get osculating circle.
         if circle {
             if float_op_is_bad(1.0, kap, FloatOp::Division) {
-                return Err(nlib(OP_CURVATURE, NlibCode::Numerical));
+                return Err(SolidError::nlib(OP, NlibCode::Numerical));
             }
             let rad = 1.0 / kap;
             let f = self.eval_frenet_frame(u, side)?;
@@ -350,14 +272,14 @@ impl Curve {
     /// Errors with [`NlibCode::Parameter`] when `u` is outside the knot range, and
     /// with the errors of [`crate::nurbs::knots::KnotVector::basis_eval`].
     pub fn eval(&self, u: f64, side: Side) -> Result<Vec3> {
-        const OP: &str = OP_EVAL;
+        const OP: &str = "nurbs::crv_nurb::Curve::eval";
         let knt = self.knot_vector()?;
         let pw = self.cpts();
         let p = sx(self.degree(), OP)?;
 
         // Check parameter.
         if knt.is_param_out_of_bounds(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nlib(OP, NlibCode::Parameter));
         }
 
         // Compute non-vanishing B-splines.
@@ -401,7 +323,7 @@ impl Curve {
     /// [`NlibCode::MaxDerivative`] when `der > NL_MAXDER`, and with
     /// [`NlibCode::Numerical`] when a basis quotient is not computable.
     pub fn derivs(&self, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
-        const OP: &str = OP_DERIVS;
+        const OP: &str = "nurbs::crv_nurb::Curve::derivs";
         const NP: usize = MAX_DEGREE + 1;
         let pu = self.degree();
         let p = sx(pu, OP)?;
@@ -412,10 +334,10 @@ impl Curve {
 
         // Check parameter and order of derivatives.
         if u < get(uk, 0, OP)? || u > get(uk, m, OP)? {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nlib(OP, NlibCode::Parameter));
         }
         if der > MAX_DERIVATIVE {
-            return Err(nlib(OP, NlibCode::MaxDerivative));
+            return Err(SolidError::nlib(OP, NlibCode::MaxDerivative));
         }
         if pu > MAX_DEGREE {
             return Err(SolidError::InvalidInput {
@@ -454,7 +376,7 @@ impl Curve {
                 let num = get2(&ndu, r, j - 1, OP)?;
                 let den = get2(&ndu, j, r, OP)?;
                 if float_op_is_bad(num, den, FloatOp::Division) {
-                    return Err(nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
                 }
                 let temp = num / den;
                 set2(&mut ndu, r, j, saved + right * temp, OP)?;
@@ -522,15 +444,14 @@ impl Curve {
             }
 
             // Compute derivatives of rational basis function: Pascal triangle first.
-            let mut tri = [[0_i64; MAX_DERIVATIVE + 1]; MAX_DERIVATIVE + 1];
-            pascal(&mut tri, der, OP)?;
+            let tri = pascal(der, OP)?;
 
             for i in 0..=p {
                 let w = get(pw, nsp - p + i, OP)?.w;
                 for k in 0..=der {
                     let mut d = w * get2(&bd, k, i, OP)?;
                     for j in 1..=k {
-                        let t = get_tri(&tri, k, j, OP)? as f64;
+                        let t = get2(&tri, k, j, OP)? as f64;
                         d -= t * get2(&a, 0, j, OP)? * get2(&bd, k - j, i, OP)?;
                     }
                     set2(&mut bd, k, i, d / get2(&a, 0, 0, OP)?, OP)?;
@@ -564,9 +485,10 @@ impl Curve {
     /// Errors with the errors of [`Curve::derivs`] and with [`NlibCode::Geometry`]
     /// when the first derivative cannot be normalised.
     pub fn eval_tangent(&self, u: f64, side: Side) -> Result<(Vec3, Vec3)> {
+        const OP: &str = "nurbs::crv_nurb::Curve::eval_tangent";
         let cd = self.derivs(u, side, 1)?;
-        let p = get(&cd, 0, OP_DERIVS)?;
-        let (t, _) = normalize(get(&cd, 1, OP_DERIVS)?)?;
+        let p = get(&cd, 0, OP)?;
+        let (t, _) = normalize(get(&cd, 1, OP)?)?;
         Ok((p, t))
     }
 
@@ -577,13 +499,14 @@ impl Curve {
     /// [`Curve::derivs`], and with [`NlibCode::Geometry`] when the tangent or the
     /// binormal cannot be normalised.
     pub fn eval_frenet_frame(&self, u: f64, side: Side) -> Result<FrenetFrame> {
+        const OP: &str = "nurbs::crv_nurb::Curve::eval_frenet_frame";
         if self.degree() <= 1 {
-            return Err(nlib(OP_FRENET, NlibCode::Degree));
+            return Err(SolidError::nlib(OP, NlibCode::Degree));
         }
         let cd = self.derivs(u, side, 2)?;
-        let c0 = get(&cd, 0, OP_FRENET)?;
-        let c1 = get(&cd, 1, OP_FRENET)?;
-        let c2 = get(&cd, 2, OP_FRENET)?;
+        let c0 = get(&cd, 0, OP)?;
+        let c1 = get(&cd, 1, OP)?;
+        let c2 = get(&cd, 2, OP)?;
 
         // Get point and tangent.
         let (t, _) = normalize(c1)?;
@@ -605,10 +528,11 @@ impl Curve {
     /// Errors with `InvalidInput` (changing nothing) when `rma`'s storage is smaller
     /// than 4x4.
     pub fn transform(&mut self, rma: &RealMatrix) -> Result<()> {
+        const OP: &str = "nurbs::crv_nurb::Curve::transform";
         // Check the matrix before anything changes.
         for i in 0..4 {
             for j in 0..4 {
-                rma.get(i, j).map_err(|_| oob(OP_TRANSFORM))?;
+                rma.get(i, j).map_err(|_| oob(OP))?;
             }
         }
         // Convert to 3-D if needed.
@@ -710,7 +634,7 @@ impl Curve {
     /// (perspective) with [`NlibCode::Numerical`] when a control point's projection
     /// is not computable.
     pub fn project_onto_plane(&self, o: Vec3, n: Vec3, e: Vec3, prj: Projection) -> Result<Curve> {
-        const OP: &str = OP_PROJECT;
+        const OP: &str = "nurbs::crv_nurb::Curve::project_onto_plane";
         let pw = self.cpts();
         let mut qw = pw.to_vec();
         let rat = self.is_rational();
@@ -721,7 +645,7 @@ impl Curve {
                 let (en, _) = normalize(e)?;
                 let ne = nn.dot(en);
                 if ne.abs() < LINE_TOL {
-                    return Err(nlib(OP, NlibCode::Input));
+                    return Err(SolidError::nlib(OP, NlibCode::Input));
                 }
                 let ne = n.dot(e);
                 for (q, p) in qw.iter_mut().zip(pw) {
@@ -745,7 +669,7 @@ impl Curve {
                     let ep = e - pe;
                     let nep = n.dot(ep);
                     if float_op_is_bad(neo, nep, FloatOp::Division) {
-                        return Err(nlib(OP, NlibCode::Numerical));
+                        return Err(SolidError::nlib(OP, NlibCode::Numerical));
                     }
                     let alf = neo / nep;
                     let bet = 1.0 - alf;
@@ -771,7 +695,7 @@ impl Curve {
     /// Errors with `InvalidInput` (the curve may then be partly reversed) only for
     /// knot vectors shorter than upstream indexes.
     pub fn reverse(&mut self) -> Result<()> {
-        const OP: &str = OP_REVERSE;
+        const OP: &str = "nurbs::crv_nurb::Curve::reverse";
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -807,7 +731,7 @@ impl Curve {
     /// Errors with `InvalidInput` when the knots do not match the control points as
     /// upstream indexes them (`n + p + 1 > m`).
     pub fn reversed(&self) -> Result<Curve> {
-        const OP: &str = OP_REVERSE;
+        const OP: &str = "nurbs::crv_nurb::Curve::reversed";
         let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
         let m = sx(self.m(), OP)?;
@@ -869,14 +793,14 @@ impl Curve {
     /// Errors with [`NlibCode::Degree`] for degrees below 2 and with the errors of
     /// [`Curve::extract_seg`].
     pub fn linear_segs(&self, tol: f64) -> Result<Vec<LinearSeg>> {
-        const OP: &str = OP_LINEAR;
+        const OP: &str = "nurbs::crv_nurb::Curve::linear_segs";
         let pw = self.cpts();
         let uk = self.knots();
         let p = sx(self.degree(), OP)?;
         let m = sx(self.m(), OP)?;
 
         if p < 2 {
-            return Err(nlib(OP, NlibCode::Degree));
+            return Err(SolidError::nlib(OP, NlibCode::Degree));
         }
 
         let mut segs = vec![LinearSeg {
@@ -986,7 +910,7 @@ impl Curve {
     ///
     /// Errors with the errors of [`Curve::eval`] and [`Curve::arc_length`].
     pub fn degen_segs(&self, tol: f64) -> Result<Vec<(f64, f64)>> {
-        const OP: &str = OP_DEGEN;
+        const OP: &str = "nurbs::crv_nurb::Curve::degen_segs";
         let p = sx(self.degree(), OP)?;
         let uk = self.knots();
         let m = sx(self.m(), OP)?;
@@ -1065,7 +989,7 @@ impl Curve {
     /// the sweep angle in the circle branch (upstream then has written the center and
     /// normal); everything else that stops recognition is [`CurveType::FreeForm`].
     pub fn get_type(&self, tol: f64) -> Result<CurveType> {
-        const OP: &str = OP_TYPE;
+        const OP: &str = "nurbs::crv_nurb::Curve::get_type";
         let pw = self.cpts();
         let uk = self.knots();
         let p = sx(self.degree(), OP)?;
@@ -1286,7 +1210,7 @@ impl Curve {
     /// the binormal cannot be normalised and with [`NlibCode::Numerical`] when the
     /// final quotient is not computable.
     pub fn curvature_deriv(&self, u: f64, side: Side) -> Result<f64> {
-        const OP: &str = OP_CURV_DERIV;
+        const OP: &str = "nurbs::crv_nurb::Curve::curvature_deriv";
         let d = self.derivs(u, side, 3)?;
         let d1 = get(&d, 1, OP)?;
         let d2 = get(&d, 2, OP)?;
@@ -1314,7 +1238,7 @@ impl Curve {
         let den = den * den * den * den * den;
 
         if float_op_is_bad(num, den, FloatOp::Division) {
-            return Err(nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nlib(OP, NlibCode::Numerical));
         }
         Ok(num / den)
     }
@@ -1328,9 +1252,9 @@ impl Curve {
     /// computable and with [`NlibCode::Numerical`] when a curvature is not;
     /// `InvalidInput` when `tols` lacks a tolerance that is read.
     pub fn is_closed_continuity(&self, n: usize, tols: &[f64]) -> Result<bool> {
-        const OP: &str = OP_CLOSED;
+        const OP: &str = "nurbs::crv_nurb::Curve::is_closed_continuity";
         if n > 2 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         let tol = |i: usize| tols.get(i).copied().ok_or_else(|| oob(OP));
 
@@ -1360,7 +1284,7 @@ impl Curve {
                 let dd = at(d, 1)?.length();
                 let dd = dd * dd * dd;
                 if float_op_is_bad(dn, dd, FloatOp::Division) {
-                    return Err(nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
                 }
                 Ok(dn / dd)
             };
@@ -1381,65 +1305,36 @@ fn to_len(der: isize) -> usize {
     usize::try_from(der).map_or(0, |d| d.saturating_add(1))
 }
 
-/// `tri[k][j]`.
-fn get_tri(
-    tri: &[[i64; MAX_DERIVATIVE + 1]; MAX_DERIVATIVE + 1],
-    k: isize,
-    j: isize,
-    op: &'static str,
-) -> Result<i64> {
-    let row = usize::try_from(k)
-        .ok()
-        .and_then(|k| tri.get(k))
-        .ok_or_else(|| oob(op))?;
-    get(row, j, op)
-}
-
-/// `tri[k][j] = v`.
-fn set_tri(
-    tri: &mut [[i64; MAX_DERIVATIVE + 1]; MAX_DERIVATIVE + 1],
-    k: isize,
-    j: isize,
-    v: i64,
-    op: &'static str,
-) -> Result<()> {
-    let row = usize::try_from(k)
-        .ok()
-        .and_then(|k| tri.get_mut(k))
-        .ok_or_else(|| oob(op))?;
-    set(row, j, v, op)
-}
+/// Binomial coefficients `tri[k][j]`, `k, j <= NL_MAXDER`.
+type PascalTriangle = [[i64; MAX_DERIVATIVE + 1]; MAX_DERIVATIVE + 1];
 
 /// Pascal triangle rows `0..=der` as `N_CrvDerivs` builds them.
-fn pascal(
-    tri: &mut [[i64; MAX_DERIVATIVE + 1]; MAX_DERIVATIVE + 1],
-    der: isize,
-    op: &'static str,
-) -> Result<()> {
-    set_tri(tri, 0, 0, 1, op)?;
-    set_tri(tri, 1, 0, 1, op)?;
-    set_tri(tri, 1, 1, 1, op)?;
+fn pascal(der: isize, op: &'static str) -> Result<PascalTriangle> {
+    let mut tri: PascalTriangle = [[0; MAX_DERIVATIVE + 1]; MAX_DERIVATIVE + 1];
+    set2(&mut tri, 0, 0, 1, op)?;
+    set2(&mut tri, 1, 0, 1, op)?;
+    set2(&mut tri, 1, 1, 1, op)?;
     if der > 1 {
-        set_tri(tri, 2, 0, 1, op)?;
-        set_tri(tri, 2, 1, 2, op)?;
-        set_tri(tri, 2, 2, 1, op)?;
+        set2(&mut tri, 2, 0, 1, op)?;
+        set2(&mut tri, 2, 1, 2, op)?;
+        set2(&mut tri, 2, 2, 1, op)?;
         if der > 2 {
             for k in 3..=der {
-                set_tri(tri, k, 0, 1, op)?;
+                set2(&mut tri, k, 0, 1, op)?;
                 let r = k / 2;
                 let mut j2 = 1;
                 for j in 1..=r {
-                    let j1 = get_tri(tri, k - 1, j, op)?;
-                    let v = get_tri(tri, k - 1, j, op)? + j2;
-                    set_tri(tri, k, j, v, op)?;
-                    set_tri(tri, k, k - j, v, op)?;
+                    let j1 = get2(&tri, k - 1, j, op)?;
+                    let v = get2(&tri, k - 1, j, op)? + j2;
+                    set2(&mut tri, k, j, v, op)?;
+                    set2(&mut tri, k, k - j, v, op)?;
                     j2 = j1;
                 }
-                set_tri(tri, k, k, 1, op)?;
+                set2(&mut tri, k, k, 1, op)?;
             }
         }
     }
-    Ok(())
+    Ok(tri)
 }
 
 #[cfg(test)]
@@ -1514,7 +1409,7 @@ mod tests {
         assert!(d[1].dot(p).abs() < 1e-12);
         assert_eq!(
             c.eval(2.0, Side::Left).unwrap_err(),
-            nlib(OP_EVAL, NlibCode::Parameter)
+            SolidError::nlib("nurbs::crv_nurb::Curve::eval", NlibCode::Parameter)
         );
         assert!(matches!(
             c.derivs(0.5, Side::Left, 5),

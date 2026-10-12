@@ -50,47 +50,14 @@ use crate::math::Vec3;
 use crate::nurbs::crv_fit::p1::{
     cpts_from_srf_data, interp_knot_vector, knot_vector_approx, DataDir, FitPoint, ParamMethod,
 };
+use crate::nurbs::fit_arrays::{
+    alloc, alloc2, at, at2, at_mut, banded, basis, copy_knots, head, hi, idx, invalid, mget, mset,
+    put, put2, sg, Block,
+};
 use crate::nurbs::funcs_basic::SurfaceFunction;
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, MODEL_TOL};
+use crate::nurbs::math::{CPoint, RealMatrix, MODEL_TOL};
 use crate::nurbs::srf_basic::Surface;
-
-const OP_PARAMS: &str = "nurbs::srf_fit::param_values";
-const OP_INTERP_PARAMS: &str = "nurbs::srf_fit::interp_params";
-const OP_INTERP: &str = "nurbs::srf_fit::interp_given_knots";
-const OP_APPROX: &str = "nurbs::srf_fit::lst_sq_approx";
-const OP_FUNC: &str = "nurbs::srf_fit::func_interp";
-
-// ---- helpers ----------------------------------------------------------------------
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-fn out_of_range(op: &'static str) -> SolidError {
-    invalid(op, "index outside the arrays upstream would access")
-}
-
-/// `usize` -> signed index (upstream `NL_INDEX` arithmetic).
-fn sg(x: usize, op: &'static str) -> Result<i64> {
-    i64::try_from(x).map_err(|_| invalid(op, "size overflow"))
-}
-
-fn idx(i: i64, op: &'static str) -> Result<usize> {
-    usize::try_from(i).map_err(|_| out_of_range(op))
-}
-
-/// Highest index of a slice (`len - 1`), `InvalidInput` when empty.
-fn hi<T>(a: &[T], op: &'static str, what: &'static str) -> Result<i64> {
-    match a.len().checked_sub(1) {
-        Some(n) => sg(n, op),
-        None => Err(invalid(op, what)),
-    }
-}
 
 /// Highest row and column indexes `(n, m)` of a grid (the first row's length).
 fn grid_his<T>(a: &[Vec<T>], op: &'static str) -> Result<(i64, i64)> {
@@ -101,149 +68,6 @@ fn grid_his<T>(a: &[Vec<T>], op: &'static str) -> Result<(i64, i64)> {
         "empty grid row",
     )?;
     Ok((n, m))
-}
-
-fn at<T: Copy>(a: &[T], i: i64, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i).copied())
-        .ok_or_else(|| out_of_range(op))
-}
-
-fn put<T>(a: &mut [T], i: i64, v: T, op: &'static str) -> Result<()> {
-    *at_mut(a, i, op)? = v;
-    Ok(())
-}
-
-fn at_mut<'a, T>(a: &'a mut [T], i: i64, op: &'static str) -> Result<&'a mut T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| out_of_range(op))
-}
-
-/// `a[i][j]` of a grid.
-fn at2<T: Copy>(a: &[Vec<T>], i: i64, j: i64, op: &'static str) -> Result<T> {
-    let row = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i))
-        .ok_or_else(|| out_of_range(op))?;
-    at(row, j, op)
-}
-
-fn put2<T>(a: &mut [Vec<T>], i: i64, j: i64, v: T, op: &'static str) -> Result<()> {
-    let row = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| out_of_range(op))?;
-    put(row, j, v, op)
-}
-
-/// A vector of `n + 1` copies of `v` (`n` an upstream highest index; empty for
-/// `n == -1`).
-fn alloc<T: Clone>(n: i64, v: T, op: &'static str) -> Result<Vec<T>> {
-    let len = n
-        .checked_add(1)
-        .and_then(|l| usize::try_from(l).ok())
-        .ok_or_else(|| out_of_range(op))?;
-    Ok(vec![v; len])
-}
-
-/// An `(n+1) x (m+1)` grid of `v`.
-fn alloc2<T: Clone>(n: i64, m: i64, v: T, op: &'static str) -> Result<Vec<Vec<T>>> {
-    alloc(n, alloc(m, v, op)?, op)
-}
-
-/// Upstream's row-major block of reals (`N_AllocReal2dArray`), indexed as `B[i][j]`
-/// = element `i*cols + j` of the block.
-struct Block {
-    cols: i64,
-    data: Vec<f64>,
-}
-
-impl Block {
-    /// Block for highest indexes `n`, `m` (`(n+1) x (m+1)`), zero-filled.
-    fn new(n: i64, m: i64, op: &'static str) -> Result<Self> {
-        let cols = m.checked_add(1).ok_or_else(|| out_of_range(op))?;
-        let len = n
-            .checked_add(1)
-            .and_then(|r| r.checked_mul(cols))
-            .ok_or_else(|| out_of_range(op))?;
-        Ok(Self {
-            cols,
-            data: alloc(len - 1, 0.0, op)?,
-        })
-    }
-
-    fn flat(&self, i: i64, j: i64) -> Option<i64> {
-        i.checked_mul(self.cols)?.checked_add(j)
-    }
-
-    fn get(&self, i: i64, j: i64, op: &'static str) -> Result<f64> {
-        at(
-            &self.data,
-            self.flat(i, j).ok_or_else(|| out_of_range(op))?,
-            op,
-        )
-    }
-
-    fn set(&mut self, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-        let k = self.flat(i, j).ok_or_else(|| out_of_range(op))?;
-        put(&mut self.data, k, v, op)
-    }
-}
-
-/// Element `(i, j)` of a matrix's storage block addressed as upstream's `RM[i][j]`
-/// (row pointers into one row-major block): `j` may leave row `i`.
-fn mat_slot(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<(usize, usize)> {
-    let (_, cols) = cm.storage_shape().ok_or_else(|| out_of_range(op))?;
-    let cols = sg(cols, op)?;
-    let k = i
-        .checked_mul(cols)
-        .and_then(|r| r.checked_add(j))
-        .ok_or_else(|| out_of_range(op))?;
-    if k < 0 || cols == 0 {
-        return Err(out_of_range(op));
-    }
-    Ok((idx(k / cols, op)?, idx(k % cols, op)?))
-}
-
-fn mset(cm: &mut RealMatrix, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.set(r, c, v).map_err(|_| out_of_range(op))
-}
-
-fn mget(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<f64> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.get(r, c).map_err(|_| out_of_range(op))
-}
-
-/// Banded `(n+1) x (n+1)` matrix with bandwidth `bw` (`N_SetRealMatrix`); the storage
-/// is zero-filled, which is what upstream's explicit zeroing loops produce.
-fn banded(n: i64, bw: i64, op: &'static str) -> Result<RealMatrix> {
-    RealMatrix::new(idx(n, op)?, idx(n, op)?, MatrixType::Banded, idx(bw, op)?)
-}
-
-/// Copy of `U[0..=last]` of a knot vector (upstream copies knot by knot).
-fn copy_knots(knt: &KnotVector<'_>, last: i64, op: &'static str) -> Result<Vec<f64>> {
-    let uk = knt.knots();
-    let mut uc = alloc(last, 0.0, op)?;
-    for i in 0..=last {
-        put(&mut uc, i, at(uk, i, op)?, op)?;
-    }
-    Ok(uc)
-}
-
-/// Basis functions `N[0..=p]` at `u` and the span index (`N_BasisEval`, `NL_LEFT`).
-fn basis(knt: &KnotVector<'_>, p: i64, u: f64, op: &'static str) -> Result<(i64, Vec<f64>)> {
-    let b = knt.basis_eval(idx(p, op)?, u, Side::Left)?;
-    Ok((sg(b.span, op)?, b.values))
-}
-
-/// `u[0..=n]` of a parameter slice.
-fn first<'a>(u: &'a [f64], n: i64, op: &'static str) -> Result<&'a [f64]> {
-    let end = idx(n, op)?.checked_add(1).ok_or_else(|| out_of_range(op))?;
-    u.get(..end).ok_or_else(|| out_of_range(op))
 }
 
 /// Chord-length / centripetal accumulation over one direction (the shared loop of
@@ -313,7 +137,7 @@ fn chord_dir<P: FitPoint>(
 /// with chord-length or centripetal parameters); `InvalidInput` for an empty grid or
 /// a row shorter than the first.
 pub fn param_values<P: FitPoint>(a: &[Vec<P>], par: ParamMethod) -> Result<(Vec<f64>, Vec<f64>)> {
-    const OP: &str = OP_PARAMS;
+    const OP: &str = "nurbs::srf_fit::param_values";
     let (n, m) = grid_his(a, OP)?;
     let mut u = alloc(n, 0.0, OP)?;
     let mut v = alloc(m, 0.0, OP)?;
@@ -340,12 +164,12 @@ pub fn param_values<P: FitPoint>(a: &[Vec<P>], par: ParamMethod) -> Result<(Vec<
 
     // Get u-directional parameters (the points P[i][j], i = 0..=n, of column j).
     if !chord_dir(&mut u, &mut dist, n, m, par, |j, i| at2(a, i, j, OP), OP)? {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Get v-directional parameters (the points P[i][j], j = 0..=m, of row i).
     if !chord_dir(&mut v, &mut dist, m, n, par, |i, j| at2(a, i, j, OP), OP)? {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     Ok((u, v))
 }
@@ -366,7 +190,7 @@ pub fn interp_params<P: FitPoint>(
     par: ParamMethod,
     dir: DataDir,
 ) -> Result<Vec<f64>> {
-    const OP: &str = OP_INTERP_PARAMS;
+    const OP: &str = "nurbs::srf_fit::interp_params";
     let (n, m) = grid_his(a, OP)?;
     let len = match dir {
         DataDir::U => n,
@@ -416,7 +240,7 @@ fn interp_matrix(
         let (j, nb) = basis(knt, p, at(t, i, op)?, op)?;
         let l = j - i - 1;
         if l < 0 || l + p >= ub {
-            return Err(nlib(op, NlibCode::Input));
+            return Err(SolidError::nlib(op, NlibCode::Input));
         }
         for k in 0..=p {
             mset(&mut cm, i, l + k, at(&nb, k, op)?, op)?;
@@ -446,7 +270,7 @@ pub fn interp_given_knots<P: FitPoint>(
     p: usize,
     q: usize,
 ) -> Result<Surface> {
-    const OP: &str = OP_INTERP;
+    const OP: &str = "nurbs::srf_fit::interp_given_knots";
     let (n, m) = grid_his(a, OP)?;
     let (p, q) = (sg(p, OP)?, sg(q, OP)?);
 
@@ -454,10 +278,10 @@ pub fn interp_given_knots<P: FitPoint>(
     let r = sg(knu.last_index(), OP)?;
     let s = sg(knv.last_index(), OP)?;
     if r != n + p + 1 || s != m + q + 1 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if p > n || q > m {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let us = copy_knots(knu, r, OP)?;
     let vs = copy_knots(knv, s, OP)?;
@@ -501,9 +325,32 @@ pub fn interp_given_knots<P: FitPoint>(
 
 // ---- least-squares approximation --------------------------------------------------
 
+/// Band bookkeeping of `N_FitSrfLstSqApprox`, shared by its u and v passes as
+/// upstream (entries a pass does not rewrite keep the previous pass's values).
+struct Band {
+    /// `index[k]`: first basis function index of sample `k`'s row of `A`.
+    index: Vec<i64>,
+    /// `start[i]`: first sample on which basis function `i + 1` is non-zero.
+    start: Vec<i64>,
+    /// `end[i]`: last sample on which basis function `i + 1` is non-zero.
+    end: Vec<i64>,
+}
+
+impl Band {
+    /// Zeroed bookkeeping for highest sample index `samples` and highest interior
+    /// basis index `basis`.
+    fn new(samples: i64, basis: i64, op: &'static str) -> Result<Self> {
+        Ok(Self {
+            index: alloc(samples, 0, op)?,
+            start: alloc(basis, 0, op)?,
+            end: alloc(basis, 0, op)?,
+        })
+    }
+}
+
 /// Band bookkeeping and normal equations of one direction of
-/// `N_FitSrfLstSqApprox`: fills `A` (basis functions per sample, shared block),
-/// `index`, `start` and `end`, and returns the LU-decomposed matrix `N^T N`.
+/// `N_FitSrfLstSqApprox`: fills `A` (basis functions per sample, shared block) and
+/// `band`, and returns the LU-decomposed matrix `N^T N`.
 fn normal_matrix(
     knt: &KnotVector<'_>,
     t: &[f64],
@@ -511,11 +358,12 @@ fn normal_matrix(
     n: i64,
     p: i64,
     a: &mut Block,
-    index: &mut [i64],
-    start: &mut [i64],
-    end: &mut [i64],
+    band: &mut Band,
 ) -> Result<RealMatrix> {
-    const OP: &str = OP_APPROX;
+    const OP: &str = "nurbs::srf_fit::lst_sq_approx";
+    let index = band.index.as_mut_slice();
+    let start = band.start.as_mut_slice();
+    let end = band.end.as_mut_slice();
     let ub = 2 * p + 1;
     let usb = p;
     let mut rj = p;
@@ -556,7 +404,7 @@ fn normal_matrix(
     }
 
     if sj < n - 2 || at(end, 0, OP)? == -1 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     for i in 0.max(ej + 1)..=n - 2 {
         put(end, i, r - 2, OP)?;
@@ -591,7 +439,7 @@ fn end_basis(
     ts: &mut [f64],
     te: &mut [f64],
 ) -> Result<()> {
-    const OP: &str = OP_APPROX;
+    const OP: &str = "nurbs::srf_fit::lst_sq_approx";
     let (pi, ni) = (idx(p, OP)?, idx(n, OP)?);
     for i in 1..r {
         let ti = at(t, i, OP)?;
@@ -603,16 +451,9 @@ fn end_basis(
 
 /// Least-squares right-hand sides `R[i-1] = sum_k A[k][i-index[k]-1] * Rk[k]` for
 /// `i = 1..n` (`R` keeps its length; entries past `n - 2` are not touched).
-fn rhs<P: FitPoint>(
-    a: &Block,
-    rk: &[P],
-    n: i64,
-    index: &[i64],
-    start: &[i64],
-    end: &[i64],
-    out: &mut [P],
-) -> Result<()> {
-    const OP: &str = OP_APPROX;
+fn rhs<P: FitPoint>(a: &Block, rk: &[P], n: i64, band: &Band, out: &mut [P]) -> Result<()> {
+    const OP: &str = "nurbs::srf_fit::lst_sq_approx";
+    let Band { index, start, end } = band;
     for i in 1..n {
         let ri = at_mut(out, i - 1, OP)?;
         *ri = P::ZERO;
@@ -649,16 +490,16 @@ pub fn lst_sq_approx(
     q: usize,
     par: ParamMethod,
 ) -> Result<Surface> {
-    const OP: &str = OP_APPROX;
+    const OP: &str = "nurbs::srf_fit::lst_sq_approx";
     let (r, s) = grid_his(pts, OP)?;
     let (n, m, p, q) = (sg(n, OP)?, sg(m, OP)?, sg(p, OP)?, sg(q, OP)?);
 
     // Check for error (upstream's further checks are implied by these).
     if n > r || n < 1 || p > n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if m > s || m < 1 || q > m {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let mut pw = alloc2(n, m, CPoint::default(), OP)?;
 
@@ -700,9 +541,7 @@ pub fn lst_sq_approx(
     let mut a = Block::new(ii, kk, OP)?;
     let mut ts = alloc(ii, 0.0, OP)?;
     let mut te = alloc(ii, 0.0, OP)?;
-    let mut index = alloc(ii, 0_i64, OP)?;
-    let mut start = alloc(jj, 0_i64, OP)?;
-    let mut end = alloc(jj, 0_i64, OP)?;
+    let mut band = Band::new(ii, jj, OP)?;
     let mut rk = alloc(ii, Vec3::ZERO, OP)?;
     let mut rv = alloc(jj, Vec3::ZERO, OP)?;
     let mut rkw = alloc(ii, CPoint::ZERO, OP)?;
@@ -711,7 +550,7 @@ pub fn lst_sq_approx(
 
     // Compute coefficient matrix for u-directional approximation.
     if n > 1 {
-        let cm = normal_matrix(&knu, &u, r, n, p, &mut a, &mut index, &mut start, &mut end)?;
+        let cm = normal_matrix(&knu, &u, r, n, p, &mut a, &mut band)?;
 
         // Approximate rows in the u-direction.
         end_basis(&knu, &u, r, n, p, &mut ts, &mut te)?;
@@ -731,7 +570,7 @@ pub fn lst_sq_approx(
                 );
                 put(&mut rk, i - 1, v, OP)?;
             }
-            rhs(&a, &rk, n, &index, &start, &end, &mut rv)?;
+            rhs(&a, &rk, n, &band, &mut rv)?;
             let aw = cm.for_back_points(&rv)?;
             for i in 0..=n - 2 {
                 put2(target, i + 1, j, at(&aw, i, OP)?, OP)?;
@@ -741,7 +580,7 @@ pub fn lst_sq_approx(
 
     // Compute coefficient matrix for v-directional approximation.
     if m > 1 {
-        let cm = normal_matrix(&knv, &v, s, m, q, &mut a, &mut index, &mut start, &mut end)?;
+        let cm = normal_matrix(&knv, &v, s, m, q, &mut a, &mut band)?;
 
         // Approximate rows in the v-direction.
         end_basis(&knv, &v, s, m, q, &mut ts, &mut te)?;
@@ -760,7 +599,7 @@ pub fn lst_sq_approx(
                     );
                     put(&mut rk, j - 1, v, OP)?;
                 }
-                rhs(&a, &rk, m, &index, &start, &end, &mut rv)?;
+                rhs(&a, &rk, m, &band, &mut rv)?;
                 let aw = cm.for_back_points(&rv)?;
                 for j in 0..=m - 2 {
                     put2(&mut pw, i, j + 1, at(&aw, j, OP)?, OP)?;
@@ -781,7 +620,7 @@ pub fn lst_sq_approx(
                     );
                     put(&mut rkw, j - 1, v, OP)?;
                 }
-                rhs(&a, &rkw, m, &index, &start, &end, &mut rw)?;
+                rhs(&a, &rkw, m, &band, &mut rw)?;
                 let aw = cm.for_back_cpoints(&rw)?;
                 for j in 0..=m - 2 {
                     put2(&mut pw, i, j + 1, at(&aw, j, OP)?, OP)?;
@@ -837,19 +676,19 @@ pub fn func_interp(
     u: &[f64],
     v: &[f64],
 ) -> Result<SurfaceFunction> {
-    const OP: &str = OP_FUNC;
+    const OP: &str = "nurbs::srf_fit::func_interp";
     let (n, m) = grid_his(f, OP)?;
     let (pp, qq) = (p, q);
     let (p, q) = (sg(p, OP)?, sg(q, OP)?);
 
     // Check for function memory.
     if p > n || q > m {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Compute knot vectors.
-    let uk = interp_knot_vector(first(u, n, OP)?, pp)?;
-    let vk = interp_knot_vector(first(v, m, OP)?, qq)?;
+    let uk = interp_knot_vector(head(u, n, OP)?, pp)?;
+    let vk = interp_knot_vector(head(v, m, OP)?, qq)?;
     let (knu, knv) = (KnotVector::from_slice(&uk)?, KnotVector::from_slice(&vk)?);
     let mut fuv = alloc2(n, m, 0.0, OP)?;
 

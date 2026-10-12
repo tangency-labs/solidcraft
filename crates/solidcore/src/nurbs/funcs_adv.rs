@@ -39,7 +39,7 @@
 //!   are the same, bit for bit.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
-// goes through `get`/`set`, which reject negative or too-large indices.
+// goes through `nurbs::index::{get, set}`, which reject negative or too-large indices.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::basis_basic::{make_knots_compatible, PTOL};
@@ -48,65 +48,9 @@ use crate::nurbs::bezier::{
 };
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::funcs_basic::CurveFunction;
+use crate::nurbs::index::{get, oob, set, storage, sx, ux};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{float_op_is_bad, CPoint, FloatOp, RealMatrix};
-
-const OP_REFINE: &str = "nurbs::funcs_adv::CurveFunction::refine";
-const OP_DERIV: &str = "nurbs::funcs_adv::CurveFunction::deriv";
-const OP_MUL_FUNC: &str = "nurbs::funcs_adv::CurveFunction::multiply_func";
-const OP_MUL_CRV: &str = "nurbs::funcs_adv::CurveFunction::multiply_crv";
-const OP_MUL_CRV_4D: &str = "nurbs::funcs_adv::CurveFunction::multiply_crv_4d";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (malformed function, curve or arguments)",
-    }
-}
-
-/// `usize` -> signed index.
-fn sx(u: usize, op: &'static str) -> Result<isize> {
-    isize::try_from(u).map_err(|_| oob(op))
-}
-
-/// Signed index -> `usize`, rejecting negative values.
-fn ux(i: isize, op: &'static str) -> Result<usize> {
-    usize::try_from(i).map_err(|_| oob(op))
-}
-
-/// `a[i]`.
-#[inline]
-fn get<T: Copy>(a: &[T], i: isize, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i))
-        .copied()
-        .ok_or_else(|| oob(op))
-}
-
-/// `a[i] = v`.
-#[inline]
-fn set<T>(a: &mut [T], i: isize, v: T, op: &'static str) -> Result<()> {
-    let slot = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| oob(op))?;
-    *slot = v;
-    Ok(())
-}
-
-/// Zero-filled storage for `hi + 1` entries (`N_AllocReal1dArray(hi)` and friends).
-fn storage<T: Clone + Default>(hi: isize, op: &'static str) -> Result<Vec<T>> {
-    let len = ux(hi, op)?.checked_add(1).ok_or_else(|| oob(op))?;
-    let mut v = Vec::new();
-    v.try_reserve_exact(len).map_err(|_| oob(op))?;
-    v.resize(len, T::default());
-    Ok(v)
-}
 
 /// A function over whole arrays `fq[0..=n]`, `uq[0..=m]`.
 fn function(fq: Vec<f64>, p: usize, uq: Vec<f64>, op: &'static str) -> Result<CurveFunction> {
@@ -124,7 +68,7 @@ impl CurveFunction {
     /// of [`crate::nurbs::knots::KnotVector::find_span`]; `InvalidInput` where upstream
     /// would index outside its arrays.
     pub fn refine(&self, x: &[f64]) -> Result<CurveFunction> {
-        const OP: &str = OP_REFINE;
+        const OP: &str = "nurbs::funcs_adv::CurveFunction::refine";
         let fp = self.values();
         let up = self.knots();
         let pu = self.degree();
@@ -136,12 +80,12 @@ impl CurveFunction {
 
         // Check input parameters.
         if r < 0 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         let x0 = get(x, 0, OP)?;
         let xr = get(x, r, OP)?;
         if knt.is_end_param(x0) || knt.is_end_param(xr) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nlib(OP, NlibCode::Parameter));
         }
 
         let mut fq: Vec<f64> = storage(n + r + 1, OP)?;
@@ -212,7 +156,7 @@ impl CurveFunction {
     /// `InvalidInput` where upstream would index outside its arrays (`n < d` or knots
     /// that do not match the values).
     pub fn deriv(&self, d: usize) -> Result<CurveFunction> {
-        const OP: &str = OP_DERIV;
+        const OP: &str = "nurbs::funcs_adv::CurveFunction::deriv";
         let fu = self.values();
         let u = self.knots();
         let n = sx(self.n(), OP)?;
@@ -220,9 +164,9 @@ impl CurveFunction {
         let p = sx(self.degree(), OP)?;
 
         // Check error.
-        let d = isize::try_from(d).map_err(|_| nlib(OP, NlibCode::Input))?;
+        let d = isize::try_from(d).map_err(|_| SolidError::nlib(OP, NlibCode::Input))?;
         if d > p {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
 
         // Output sizes.
@@ -243,10 +187,10 @@ impl CurveFunction {
                 let hi = get(u, i + p + 1, OP)?;
                 let lo = get(u, i + k, OP)?;
                 if hi == lo {
-                    return Err(nlib(OP, NlibCode::Derivative));
+                    return Err(SolidError::nlib(OP, NlibCode::Derivative));
                 }
                 if float_op_is_bad(pf - kf + 1.0, hi - lo, FloatOp::Division) {
-                    return Err(nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
                 }
                 let alf = (pf - kf + 1.0) / (hi - lo);
                 let t = alf * (get(&ft, i + 1, OP)? - get(&ft, i, OP)?);
@@ -388,14 +332,14 @@ fn multiply<G: Operand>(
     let q = sx(opg.degree(), op)?;
     let pq = p + q;
     if pq > sx(MAX_DEGREE, op)? {
-        return Err(nlib(op, NlibCode::Degree));
+        return Err(SolidError::nlib(op, NlibCode::Degree));
     }
     let pqu = ux(pq, op)?;
 
     // Handle special case p=0 or q=0.
     if p == 0 || q == 0 {
         if sx(fun.n(), op)? != p || sx(opg.n(), op)? != q {
-            return Err(nlib(op, NlibCode::Input));
+            return Err(SolidError::nlib(op, NlibCode::Input));
         }
         let mut h: Vec<G::C> = storage(pq, op)?;
         let mut t: Vec<f64> = storage(pq + pq + 1, op)?;
@@ -459,7 +403,7 @@ fn multiply<G: Operand>(
     let nss = gop.span_count()?;
 
     if nsr != nss {
-        return Err(nlib(op, NlibCode::Knot));
+        return Err(SolidError::nlib(op, NlibCode::Knot));
     }
 
     // See if memory is needed.
@@ -526,7 +470,7 @@ fn multiply<G: Operand>(
 
         // Check multiplicities of internal knots.
         if br < mr && bs < ms && (mlr > p || mls > q) {
-            return Err(nlib(op, NlibCode::Knot));
+            return Err(SolidError::nlib(op, NlibCode::Knot));
         }
 
         // Adjust multiplicities and compute multiplicity of output knot.
@@ -730,7 +674,7 @@ impl CurveFunction {
     /// and the Bezier product; `InvalidInput` where upstream would index outside its
     /// arrays.
     pub fn multiply_func(&mut self, g: &mut CurveFunction) -> Result<CurveFunction> {
-        let op = OP_MUL_FUNC;
+        let op = "nurbs::funcs_adv::CurveFunction::multiply_func";
         let r = multiply(self, g, func_multiply_func, scale_value, op)?;
         CurveFunction::with_indices(r.coefs, r.n, r.p, r.knots, r.m).map_err(|_| oob(op))
     }
@@ -741,7 +685,7 @@ impl CurveFunction {
     /// Knot rescaling, special cases and errors as [`CurveFunction::multiply_func`]
     /// (with [`Curve::refine`] for the curve).
     pub fn multiply_crv(&mut self, g: &mut Curve) -> Result<Curve> {
-        let op = OP_MUL_CRV;
+        let op = "nurbs::funcs_adv::CurveFunction::multiply_crv";
         let r = multiply(self, g, func_multiply_crv, CPoint::scale_xyz, op)?;
         Curve::with_indices(r.coefs, r.n, r.p, r.knots, r.m).map_err(|_| oob(op))
     }
@@ -749,7 +693,7 @@ impl CurveFunction {
     /// As [`CurveFunction::multiply_crv`], scaling all four homogeneous coordinates
     /// (`N_CrvFuncMultiplyCrv4d`).
     pub fn multiply_crv_4d(&mut self, g: &mut Curve) -> Result<Curve> {
-        let op = OP_MUL_CRV_4D;
+        let op = "nurbs::funcs_adv::CurveFunction::multiply_crv_4d";
         let r = multiply(self, g, func_multiply_crv_4d, CPoint::scale, op)?;
         Curve::with_indices(r.coefs, r.n, r.p, r.knots, r.m).map_err(|_| oob(op))
     }
