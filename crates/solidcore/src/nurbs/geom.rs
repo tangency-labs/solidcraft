@@ -31,7 +31,7 @@
 //! | `alpha * v` / `v * alpha`              | `N_VectorScale`, `N_VectorScaleRef`   |
 //! | `-v`                                   | `N_VectorReverse`, `N_VectorReverseInPlace` |
 //! | `a + b`                                | `N_VectorSum`                         |
-//! | [`combine2_pts`](crate::nurbs::math::combine2_pts) | `N_VectorCombine`         |
+//! | [`combine2_pts`]                       | `N_VectorCombine`                     |
 //! | `a - b` / `pe - ps`                    | `N_VectorDiff` / `N_VectorDir`        |
 //! | [`vector_diff_cpts`]                   | `N_VectorDiffCPts`                    |
 //! | [`Vec3::new`], `Copy`                  | `N_VectorCreate`, `N_VectorCopy`      |
