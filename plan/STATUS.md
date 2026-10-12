@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **5** (4,847 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d` |
+| Green | **6** (5,663 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix` |
 | Partial | **3** (3,304 lines): `geom.extent3d`, `geom.tol`, `geom.tree` |
-| Ported (green + partial) | 8 units, 8,151 upstream lines (2.1%); about 8,900 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 7 (5,827 lines): `geom.assert_array`, `geom.attribute`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.vector3d`, `nlib.geom` |
+| Ported (green + partial) | 9 units, 8,967 upstream lines (2.3%); about 9,750 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 7 (5,827 lines): `geom.assert_array`, `geom.attribute`, `geom.context`, `geom.extent1d`, `geom.vector3d`, `nlib.geom` |
 | Blocked | 0 |
 | Todo | 245 |
 
@@ -62,6 +62,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `topology.database_io` | `topology::database_io` | 2059 cases (59 fixture + 2000 generated), max_rel_err 0 | stream state and position match per step; a 200,059-case run was also clean |
 | `nlib.math` | `nurbs::math` | 3076 cases (76 fixture + 3000 generated), max_rel_err 0 | bit-identical; a 100,076-case run was also clean |
 | `geom.periodic_extent1d` | `geom::periodic_extent1d` | 4054 cases (54 fixture + 4000 generated), max_rel_err 0 | bit-identical; upstream quirks in findings.md |
+| `geom.matrix` | `geom::matrix` | 4044 cases (44 fixture + 4000 generated), max_rel_err 0 | bit-identical; a 100,044-case run was also clean; upstream quirks in findings.md |
 
 ## Partial units
 
