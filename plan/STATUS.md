@@ -11,12 +11,12 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **10** (9,348 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol` |
+| Green | **11** (9,703 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context` |
 | Partial | **2** (2,381 lines): `geom.extent3d`, `geom.tree` |
-| Ported (green + partial) | 12 units, 11,729 upstream lines (3.0%); about 11,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 3 (2,249 lines): `geom.attribute`, `geom.context`, `geom.extent1d` |
+| Ported (green + partial) | 13 units, 12,084 upstream lines (3.1%); about 11,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 8 (6,615 lines): `geom.attribute`, `geom.extent1d`, `nlib.basis_basic`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve_nd`, `geom.polynomial` |
 | Blocked | 0 |
-| Todo | 245 |
+| Todo | 239 |
 
 ## What Wave 0 produced
 
