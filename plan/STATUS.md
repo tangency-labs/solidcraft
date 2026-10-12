@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **8** (7,280 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom` |
-| Partial | **3** (3,304 lines): `geom.extent3d`, `geom.tol`, `geom.tree` |
-| Ported (green + partial) | 11 units, 10,584 upstream lines (2.7%); about 10,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 4 (3,394 lines): `geom.attribute`, `geom.context`, `geom.extent1d`, `geom.vector3d` |
+| Green | **10** (9,348 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol` |
+| Partial | **2** (2,381 lines): `geom.extent3d`, `geom.tree` |
+| Ported (green + partial) | 12 units, 11,729 upstream lines (3.0%); about 11,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 3 (2,249 lines): `geom.attribute`, `geom.context`, `geom.extent1d` |
 | Blocked | 0 |
 | Todo | 245 |
 
@@ -72,7 +72,6 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | Unit | Rust module | difftest | Deferred on |
 |---|---|---|---|
 | `geom.extent3d` | `geom::extent3d` | 3086 cases, 3080 bit-identical | 6 (`geom.extent1d`, `geom.pseudo_box`) |
-| `geom.tol` | `geom::tol` | 3430 cases (430 fixture + 3000 generated), 3209 bit-identical; a 60,430-case run was also clean | 221 (`geom.vector3d`) |
 | `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
 
 ## Ready set
