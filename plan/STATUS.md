@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **15** (12,917 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d` |
+| Green | **16** (13,703 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic` |
 | Partial | **4** (3,780 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement` |
-| Ported (green + partial) | 19 units, 16,697 upstream lines (4.3%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 6 (5,823 lines): `nlib.basis_basic`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
+| Ported (green + partial) | 20 units, 17,483 upstream lines (4.5%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 5 (5,037 lines): `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
 | Blocked | 0 |
 | Todo | 235 (365,383 lines) |
 
@@ -68,6 +68,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `geom.polynomial` | `geom::polynomial` | 6038 cases (38 fixture + 6000 generated), max_rel_err 0 | bit-identical; quartic UB with tol > 1 noted in findings.md |
 | `nlib.srf_basic` | `nurbs::srf_basic` | 3220 cases (220 fixture incl. Surface.sms / offset_nurb.sms / DropCurveSurface.sms + 3000 generated), max_rel_err 0 | bit-identical; a 100,220-case run was also clean; NL_SURFACE as `Surface` (storage/index split), quirks in findings.md |
 | `geom.extent2d` | `geom::extent2d` | 3069 cases (69 fixture + 3000 generated), max_rel_err 0 | bit-identical; a 30,069-case run was also clean; wired tol GetScaledZero(SmExtent2d); PeriodicWrap hang note in findings.md |
+| `nlib.basis_basic` | `nurbs::basis_basic` | 2596 cases (1096 fixture incl. every pt_TestFiles .smc/.sms knot vector + 1500 generated), max_rel_err 0 | bit-identical; a 201,096-case run was also clean; upstream endless loops / OOB reads noted in findings.md |
 
 ## Partial units
 
