@@ -2,21 +2,23 @@
 //!
 //! ```text
 //! cargo run -p difftest --features cpp -- --unit <id> [--unit <id>...]
-//! cargo run -p difftest --features cpp -- --green      # all status=green units in plan/modules.toml
+//! cargo run -p difftest --features cpp -- --green      # all status=green|partial units in plan/modules.toml
 //! cargo run -p difftest --features cpp -- --all        # every registered runner
 //! cargo run -p difftest --features cpp -- --list
+//! cargo run -p difftest --features cpp -- --status-of <id>   # prints green|partial|fail
 //! options: --seeds N (default 16)  --filter <substr>  --perturb  --report-dir <dir>  --no-report
 //! ```
-//! Exit status: 0 all pass, 1 any failure, 2 usage / harness setup error.
+//! Exit status: 0 no failures (deferred cases are not failures), 1 any failure,
+//! 2 usage / harness setup error.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use difftest::case::repo_root;
-use difftest::{plan, registry, report, run_unit, CaseContext, RunOptions};
+use difftest::{plan, registry, report, run_unit, CaseContext, RunOptions, UnitStatus};
 
-const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] [--seeds N] \
-[--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]";
+const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] \
+[--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]";
 
 /// Default number of generated cases per unit.
 const DEFAULT_SEEDS: usize = 16;
@@ -29,6 +31,7 @@ struct Args {
     green: bool,
     all: bool,
     list: bool,
+    status_of: Option<String>,
     seeds: Option<usize>,
     filter: Option<String>,
     perturb: bool,
@@ -46,6 +49,7 @@ fn parse_args() -> Result<Args, String> {
             "--green" => a.green = true,
             "--all" => a.all = true,
             "--list" => a.list = true,
+            "--status-of" => a.status_of = Some(val("--status-of")?),
             "--seeds" => {
                 let v = val("--seeds")?;
                 a.seeds = Some(v.parse().map_err(|_| format!("bad --seeds `{v}`"))?);
@@ -103,6 +107,26 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    if let Some(id) = &args.status_of {
+        // Runs the unit (no report) and prints only its status word.
+        let status = reg
+            .iter()
+            .find(|u| u.id() == id.as_str())
+            .map_or(UnitStatus::Fail, |unit| {
+                let opts = RunOptions {
+                    filter: args.filter.clone(),
+                    perturb: false,
+                };
+                run_unit(unit.as_ref(), &ctx, &opts).status()
+            });
+        println!("{}", status.as_str());
+        return if status == UnitStatus::Fail {
+            ExitCode::from(1)
+        } else {
+            ExitCode::SUCCESS
+        };
+    }
+
     let mut wanted: Vec<String> = args.units.clone();
     if args.green {
         match plan::load(&root) {
@@ -119,7 +143,7 @@ fn main() -> ExitCode {
     let mut seen = std::collections::BTreeSet::new();
     wanted.retain(|w| seen.insert(w.clone()));
     if wanted.is_empty() && args.green {
-        println!("difftest: no units with status = \"green\" yet");
+        println!("difftest: no units with status = \"green\" or \"partial\" yet");
         return ExitCode::SUCCESS;
     }
     if wanted.is_empty() {
@@ -138,6 +162,7 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| root.join("reports").join("difftest"));
 
     let mut failed = 0usize;
+    let mut partial = 0usize;
     let mut setup_error = false;
     for id in &wanted {
         let Some(unit) = reg.iter().find(|u| u.id() == id.as_str()) else {
@@ -149,9 +174,12 @@ fn main() -> ExitCode {
         if args.perturb {
             let (n, caught) = res.perturb_stats();
             let ok = n > 0 && n == caught;
+            let unperturbed = res.cases.len().saturating_sub(n + res.deferred());
             println!(
-                "{} {id} perturbed={n} detected={caught} (perturb mode: every perturbed case must FAIL)",
-                if ok { "SENSITIVE" } else { "INSENSITIVE" }
+                "{} {id} perturbed={n} detected={caught} unperturbed={unperturbed} deferred={} \
+                 (perturb mode: every perturbed case must FAIL)",
+                if ok { "SENSITIVE" } else { "INSENSITIVE" },
+                res.deferred()
             );
             if !ok {
                 failed += 1;
@@ -159,7 +187,7 @@ fn main() -> ExitCode {
             continue;
         }
         println!("{}", report::summary_line(&res));
-        for c in res.cases.iter().filter(|c| !c.pass()).take(5) {
+        for c in res.cases.iter().filter(|c| c.fail()).take(5) {
             let first = c
                 .harness_error
                 .clone()
@@ -172,8 +200,19 @@ fn main() -> ExitCode {
                 .unwrap_or_default();
             println!("  case {} [{}]: {first}", c.name, c.source.describe());
         }
-        if !res.pass() {
-            failed += 1;
+        let plan_status = plan_units
+            .iter()
+            .find(|p| p.id == id.as_str())
+            .map(|p| p.status.as_str());
+        match res.status() {
+            UnitStatus::Fail => failed += 1,
+            UnitStatus::Partial if plan_status == Some("green") => {
+                // A green unit must have zero deferred cases (AGENTS.md 4a).
+                println!("  FAIL {id}: plan status is green but cases are deferred");
+                failed += 1;
+            }
+            UnitStatus::Partial => partial += 1,
+            UnitStatus::Green => {}
         }
         if !args.no_report {
             match report::write_unit_report(&report_dir, &res) {
@@ -189,9 +228,9 @@ fn main() -> ExitCode {
         }
     }
     println!(
-        "difftest: {} unit(s), {} passed, {failed} failed",
+        "difftest: {} unit(s), {} passed, {partial} partial, {failed} failed",
         wanted.len(),
-        wanted.len() - failed
+        wanted.len() - failed - partial
     );
     if setup_error {
         ExitCode::from(2)

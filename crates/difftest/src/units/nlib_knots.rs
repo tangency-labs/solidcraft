@@ -132,10 +132,13 @@ fn cpp_err(e: &FfiError) -> Result<Output, HarnessError> {
     }
 }
 
-/// Rust failure -> normalised output. Non-NLib errors (`InvalidInput`: an index
+/// Rust failure -> normalised output (`Unported` -> deferred case). Non-NLib errors (`InvalidInput`: an index
 /// upstream would read out of bounds) cannot match any C++ output, so such a case
 /// fails, as it should within the wrapper's domain.
 fn rust_err(e: &SolidError) -> Output {
+    if let Some(d) = Output::unported(e) {
+        return d;
+    }
     match e {
         SolidError::Nlib { code, .. } => Output::err(format!("nlib_{}", code.code())),
         other => Output::err(format!("rust: {other}")),

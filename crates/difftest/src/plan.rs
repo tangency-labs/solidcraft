@@ -10,9 +10,20 @@ use crate::HarnessError;
 pub struct PlanUnit {
     /// Unit id.
     pub id: String,
-    /// `todo | claimed | green | blocked | out_of_scope`.
+    /// One of [`STATUSES`].
     pub status: String,
 }
+
+/// Valid `status` values (`plan/modules.schema.md`). `partial` = every
+/// non-deferred difftest case passes and at least one is deferred (AGENTS.md 4a).
+pub const STATUSES: &[&str] = &[
+    "todo",
+    "claimed",
+    "partial",
+    "green",
+    "blocked",
+    "out_of_scope",
+];
 
 /// Parses `<root>/plan/modules.toml`.
 pub fn load(root: &Path) -> Result<Vec<PlanUnit>, HarnessError> {
@@ -40,6 +51,12 @@ pub fn parse(text: &str) -> Result<Vec<PlanUnit>, String> {
             .get("status")
             .and_then(toml::Value::as_str)
             .unwrap_or("todo");
+        if !STATUSES.contains(&status) {
+            return Err(format!(
+                "unit {id}: unknown status `{status}` (expected one of {})",
+                STATUSES.join(", ")
+            ));
+        }
         out.push(PlanUnit {
             id: id.to_string(),
             status: status.to_string(),
@@ -48,11 +65,12 @@ pub fn parse(text: &str) -> Result<Vec<PlanUnit>, String> {
     Ok(out)
 }
 
-/// Ids of units with `status = "green"`, in file order.
+/// Ids of units with `status = "green"` or `"partial"` (what `--green` runs), in
+/// file order.
 pub fn green_units(units: &[PlanUnit]) -> Vec<String> {
     units
         .iter()
-        .filter(|u| u.status == "green")
+        .filter(|u| u.status == "green" || u.status == "partial")
         .map(|u| u.id.clone())
         .collect()
 }
@@ -64,8 +82,10 @@ mod tests {
     #[test]
     fn parses_green() {
         let t =
-            "[[unit]]\nid = \"a\"\nstatus = \"green\"\n[[unit]]\nid = \"b\"\nstatus = \"todo\"\n";
+            "[[unit]]\nid = \"a\"\nstatus = \"green\"\n[[unit]]\nid = \"b\"\nstatus = \"todo\"\n\
+                 [[unit]]\nid = \"c\"\nstatus = \"partial\"\n";
         let u = parse(t).unwrap();
-        assert_eq!(green_units(&u), vec!["a".to_string()]);
+        assert_eq!(green_units(&u), vec!["a".to_string(), "c".to_string()]);
+        assert!(parse("[[unit]]\nid = \"x\"\nstatus = \"done\"\n").is_err());
     }
 }

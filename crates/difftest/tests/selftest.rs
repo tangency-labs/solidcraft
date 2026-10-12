@@ -51,6 +51,10 @@ fn perturbation_is_caught() {
     assert!(perturbed > 64);
     assert_eq!(perturbed, detected);
     assert!(!res.pass());
-    let c = res.cases.iter().find(|c| c.perturbed).unwrap();
+    let c = res
+        .cases
+        .iter()
+        .find(|c| c.perturbed == Some("value"))
+        .unwrap();
     assert!(c.diff.max_rel_err > 9e-9 && c.diff.max_rel_err < 2e-8);
 }

@@ -20,9 +20,9 @@ pub mod runner;
 
 pub use case::{Case, CaseContext, CaseSource};
 pub use compare::{compare, AbsFloor, CaseDiff, Mismatch, REL_TOL};
-pub use output::{Output, Topology};
+pub use output::{Deferred, Output, Topology};
 pub use rng::Rng;
-pub use runner::{run_unit, RunOptions, UnitDiff, UnitResult};
+pub use runner::{run_unit, CaseOutcome, RunOptions, UnitDiff, UnitResult, UnitStatus};
 
 /// Error from the harness itself (bad fixture, missing file, ...), as opposed
 /// to a comparison failure.

@@ -104,11 +104,6 @@ back-edges call into `geom.vector3d`, `geom.tol` and others (listed in each unit
 
 ## Open issues
 
-- **`--perturb` covers floats only.** It perturbs only the first nonzero float, so
-  2092/2953 `nlib.knots` cases go unperturbed: these return only ints or an error (span,
-  mult, valid, error codes). Exact int and error comparison is covered by
-  `compare::tests::structure_mismatches`. Still, `--perturb` should also flip one int or
-  error string per case, so that sensitivity is proven for integer/topology-only units.
 - **`geom.vector2d` / `geom.vector3d` vs `math.rs`.** The plan puts these units at
   `geom::vector2d` / `geom::vector3d`, but `crates/solidcore/src/math.rs` already defines
   `Vec2`/`Vec3`, mapped to `SmVector2d`/`SmVector3d`. The agent porting those units should

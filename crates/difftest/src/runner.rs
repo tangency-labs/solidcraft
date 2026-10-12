@@ -1,12 +1,13 @@
 //! The [`UnitDiff`] trait and the per-unit driver.
 
+use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use serde_json::Value;
 
 use crate::case::{Case, CaseContext, CaseSource};
 use crate::compare::{compare, AbsFloor, CaseDiff};
-use crate::output::Output;
+use crate::output::{Deferred, Output};
 use crate::rng::Rng;
 use crate::HarnessError;
 
@@ -21,7 +22,9 @@ pub trait UnitDiff {
     /// for harness problems (bad inputs); `Err` always fails the case.
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError>;
 
-    /// Runs the solidcore Rust port on the same inputs.
+    /// Runs the solidcore Rust port on the same inputs. Return
+    /// [`Output::deferred`] (e.g. via [`Output::unported`]) when the port hits a
+    /// `SolidError::Unported` callee: the case is then deferred, not compared.
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError>;
 
     /// One generated case's inputs from a seeded RNG; `None` = no generator.
@@ -57,8 +60,8 @@ pub fn default_cases<U: UnitDiff + ?Sized>(
 pub struct RunOptions {
     /// Only run cases whose name contains this substring.
     pub filter: Option<String>,
-    /// Sensitivity check: multiply the first nonzero finite Rust value of each
-    /// case by `1 + PERTURBATION` before comparing; every such case must fail.
+    /// Sensitivity check: change one item of each case's Rust output before
+    /// comparing (see [`perturb_output`]); every perturbed case must fail.
     pub perturb: bool,
 }
 
@@ -80,14 +83,85 @@ pub struct CaseResult {
     pub harness_error: Option<String>,
     /// Both sides reported the same operation error.
     pub both_errored: bool,
-    /// In perturb mode: whether a value was perturbed.
-    pub perturbed: bool,
+    /// The Rust side hit an unported callee (case deferred, nothing compared).
+    pub deferred: Option<Deferred>,
+    /// In perturb mode: what was perturbed (`value`, `int`, `topology`, `error`),
+    /// or `None` if the case had nothing to perturb or was deferred.
+    pub perturbed: Option<&'static str>,
+}
+
+/// Classification of one case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseOutcome {
+    /// Both sides ran and agree.
+    Pass,
+    /// Mismatch or harness error.
+    Fail,
+    /// The Rust side returned `Unported` (and the C++ side ran without a harness
+    /// error): neither pass nor fail.
+    Deferred,
+}
+
+impl CaseOutcome {
+    /// `pass`, `fail` or `deferred`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Deferred => "deferred",
+        }
+    }
 }
 
 impl CaseResult {
-    /// Case passes: no harness error and no mismatch.
+    /// Pass, fail or deferred. A harness error always fails.
+    pub fn outcome(&self) -> CaseOutcome {
+        if self.harness_error.is_some() {
+            CaseOutcome::Fail
+        } else if self.deferred.is_some() {
+            CaseOutcome::Deferred
+        } else if self.diff.pass() {
+            CaseOutcome::Pass
+        } else {
+            CaseOutcome::Fail
+        }
+    }
+
+    /// Case passes (not deferred, no harness error, no mismatch).
     pub fn pass(&self) -> bool {
-        self.harness_error.is_none() && self.diff.pass()
+        self.outcome() == CaseOutcome::Pass
+    }
+
+    /// Case fails (mismatch or harness error).
+    pub fn fail(&self) -> bool {
+        self.outcome() == CaseOutcome::Fail
+    }
+
+    /// Case is deferred.
+    pub fn is_deferred(&self) -> bool {
+        self.outcome() == CaseOutcome::Deferred
+    }
+}
+
+/// Status of a unit run (AGENTS.md section 4a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitStatus {
+    /// At least one case, every case passes, none deferred.
+    Green,
+    /// No failing case and at least one deferred case.
+    Partial,
+    /// Any failing case, a harness error, or no cases at all.
+    Fail,
+}
+
+impl UnitStatus {
+    /// `green`, `partial` or `fail`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Green => "green",
+            Self::Partial => "partial",
+            Self::Fail => "fail",
+        }
     }
 }
 
@@ -107,16 +181,46 @@ pub struct UnitResult {
 }
 
 impl UnitResult {
-    /// Unit passes: cases built, at least one case, all pass.
+    /// Green, partial or fail (see [`UnitStatus`]).
+    pub fn status(&self) -> UnitStatus {
+        if self.harness_error.is_some() || self.cases.is_empty() || self.failed() > 0 {
+            UnitStatus::Fail
+        } else if self.deferred() > 0 {
+            UnitStatus::Partial
+        } else {
+            UnitStatus::Green
+        }
+    }
+
+    /// No failure: the unit is green or partial (the exit status is 0).
     pub fn pass(&self) -> bool {
-        self.harness_error.is_none()
-            && !self.cases.is_empty()
-            && self.cases.iter().all(CaseResult::pass)
+        self.status() != UnitStatus::Fail
+    }
+
+    /// Number of passing cases.
+    pub fn passed(&self) -> usize {
+        self.cases.iter().filter(|c| c.pass()).count()
     }
 
     /// Number of failing cases.
     pub fn failed(&self) -> usize {
-        self.cases.iter().filter(|c| !c.pass()).count()
+        self.cases.iter().filter(|c| c.fail()).count()
+    }
+
+    /// Number of deferred cases.
+    pub fn deferred(&self) -> usize {
+        self.cases.iter().filter(|c| c.is_deferred()).count()
+    }
+
+    /// Deferred case count per blocking unit id, sorted by unit id.
+    pub fn deferred_by_unit(&self) -> BTreeMap<String, usize> {
+        let mut m = BTreeMap::new();
+        for c in &self.cases {
+            if let (CaseOutcome::Deferred, Some(d)) = (c.outcome(), &c.deferred) {
+                *m.entry(d.unit.clone()).or_insert(0) += 1;
+            }
+        }
+        m
     }
 
     /// Max relative error over all cases.
@@ -129,8 +233,12 @@ impl UnitResult {
 
     /// Perturb mode: (perturbed cases, of which detected).
     pub fn perturb_stats(&self) -> (usize, usize) {
-        let p: Vec<&CaseResult> = self.cases.iter().filter(|c| c.perturbed).collect();
-        (p.len(), p.iter().filter(|c| !c.pass()).count())
+        let p: Vec<&CaseResult> = self
+            .cases
+            .iter()
+            .filter(|c| c.perturbed.is_some())
+            .collect();
+        (p.len(), p.iter().filter(|c| c.fail()).count())
     }
 }
 
@@ -149,14 +257,61 @@ fn guarded(f: impl FnOnce() -> Result<Output, HarnessError>, side: &str) -> Resu
     }
 }
 
-fn perturb(out: &mut Output) -> bool {
+/// Changes exactly one item of `out` so that a correct comparison must fail;
+/// returns what was changed, or `None` if `out` has nothing comparable.
+///
+/// In order of preference: the error string if the operation failed (only it is
+/// compared then); the first nonzero finite float (times `1 + PERTURBATION`); the
+/// first integer (`+1`); the first topology id (`+1`; an empty adjacency entry
+/// gains a neighbour); else the first float of an all-zero/non-finite array
+/// (`0` -> `PERTURBATION`, NaN -> `0`, `±inf` -> `∓inf`).
+pub fn perturb_output(out: &mut Output) -> Option<&'static str> {
+    if let Some(e) = out.error.as_mut() {
+        e.push_str("~perturbed");
+        return Some("error");
+    }
     for v in out.values.values_mut() {
         if let Some(x) = v.iter_mut().find(|x| x.is_finite() && **x != 0.0) {
             *x *= 1.0 + PERTURBATION;
-            return true;
+            return Some("value");
         }
     }
-    false
+    for v in out.ints.values_mut() {
+        if let Some(x) = v.first_mut() {
+            *x = x.wrapping_add(1);
+            return Some("int");
+        }
+    }
+    if let Some(t) = out.topology.as_mut() {
+        for v in t.entities.values_mut() {
+            if let Some(x) = v.first_mut() {
+                *x = x.wrapping_add(1);
+                return Some("topology");
+            }
+        }
+        for adj in t.adjacency.values_mut() {
+            if let Some(n) = adj.first_mut() {
+                match n.first_mut() {
+                    Some(x) => *x = x.wrapping_add(1),
+                    None => n.push(0),
+                }
+                return Some("topology");
+            }
+        }
+    }
+    for v in out.values.values_mut() {
+        if let Some(x) = v.first_mut() {
+            *x = if *x == 0.0 {
+                PERTURBATION
+            } else if x.is_nan() {
+                0.0
+            } else {
+                -*x
+            };
+            return Some("value");
+        }
+    }
+    None
 }
 
 /// Runs every case of `unit` through both sides and compares.
@@ -191,12 +346,16 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             diff: CaseDiff::default(),
             harness_error: None,
             both_errored: false,
-            perturbed: false,
+            deferred: None,
+            perturbed: None,
         };
         match (cpp, rust) {
+            (Ok(_), Ok(r)) if r.deferred.is_some() => {
+                cr.deferred = r.deferred;
+            }
             (Ok(c), Ok(mut r)) => {
                 if opts.perturb {
-                    cr.perturbed = perturb(&mut r);
+                    cr.perturbed = perturb_output(&mut r);
                 }
                 cr.both_errored = c.error.is_some() && r.error.is_some();
                 cr.diff = compare(&c, &r, unit.abs_floors());
@@ -209,4 +368,147 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
         res.cases.push(cr);
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compare::compare;
+    use crate::output::Topology;
+
+    fn caught(base: &Output) -> Option<&'static str> {
+        let mut r = base.clone();
+        let kind = perturb_output(&mut r);
+        assert!(!compare(base, &r, &[]).pass(), "perturbation not caught");
+        kind
+    }
+
+    #[test]
+    fn perturbs_every_kind_of_output() {
+        assert_eq!(caught(&Output::err("nlib_6")), Some("error"));
+        assert_eq!(
+            caught(&Output::new().values("v", vec![0.0, 2.0]).int("n", 3)),
+            Some("value")
+        );
+        assert_eq!(caught(&Output::new().int("span", 4)), Some("int"));
+        assert_eq!(
+            caught(&Output::new().topology(Topology::new().count("faces", 2))),
+            Some("topology")
+        );
+        assert_eq!(
+            caught(&Output::new().topology(Topology::new().adjacency("f", vec![vec![]]))),
+            Some("topology")
+        );
+        assert_eq!(caught(&Output::new().scalar("z", 0.0)), Some("value"));
+        assert_eq!(
+            caught(&Output::new().values("d", vec![f64::INFINITY, f64::NEG_INFINITY])),
+            Some("value")
+        );
+        assert_eq!(caught(&Output::new().scalar("n", f64::NAN)), Some("value"));
+        let mut empty = Output::new().values("v", Vec::<f64>::new());
+        assert_eq!(perturb_output(&mut empty), None);
+    }
+
+    #[test]
+    fn outcomes_and_status() {
+        let case = |deferred: Option<Deferred>, pass: bool| CaseResult {
+            name: "c".into(),
+            source: CaseSource::Inline,
+            inputs: Value::Null,
+            diff: if pass {
+                CaseDiff::default()
+            } else {
+                compare(&Output::err("a"), &Output::err("b"), &[])
+            },
+            harness_error: None,
+            both_errored: false,
+            deferred,
+            perturbed: None,
+        };
+        let d = || {
+            Some(Deferred {
+                unit: "geom.curve".into(),
+                symbol: "SmCurve::Evaluate".into(),
+            })
+        };
+        let mut r = UnitResult {
+            unit: "u".into(),
+            cases: vec![case(None, true), case(d(), true)],
+            harness_error: None,
+            abs_floors: Vec::new(),
+            seeds: 0,
+        };
+        assert_eq!(r.cases[1].outcome(), CaseOutcome::Deferred);
+        assert_eq!(r.status(), UnitStatus::Partial);
+        assert!(r.pass());
+        assert_eq!((r.passed(), r.failed(), r.deferred()), (1, 0, 1));
+        assert_eq!(r.deferred_by_unit().get("geom.curve"), Some(&1));
+        r.cases.push(case(None, false));
+        assert_eq!(r.status(), UnitStatus::Fail);
+        r.cases.truncate(1);
+        assert_eq!(r.status(), UnitStatus::Green);
+        let mut h = case(d(), true);
+        h.harness_error = Some("cpp: bad".into());
+        assert_eq!(h.outcome(), CaseOutcome::Fail);
+    }
+
+    /// Fake unit: case `i` returns `Unported` on the Rust side when `i` is odd.
+    struct Fake;
+
+    impl UnitDiff for Fake {
+        fn id(&self) -> &'static str {
+            "fake.unit"
+        }
+        fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+            Ok(Output::new().int("i", case.get("i")?))
+        }
+        fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+            let i: i64 = case.get("i")?;
+            if i % 2 == 1 {
+                let e = solidcore::SolidError::Unported {
+                    upstream: "SmCurve::Evaluate",
+                    unit: "geom.curve",
+                };
+                return Ok(Output::unported(&e).unwrap_or_else(|| Output::err("x")));
+            }
+            Ok(Output::new().int("i", i))
+        }
+        fn cases(&self, _ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+            Ok((0..4)
+                .map(|i| Case {
+                    unit: "fake.unit".into(),
+                    name: format!("c{i}"),
+                    source: CaseSource::Inline,
+                    inputs: serde_json::json!({ "i": i }),
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn unported_rust_side_is_deferred() {
+        let ctx = CaseContext {
+            root: std::path::PathBuf::new(),
+            seeds: 0,
+        };
+        let r = run_unit(&Fake, &ctx, &RunOptions::default());
+        assert_eq!((r.passed(), r.failed(), r.deferred()), (2, 0, 2));
+        assert_eq!(r.status(), UnitStatus::Partial);
+        let line = crate::report::summary_line(&r);
+        assert!(line.starts_with("PARTIAL fake.unit cases=4 passed=2 failed=0 deferred=2"));
+        assert!(line.ends_with(" blocked_by=geom.curve(2)"), "{line}");
+        let rep = crate::report::unit_report(&r);
+        assert_eq!(rep["status"], "partial");
+        assert_eq!(rep["deferred_by_unit"]["geom.curve"], 2);
+        assert_eq!(rep["cases"][1]["deferred"]["symbol"], "SmCurve::Evaluate");
+        let p = run_unit(
+            &Fake,
+            &ctx,
+            &RunOptions {
+                perturb: true,
+                ..RunOptions::default()
+            },
+        );
+        assert_eq!(p.perturb_stats(), (2, 2));
+    }
 }

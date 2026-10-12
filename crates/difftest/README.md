@@ -3,7 +3,8 @@
 `difftest` runs every case of a unit through **upstream SMLib (C++, via
 `solidcore-ffi`)** and the **solidcore Rust port** on identical inputs and
 compares the results. A unit may be marked `status = "green"` in
-`plan/modules.toml` only when `difftest --unit <id>` passes.
+`plan/modules.toml` only when `difftest --status-of <id>` prints `green`, and
+`status = "partial"` only when it prints `partial` (AGENTS.md section 4a).
 
 ## Quick start
 
@@ -13,24 +14,64 @@ export CARGO_BUILD_JOBS=2                 # shared machine
 nice -n 10 cargo run -p difftest --features cpp -- --list
 nice -n 10 cargo run -p difftest --features cpp -- --unit harness.selftest
 nice -n 10 cargo run -p difftest --features cpp -- --unit harness.selftest --perturb   # sensitivity check
-nice -n 10 cargo run -p difftest --features cpp -- --green          # every status=green unit
+nice -n 10 cargo run -p difftest --features cpp -- --green          # every status=green|partial unit
+nice -n 10 cargo run -p difftest --features cpp -- --status-of nlib.knots   # prints green|partial|fail
 nice -n 10 cargo test -p difftest --features cpp                     # harness self-tests
 ```
 
 | flag | meaning |
 |---|---|
 | `--unit <id>` | run one unit (repeatable) |
-| `--green` | all units with `status = "green"` in `plan/modules.toml` (a green unit without a runner FAILS) |
+| `--green` | all units with `status = "green"` or `"partial"` in `plan/modules.toml` (one without a runner FAILS; a `green` unit that comes out partial FAILS) |
+| `--status-of <id>` | run the unit (no report) and print only `green`, `partial` or `fail`; exit `1` on `fail` (also when no runner is registered) |
 | `--all` | every registered runner |
 | `--list` | registered runners, their plan status and case counts |
 | `--seeds N` | generated cases per unit (default 16) |
 | `--filter S` | only cases whose name contains `S` |
-| `--perturb` | multiply one Rust value per case by `1+1e-8`; passes only if **every** perturbed case is caught. No report written. |
+| `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
 
-Exit status: `0` all pass, `1` any failure, `2` usage or setup error.
-Output: one summary line per unit (`PASS|FAIL <unit> cases=… failed=… max_rel_err=…`),
-the first few failing cases, then `reports/difftest/<unit>.json`.
+Exit status: `0` no failures (deferred cases are not failures), `1` any
+failure, `2` usage or setup error. Output: one summary line per unit,
+
+```
+PASS|PARTIAL|FAIL <unit> cases=… passed=… failed=… deferred=… max_rel_err=… [blocked_by=<unit>(<n>),…]
+```
+
+then the first few failing cases and `reports/difftest/<unit>.json`.
+
+**Perturbation** (`--perturb`): per case, in order of preference: the error
+string if the Rust side errored (gets `~perturbed` appended); else the first
+nonzero finite float (× `1+1e-8`); else the first integer (`+1`); else the
+first topology id (`+1`, or an empty adjacency entry gains a neighbour); else
+the first float of an all-zero / non-finite array (`0`→`1e-8`, NaN→`0`,
+±inf→∓inf). The line reports `perturbed`, `detected`, `unperturbed` (cases
+with an empty output) and `deferred` (never perturbed).
+
+## Deferred cases, `partial` units
+
+A unit's Rust code may call into a unit that is not ported yet; it then returns
+`SolidError::Unported { upstream, unit }` (AGENTS.md section 4a). In
+`run_rust`, map that to `Output::deferred(unit, symbol)`, most simply:
+
+```rust
+Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(normalise(&e)))),
+```
+
+A case whose Rust side is deferred is **neither pass nor fail**: nothing is
+compared (a harness error on the C++ side still fails it). Unit status:
+
+| status | condition |
+|---|---|
+| `green` | ≥1 case, every case passes, 0 deferred |
+| `partial` | no failing case, ≥1 deferred |
+| `fail` | any failing case, harness error, or no cases |
+
+The report records `status`, `cases_passed`/`cases_failed`/`cases_deferred`,
+`deferred_by_unit` (`{"<blocking unit>": <cases>}`, sorted), and per case
+`outcome` (`pass|fail|deferred`) plus `deferred: {unit, symbol}`. When the
+blocking unit lands and its stubs are wired, re-run: the deferred count drops
+and the unit can move from `partial` to `green`.
 
 ## Pass criteria (fixed; never weaken)
 
@@ -209,7 +250,8 @@ git add harness/cpp/shim/foo_bar.cpp crates/solidcore-ffi/src/units/foo_bar.rs \
 ```
 
 Commit the report produced with the default `--seeds` (it is deterministic, so
-diffs in it are meaningful). Only then set `status = "green"`.
+diffs in it are meaningful). Then set `status` to what
+`--status-of foo.bar` prints (`green` or `partial`; never on `fail`).
 
 ## Notes
 

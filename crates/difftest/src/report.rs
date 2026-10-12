@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 
 use crate::compare::REL_TOL;
 use crate::json::{num, to_canonical_string};
-use crate::runner::{CaseResult, UnitResult};
+use crate::runner::{CaseResult, UnitResult, UnitStatus};
 use crate::HarnessError;
 
 fn case_json(c: &CaseResult) -> Value {
@@ -20,12 +20,19 @@ fn case_json(c: &CaseResult) -> Value {
     m.insert("name".into(), json!(c.name));
     m.insert("source".into(), json!(c.source.describe()));
     m.insert("pass".into(), json!(c.pass()));
+    m.insert("outcome".into(), json!(c.outcome().as_str()));
+    if let Some(d) = &c.deferred {
+        m.insert(
+            "deferred".into(),
+            json!({"unit": d.unit, "symbol": d.symbol}),
+        );
+    }
     m.insert("max_rel_err".into(), num(c.diff.max_rel_err));
     m.insert("values_compared".into(), json!(c.diff.values_compared));
     if c.both_errored {
         m.insert("both_errored".into(), json!(true));
     }
-    if !c.pass() {
+    if c.fail() {
         m.insert("inputs".into(), c.inputs.clone());
         m.insert("mismatch_count".into(), json!(c.diff.mismatch_count));
         let mm: Vec<Value> = c
@@ -62,11 +69,20 @@ pub fn unit_report(r: &UnitResult) -> Value {
     let mut m = Map::new();
     m.insert("unit".into(), json!(r.unit));
     m.insert("pass".into(), json!(r.pass()));
+    m.insert("status".into(), json!(r.status().as_str()));
     m.insert("rel_tol".into(), num(REL_TOL));
     m.insert("abs_floors".into(), Value::Array(floors));
     m.insert("seeds".into(), json!(r.seeds));
     m.insert("cases_total".into(), json!(r.cases.len()));
+    m.insert("cases_passed".into(), json!(r.passed()));
     m.insert("cases_failed".into(), json!(r.failed()));
+    m.insert("cases_deferred".into(), json!(r.deferred()));
+    let by_unit: Map<String, Value> = r
+        .deferred_by_unit()
+        .into_iter()
+        .map(|(u, n)| (u, json!(n)))
+        .collect();
+    m.insert("deferred_by_unit".into(), Value::Object(by_unit));
     m.insert("cases_both_errored".into(), json!(errored));
     m.insert("max_rel_err".into(), num(r.max_rel_err()));
     m.insert(
@@ -88,16 +104,33 @@ pub fn write_unit_report(dir: &Path, r: &UnitResult) -> Result<PathBuf, HarnessE
     Ok(path)
 }
 
-/// One-line summary, e.g. `PASS harness.selftest cases=40 failed=0 max_rel_err=1.1e-16`.
+/// One-line summary, e.g.
+/// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16`.
+/// The status word is `PASS` (green), `PARTIAL` or `FAIL`; with deferred cases the
+/// line ends with ` blocked_by=<unit>(<cases>),...`.
 pub fn summary_line(r: &UnitResult) -> String {
     let mut s = format!(
-        "{} {} cases={} failed={} max_rel_err={:e}",
-        if r.pass() { "PASS" } else { "FAIL" },
+        "{} {} cases={} passed={} failed={} deferred={} max_rel_err={:e}",
+        match r.status() {
+            UnitStatus::Green => "PASS",
+            UnitStatus::Partial => "PARTIAL",
+            UnitStatus::Fail => "FAIL",
+        },
         r.unit,
         r.cases.len(),
+        r.passed(),
         r.failed(),
+        r.deferred(),
         r.max_rel_err()
     );
+    let blocked: Vec<String> = r
+        .deferred_by_unit()
+        .iter()
+        .map(|(u, n)| format!("{u}({n})"))
+        .collect();
+    if !blocked.is_empty() {
+        let _ = write!(s, " blocked_by={}", blocked.join(","));
+    }
     if let Some(h) = &r.harness_error {
         let _ = write!(s, " harness_error={h:?}");
     } else if r.cases.is_empty() {

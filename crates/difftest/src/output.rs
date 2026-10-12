@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use solidcore::SolidError;
+
 /// What one side produced for a case. Both sides must fill the *same* keys.
 ///
 /// * `values`: floating-point arrays, compared with the 1e-9 relative rule.
@@ -9,6 +11,10 @@ use std::collections::BTreeMap;
 /// * `topology`: compared exactly (same counts and order).
 /// * `error`: a normalised error string; if either side errors, both must
 ///   report the same string (values are then not compared).
+/// * `deferred`: set only by the Rust side (via [`Output::deferred`] or
+///   [`Output::unported`]) when the port reached code that is not ported yet
+///   ([`SolidError::Unported`]). The case is then *deferred*: neither pass nor
+///   fail, and nothing is compared (AGENTS.md section 4a).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Output {
     /// Named float arrays.
@@ -19,6 +25,17 @@ pub struct Output {
     pub topology: Option<Topology>,
     /// Normalised error (e.g. `"nl_error"`), if the operation failed.
     pub error: Option<String>,
+    /// The Rust side hit an unported callee; the case is deferred.
+    pub deferred: Option<Deferred>,
+}
+
+/// Why a case is deferred: the unported upstream callee and the unit that will port it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Deferred {
+    /// Plan unit id that blocks the case (e.g. `geom.curve`).
+    pub unit: String,
+    /// Upstream C++ symbol that is not ported yet.
+    pub symbol: String,
 }
 
 impl Output {
@@ -32,6 +49,28 @@ impl Output {
         Self {
             error: Some(msg.into()),
             ..Self::default()
+        }
+    }
+
+    /// Output of a Rust side that could not finish because `symbol` (owned by plan
+    /// unit `unit`) is not ported yet: the case is counted as deferred.
+    pub fn deferred(unit: impl Into<String>, symbol: impl Into<String>) -> Self {
+        Self {
+            deferred: Some(Deferred {
+                unit: unit.into(),
+                symbol: symbol.into(),
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// `Some(Output::deferred(..))` if `e` is [`SolidError::Unported`], else `None`.
+    /// Runners call this first when mapping a Rust error:
+    /// `Output::unported(&e).unwrap_or_else(|| Output::err(normalise(&e)))`.
+    pub fn unported(e: &SolidError) -> Option<Self> {
+        match e {
+            SolidError::Unported { upstream, unit } => Some(Self::deferred(*unit, *upstream)),
+            _ => None,
         }
     }
 

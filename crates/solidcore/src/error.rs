@@ -9,6 +9,7 @@
 //! | [`SolidError::InvalidInput`]| `SM_ERR_INVALID_INPUT`                           |
 //! | [`SolidError::Upstream`]    | any other `SM_ERR_*` code, carried numerically   |
 //! | [`SolidError::Nlib`]        | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`)    |
+//! | [`SolidError::Unported`]    | (none: call into a unit not ported yet)          |
 //! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
 //!
@@ -128,6 +129,20 @@ pub enum SolidError {
         /// Upstream NLib error number.
         code: NlibCode,
     },
+
+    /// The operation needs an upstream routine whose unit is not ported yet (a
+    /// plan back-edge). Returned instead of panicking or faking a result; every
+    /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
+    /// target unit's porter can wire it up. difftest classifies a case whose Rust
+    /// side returns this as *deferred* (neither pass nor fail). See `AGENTS.md`
+    /// section 4a.
+    #[error("unported: upstream `{upstream}` (unit {unit}) is not ported yet")]
+    Unported {
+        /// Upstream C++ symbol that would be called (e.g. `"SmCurve::Evaluate"`).
+        upstream: &'static str,
+        /// Plan unit id that will port it (e.g. `"geom.curve"`).
+        unit: &'static str,
+    },
 }
 
 /// NLib error numbers (`NL_*_ERR`, `source/SMLib/inc/NL_DataStruct.h`); the
@@ -196,7 +211,8 @@ fn fmt_entity(entity: Option<EntityRef>) -> String {
 }
 
 impl SolidError {
-    /// The operation that produced this error.
+    /// The operation that produced this error (for [`SolidError::Unported`], the
+    /// upstream symbol that is not ported yet).
     #[must_use]
     pub fn operation(&self) -> &'static str {
         match self {
@@ -207,6 +223,7 @@ impl SolidError {
             | Self::Unsupported { operation, .. }
             | Self::Upstream { operation, .. }
             | Self::Nlib { operation, .. } => operation,
+            Self::Unported { upstream, .. } => upstream,
         }
     }
 
@@ -219,7 +236,8 @@ impl SolidError {
             Self::InvalidInput { .. }
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }
-            | Self::Nlib { .. } => None,
+            | Self::Nlib { .. }
+            | Self::Unported { .. } => None,
         }
     }
 }
@@ -243,5 +261,16 @@ mod tests {
             entity: None,
         };
         assert_eq!(d.to_string(), "op: degenerate geometry");
+
+        let u = SolidError::Unported {
+            upstream: "SmCurve::Evaluate",
+            unit: "geom.curve",
+        };
+        assert_eq!(
+            u.to_string(),
+            "unported: upstream `SmCurve::Evaluate` (unit geom.curve) is not ported yet"
+        );
+        assert_eq!(u.operation(), "SmCurve::Evaluate");
+        assert_eq!(u.entity(), None);
     }
 }
