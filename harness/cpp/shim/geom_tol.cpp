@@ -6,6 +6,7 @@
 
 #include <SmContext.h>
 #include <SmExtent1d.h>
+#include <SmExtent2d.h>
 #include <SmExtent3d.h>
 #include <SmRelation.h>
 #include <SmTol.h>
@@ -53,6 +54,7 @@ enum ScTolKind : int32_t
     KIND_VEC3 = 2,    // SmVector3d(d[0], d[1], d[2])
     KIND_EXTENT3 = 3, // SmExtent3d(d[0..6])
     KIND_EXTENT1 = 4, // SmExtent1d(d[0], d[1])
+    KIND_EXTENT2 = 5, // SmExtent2d(d[0], d[1], d[2], d[3])
 };
 
 namespace
@@ -67,6 +69,7 @@ template <class F> void sc_with_obj(int32_t kind, const double* d, F f)
     case KIND_VEC3: f(SmVector3d(d[0], d[1], d[2])); break;
     case KIND_EXTENT3: f(SmExtent3d(d[0], d[1], d[2], d[3], d[4], d[5])); break;
     case KIND_EXTENT1: f(SmExtent1d(d[0], d[1])); break;
+    case KIND_EXTENT2: f(SmExtent2d(d[0], d[1], d[2], d[3])); break;
     default: f(d[0]); break;
     }
 }

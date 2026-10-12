@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::tol::{self, Cardinality, Relation, ScaledZero, SmallTopoType};
 use solidcore::geom::vector2d::Vec2;
@@ -78,7 +79,7 @@ fn use_default() -> f64 {
 }
 
 /// An object of `scaled_zero_n`: `kind` 0 = double, 1 = `SmVector2d`,
-/// 2 = `SmVector3d`, 3 = `SmExtent3d`, 4 = `SmExtent1d`; `d` holds its coordinates.
+/// 2 = `SmVector3d`, 3 = `SmExtent3d`, 4 = `SmExtent1d`, 5 = `SmExtent2d`; `d` holds its coordinates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Obj {
     kind: i32,
@@ -231,6 +232,7 @@ fn object(o: &Obj) -> Box<dyn ScaledZero> {
         2 => Box::new(Vec3::new(c(0), c(1), c(2))),
         3 => Box::new(Extent3d::from_bounds(c(0), c(1), c(2), c(3), c(4), c(5))),
         4 => Box::new(Extent1d::from_min_max(c(0), c(1))),
+        5 => Box::new(Extent2d::from_bounds(c(0), c(1), c(2), c(3))),
         _ => Box::new(c(0)),
     }
 }

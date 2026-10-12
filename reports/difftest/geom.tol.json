@@ -3323,6 +3323,46 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "scaled_zero_extent2d",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/extent2d.json#0 (upstream source/SMLib/src/SmTol.cpp:1379)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "scaled_zero_extent2d_init",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/extent2d.json#1 (upstream source/SMLib/src/SmTol.cpp:1379)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "scaled_zero_extent2d_pair",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/extent2d.json#2 (upstream source/SMLib/src/SmTol.cpp:1379)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "scaled_zero_extent2d_triple",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/extent2d.json#3 (upstream source/SMLib/src/SmTol.cpp:1379)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "scaled_zero_extent2d_quad",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/geom.tol/extent2d.json#4 (upstream source/SMLib/src/SmTol.cpp:1379)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "relation_c0_basic",
       "outcome": "pass",
       "pass": true,
@@ -27485,8 +27525,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3435,
-  "cases_total": 3435,
+  "cases_passed": 3440,
+  "cases_total": 3440,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

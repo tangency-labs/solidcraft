@@ -105,6 +105,8 @@ pub const KIND_VEC3: i32 = 2;
 pub const KIND_EXTENT3: i32 = 3;
 /// Object kind for [`Op::ScaledZeroN`]: `SmExtent1d` (`d[0]`, `d[1]`, swapped if inverted).
 pub const KIND_EXTENT1: i32 = 4;
+/// Object kind for [`Op::ScaledZeroN`]: `SmExtent2d` (`d[0..4]`, stored as given).
+pub const KIND_EXTENT2: i32 = 5;
 
 /// Operands of one [`op`] call.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -134,7 +136,7 @@ pub fn op(op: Op, args: &OpArgs) -> Result<Vec<f64>, FfiError> {
     if op == Op::ScaledZeroN && args.small == 0 {
         return Err(FfiError::InvalidArgument("object count 0".into()));
     }
-    if args.kinds.iter().any(|k| !(0..=4).contains(k)) {
+    if args.kinds.iter().any(|k| !(0..=5).contains(k)) {
         return Err(FfiError::InvalidArgument("object kind".into()));
     }
     let mut out = [0.0f64; 16];
