@@ -140,7 +140,7 @@ first.
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test -p solidcore
    cargo check -p solidcore --target wasm32-unknown-unknown
-   cargo run -p difftest --features cpp -- <unit id>   # flags: ... -- --help
+   cargo run -p difftest --features cpp -- --unit <unit id>   # see crates/difftest/README.md
    ```
 5. **Merge** when green: in the worktree `git merge main` (resolve; never rebase
    shared history), re-run step 4, then in the main tree

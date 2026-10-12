@@ -62,7 +62,7 @@ git clone https://github.com/NVIDIA-Omniverse/usd-brep upstream
 git -C upstream checkout c9c5979
 harness/cpp/build.sh                                  # C++ reference -> bin/cpp
 cargo run -p difftest --features cpp -- --green       # all units marked green
-cargo run -p difftest --features cpp -- <unit id>     # one unit
+cargo run -p difftest --features cpp -- --unit <unit id>   # one unit
 ```
 
 `solidcore-ffi` and `difftest` compile without the C++ build; only the `cpp` feature
