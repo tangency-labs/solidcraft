@@ -3,12 +3,13 @@
 //!
 //! Upstream: `source/SMLib/src/NL_SrfTool.cpp`, `source/SMLib/inc/NL_SrfTool.h`.
 //!
-//! | Rust                   | Upstream                  |
-//! |------------------------|---------------------------|
-//! | [`remove_all_knots`]   | `N_SrfRemoveAllKnots`     |
-//! | [`make_compatible`]    | `N_MakeSrfsCompatible`    |
-//! | [`join`]               | `N_SrfJoin`               |
-//! | `NO_REMOVAL` (private) | `NOREM` (file-private)    |
+//! | Rust                        | Upstream                                                             |
+//! |-----------------------------|----------------------------------------------------------------------|
+//! | [`remove_all_knots`]        | `N_SrfRemoveAllKnots`                                                |
+//! | [`make_compatible`]         | `N_MakeSrfsCompatible`                                               |
+//! | [`join`]                    | `N_SrfJoin`                                                          |
+//! | `NO_REMOVAL` (private)      | `NOREM` (file-private)                                               |
+//! | `remove_knots_kept` (crate) | shared body of `N_SrfRemoveAllKnots` / `N_SrfRemoveKnotsConstraints` |
 //!
 //! Deviations:
 //! - Out-params become return values: [`remove_all_knots`] and [`join`] return a
@@ -209,7 +210,29 @@ struct RemoveAll {
 /// removed (see the module deviations); [`NlibCode::Call`] from the one-step error
 /// bound; `InvalidInput` for invalid surfaces.
 pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surface> {
-    const OP: &str = "nurbs::srf_tool::p3::remove_all_knots";
+    remove_knots_kept(
+        sur,
+        [None, None],
+        tol,
+        dir,
+        "nurbs::srf_tool::p3::remove_all_knots",
+    )
+}
+
+/// The body shared by `N_SrfRemoveAllKnots` and `N_SrfRemoveKnotsConstraints`
+/// (`nurbs::srf_tool::p4::remove_knots_constrained`), which differ only in the
+/// initial error bounds: a knot listed in `keep[0]` (u) / `keep[1]` (v) starts as not
+/// removable instead of getting its one-step bound. Each list is sorted and is
+/// walked alongside the distinct knots exactly as upstream walks `UK` / `VK`; a list
+/// whose entries all equal the first knot (upstream reads past it) is
+/// `InvalidInput`.
+pub(super) fn remove_knots_kept(
+    sur: &Surface,
+    keep: [Option<&[f64]>; 2],
+    tol: f64,
+    dir: Direction,
+    op: &'static str,
+) -> Result<Surface> {
     let Local {
         n,
         m,
@@ -220,7 +243,7 @@ pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surfa
         u: up,
         v: vp,
         ..
-    } = Local::of(sur, OP)?;
+    } = Local::of(sur, op)?;
     let (ns, ms) = (n, m);
 
     // Adjust removal tolerance in case of rational surfaces.
@@ -231,8 +254,8 @@ pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surfa
         tol = (tol * mm.wmin) / (1.0 + mm.pmax);
     }
 
-    let stu = REMOVAL_PARAM_TOL * (at(up, r, OP)? - at(up, 0, OP)?).abs();
-    let stv = REMOVAL_PARAM_TOL * (at(vp, s, OP)? - at(vp, 0, OP)?).abs();
+    let stu = REMOVAL_PARAM_TOL * (at(up, r, op)? - at(up, 0, op)?).abs();
+    let stv = REMOVAL_PARAM_TOL * (at(vp, s, op)? - at(vp, 0, op)?).abs();
 
     // Allocate local memory.
     let a = p.max(q);
@@ -243,18 +266,18 @@ pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surfa
         tol,
         rational,
         st: [stu, stv],
-        er: zeros2(r, s, OP)?,
-        te: zeros2(r, s, OP)?,
-        bru: vec![BIGD; ix(r + 1, OP)?],
-        brv: vec![BIGD; ix(s + 1, OP)?],
-        sru: vec![0; ix(r + 1, OP)?],
-        srv: vec![0; ix(s + 1, OP)?],
-        alf: zeros1(2 * a, OP)?,
-        oma: zeros1(2 * a, OP)?,
-        bet: zeros1(2 * a, OP)?,
-        omb: zeros1(2 * a, OP)?,
-        max: zeros1(a + 1, OP)?,
-        rw: zeros2(b, 2 * a, OP)?,
+        er: zeros2(r, s, op)?,
+        te: zeros2(r, s, op)?,
+        bru: vec![BIGD; ix(r + 1, op)?],
+        brv: vec![BIGD; ix(s + 1, op)?],
+        sru: vec![0; ix(r + 1, op)?],
+        srv: vec![0; ix(s + 1, op)?],
+        alf: zeros1(2 * a, op)?,
+        oma: zeros1(2 * a, op)?,
+        bet: zeros1(2 * a, op)?,
+        omb: zeros1(2 * a, op)?,
+        max: zeros1(a + 1, op)?,
+        rw: zeros2(b, 2 * a, op)?,
         lam: 0.0,
         oml: 0.0,
         error: None,
@@ -268,20 +291,43 @@ pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surfa
         if !on {
             continue;
         }
-        let (deg, hi, _) = dims(sur, d, OP)?;
-        let (_, ohi, _) = dims(sur, other(d), OP)?;
+        let (deg, hi, _) = dims(sur, d, op)?;
+        let (_, ohi, _) = dims(sur, other(d), op)?;
         let kn = knots(sur, d);
+        let kept = keep.get(slot(d)).copied().flatten();
+        let mut kc: isize = 0;
+        if let Some(kk) = kept {
+            let k0 = at(kn, 0, op)?;
+            while at(kk, kc, op)? == k0 {
+                kc += 1;
+            }
+        }
         let mut rd = deg + 1;
         while rd <= hi {
             let i = rd;
-            while rd <= hi && at(kn, rd, OP)? == at(kn, rd + 1, OP)? {
+            while rd <= hi && at(kn, rd, op)? == at(kn, rd + 1, op)? {
                 rd += 1;
             }
             let sd = rd - i + 1;
-            put(w.sr_mut(d), rd, sd, OP)?;
-            let mr = at(w.br(d), rd, OP)?;
-            let mr = remove_one_knot(sur, ix(rd, OP)?, ix(sd, OP)?, 0, ix(ohi, OP)?, d, mr)?;
-            put(w.br_mut(d), rd, mr, OP)?;
+            put(w.sr_mut(d), rd, sd, op)?;
+            let mut krb = true;
+            if let Some(kk) = kept {
+                let mc = sx(kk.len(), op)? - 1;
+                while kc < mc && at(kk, kc, op)? == at(kk, kc + 1, op)? {
+                    kc += 1;
+                }
+                if kc <= mc && at(kk, kc, op)? == at(kn, rd, op)? {
+                    krb = false;
+                    kc += 1;
+                }
+            }
+            if krb {
+                let mr = at(w.br(d), rd, op)?;
+                let mr = remove_one_knot(sur, ix(rd, op)?, ix(sd, op)?, 0, ix(ohi, op)?, d, mr)?;
+                put(w.br_mut(d), rd, mr, op)?;
+            } else {
+                put(w.br_mut(d), rd, NO_REMOVAL, op)?;
+            }
             rd += 1;
         }
     }
@@ -293,29 +339,29 @@ pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surfa
         // Find knot with smallest error.
         let x = w.sq.indices();
         if do_u {
-            let (pp, rr) = (sx(x.p, OP)?, sx(x.r, OP)?);
-            bu = at(&w.bru, pp + 1, OP)?;
-            su = at(&w.sru, pp + 1, OP)?;
+            let (pp, rr) = (sx(x.p, op)?, sx(x.r, op)?);
+            bu = at(&w.bru, pp + 1, op)?;
+            su = at(&w.sru, pp + 1, op)?;
             ru = pp + 1;
             for i in (pp + 2)..(rr - pp) {
-                let bi = at(&w.bru, i, OP)?;
+                let bi = at(&w.bru, i, op)?;
                 if bi < bu {
                     bu = bi;
-                    su = at(&w.sru, i, OP)?;
+                    su = at(&w.sru, i, op)?;
                     ru = i;
                 }
             }
         }
         if do_v {
-            let (qq, ss) = (sx(x.q, OP)?, sx(x.s, OP)?);
-            bv = at(&w.brv, qq + 1, OP)?;
-            sv = at(&w.srv, qq + 1, OP)?;
+            let (qq, ss) = (sx(x.q, op)?, sx(x.s, op)?);
+            bv = at(&w.brv, qq + 1, op)?;
+            sv = at(&w.srv, qq + 1, op)?;
             rv = qq + 1;
             for j in (qq + 2)..(ss - qq) {
-                let bj = at(&w.brv, j, OP)?;
+                let bj = at(&w.brv, j, op)?;
                 if bj < bv {
                     bv = bj;
-                    sv = at(&w.srv, j, OP)?;
+                    sv = at(&w.srv, j, op)?;
                     rv = j;
                 }
             }
@@ -344,15 +390,15 @@ pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surfa
 
         // Remove in the chosen direction.
         if krm == Direction::U {
-            w.step(Direction::U, ru, su, bu, OP)?;
+            w.step(Direction::U, ru, su, bu, op)?;
         } else {
-            w.step(Direction::V, rv, sv, bv, OP)?;
+            w.step(Direction::V, rv, sv, bv, op)?;
         }
     }
 
     // Compact surface.
     let x = w.sq.indices();
-    if sx(x.n, OP)? < ns || sx(x.m, OP)? < ms {
+    if sx(x.n, op)? < ns || sx(x.m, op)? < ms {
         w.sq.compress();
         w.error = None;
     }

@@ -47,7 +47,7 @@ pub struct Runner;
 /// A surface input: plain, or derived from another one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-enum Src {
+pub(crate) enum Src {
     /// `base`, then degree elevation, knot insertion and an optional split.
     Derived {
         base: Box<Src>,
@@ -97,7 +97,7 @@ fn rs<T>(r: solidcore::Result<T>, what: &str) -> Result<T, HarnessError> {
 }
 
 /// The surface an input stands for.
-fn surface(s: &Src) -> Result<InlineSrf, HarnessError> {
+pub(crate) fn surface(s: &Src) -> Result<InlineSrf, HarnessError> {
     match s {
         Src::Plain(p) => resolve(p),
         Src::Derived {
@@ -258,11 +258,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- generation -------------------------------------------------------------------
 
-fn plain(s: InlineSrf) -> Src {
+pub(crate) fn plain(s: InlineSrf) -> Src {
     Src::Plain(SrfIn::Inline(s))
 }
 
-fn gen_dir(rng: &mut Rng) -> i32 {
+pub(crate) fn gen_dir(rng: &mut Rng) -> i32 {
     match rng.below(5) {
         0 | 1 => 3,
         2 => 1,
@@ -271,7 +271,7 @@ fn gen_dir(rng: &mut Rng) -> i32 {
     }
 }
 
-fn gen_tol(rng: &mut Rng) -> f64 {
+pub(crate) fn gen_tol(rng: &mut Rng) -> f64 {
     match rng.below(12) {
         0 => 0.0,
         1 => 1.0,
@@ -285,7 +285,7 @@ fn gen_tol(rng: &mut Rng) -> f64 {
 }
 
 /// Random interior parameters of `k` (some on existing knots, some repeated).
-fn new_knots(rng: &mut Rng, k: &[f64], deg: usize) -> Vec<f64> {
+pub(crate) fn new_knots(rng: &mut Rng, k: &[f64], deg: usize) -> Vec<f64> {
     let cnt = rng.below(5) as usize;
     let mut x: Vec<f64> = Vec::new();
     for _ in 0..cnt {
@@ -304,7 +304,7 @@ fn new_knots(rng: &mut Rng, k: &[f64], deg: usize) -> Vec<f64> {
 }
 
 /// A surface with many removable knots: random, refined in u and/or v.
-fn gen_refined(rng: &mut Rng) -> InlineSrf {
+pub(crate) fn gen_refined(rng: &mut Rng) -> InlineSrf {
     if rng.chance(0.3) {
         return gen_removable(rng);
     }
@@ -340,12 +340,12 @@ fn gen_refined(rng: &mut Rng) -> InlineSrf {
     inline(&sur)
 }
 
-fn valid(k: &[f64], p: usize) -> bool {
+pub(crate) fn valid(k: &[f64], p: usize) -> bool {
     crate::units::nlib_srf_tool_p2::knots_valid(k, p)
 }
 
 /// `w` -> NOW (Euclidean coordinates) or NOW -> random weights.
-fn flip_rational(rng: &mut Rng, s: &mut InlineSrf) {
+pub(crate) fn flip_rational(rng: &mut Rng, s: &mut InlineSrf) {
     let rational = s.net.first().and_then(|r| r.first()).is_some_and(|c| c[3] != NOW);
     for row in &mut s.net {
         for c in row.iter_mut() {
