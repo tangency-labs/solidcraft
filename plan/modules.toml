@@ -88,10 +88,10 @@ depends_on = ["geom.extent3d", "geom.vector2d"]
 est_lines = 923
 layer = 1
 tests = ["prog_test:my_test_crv_projected_max", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix"]
-status = "partial"
+status = "green"
 claimed_by = "swarm-geom.tol-a1"
 claimed_at = "2026-10-12T19:35:37Z"
-notes = "119 fns; largest: SmTol::UpdateObjectTolerance, SmTol::GetZoneTol3d, SmRelation::RelatePair, SmTol::MapTo2d; cycle back-edges (call into later units; stub or co-port): geom.vector3d(20), curve.curve_p2(10), intersect.curve_class_p1(9), topology.edge(9), geom.object(6), heal.gap(6), topology.face_p2(6), geom.extent1d(5), geom.extent2d(5), surface.surface_p1(5), surface.surface_p2(5), intersect.point_class(4), topology.brep_p1(4), topology.vertex(4), curve.curve_p4(3), topology.topology(3), curve.crv_on_surf(2), geom.context(2), query.face_p1(2), surface.surface_p7(2), topology.shell(2), blend.fillet_corner_p1(1), blend.fillet_solver_p1(1), geom.local_solve_nd(1), geom.pseudo_box(1), query.brep(1), query.poly(1), surface.surface_p5(1), surface.volume_p1(1), surface.volume_p2(1), topology.face_p3(1), topology.face_p4(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit; PARTIAL: difftest 3430 cases (430 fixture + 3000 generated), 3209 bit-identical, 221 deferred (geom.vector3d: SmVector3d::IsParallelTo/IsPerpendicularTo via AreParallel/ArePerpendicular), max_rel_err 0; 60k-seed run clean; object/curve/surface/topology/extent1d/2d overloads are UNPORTED(<unit>) markers in geom/tol.rs; SmRelation results sorted (upstream hash order, see findings)"
+notes = "119 fns; largest: SmTol::UpdateObjectTolerance, SmTol::GetZoneTol3d, SmRelation::RelatePair, SmTol::MapTo2d; cycle back-edges (call into later units; stub or co-port): geom.vector3d(20), curve.curve_p2(10), intersect.curve_class_p1(9), topology.edge(9), geom.object(6), heal.gap(6), topology.face_p2(6), geom.extent1d(5), geom.extent2d(5), surface.surface_p1(5), surface.surface_p2(5), intersect.point_class(4), topology.brep_p1(4), topology.vertex(4), curve.curve_p4(3), topology.topology(3), curve.crv_on_surf(2), geom.context(2), query.face_p1(2), surface.surface_p7(2), topology.shell(2), blend.fillet_corner_p1(1), blend.fillet_solver_p1(1), geom.local_solve_nd(1), geom.pseudo_box(1), query.brep(1), query.poly(1), surface.surface_p5(1), surface.volume_p1(1), surface.volume_p2(1), topology.face_p3(1), topology.face_p4(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit; GREEN: difftest 3430 cases (430 fixture + 3000 generated), all bit-identical, 0 deferred (the 221 geom.vector3d cases resolved when geom.vector3d landed), max_rel_err 0; 60k-seed run clean; object/curve/surface/topology/extent1d/2d overloads are UNPORTED(<unit>) markers in geom/tol.rs; SmRelation results sorted (upstream hash order, see findings)"
 
 [[unit]]
 id = "geom.tree"
@@ -192,10 +192,10 @@ depends_on = ["geom.tol"]
 est_lines = 1145
 layer = 2
 tests = ["prog_test:my_test_polynomial", "SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-geom.vector3d-a1"
 claimed_at = "2026-10-12T19:48:09Z"
-notes = "65 fns; largest: SmVector3d::CCWAngleBetween, SmVector3d::AngleBetween, SmVector3d::MakeUnitOrthoVectors, SmVector3d::UnitizedDerivative3; unit-SCC #22 (220 units); 321 upstream test entry points reach this unit"
+notes = "65 fns; largest: SmVector3d::CCWAngleBetween, SmVector3d::AngleBetween, SmVector3d::MakeUnitOrthoVectors, SmVector3d::UnitizedDerivative3; unit-SCC #22 (220 units); 321 upstream test entry points reach this unit; GREEN: difftest 6114 cases (114 fixture from my_test_vector3d + edge cases, 6000 generated), all bit-identical, 0 deferred, perturb SENSITIVE; Vec3 moved from math.rs to geom::vector3d (re-exported); wired UNPORTED(geom.vector3d) in geom.tol (AreParallel/ArePerpendicular) and replaced CO-PORTs in tol/vector2d/extent3d"
 
 [[unit]]
 id = "nlib.basis_basic"
