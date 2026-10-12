@@ -110,14 +110,17 @@ use crate::math::{
 // SmTol::CalcEdgeZoneTol3d(.., SmBrep*, ..), SmTol::CalcVertexZoneTol3d(.., SmBrep*, ..)
 // need SmBrep::GetTolerance / SmBrep::SetThisModelSizeEstimate; and
 // SmTol::GetScaledZero(const SmBrep&) needs SmBrep::CalculateBoundingBox.
-// UNPORTED(topology.topology): SmTol::GetZoneTol3d(const SmObject*), SmTol::GetZoneTol3d(const
-// SmBrepData*), SmTol::GetApproxTol3d(const SmObject*), SmTol::GetXSectTol3d(const
-// SmObject*, const SmObject*, ..), SmTol::GetZoneTol3d_ForXSectResult(const SmObject*,
-// const SmObject*), SmTol::IsDegenerate(const SmObject*), SmTol::IsClosed(const
-// SmObject*), SmTol::GetScaledZero(const SmObject&) dispatch on IsKindOf over
-// SmTopology (GetTolerance), SmSurface/SmCurve (GetFace/GetEdge), SmBrep, SmBrepData
-// and SmCurveClassification; geom.object (SmObject::IsKindOf) is ported, but those
-// classes have no Rust object type yet.
+// UNPORTED(topology.vertex), UNPORTED(topology.edge), UNPORTED(topology.face_p2),
+// UNPORTED(topology.edgeuse_p1), UNPORTED(topology.brep_p1): SmTol::GetZoneTol3d(const
+// SmObject*), SmTol::GetZoneTol3d(const SmBrepData*), SmTol::GetApproxTol3d(const
+// SmObject*), SmTol::GetXSectTol3d(const SmObject*, const SmObject*, ..),
+// SmTol::GetZoneTol3d_ForXSectResult(const SmObject*, const SmObject*),
+// SmTol::IsDegenerate(const SmObject*), SmTol::IsClosed(const SmObject*),
+// SmTol::GetScaledZero(const SmObject&) dispatch on IsKindOf over SmTopology (the
+// virtual GetTolerance: the base is topology::topology::Topology::tolerance, the
+// overrides belong to SmVertex, SmEdge, SmFace, SmEdgeuse), SmSurface/SmCurve
+// (GetFace/GetEdge), SmBrep, SmBrepData and SmCurveClassification; those classes have
+// no Rust object type yet.
 // UNPORTED(curve.curve_p2): SmTol::IsDegenerate(const SmCurve*, SmExtent1d, ..),
 // SmTol::MapTo1d(SmTol3d&, double, const SmCurve&), SmTol::MapTo2d(.., double, const
 // SmCurve&, const SmSurface&) and SmTol::GetScaledZero(const SmCurve&) need
@@ -143,9 +146,9 @@ use crate::math::{
 // UNPORTED(topology.face_p2): SmTol::GetScaledZero(const SmFace&) (SmFace::GetSurface).
 // UNPORTED(topology.shell): SmTol::GetScaledZero(const SmRegion&) and (const SmShell&)
 // (CalculateBoundingBox).
-// UNPORTED(topology.topology): SmTol::UpdateObjectTolerance(SmTopology*, double, double,
-// SmBoolean) needs SmVertex/SmEdge/SmFace::SetTolerance, GetMaxGap3d (heal.gap) and
-// SmFace::GetEdges.
+// UNPORTED(topology.vertex), UNPORTED(topology.edge), UNPORTED(topology.face_p2):
+// SmTol::UpdateObjectTolerance(SmTopology*, double, double, SmBoolean) needs
+// SmVertex/SmEdge/SmFace::SetTolerance, GetMaxGap3d (heal.gap) and SmFace::GetEdges.
 
 /// `SM_USE_DEFAULT`: sentinel meaning "use the current system value".
 pub const USE_DEFAULT: f64 = 9876543.21;

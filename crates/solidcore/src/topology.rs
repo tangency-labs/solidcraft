@@ -23,6 +23,8 @@
 //! tolerances, attributes) extend these records; keep the id/arena/accessor shape.
 
 pub mod database_io;
+#[allow(clippy::module_inception)]
+pub mod topology;
 
 use core::marker::PhantomData;
 

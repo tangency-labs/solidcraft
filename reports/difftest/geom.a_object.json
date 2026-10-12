@@ -262,14 +262,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopology::Notify",
-        "unit": "topology.topology"
-      },
       "max_rel_err": 0.0,
       "name": "sag_notify_pre_edit",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.a_object/edge_cases.json#31",
       "values_compared": 0
     },
@@ -16999,14 +16995,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 169,
+  "cases_deferred": 168,
   "cases_failed": 0,
-  "cases_passed": 1871,
+  "cases_passed": 1872,
   "cases_total": 2040,
   "deferred_by_unit": {
     "topology.brep_cache": 131,
-    "topology.shell": 37,
-    "topology.topology": 1
+    "topology.shell": 37
   },
   "max_rel_err": 0.0,
   "pass": true,

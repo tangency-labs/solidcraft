@@ -707,7 +707,13 @@ impl RustRun {
                     {
                         return Err(h("sag_notify arguments"));
                     }
+                    // SmTopology::Notify touches no record for these operations.
+                    let mut records = std::collections::BTreeMap::<
+                        ObjectKey,
+                        solidcore::topology::topology::Topology,
+                    >::new();
                     tryr!(a_object::sag_notify(
+                        &mut records,
                         &mut self.store,
                         Some(&mut self.ctx),
                         opn,

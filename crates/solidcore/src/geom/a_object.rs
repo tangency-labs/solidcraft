@@ -60,8 +60,7 @@
 //!   `GetOrCreateObjectCache` reads the `context` argument.
 //! - **Unported.** `SmAObject::Notify(SM_NO_REG_PROPAGATION)` asks each "other"
 //!   source region whether it is void (`SmRegion::IsVoid`, unit `topology.shell`);
-//!   `SmSAGObject::Notify` ends in `SmOwningTopology::Notify` (`SmTopology::Notify`,
-//!   unit `topology.topology`); building a new `SmBrepCache` needs unit
+//!   building a new `SmBrepCache` needs unit
 //!   `topology.brep_cache`; the curve and surface `CacheMakeOrValidate` overrides
 //!   belong to `curve.curve_p5` and `surface.surface_p1`. These return
 //!   [`SolidError::Unported`].
@@ -79,6 +78,8 @@ use crate::geom::context::Context;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
 use crate::math::Vec3;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::topology;
+use crate::topology::topology::TopologyRecords;
 
 /// `SmAObject_TYPE` (`CONT_BASE_TYPE + 60`).
 pub const TYPE: i64 = 12060;
@@ -609,25 +610,26 @@ pub fn copy_construct(
 }
 
 /// `SmSAGObject::Notify`: drops the saved display list (no graphics here) and passes
-/// the notification to `SmOwningTopology::Notify`.
+/// the notification to `SmOwningTopology::Notify` (which is
+/// [`topology::topology::notify`]; `this` and the data objects that operation
+/// touches need records in `records`).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`topology.topology`) until `SmTopology::Notify` is ported.
-pub fn sag_notify(
-    _attributes: &mut AttributeStore,
-    _context: Option<&mut Context>,
-    _operation: NotifyOperation,
-    _this: ObjectRef,
-    _data1: Option<ObjectRef>,
-    _data2: Option<ObjectRef>,
-    _data3: Option<ObjectRef>,
+/// Errors of [`topology::topology::notify`].
+pub fn sag_notify<R: TopologyRecords + ?Sized>(
+    records: &mut R,
+    attributes: &mut AttributeStore,
+    context: Option<&mut Context>,
+    operation: NotifyOperation,
+    this: ObjectRef,
+    data1: Option<ObjectRef>,
+    data2: Option<ObjectRef>,
+    data3: Option<ObjectRef>,
 ) -> Result<()> {
-    // UNPORTED(topology.topology): SmTopology::Notify (as SmOwningTopology::Notify)
-    Err(SolidError::Unported {
-        upstream: "SmTopology::Notify",
-        unit: "topology.topology",
-    })
+    topology::topology::notify(
+        records, attributes, context, operation, this, data1, data2, data3,
+    )
 }
 
 // ---- caches ---------------------------------------------------------------------

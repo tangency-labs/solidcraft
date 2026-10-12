@@ -159,6 +159,14 @@ pub trait NotifyCallback: std::fmt::Debug + Send {
         data2: Option<object::ObjectRef>,
         data3: Option<object::ObjectRef>,
     ) -> Result<()>;
+
+    /// This callback as [`core::any::Any`], so that whoever installed it can
+    /// recognise it in a context (upstream compares callback addresses, e.g.
+    /// `SmTrackTopologyChanges::IsTracking`). The default, `None`, suits callbacks
+    /// nobody needs to recognise.
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        None
+    }
 }
 
 /// Shared modeling state (`SmContext`): traversal marks, the Boolean flag, notify
