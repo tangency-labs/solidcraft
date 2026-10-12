@@ -1894,19 +1894,51 @@ impl BSplineSurface {
         let to_size = |x: i64| usize::try_from(x).map_err(|_| bad("negative size"));
         let (n, m) = (to_size(n)?, to_size(m)?);
         let (p, q) = (to_size(i64::from(p))?, to_size(i64::from(q))?);
-        let r = n + p + 1;
-        let s = m + q + 1;
+        let too_big = || bad("size overflow");
+        let r = n
+            .checked_add(p)
+            .and_then(|x| x.checked_add(1))
+            .ok_or_else(too_big)?;
+        let s = m
+            .checked_add(q)
+            .and_then(|x| x.checked_add(1))
+            .ok_or_else(too_big)?;
 
-        // allocate Sur memory
-        let mut sur = allocate_nurb_surface(n, m, p, q, r, s)?;
-
-        // Read in data
+        // Upstream checks the rational flag right after allocating; check it before
+        // the size bound so a bad flag reports the same error as upstream.
         let rational = match rat {
             0 => false,
             1 => true,
             // Wrong type
             _ => return Err(sm_err(OP_READ)),
         };
+
+        // Bound the header against the bytes left before allocating (Rust aborts on a
+        // failed huge allocation where upstream's malloc returned NULL). Binary: three
+        // 8-byte doubles per point and one per knot. ASCII: at least one byte each.
+        let points = n
+            .checked_add(1)
+            .and_then(|a| m.checked_add(1).and_then(|b| a.checked_mul(b)))
+            .ok_or_else(too_big)?;
+        let knots = r
+            .checked_add(s)
+            .and_then(|x| x.checked_add(2))
+            .ok_or_else(too_big)?;
+        if ascii {
+            db.ensure_available(points.checked_add(knots).ok_or_else(too_big)?, 1, OP_READ)?;
+        } else {
+            let doubles = points
+                .checked_mul(3)
+                .and_then(|x| x.checked_add(knots))
+                .ok_or_else(too_big)?;
+            db.ensure_available(doubles, 8, OP_READ)?;
+        }
+
+        // allocate Sur memory
+        let mut sur = allocate_nurb_surface(n, m, p, q, r, s)?;
+
+        // Read in data
+
         let mut wx = f64::NAN;
         let mut wy = f64::NAN;
         let mut wz = f64::NAN;
@@ -2182,6 +2214,27 @@ mod tests {
             Err(SolidError::Unported { .. })
         ));
         assert!(s.is_parallel_to_vector(Vec3::new(0.0, 0.0, 0.0)).unwrap());
+    }
+
+    #[test]
+    fn read_rejects_oversized_header() {
+        // A header declaring ~1e18 control points must fail cleanly, not abort on
+        // allocation or overflow `n + p + 1`.
+        for text in [
+            "1000000000 1000000000\n3 3\n0\n0 0 0\n",
+            "9223372036854775807 0\n3 3\n0\n",
+        ] {
+            let mut db = DatabaseReader::new();
+            db.open_for_read(text.as_bytes().to_vec(), FileType::Ascii);
+            assert!(BSplineSurface::read_from_db(&mut db, 30).is_err());
+        }
+        let mut bin = Vec::new();
+        for v in [i64::MAX / 2, 1] {
+            bin.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut db = DatabaseReader::new();
+        db.open_for_read(bin, FileType::Binary);
+        assert!(BSplineSurface::read_from_db(&mut db, 30).is_err());
     }
 
     #[test]

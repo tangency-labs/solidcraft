@@ -29,6 +29,10 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
   results (use `Vec`, `BTreeMap`, or sort), randomness only from `kernel.rng`.
 - No global or `static mut`/`thread_local` state. Everything lives in `Kernel`.
 - Must build for `wasm32-unknown-unknown`: no threads, filesystem or `std::time`.
+- Never allocate from an input-declared size unchecked (file headers, counts in data):
+  use checked arithmetic and call `DatabaseReader::ensure_available(count, min_bytes,
+  op)` before allocating, as `BSplineSurface::read_from_db` does. Upstream `malloc`
+  fails softly; Rust aborts.
 
 **Correctness gate.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within

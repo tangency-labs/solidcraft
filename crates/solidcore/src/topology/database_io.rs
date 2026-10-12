@@ -287,6 +287,13 @@ impl InputStream {
         }
     }
 
+    /// Bytes not yet consumed. Used to bound header-declared counts before
+    /// allocating (not an upstream function; see `DatabaseReader::ensure_available`).
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
     /// `istream::read(buf, n)`: up to `n` bytes; `eofbit|failbit` when fewer were
     /// available, `failbit` (nothing read) when the stream was not good.
     pub fn read_bytes(&mut self, n: usize) -> &[u8] {
@@ -696,6 +703,33 @@ impl DatabaseReader {
     #[must_use]
     pub fn in_stream(&self) -> Option<&InputStream> {
         self.stream.as_ref()
+    }
+
+    /// Rejects a header-declared size before it is allocated: `count` items of at least
+    /// `min_bytes_each` bytes must fit in what is left of the stream.
+    ///
+    /// Not an upstream function. Upstream `malloc`s whatever a file header asks for and
+    /// fails later at end of data; Rust would abort on a failed huge allocation, so
+    /// readers call this first. Any count this rejects cannot be read to completion
+    /// from the remaining bytes. See `plan/findings.md` ("header-declared sizes").
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when there is no stream or the items cannot fit.
+    pub fn ensure_available(
+        &self,
+        count: usize,
+        min_bytes_each: usize,
+        operation: &'static str,
+    ) -> Result<()> {
+        let left = self.stream.as_ref().map_or(0, InputStream::remaining);
+        match count.checked_mul(min_bytes_each) {
+            Some(need) if need <= left => Ok(()),
+            _ => Err(SolidError::InvalidInput {
+                operation,
+                reason: "header-declared size exceeds the remaining input",
+            }),
+        }
     }
 
     /// The input stream for ASCII extraction (`*GetInStreamPtr() >> ...`).
