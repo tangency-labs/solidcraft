@@ -1,0 +1,2632 @@
+{
+ "cases": [
+  {
+   "name": "Surface_state_fast_owned",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "Surface_state_fast_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "Surface_state_data",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "Surface_state_gw_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "gw_copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "Surface_state_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "Surface_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "Surface_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "domain"
+   }
+  },
+  {
+   "name": "Surface_knots_u",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "v_dir": false
+   }
+  },
+  {
+   "name": "Surface_knots_v",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "v_dir": true
+   }
+  },
+  {
+   "name": "Surface_greville_u0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 0
+   }
+  },
+  {
+   "name": "Surface_greville_u1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 1
+   }
+  },
+  {
+   "name": "Surface_greville_u2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 2
+   }
+  },
+  {
+   "name": "Surface_greville_u3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 3
+   }
+  },
+  {
+   "name": "Surface_greville_u100",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 100
+   }
+  },
+  {
+   "name": "Surface_greville_v1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": true,
+    "index": 1
+   }
+  },
+  {
+   "name": "Surface_get_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "get_canonical"
+   }
+  },
+  {
+   "name": "Surface_net",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "net"
+   }
+  },
+  {
+   "name": "Surface_control_points",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "Surface_parallel_z",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "vec": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "Surface_parallel_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "vec": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Surface_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "Surface_eq_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_is_kind_of_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "is_kind_of",
+    "t": 15002
+   }
+  },
+  {
+   "name": "Surface_is_kind_of_plane",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "is_kind_of",
+    "t": 15011
+   }
+  },
+  {
+   "name": "Surface_type",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "type"
+   }
+  },
+  {
+   "name": "Surface_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface)); frame as my_create_refframe origin (-2,0,0)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      -2,
+      0,
+      0
+     ],
+     [
+      0.9950041652780258,
+      0.0998334166468282,
+      0.0
+     ],
+     [
+      -0.0998334166468282,
+      0.9950041652780258,
+      0.0
+     ]
+    ],
+    "scale": [
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "Surface_read_db",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface)); .sms text is the SmBSplineSurface WriteToDB ASCII layout (version <= 32)",
+   "inputs": {
+    "op": "read_db",
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_degen_curve",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "degen_curve",
+    "angle": 1e-10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "offset_nurb_state_fast_owned",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "offset_nurb_state_fast_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "offset_nurb_state_data",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "offset_nurb_state_gw_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "gw_copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "offset_nurb_state_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "offset_nurb_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "offset_nurb_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "domain"
+   }
+  },
+  {
+   "name": "offset_nurb_knots_u",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "v_dir": false
+   }
+  },
+  {
+   "name": "offset_nurb_knots_v",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "v_dir": true
+   }
+  },
+  {
+   "name": "offset_nurb_greville_u0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 0
+   }
+  },
+  {
+   "name": "offset_nurb_greville_u1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 1
+   }
+  },
+  {
+   "name": "offset_nurb_greville_u2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 2
+   }
+  },
+  {
+   "name": "offset_nurb_greville_u3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 3
+   }
+  },
+  {
+   "name": "offset_nurb_greville_u100",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 100
+   }
+  },
+  {
+   "name": "offset_nurb_greville_v1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": true,
+    "index": 1
+   }
+  },
+  {
+   "name": "offset_nurb_get_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "get_canonical"
+   }
+  },
+  {
+   "name": "offset_nurb_net",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "net"
+   }
+  },
+  {
+   "name": "offset_nurb_control_points",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "offset_nurb_parallel_z",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "vec": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_parallel_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "vec": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "offset_nurb_eq_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_is_kind_of_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "is_kind_of",
+    "t": 15002
+   }
+  },
+  {
+   "name": "offset_nurb_is_kind_of_plane",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "is_kind_of",
+    "t": 15011
+   }
+  },
+  {
+   "name": "offset_nurb_type",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "type"
+   }
+  },
+  {
+   "name": "offset_nurb_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms); frame as my_create_refframe origin (-2,0,0)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      -2,
+      0,
+      0
+     ],
+     [
+      0.9950041652780258,
+      0.0998334166468282,
+      0.0
+     ],
+     [
+      -0.0998334166468282,
+      0.9950041652780258,
+      0.0
+     ]
+    ],
+    "scale": [
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_read_db",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms); .sms text is the SmBSplineSurface WriteToDB ASCII layout (version <= 32)",
+   "inputs": {
+    "op": "read_db",
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_degen_curve",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (prog_test surface input offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "degen_curve",
+    "angle": 1e-10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveSurface_state_fast_owned",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "DropCurveSurface_state_fast_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "DropCurveSurface_state_data",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "DropCurveSurface_state_gw_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "gw_copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "DropCurveSurface_state_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "DropCurveSurface_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "DropCurveSurface_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "domain"
+   }
+  },
+  {
+   "name": "DropCurveSurface_knots_u",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "v_dir": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_knots_v",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "v_dir": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_greville_u0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 0
+   }
+  },
+  {
+   "name": "DropCurveSurface_greville_u1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_greville_u2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_greville_u3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_greville_u100",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": false,
+    "index": 100
+   }
+  },
+  {
+   "name": "DropCurveSurface_greville_v1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "greville",
+    "v_dir": true,
+    "index": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_get_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "get_canonical"
+   }
+  },
+  {
+   "name": "DropCurveSurface_net",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "net"
+   }
+  },
+  {
+   "name": "DropCurveSurface_control_points",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "DropCurveSurface_parallel_z",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "vec": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_parallel_zero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "vec": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "DropCurveSurface_eq_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "copy",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_is_kind_of_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "is_kind_of",
+    "t": 15002
+   }
+  },
+  {
+   "name": "DropCurveSurface_is_kind_of_plane",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "is_kind_of",
+    "t": 15011
+   }
+  },
+  {
+   "name": "DropCurveSurface_type",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "type"
+   }
+  },
+  {
+   "name": "DropCurveSurface_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input); frame as my_create_refframe origin (-2,0,0)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      -2,
+      0,
+      0
+     ],
+     [
+      0.9950041652780258,
+      0.0998334166468282,
+      0.0
+     ],
+     [
+      -0.0998334166468282,
+      0.9950041652780258,
+      0.0
+     ]
+    ],
+    "scale": [
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_read_db",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input); .sms text is the SmBSplineSurface WriteToDB ASCII layout (version <= 32)",
+   "inputs": {
+    "op": "read_db",
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_degen_curve",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "degen_curve",
+    "angle": 1e-10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "Surface_bbox",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Surface.sms (prog_test smSurfaceTest.cpp surface input (my_test_surface_closest_point reaches SmBSplineSurface))",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "b_box",
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_bbox",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveSurface.sms (prog_test smCurveTest.cpp my_test_drop_point surface input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "b_box",
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": true
+   }
+  },
+  {
+   "name": "Surface_step_inv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4136 (my_test_surface_closest_point)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "step_inv",
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "point": [
+     4.404800473510645,
+     21.121034044810564,
+     13.171054214828178
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "offset_nurb_offset",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/offset_nurb.sms (offset input)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "oob": false,
+     "form": 9,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "offset",
+    "dist": 1.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "cone_tsurface_regression7",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:1495",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      -2,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": 1,
+    "rt": 1,
+    "a0": 0,
+    "a1": 360,
+    "h": 1,
+    "quintic": false
+   }
+  },
+  {
+   "name": "cone_quarter_cylinder",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:471",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": 1,
+    "rt": 1,
+    "a0": 45,
+    "a1": 135,
+    "h": 1,
+    "quintic": false
+   }
+  },
+  {
+   "name": "cone_seam_frame",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:478",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "rb": 1,
+    "rt": 1,
+    "a0": 0,
+    "a1": 360,
+    "h": 1,
+    "quintic": false
+   }
+  },
+  {
+   "name": "cone_10_5_half",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:701",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": 10,
+    "rt": 5,
+    "a0": 0,
+    "a1": 180,
+    "h": 10,
+    "quintic": false
+   }
+  },
+  {
+   "name": "cone_quintic",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2296 (quintic variant)",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      -2,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": 2,
+    "rt": 2,
+    "a0": 0,
+    "a1": 270,
+    "h": 5,
+    "quintic": true
+   }
+  },
+  {
+   "name": "cone_bad_radius",
+   "upstream_ref": "edge: negative radius (LT_ZERO_ER)",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": -1,
+    "rt": 1,
+    "a0": 0,
+    "a1": 90,
+    "h": 1,
+    "quintic": false
+   }
+  },
+  {
+   "name": "cone_bad_angle",
+   "upstream_ref": "edge: angle above 360 (RANGE_ER)",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": 1,
+    "rt": 1,
+    "a0": 0,
+    "a1": 361,
+    "h": 1,
+    "quintic": false
+   }
+  },
+  {
+   "name": "cone_apex_both",
+   "upstream_ref": "edge: both radii zero (NLib failure)",
+   "inputs": {
+    "op": "cone",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "rb": 0,
+    "rt": 0,
+    "a0": 0,
+    "a1": 90,
+    "h": 1,
+    "quintic": false
+   }
+  },
+  {
+   "name": "bilinear_ssi14_a",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:4422",
+   "inputs": {
+    "op": "bilinear",
+    "p00": [
+     0,
+     0,
+     0
+    ],
+    "p10": [
+     0,
+     10,
+     0
+    ],
+    "p01": [
+     10,
+     0,
+     0
+    ],
+    "p11": [
+     10,
+     10,
+     0
+    ]
+   }
+  },
+  {
+   "name": "bilinear_ssi14_b",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:4432",
+   "inputs": {
+    "op": "bilinear",
+    "p00": [
+     10,
+     5,
+     0
+    ],
+    "p10": [
+     10,
+     15,
+     0
+    ],
+    "p01": [
+     20,
+     5,
+     0
+    ],
+    "p11": [
+     20,
+     15,
+     0
+    ]
+   }
+  },
+  {
+   "name": "bilinear_degenerate",
+   "upstream_ref": "edge: all corners equal",
+   "inputs": {
+    "op": "bilinear",
+    "p00": [
+     1,
+     1,
+     1
+    ],
+    "p10": [
+     1,
+     1,
+     1
+    ],
+    "p01": [
+     1,
+     1,
+     1
+    ],
+    "p11": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "canonical_biquadratic_rational",
+   "upstream_ref": "STEP B_SPLINE_SURFACE_WITH_KNOTS (rational), CreateCanonical",
+   "inputs": {
+    "op": "canonical",
+    "ud": 2,
+    "vd": 1,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      1
+     ],
+     [
+      2,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ],
+     [
+      2,
+      1,
+      0
+     ]
+    ],
+    "form": 4,
+    "uk": [
+     0,
+     1
+    ],
+    "um": [
+     3,
+     3
+    ],
+    "vk": [
+     0,
+     1
+    ],
+    "vm": [
+     2,
+     2
+    ],
+    "kt": 3,
+    "weights": [
+     1,
+     0.7071067811865476,
+     1,
+     1,
+     0.7071067811865476,
+     1
+    ]
+   }
+  },
+  {
+   "name": "canonical_unit_weights",
+   "upstream_ref": "edge: all weights 1 -> non-rational",
+   "inputs": {
+    "op": "canonical",
+    "ud": 1,
+    "vd": 1,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "form": 9,
+    "uk": [
+     0,
+     1
+    ],
+    "um": [
+     2,
+     2
+    ],
+    "vk": [
+     0,
+     2
+    ],
+    "vm": [
+     2,
+     2
+    ],
+    "kt": 1,
+    "weights": [
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "canonical_domain",
+   "upstream_ref": "edge: domain overrides the knot bounds",
+   "inputs": {
+    "op": "canonical",
+    "ud": 1,
+    "vd": 1,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "form": 0,
+    "uk": [
+     0,
+     1
+    ],
+    "um": [
+     2,
+     2
+    ],
+    "vk": [
+     0,
+     2
+    ],
+    "vm": [
+     2,
+     2
+    ],
+    "kt": 1,
+    "domain": [
+     0,
+     0,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "canonical_count_mismatch",
+   "upstream_ref": "edge: point count inconsistent",
+   "inputs": {
+    "op": "canonical",
+    "ud": 1,
+    "vd": 1,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "form": 9,
+    "uk": [
+     0,
+     1
+    ],
+    "um": [
+     2,
+     2
+    ],
+    "vk": [
+     0,
+     1
+    ],
+    "vm": [
+     2,
+     2
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "canonical_degree_zero",
+   "upstream_ref": "edge: degree 0 (RANGE_ER)",
+   "inputs": {
+    "op": "canonical",
+    "ud": 0,
+    "vd": 1,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "form": 9,
+    "uk": [
+     0,
+     1
+    ],
+    "um": [
+     1,
+     1
+    ],
+    "vk": [
+     0,
+     1
+    ],
+    "vm": [
+     2,
+     2
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "sweep_line",
+   "upstream_ref": "CreateLinearSweep of a line segment",
+   "inputs": {
+    "op": "sweep",
+    "dim": 3,
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       3,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     5
+    ]
+   }
+  },
+  {
+   "name": "sweep_2d_curve",
+   "upstream_ref": "CreateLinearSweep of a 2D curve (made 3D in place)",
+   "inputs": {
+    "op": "sweep",
+    "dim": 2,
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       1.7976931348623157e+308,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "sweep_zero",
+   "upstream_ref": "edge: zero sweep vector",
+   "inputs": {
+    "op": "sweep",
+    "dim": 3,
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       3,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "empty_state",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "empty_counts",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "empty_domain",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "domain"
+   }
+  },
+  {
+   "name": "empty_get_canonical",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "get_canonical"
+   }
+  },
+  {
+   "name": "empty_make_nurb",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "make_nurb"
+   }
+  },
+  {
+   "name": "empty_copy",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "empty_type",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "type"
+   }
+  },
+  {
+   "name": "empty_knots",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "knots",
+    "v_dir": false
+   }
+  },
+  {
+   "name": "empty_eq",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "empty"
+    }
+   }
+  },
+  {
+   "name": "empty_set_form",
+   "upstream_ref": "edge: SmBSplineSurface() without NURB",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "oob": true,
+     "form": 3
+    },
+    "op": "set_form",
+    "form": 2
+   }
+  },
+  {
+   "name": "read_db_v33_ascii",
+   "upstream_ref": "WriteToDB layout version 33 (knot type and form)",
+   "inputs": {
+    "op": "read_db",
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 1,
+     "m": 1,
+     "p": 1,
+     "q": 1,
+     "rat": 1,
+     "kt": 3,
+     "form": 5,
+     "vals": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      2,
+      0,
+      2,
+      2,
+      0,
+      0,
+      2,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_v33_binary",
+   "upstream_ref": "WriteToDB layout version 33, binary",
+   "inputs": {
+    "op": "read_db",
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 1,
+     "m": 1,
+     "p": 1,
+     "q": 1,
+     "rat": 1,
+     "kt": 3,
+     "form": 5,
+     "vals": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      2,
+      0,
+      2,
+      2,
+      0,
+      0,
+      2,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bad_rat",
+   "upstream_ref": "edge: rational flag 2 (SM_ERR)",
+   "inputs": {
+    "op": "read_db",
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 1,
+     "m": 1,
+     "p": 1,
+     "q": 1,
+     "rat": 2,
+     "vals": []
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,2198 @@
+//! `SmBSplineSurface`, part 1: the surface object (an NLib surface plus the STEP form
+//! flags), its constructors and copies, the bilinear, canonical, cone patch and linear
+//! sweep factories, control net, knot, degree, count, domain and Greville queries,
+//! bounding boxes, parallelism test, affine transformation, STEP inversion and reading
+//! from a database stream.
+//!
+//! Upstream: `source/SMLib/src/SmBSplineSurface.cpp`, `source/SMLib/inc/SmBSplineSurface.h`.
+//!
+//! | Rust                                              | Upstream                                         |
+//! |---------------------------------------------------|--------------------------------------------------|
+//! | [`BSplineSurface`]                                | `SmBSplineSurface`                               |
+//! | [`BSplineSurface::new`], `Default`                | `SmBSplineSurface()`                             |
+//! | [`BSplineSurface::from_data`]                     | `SmBSplineSurface(n, m, p, q, r, s, Pw, U, V)`   |
+//! | [`BSplineSurface::from_nurb`]                     | `SmBSplineSurface(gw_SURFACE*, SmBoolean, const SmContext*)` |
+//! | [`BSplineSurface::from_gw_nurb`]                  | `SmBSplineSurface(const gw_SURFACE*)`            |
+//! | [`BSplineSurface::copy`], `Clone`                 | copy constructor, `Copy`                         |
+//! | `Drop` (implicit)                                 | `~SmBSplineSurface`                              |
+//! | [`BSplineSurface::approx_eq`]                     | `operator==`                                     |
+//! | [`BSplineSurface::calculate_bounding_box`], [`BoundingBoxRequest`], [`BoundingBoxes`] | `CalculateBoundingBox` |
+//! | [`BSplineSurface::create_bilinear_surface`]       | `CreateBilinearSurface`                          |
+//! | [`BSplineSurface::create_canonical`], [`CanonicalSurfaceData`] | `CreateCanonical`                   |
+//! | `create_cone_patch_dir` (private)                 | `sm_CreateConePatch` (static)                    |
+//! | [`BSplineSurface::create_cone_patch`]             | `CreateConePatch`                                |
+//! | [`BSplineSurface::create_linear_sweep`]           | `CreateLinearSweep`                              |
+//! | [`BSplineSurface::create_offset_surface`]         | `CreateOffsetSurface`                            |
+//! | [`BSplineSurface::canonical`], [`SurfaceCanonical`] | `GetCanonical`                                 |
+//! | [`BSplineSurface::control_point_net`], [`ControlPointNet`] | `GetControlPointNet`                    |
+//! | [`BSplineSurface::control_points`]                | `GetControlPointsPointer`                        |
+//! | [`BSplineSurface::number_natural_knots`]          | `GetNumberNaturalKnots`                          |
+//! | [`BSplineSurface::number_control_points`]         | `GetNumberControlPoints`                         |
+//! | [`BSplineSurface::is_degenerate_curve`]           | `IsDegenerateCurve`                              |
+//! | [`BSplineSurface::is_parallel_to_vector`]         | `IsParallelToVector`                             |
+//! | [`BSplineSurface::is_rational`]                   | `IsRational`                                     |
+//! | [`BSplineSurface::greville_abscissa`]             | `GetGrevilleAbscissa`                            |
+//! | [`BSplineSurface::degree`]                        | `GetDegree`                                      |
+//! | [`BSplineSurface::knots`]                         | `GetKnots`                                       |
+//! | [`BSplineSurface::natural_uv_domain`]             | `GetNaturalUVDomain`                             |
+//! | [`BSplineSurface::make_nurb`]                     | `MakeNurb`                                       |
+//! | [`BSplineSurface::step_inversion`]                | `STEPInversion`                                  |
+//! | [`BSplineSurface::transform`]                     | `Transform`                                      |
+//! | [`BSplineSurface::is_kind_of`]                    | `IsKindOf`                                       |
+//! | [`BSplineSurface::read_from_db`]                  | `ReadFromDB`                                     |
+//! | [`BSplineSurface::TYPE`], [`BSplineSurface::type_code`], [`BSplineSurface::type_string`], [`BSplineSurface::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
+//! | [`BSplineSurface::out_of_bounds_enabled_mut`]     | `GetOutOfBoundsEnabled`                          |
+//! | [`BSplineSurface::is_out_of_bounds_enabled`]      | `IsOutOfBoundsEnabled`                           |
+//! | [`BSplineSurface::gw_nurb`]                       | `GetGwNurbPointer`                               |
+//! | [`BSplineSurface::get_or_create_gw_nurb`]         | `GetOrCreateGwNurbPointer`                       |
+//! | [`BSplineSurface::rebuild_step_from_nurb_parameters`] | `RebuildSTEPFromNURBParameters`              |
+//! | [`BSplineSurface::set_b_spline_surface_form`]     | `SetBSplineSurfaceForm`                          |
+//! | [`BSplineSurface::toggle_swap_uv_bit`]            | `ToggleSwapUVBit`                                |
+//! | [`BSplineSurfaceForm`], [`SurfParamType`], [`LocationType`] | `SmBSplineSurfaceForm`, `SmSurfParamType`, `SmLocationType` |
+//!
+//! Deviations:
+//! - **Surface base.** `SmBSplineSurface` derives from `SmSurface` (units
+//!   `surface.surface_*`), which is not ported. A surface has no owner, attributes or
+//!   caches here, so `Transform`'s `Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT)` calls
+//!   (which only drop caches and notify owners) are omitted. `SmSurface::operator==`
+//!   (same type) is the Rust type of [`BSplineSurface::approx_eq`]'s argument.
+//! - **Derived classes.** Upstream `MakeNurb`, `IsKindOf`, `ToggleSwapUVBit` and
+//!   `RebuildSTEPFromNURBParameters` are virtual and overridden by the analytic
+//!   surfaces (`SmPlane`, `SmCone`, `SmSphere`, ..., units `surface.*`), which build
+//!   their NURB lazily. Those types are not ported; this type is the plain B-spline,
+//!   whose `MakeNurb` cannot create a NURB.
+//! - **Missing NURB.** Upstream methods that dereference the `NULL` returned by
+//!   `GetOrCreateGwNurbPointer` for a surface without NURB data (built by
+//!   `SmBSplineSurface()`) crash; here they return [`SolidError::Upstream`] `SM_ERR`
+//!   (the status of the failed `MakeNurb`). The counts, degree, domain, rationality
+//!   and parallelism queries return `0` / `false` / the empty domain there, as
+//!   upstream; `GetCanonical` returns `SM_ERR_NULL_POINTER` and `GetKnots` `SM_ERR`.
+//!   Copying a surface without NURB gives one without NURB, as upstream
+//!   (`sm_AllocateAndCopyNurbSurface(NULL)` is `NULL`).
+//! - **Ownership.** The NURB is owned ([`Surface`]); the "borrowed" flag of the fast
+//!   constructor only skips the knot fix-up and is reported by
+//!   [`BSplineSurface::is_nurb_borrowed`].
+//! - **Context.** The `SmContext` arguments only choose where upstream allocates the
+//!   new object and are dropped. `ReadFromDB`'s type argument (unused upstream) is
+//!   dropped and it always builds a new surface (upstream's "fill the surface passed
+//!   in" branch and its `IsKindOf` check have no counterpart).
+//! - **Errors.** Out-params become return values. A failing NLib routine becomes
+//!   `SM_ERR` ([`SolidError::Upstream`], code 1001), as upstream's
+//!   `if(NL_YES == ...) SER(SM_ERR)`; `SM_ERR_INVALID_INPUT` checks are
+//!   [`SolidError::InvalidInput`]. Where upstream would index outside its arrays or
+//!   allocate from wrapped or negative sizes (fewer multiplicities than knots or no
+//!   control points in `CreateCanonical`, too short arrays for the data constructor,
+//!   negative sizes, an unreadable header or a short binary stream in `ReadFromDB`,
+//!   knot type / form values outside the enums) the port returns `InvalidInput`.
+//! - **Data constructor.** `SmBSplineSurface(n, m, p, q, r, s, Pw, U, V)` copies `V`
+//!   with `smos_MemCpy(.., (s+1) doubles, (r+1) doubles)`: the destination size is the
+//!   u knot count, so the copy is refused (status ignored) when `s > r` and the v
+//!   knots stay 0 (then fixed up). [`BSplineSurface::from_data`] keeps that
+//!   (`plan/findings.md`).
+//! - **Returned pointers.** `GetControlPointsPointer` returns a pointer into the NURB;
+//!   [`BSplineSurface::control_points`] returns a copy of the control points, row by
+//!   row (u index slowest).
+//! - **`IsParallelToVector`** returns its `SER(sTestVec.Unitize())` status
+//!   (`SM_ERR_INVALID_INPUT`, nonzero) as the boolean for a zero vector, so upstream
+//!   callers see `TRUE`; the port returns `Ok(true)` there. Its line distance test
+//!   passes the second line point as the *direction* of the line
+//!   (`smgu_LinePointDistance(LinePnt, LineEnd, Pnt, ..)` binds the `SmVector3d`
+//!   overload); the port keeps that.
+//! - **`CreateLinearSweep`** extrudes the curve's own NURB, which NLib makes 3D in
+//!   place for a 2D curve (upstream casts away `const`); the port takes the curve
+//!   mutably for that reason.
+//! - **Back-edges.** `IsKindOf` answers for `SmBSplineSurface_TYPE` and returns
+//!   [`SolidError::Unported`] (`SmSurface::IsKindOf`, unit `surface.surface_p2`)
+//!   otherwise, so `CalculateBoundingBox` and `IsParallelToVector` (which test for the
+//!   analytic types first) are unported for now. `CalculateBoundingBox` also calls
+//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`) and `SmSurface::GetFace`
+//!   (`surface.surface_p1`); `CreateOffsetSurface` and `IsDegenerateCurve` pass the
+//!   call to `SmSurface` (`surface.surface_p1`); `STEPInversion` calls
+//!   `SmSurface::LocalPointSolve` / `GlobalPointSolve` (`surface.surface_p1`),
+//!   `IsSingularity` and `IsClosed` (`surface.surface_p5`). Those calls return
+//!   [`SolidError::Unported`] until the units are ported.
+
+use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::line_point_distance;
+use crate::geom::polar_box::{PolarBox, PolarBoxState};
+use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::tol::are_same;
+use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ};
+use crate::nurbs::b_spline_curve::{BSplineCurve, KnotType, NurbCircleParam};
+use crate::nurbs::crv_basic::ConicType;
+use crate::nurbs::iges::{iges_128_surface, Entity128};
+use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, NOW, NOZ};
+use crate::nurbs::nurbs_crv::{extract_frame, fixup_knot_vector, get_knots};
+use crate::nurbs::nurbs_srf::{allocate_nurb_surface, copy_nurb_surface};
+use crate::nurbs::srf_basic::{Direction, Surface};
+use crate::nurbs::srf_common::{corner_pts, cyl_cone, extrude_crv, CylCone};
+use crate::topology::database_io::{DatabaseReader, FileType};
+
+/// `SURF_BASE_TYPE` (`SmTypes.h`).
+const SURF_BASE_TYPE: i64 = 15000;
+/// `SmPlane_TYPE`.
+const PLANE_TYPE: i64 = SURF_BASE_TYPE + 11;
+/// `SmCone_TYPE`.
+const CONE_TYPE: i64 = SURF_BASE_TYPE + 12;
+/// `SmSphere_TYPE`.
+const SPHERE_TYPE: i64 = SURF_BASE_TYPE + 14;
+/// `SmTorus_TYPE`.
+const TORUS_TYPE: i64 = SURF_BASE_TYPE + 15;
+
+/// `SM_ERR_NULL_POINTER` (upstream `NER`).
+const SM_ERR_NULL_POINTER: i32 = 1006;
+
+const OP_DATA: &str = "nurbs::b_spline_surface::p1::BSplineSurface::from_data";
+const OP_NURB: &str = "nurbs::b_spline_surface::p1::BSplineSurface::make_nurb";
+const OP_BBOX: &str = "nurbs::b_spline_surface::p1::BSplineSurface::calculate_bounding_box";
+const OP_BILINEAR: &str = "nurbs::b_spline_surface::p1::BSplineSurface::create_bilinear_surface";
+const OP_CANON: &str = "nurbs::b_spline_surface::p1::BSplineSurface::create_canonical";
+const OP_CONE: &str = "nurbs::b_spline_surface::p1::BSplineSurface::create_cone_patch";
+const OP_SWEEP: &str = "nurbs::b_spline_surface::p1::BSplineSurface::create_linear_sweep";
+const OP_GET_CANON: &str = "nurbs::b_spline_surface::p1::BSplineSurface::canonical";
+const OP_NET: &str = "nurbs::b_spline_surface::p1::BSplineSurface::control_point_net";
+const OP_GREVILLE: &str = "nurbs::b_spline_surface::p1::BSplineSurface::greville_abscissa";
+const OP_KNOTS: &str = "nurbs::b_spline_surface::p1::BSplineSurface::knots";
+const OP_STEP_INV: &str = "nurbs::b_spline_surface::p1::BSplineSurface::step_inversion";
+const OP_XFORM: &str = "nurbs::b_spline_surface::p1::BSplineSurface::transform";
+const OP_READ: &str = "nurbs::b_spline_surface::p1::BSplineSurface::read_from_db";
+
+/// `SmBSplineSurfaceForm`: the STEP form of a B-spline surface; discriminants are the
+/// upstream values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BSplineSurfaceForm {
+    /// `SM_SF_PLANE_SURF`.
+    PlaneSurf = 0,
+    /// `SM_SF_CYLINDRICAL_SURF`.
+    CylindricalSurf = 1,
+    /// `SM_SF_CONICAL_SURF`.
+    ConicalSurf = 2,
+    /// `SM_SF_SPHERICAL_SURF`.
+    SphericalSurf = 3,
+    /// `SM_SF_SURF_OF_REVOLUTION`.
+    SurfOfRevolution = 4,
+    /// `SM_SF_RULED_SURF`.
+    RuledSurf = 5,
+    /// `SM_SF_GENERALIZED_CONE`.
+    GeneralizedCone = 6,
+    /// `SM_SF_QUADRIC_SURF`.
+    QuadricSurf = 7,
+    /// `SM_SF_SURF_OF_LINEAR_EXTRUSION`.
+    SurfOfLinearExtrusion = 8,
+    /// `SM_SF_UNSPECIFIED`.
+    #[default]
+    Unspecified = 9,
+    /// `SM_SF_POLYNOMIAL`.
+    Polynomial = 10,
+    /// `SM_SF_HELICAL_SWEEP`.
+    HelicalSweep = 11,
+}
+
+impl BSplineSurfaceForm {
+    /// The form with upstream value `code`, if any.
+    #[must_use]
+    pub fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::PlaneSurf,
+            1 => Self::CylindricalSurf,
+            2 => Self::ConicalSurf,
+            3 => Self::SphericalSurf,
+            4 => Self::SurfOfRevolution,
+            5 => Self::RuledSurf,
+            6 => Self::GeneralizedCone,
+            7 => Self::QuadricSurf,
+            8 => Self::SurfOfLinearExtrusion,
+            9 => Self::Unspecified,
+            10 => Self::Polynomial,
+            11 => Self::HelicalSweep,
+            _ => return None,
+        })
+    }
+}
+
+/// `SmSurfParamType`: a surface parameter direction (or side); discriminants are the
+/// upstream values. The queries here treat [`SurfParamType::U`] as u and every other
+/// value as v (or, for [`BSplineSurface::number_control_points`], as "both").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SurfParamType {
+    /// `SM_SP_U`: the u direction.
+    U = 0,
+    /// `SM_SP_V`: the v direction.
+    V = 1,
+    /// `SM_SP_UNKNOWN`.
+    Unknown = 2,
+    /// `SM_SP_BOTH`.
+    Both = 3,
+    /// `SM_SP_NEITHER`.
+    Neither = 4,
+    /// `SM_SP_UMIN`.
+    UMin = 5,
+    /// `SM_SP_VMIN`.
+    VMin = 6,
+    /// `SM_SP_UMAX`.
+    UMax = 7,
+    /// `SM_SP_VMAX`.
+    VMax = 8,
+    /// `SM_SP_OUT`.
+    Out = 9,
+}
+
+/// `SmLocationType`: where a point lies on a surface; discriminants are the upstream
+/// values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LocationType {
+    /// `SM_LT_POLE`: at a pole.
+    Pole = 0,
+    /// `SM_LT_U_SEAM`: on the seam of a surface closed in u.
+    USeam = 1,
+    /// `SM_LT_V_SEAM`: on the seam of a surface closed in v.
+    VSeam = 2,
+    /// `SM_LT_UV_SEAM`: on both seams.
+    UvSeam = 3,
+    /// `SM_LT_INTERIOR`: neither at a pole nor on a seam.
+    Interior = 4,
+    /// `SM_LT_EXTERIOR`: not on the surface or outside the domain.
+    Exterior = 5,
+}
+
+/// The STEP-style data of [`BSplineSurface::create_canonical`].
+#[derive(Debug, Clone, Copy)]
+pub struct CanonicalSurfaceData<'a> {
+    /// Degree in u, 1 to 32.
+    pub u_degree: usize,
+    /// Degree in v, 1 to 32.
+    pub v_degree: usize,
+    /// Euclidean control points, row by row (`P[i][j]` at `i * v_count + j`).
+    pub control_points: &'a [Point3],
+    /// STEP form of the new surface.
+    pub form: BSplineSurfaceForm,
+    /// Multiplicity of each unique u knot.
+    pub u_multiplicities: &'a [usize],
+    /// Multiplicity of each unique v knot.
+    pub v_multiplicities: &'a [usize],
+    /// Unique u knots in ascending order.
+    pub u_knots: &'a [f64],
+    /// Unique v knots in ascending order.
+    pub v_knots: &'a [f64],
+    /// STEP knot type of the new surface.
+    pub knot_type: KnotType,
+    /// Optional weight of each control point (same order as the points).
+    pub weights: Option<&'a [f64]>,
+    /// Optional domain whose bounds replace the parameter bounds taken from the knots.
+    pub uv_domain: Option<Extent2d>,
+}
+
+/// The STEP-style data of a surface ([`BSplineSurface::canonical`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceCanonical {
+    /// Degree in u.
+    pub u_degree: usize,
+    /// Degree in v.
+    pub v_degree: usize,
+    /// Euclidean control points, row by row (u index slowest).
+    pub control_points: Vec<Point3>,
+    /// STEP form.
+    pub form: BSplineSurfaceForm,
+    /// Multiplicity of each unique u knot.
+    pub u_multiplicities: Vec<usize>,
+    /// Multiplicity of each unique v knot.
+    pub v_multiplicities: Vec<usize>,
+    /// Unique u knots.
+    pub u_knots: Vec<f64>,
+    /// Unique v knots.
+    pub v_knots: Vec<f64>,
+    /// STEP knot type.
+    pub knot_type: KnotType,
+    /// Weight of each control point; empty for a non-rational surface.
+    pub weights: Vec<f64>,
+}
+
+/// The control net of a surface in Euclidean form
+/// ([`BSplineSurface::control_point_net`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlPointNet {
+    /// Control points in u.
+    pub u_count: usize,
+    /// Control points in v.
+    pub v_count: usize,
+    /// Euclidean control points; `Pw[i][j]` is at `i * v_count + j`.
+    pub points: Vec<Point3>,
+    /// Weights, same order; empty for a non-rational surface.
+    pub weights: Vec<f64>,
+}
+
+/// Which boxes [`BSplineSurface::calculate_bounding_box`] computes, with its optional
+/// basis guesses.
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_excessive_bools)] // upstream's optional out-pointers and flag
+pub struct BoundingBoxRequest<'a> {
+    /// Compute the axis aligned box (`pNormalBox`).
+    pub normal: bool,
+    /// Compute the non-axis aligned box (`pPseudoBox`).
+    pub pseudo: bool,
+    /// Compute the normal vector box (`pPolarBox`).
+    pub polar: bool,
+    /// Basis guess for the pseudo box, used when it gives a smaller box
+    /// (`pOptPseudoBasisGuess`).
+    pub pseudo_guess: Option<&'a PseudoBox>,
+    /// Basis guess for the polar box, used when it gives a smaller box
+    /// (`pOptPolarBasisGuess`; ignored when uninitialised).
+    pub polar_guess: Option<&'a PolarBox>,
+    /// Expand the normal and pseudo boxes by the zone tolerance
+    /// (`bExpandPosBoxesByZoneTol3d`, upstream default `TRUE`).
+    pub expand_by_zone_tol: bool,
+}
+
+/// The boxes of [`BSplineSurface::calculate_bounding_box`] (each present when asked).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoundingBoxes {
+    /// Axis aligned box.
+    pub normal: Option<Extent3d>,
+    /// Non-axis aligned box.
+    pub pseudo: Option<PseudoBox>,
+    /// Normal vector box.
+    pub polar: Option<PolarBox>,
+}
+
+/// A B-spline (NURBS) surface (`SmBSplineSurface`): an NLib surface with its STEP form
+/// flags.
+#[derive(Debug)]
+pub struct BSplineSurface {
+    /// The NURB (`m_pNurb`); `None` is `NULL`.
+    pub(crate) nurb: Option<Surface>,
+    /// `m_bNurbIsBorrowed`.
+    pub(crate) nurb_is_borrowed: bool,
+    /// `m_bOutOfBoundsEnabled`: evaluate beyond the natural domain.
+    pub(crate) out_of_bounds_enabled: bool,
+    /// `m_eKnotType`.
+    pub(crate) knot_type: KnotType,
+    /// `m_eBSplineSurfaceForm`.
+    pub(crate) form: BSplineSurfaceForm,
+}
+
+impl Clone for BSplineSurface {
+    /// The copy constructor (see [`BSplineSurface::copy`]).
+    fn clone(&self) -> Self {
+        self.copy()
+    }
+}
+
+impl Default for BSplineSurface {
+    /// A surface without NURB data (`SmBSplineSurface()`).
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn sm_err(operation: &'static str) -> SolidError {
+    SolidError::sm_err(operation)
+}
+
+fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
+    SolidError::InvalidInput { operation, reason }
+}
+
+/// `InvalidInput` unless `ok` (upstream's `*_ER` input checks, which fail for NaN).
+fn check(ok: bool, operation: &'static str, reason: &'static str) -> Result<()> {
+    if ok {
+        Ok(())
+    } else {
+        Err(invalid(operation, reason))
+    }
+}
+
+/// An NLib failure as upstream's `SER(SM_ERR)`; `Unported` passes through.
+fn nl_err(operation: &'static str) -> impl Fn(SolidError) -> SolidError {
+    move |e| match e {
+        SolidError::Unported { .. } => e,
+        _ => sm_err(operation),
+    }
+}
+
+/// `TO_EUCLID` (`SmNurbsCrv.h`): homogeneous to Euclidean by division, a missing `z`
+/// becomes `0`.
+fn to_euclid(from: CPoint) -> Point3 {
+    if from.w == NOW {
+        let z = if from.z == NOZ { 0.0 } else { from.z };
+        Point3::new(from.x, from.y, z)
+    } else {
+        let z = if from.z == NOZ { 0.0 } else { from.z / from.w };
+        Point3::new(from.x / from.w, from.y / from.w, z)
+    }
+}
+
+/// `TO_EUCLID` of control point `[i][j]` of `sur`.
+fn euclid_at(sur: &Surface, i: usize, j: usize) -> Result<Point3> {
+    Ok(to_euclid(sur.cpt(i, j)?))
+}
+
+/// The control net in Euclidean form with the weights of rational points, as
+/// `GetCanonical` / `GetControlPointNet` build it (division by `w`, `z` divided even
+/// when missing).
+fn euclidean_net(sur: &Surface) -> (Vec<Point3>, Vec<f64>) {
+    let count = (sur.n() + 1) * (sur.m() + 1);
+    let mut points = Vec::with_capacity(count);
+    let mut weights = vec![0.0; count];
+    let mut is_rational = false;
+    let mut l_count = 0usize;
+    for row in sur.rows() {
+        for pw in row {
+            let mut pnt = Point3::new(pw.x, pw.y, pw.z);
+            if pw.w != NOW {
+                is_rational = true;
+                if let Some(w) = weights.get_mut(l_count) {
+                    *w = pw.w;
+                }
+                pnt.x /= pw.w;
+                pnt.y /= pw.w;
+                pnt.z /= pw.w;
+            }
+            points.push(pnt);
+            l_count += 1;
+        }
+    }
+    if !is_rational {
+        weights.clear();
+    }
+    (points, weights)
+}
+
+/// The NLib direction flag of a surface parameter (`SM_SP_U` is `NL_UDIR`, anything
+/// else `NL_VDIR`).
+fn nl_dir(param: SurfParamType) -> Direction {
+    if param == SurfParamType::U {
+        Direction::U
+    } else {
+        Direction::V
+    }
+}
+
+// ---- unported SmSurface methods ------------------------------------------------------
+
+/// `SmSurface::IsKindOf`.
+fn surface_is_kind_of(_t: i64) -> Result<bool> {
+    // UNPORTED(surface.surface_p2): SmSurface::IsKindOf
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsKindOf",
+        unit: "surface.surface_p2",
+    })
+}
+
+/// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
+fn evaluate_normal(_srf: &BSplineSurface, _uv: Point2) -> Result<Vec3> {
+    // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
+    Err(SolidError::Unported {
+        upstream: "SmSurface::EvaluateNormal",
+        unit: "surface.surface_p7",
+    })
+}
+
+/// The zone tolerance of the owning face or brep, `SM_ZONE_TOL_3D` without owner
+/// (`GetFace() ? GetFace()->GetTolerance() : GetBrep() ? ... : SM_ZONE_TOL_3D`).
+fn owner_zone_tolerance(_srf: &BSplineSurface) -> Result<f64> {
+    // UNPORTED(surface.surface_p1): SmSurface::GetFace
+    Err(SolidError::Unported {
+        upstream: "SmSurface::GetFace",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// `SmSurface::CreateOffsetSurface`.
+fn surface_create_offset_surface(
+    _srf: &BSplineSurface,
+    _signed_offset_distance: f64,
+    _approx_tol_3d: f64,
+) -> Result<BSplineSurface> {
+    // UNPORTED(surface.surface_p1): SmSurface::CreateOffsetSurface
+    Err(SolidError::Unported {
+        upstream: "SmSurface::CreateOffsetSurface",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// `SmSurface::IsDegenerateCurve`.
+fn surface_is_degenerate_curve(
+    _srf: &BSplineSurface,
+    _angle_tol_deg: f64,
+    _uv_domain: Option<&Extent2d>,
+    _tol_3d: f64,
+) -> Result<bool> {
+    // UNPORTED(surface.surface_p1): SmSurface::IsDegenerateCurve
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsDegenerateCurve",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// `SmSurface::LocalPointSolve(domain, SM_SO_INTERSECT, point, guess, ..)`: whether it
+/// succeeded and the solution's start parameters.
+fn local_point_solve(
+    _srf: &BSplineSurface,
+    _domain: &Extent2d,
+    _point: Point3,
+    _guess: Point2,
+) -> Result<(bool, Point2)> {
+    // UNPORTED(surface.surface_p1): SmSurface::LocalPointSolve
+    Err(SolidError::Unported {
+        upstream: "SmSurface::LocalPointSolve",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// `SmSurface::GlobalPointSolve(domain, SM_SO_INTERSECT, point, tol, NULL,
+/// SM_SR_ALL, ..)`: the start parameters of every solution.
+fn global_point_solve(
+    _srf: &BSplineSurface,
+    _domain: &Extent2d,
+    _point: Point3,
+    _tol_3d: f64,
+) -> Result<Vec<Point2>> {
+    // UNPORTED(surface.surface_p1): SmSurface::GlobalPointSolve
+    Err(SolidError::Unported {
+        upstream: "SmSurface::GlobalPointSolve",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// `SmSurface::IsSingularity(uv, dir)`.
+fn is_singularity(_srf: &BSplineSurface, _uv: Point2) -> Result<bool> {
+    // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsSingularity",
+        unit: "surface.surface_p5",
+    })
+}
+
+/// `SmSurface::IsClosed(domain, dir)`.
+fn is_closed(_srf: &BSplineSurface, _domain: &Extent2d, _dir: SurfParamType) -> Result<bool> {
+    // UNPORTED(surface.surface_p5): SmSurface::IsClosed
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsClosed",
+        unit: "surface.surface_p5",
+    })
+}
+
+impl BSplineSurface {
+    /// `SmBSplineSurface_TYPE` (`SURF_BASE_TYPE + 2`).
+    pub const TYPE: i64 = SURF_BASE_TYPE + 2;
+
+    // ---- construction -----------------------------------------------------------------
+
+    /// A surface without NURB data (`SmBSplineSurface()`); only set methods can give it
+    /// one.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            nurb: None,
+            nurb_is_borrowed: false,
+            out_of_bounds_enabled: false,
+            knot_type: KnotType::Unspecified,
+            form: BSplineSurfaceForm::Unspecified,
+        }
+    }
+
+    /// The surface over a copy of the control points `pw[0..=n][0..=m]` and knots
+    /// `u[0..=r]`, `v[0..=s]` of degrees `p`, `q` (`SmBSplineSurface(n, m, p, q, r, s,
+    /// Pw, U, V)`); the knots are fixed up. The sizes are not checked against each
+    /// other, as upstream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when `pw` holds fewer than `n + 1` rows of `m + 1` points or `u`
+    /// / `v` fewer than `r + 1` / `s + 1` knots (upstream reads past them).
+    pub fn from_data(
+        n: usize,
+        m: usize,
+        p: usize,
+        q: usize,
+        r: usize,
+        s: usize,
+        pw: &[Vec<CPoint>],
+        u: &[f64],
+        v: &[f64],
+    ) -> Result<Self> {
+        // allocate single block Surface with internal pointers and size params set
+        let mut new_sur = allocate_nurb_surface(n, m, p, q, r, s)?;
+
+        // copy knot values from target surface to new surface.
+        let src_u = u
+            .get(..=r)
+            .ok_or_else(|| invalid(OP_DATA, "fewer than r + 1 u knots"))?;
+        new_sur.u_knots_mut().copy_from_slice(src_u);
+        // upstream passes the u size (r + 1) as the destination size of the v copy, so
+        // smos_MemCpy refuses it (status ignored) when s > r: the v knots stay 0
+        if s <= r {
+            let src_v = v
+                .get(..=s)
+                .ok_or_else(|| invalid(OP_DATA, "fewer than s + 1 v knots"))?;
+            new_sur.v_knots_mut().copy_from_slice(src_v);
+        }
+
+        // copy control point values from target surface to new surface one row at a time
+        for i in 0..=n {
+            let src = pw
+                .get(i)
+                .and_then(|row| row.get(..=m))
+                .ok_or_else(|| invalid(OP_DATA, "control net smaller than (n, m)"))?;
+            for (j, &cp) in src.iter().enumerate() {
+                *new_sur.cpt_mut(i, j)? = cp;
+            }
+        }
+
+        // Edit knot values: close knots become same and near knots are separated.
+        fixup_knot_vector(new_sur.u_knots_mut(), EFF_ZERO_PARAM);
+        fixup_knot_vector(new_sur.v_knots_mut(), EFF_ZERO_PARAM);
+        Ok(Self {
+            nurb: Some(new_sur),
+            ..Self::new()
+        })
+    }
+
+    /// The surface over an existing NURB (`SmBSplineSurface(gw_SURFACE*,
+    /// bNurbIsBorrowed, pContext)`). An owned (not borrowed) NURB gets its knots fixed
+    /// up (`sm_FixupKnotVector` with `SM_EFF_ZERO_PARAM`).
+    #[must_use]
+    pub fn from_nurb(mut nurb: Surface, borrowed: bool) -> Self {
+        // when owned call sm_FixupKnotVector()
+        if !borrowed {
+            fixup_knot_vector(nurb.u_knots_mut(), EFF_ZERO_PARAM);
+            fixup_knot_vector(nurb.v_knots_mut(), EFF_ZERO_PARAM);
+        }
+        Self {
+            nurb: Some(nurb),
+            nurb_is_borrowed: borrowed,
+            ..Self::new()
+        }
+    }
+
+    /// The surface over a compact copy of `gw_nurb`, knots fixed up
+    /// (`SmBSplineSurface(const gw_SURFACE*)`).
+    #[must_use]
+    pub fn from_gw_nurb(gw_nurb: &Surface) -> Self {
+        let mut nurb = copy_nurb_surface(gw_nurb);
+        fixup_knot_vector(nurb.u_knots_mut(), EFF_ZERO_PARAM);
+        fixup_knot_vector(nurb.v_knots_mut(), EFF_ZERO_PARAM);
+        Self {
+            nurb: Some(nurb),
+            ..Self::new()
+        }
+    }
+
+    /// A copy (copy constructor, `Copy`): out-of-bounds flag, knot type and form are
+    /// copied; the NURB (if any) is copied compactly and its knots are fixed up; the
+    /// copy owns its NURB.
+    #[must_use]
+    pub fn copy(&self) -> Self {
+        let nurb = self.nurb.as_ref().map(|src| {
+            let mut nurb = copy_nurb_surface(src);
+            fixup_knot_vector(nurb.u_knots_mut(), EFF_ZERO_PARAM);
+            fixup_knot_vector(nurb.v_knots_mut(), EFF_ZERO_PARAM);
+            nurb
+        });
+        Self {
+            nurb,
+            nurb_is_borrowed: false,
+            out_of_bounds_enabled: self.out_of_bounds_enabled,
+            knot_type: self.knot_type,
+            form: self.form,
+        }
+    }
+
+    /// Upstream `operator==`: the same object, or both without NURB, or NURBs equal
+    /// within `SM_EFF_ZERO` (`N_SrfsAreEqual`).
+    #[must_use]
+    pub fn approx_eq(&self, other: &Self) -> bool {
+        // low work
+        if core::ptr::eq(self, other) {
+            return true;
+        }
+        match (&self.nurb, &other.nurb) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.equals(b, EFF_ZERO, EFF_ZERO),
+            _ => false,
+        }
+    }
+
+    // ---- accessors --------------------------------------------------------------------
+
+    /// The NURB, if any (`GetGwNurbPointer`).
+    #[must_use]
+    pub fn gw_nurb(&self) -> Option<&Surface> {
+        self.nurb.as_ref()
+    }
+
+    /// The NURB, made first if missing (`GetOrCreateGwNurbPointer`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when there is none: a plain B-spline cannot make one (upstream returns
+    /// `NULL`).
+    pub fn get_or_create_gw_nurb(&mut self) -> Result<&mut Surface> {
+        if self.nurb.is_none() {
+            self.make_nurb()?;
+        }
+        self.nurb.as_mut().ok_or_else(|| sm_err(OP_NURB))
+    }
+
+    /// Makes the NURB representation (`MakeNurb`): a plain B-spline only checks that it
+    /// has one.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB.
+    pub fn make_nurb(&mut self) -> Result<()> {
+        if self.nurb.is_none() {
+            return Err(sm_err(OP_NURB));
+        }
+        Ok(())
+    }
+
+    /// The NURB for read-only use, made first if missing (`GetOrCreateGwNurbPointer`
+    /// from a `const` method). A plain B-spline cannot make one, so this is
+    /// [`BSplineSurface::gw_nurb`].
+    fn nurb_ref(&self) -> Option<&Surface> {
+        self.nurb.as_ref()
+    }
+
+    /// [`BSplineSurface::nurb_ref`] for methods that dereference it upstream.
+    fn nurb_or_err(&self, operation: &'static str) -> Result<&Surface> {
+        self.nurb_ref().ok_or_else(|| sm_err(operation))
+    }
+
+    /// Mutable access to the out-of-bounds evaluation flag (`GetOutOfBoundsEnabled`).
+    pub fn out_of_bounds_enabled_mut(&mut self) -> &mut bool {
+        &mut self.out_of_bounds_enabled
+    }
+
+    /// Whether evaluation beyond the natural domain is enabled (`IsOutOfBoundsEnabled`).
+    #[must_use]
+    pub fn is_out_of_bounds_enabled(&self) -> bool {
+        self.out_of_bounds_enabled
+    }
+
+    /// Whether the NURB is borrowed (`IsNurbBorrowed`).
+    #[must_use]
+    pub fn is_nurb_borrowed(&self) -> bool {
+        self.nurb_is_borrowed
+    }
+
+    /// The STEP knot type (`m_eKnotType`).
+    #[must_use]
+    pub fn knot_type(&self) -> KnotType {
+        self.knot_type
+    }
+
+    /// The STEP form (`GetBSplineSurfaceForm`).
+    #[must_use]
+    pub fn form(&self) -> BSplineSurfaceForm {
+        self.form
+    }
+
+    /// Sets the STEP form (`SetBSplineSurfaceForm`).
+    pub fn set_b_spline_surface_form(&mut self, form: BSplineSurfaceForm) {
+        self.form = form;
+    }
+
+    /// Rebuilds the STEP data from the NURB (`RebuildSTEPFromNURBParameters`): nothing
+    /// to do for a plain B-spline.
+    ///
+    /// # Errors
+    ///
+    /// None for a plain B-spline.
+    pub fn rebuild_step_from_nurb_parameters(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Records a u/v swap (`ToggleSwapUVBit`): nothing to record for a plain B-spline.
+    pub fn toggle_swap_uv_bit(&mut self) {}
+
+    /// `SmBSplineSurface_TYPE` (`GetType`).
+    #[must_use]
+    pub const fn type_code(&self) -> i64 {
+        Self::TYPE
+    }
+
+    /// `"SmBSplineSurface_TYPE"` (`GetTypeString`).
+    #[must_use]
+    pub const fn type_string(&self) -> &'static str {
+        "SmBSplineSurface_TYPE"
+    }
+
+    /// `"SmBSplineSurface"` (`GetClassString`).
+    #[must_use]
+    pub const fn class_string(&self) -> &'static str {
+        "SmBSplineSurface"
+    }
+
+    /// True for `SmBSplineSurface_TYPE` and its base types (`IsKindOf`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] for any other type: the base `SmSurface::IsKindOf` is
+    /// not ported yet.
+    pub fn is_kind_of(&self, t: i64) -> Result<bool> {
+        if t == Self::TYPE {
+            return Ok(true);
+        }
+        surface_is_kind_of(t)
+    }
+
+    // ---- simple queries ---------------------------------------------------------------
+
+    /// The degree in `param`'s direction (`GetDegree`; `0` without NURB).
+    #[must_use]
+    pub fn degree(&self, param: SurfParamType) -> usize {
+        let Some(sur) = self.nurb_ref() else {
+            return 0; // FS
+        };
+        if param == SurfParamType::U {
+            sur.p()
+        } else {
+            sur.q()
+        }
+    }
+
+    /// The number of knots (with repeats) in `param`'s direction
+    /// (`GetNumberNaturalKnots`; `0` without NURB).
+    #[must_use]
+    pub fn number_natural_knots(&self, param: SurfParamType) -> usize {
+        let Some(sur) = self.nurb_ref() else {
+            return 0; // FS
+        };
+        if param == SurfParamType::U {
+            sur.r() + 1
+        } else {
+            sur.s() + 1
+        }
+    }
+
+    /// The number of control points in u ([`SurfParamType::U`]), in v
+    /// ([`SurfParamType::V`]) or in total (any other value) (`GetNumberControlPoints`;
+    /// `0` without NURB).
+    #[must_use]
+    pub fn number_control_points(&self, param: SurfParamType) -> usize {
+        let Some(sur) = self.nurb_ref() else {
+            return 0; // FS
+        };
+        match param {
+            SurfParamType::U => sur.n() + 1,
+            SurfParamType::V => sur.m() + 1,
+            _ => (sur.n() + 1) * (sur.m() + 1),
+        }
+    }
+
+    /// Whether the surface is rational: control point `[0][0]` has a weight
+    /// (`IsRational`; `false` without NURB).
+    #[must_use]
+    pub fn is_rational(&self) -> bool {
+        let Some(sur) = self.nurb_ref() else {
+            return false; // FS
+        };
+        match sur.cpt(0, 0) {
+            Ok(cp) => cp.w != NOW,
+            Err(_) => false,
+        }
+    }
+
+    /// `[U[0], U[r]] x [V[0], V[s]]` (`GetNaturalUVDomain`; `(0, 0, 0, 0)` without NURB).
+    #[must_use]
+    pub fn natural_uv_domain(&self) -> Extent2d {
+        let Some(sur) = self.nurb_ref() else {
+            return Extent2d::from_bounds(0.0, 0.0, 0.0, 0.0); // FS
+        };
+        let u = sur.u_knots();
+        let v = sur.v_knots();
+        let first = |k: &[f64]| k.first().copied().unwrap_or(f64::NAN);
+        let last = |k: &[f64]| k.last().copied().unwrap_or(f64::NAN);
+        Extent2d::from_bounds(first(u), first(v), last(u), last(v))
+    }
+
+    /// The distinct knots in `param`'s direction and their multiplicities, optionally
+    /// only those in `ivl` (`GetKnots`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB.
+    pub fn knots(
+        &self,
+        param: SurfParamType,
+        ivl: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        let sur = self.nurb_or_err(OP_KNOTS)?;
+        let (knu, knv) = sur.knot_vectors()?;
+        if param == SurfParamType::U {
+            Ok(get_knots(&knu, ivl))
+        } else {
+            Ok(get_knots(&knv, ivl))
+        }
+    }
+
+    /// The Greville abscissa of control point `index` in `param`'s direction
+    /// (`GetGrevilleAbscissa`): the first knot for index 0, the last knot from the last
+    /// control point on, else the average of knots `index + 1 ..= index + degree`.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB (upstream crashes); `InvalidInput` for knots shorter than
+    /// the control points and degree say (upstream reads past them).
+    pub fn greville_abscissa(&self, param: SurfParamType, index: usize) -> Result<f64> {
+        let sur = self.nurb_or_err(OP_GREVILLE)?;
+        let (num_pts, knots, deg) = if param == SurfParamType::U {
+            (sur.n() + 1, sur.u_knots(), sur.p())
+        } else {
+            (sur.m() + 1, sur.v_knots(), sur.q())
+        };
+        let short = || invalid(OP_GREVILLE, "knots shorter than the control points say");
+
+        if index < 1 {
+            // at or below the beginning
+            return knots.first().copied().ok_or_else(short);
+        }
+        if index >= num_pts - 1 {
+            // at or beyond the end
+            return knots.last().copied().ok_or_else(short);
+        }
+
+        let mut ret_val = 0.0;
+        for i in 1..=deg {
+            ret_val += knots.get(index + i).copied().ok_or_else(short)?;
+        }
+        ret_val /= deg as f64;
+        Ok(ret_val)
+    }
+
+    /// The STEP canonical data (`GetCanonical`): degrees, Euclidean control points
+    /// (homogeneous `x`, `y`, `z` divided by the weight of rational points), form,
+    /// distinct knots with multiplicities, knot type and weights (empty unless some
+    /// point is rational).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without NURB.
+    pub fn canonical(&self) -> Result<SurfaceCanonical> {
+        let sur = self.nurb_ref().ok_or(SolidError::Upstream {
+            operation: OP_GET_CANON,
+            code: SM_ERR_NULL_POINTER,
+            entity: None,
+        })?;
+        let (knu, knv) = sur.knot_vectors()?;
+        let (u_knots, u_multiplicities) = get_knots(&knu, None);
+        let (v_knots, v_multiplicities) = get_knots(&knv, None);
+        let (control_points, weights) = euclidean_net(sur);
+        Ok(SurfaceCanonical {
+            u_degree: sur.p(),
+            v_degree: sur.q(),
+            control_points,
+            form: self.form,
+            u_multiplicities,
+            v_multiplicities,
+            u_knots,
+            v_knots,
+            knot_type: self.knot_type,
+            weights,
+        })
+    }
+
+    /// The control net in Euclidean form with its weights (`GetControlPointNet`); the
+    /// weights are empty unless some point is rational.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB (upstream crashes).
+    pub fn control_point_net(&self) -> Result<ControlPointNet> {
+        let sur = self.nurb_or_err(OP_NET)?;
+        let (points, weights) = euclidean_net(sur);
+        Ok(ControlPointNet {
+            u_count: sur.n() + 1,
+            v_count: sur.m() + 1,
+            points,
+            weights,
+        })
+    }
+
+    /// The control point counts in u and v and a copy of the control points as stored
+    /// (homogeneous, `z == NOZ` for 2D, `w == NOW` for non-rational points), row by row
+    /// (`GetControlPointsPointer`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB (upstream crashes).
+    pub fn control_points(&self) -> Result<(usize, usize, Vec<CPoint>)> {
+        let sur = self.nurb_or_err(OP_NET)?;
+        let pts = sur.rows().flat_map(|row| row.iter().copied()).collect();
+        Ok((sur.n() + 1, sur.m() + 1, pts))
+    }
+
+    /// Whether the surface degenerates to a curve (`IsDegenerateCurve`): passed to
+    /// `SmSurface::IsDegenerateCurve`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmSurface::IsDegenerateCurve` is not ported yet.
+    pub fn is_degenerate_curve(
+        &self,
+        angle_tol_deg: f64,
+        uv_domain: Option<&Extent2d>,
+        tol_3d: f64,
+    ) -> Result<bool> {
+        // gwc: for now - pass the call along
+        surface_is_degenerate_curve(self, angle_tol_deg, uv_domain, tol_3d)
+    }
+
+    /// Whether the surface is parallel to `vector`: all control points of every u row
+    /// (or of every v column) lie on a line parallel to it (`IsParallelToVector`).
+    /// `false` without NURB; `true` for a zero vector (see the module docs).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: the analytic plane test calls `SmSurface::IsKindOf`.
+    pub fn is_parallel_to_vector(&self, vector: Vec3) -> Result<bool> {
+        let Ok(test_vec) = vector.unitize() else {
+            // SER(sTestVec.Unitize()): SM_ERR_INVALID_INPUT returned as the boolean
+            return Ok(true);
+        };
+
+        if self.is_kind_of(PLANE_TYPE)? {
+            // the SmPlane branch: |Z . v| < SM_EFF_ZERO * (1 + |origin|max)
+            // UNPORTED(surface.plane_p1): SmPlane::GetPosition
+            return Err(SolidError::Unported {
+                upstream: "SmPlane::GetPosition",
+                unit: "surface.plane_p1",
+            });
+        }
+
+        let Some(sur) = self.nurb_ref() else {
+            return Ok(false); // FS
+        };
+        let (n, m) = (sur.n(), sur.m());
+
+        // A line through net[a] and net[b] parallel to the vector with the points
+        // `rest` on it.
+        let line_ok = |line_pnt: Point3,
+                       line_end: Point3,
+                       rest: &mut dyn Iterator<Item = Result<Point3>>|
+         -> Result<bool> {
+            let tol = EFF_ZERO * (1.0 + line_pnt.max_dimension() + line_end.max_dimension());
+            let line_vec = line_end - line_pnt;
+            if line_vec.length_squared() < EFF_ZERO {
+                return Ok(false);
+            }
+            let line_vec = line_vec.unitize()?;
+            if line_vec.dot(test_vec).abs() < 1.0 - tol {
+                return Ok(false);
+            }
+            for pnt in rest {
+                // smgu_LinePointDistance(LinePnt, LineEnd, ..): LineEnd is the direction
+                let (distance, _) = line_point_distance(line_pnt, line_end, pnt?);
+                if distance > tol {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        };
+
+        // First check U constant control points.
+        let mut failed = false;
+        for i_u in 0..=n {
+            let line_pnt = euclid_at(sur, i_u, 0)?;
+            let line_end = euclid_at(sur, i_u, 1)?;
+            let mut rest = (2..=m).map(|i_v| euclid_at(sur, i_u, i_v));
+            if !line_ok(line_pnt, line_end, &mut rest)? {
+                failed = true;
+                break;
+            }
+        }
+        if !failed {
+            return Ok(true);
+        }
+
+        // First check V constant control points.
+        failed = false;
+        for i_v in 0..=m {
+            let line_pnt = euclid_at(sur, 0, i_v)?;
+            let line_end = euclid_at(sur, 1, i_v)?;
+            let mut rest = (2..=n).map(|i_u| euclid_at(sur, i_u, i_v));
+            if !line_ok(line_pnt, line_end, &mut rest)? {
+                failed = true;
+                break;
+            }
+        }
+        if !failed {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    // ---- bounding boxes ---------------------------------------------------------------
+
+    /// The bounding boxes asked for in `req` (`CalculateBoundingBox`): the axis aligned
+    /// and pseudo boxes of the control net (always of the whole surface), and the polar
+    /// box of the normals (sampled over `uv_domain` for "analytic" low degree surfaces,
+    /// from the net otherwise). A basis guess replaces the computed box when it gives
+    /// a smaller one.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: the analytic type test calls `SmSurface::IsKindOf`,
+    /// the polar box `SmSurface::EvaluateNormal` and the zone tolerance
+    /// `SmSurface::GetFace`. `SM_ERR` without NURB (upstream crashes).
+    pub fn calculate_bounding_box(
+        &self,
+        uv_domain: &Extent2d,
+        req: &BoundingBoxRequest<'_>,
+    ) -> Result<BoundingBoxes> {
+        // init output
+        let mut normal_box = req.normal.then(Extent3d::new);
+        let mut pseudo_box = req.pseudo.then(PseudoBox::new);
+        let mut polar_box = req.polar.then(PolarBox::new);
+
+        let polar_guess = req
+            .polar_guess
+            .filter(|g| g.state() != PolarBoxState::Uninitialized);
+
+        // locals
+        let mut trial_pseudo_box = PseudoBox::new();
+        let mut trial_polar_box = PolarBox::new();
+        let mut guess_basis: Option<Vec3> = None;
+
+        // (GetNaturalUVDomain: only used by the SE'd interval test below)
+        let _natural_uv_domain = self.natural_uv_domain();
+
+        let u_degree = self.degree(SurfParamType::U);
+        let v_degree = self.degree(SurfParamType::V);
+        let u_knots = self.number_natural_knots(SurfParamType::U);
+        let v_knots = self.number_natural_knots(SurfParamType::V);
+
+        // check for analytic/non-analytic splines
+        let mut planar = u_degree == 1 && u_knots <= 4 && v_degree == 1 && v_knots <= 4;
+        let mut analytic = !((u_degree == 1 && u_knots > 4)
+            || (u_degree == 2 && u_knots > 6)
+            || (u_degree > 2)
+            || (v_degree == 1 && v_knots > 4)
+            || (v_degree == 2 && v_knots > 6)
+            || (v_degree > 2)
+            || (u_degree == 2 && v_degree == 2));
+
+        // also check the derived type of the surface
+        if self.is_kind_of(PLANE_TYPE)?
+            || self.is_kind_of(CONE_TYPE)?
+            || self.is_kind_of(SPHERE_TYPE)?
+            || self.is_kind_of(TORUS_TYPE)?
+        {
+            analytic = true;
+        }
+
+        // locals
+        let sur = self.nurb_or_err(OP_BBOX)?;
+        let (n, m) = (sur.n(), sur.m());
+
+        // Correction for poor approximation to 'plane' (status ignored)
+        if planar {
+            let flat = sur.is_flat_cheap(0.0001).is_ok_and(|f| f.flat);
+            if !flat {
+                planar = false;
+            }
+        }
+
+        // (upstream: SE(SM_ERR_INVALID_INPUT) when uv_domain is not contained by the
+        // natural domain - signalled only, not returned)
+
+        // Compute the basis vectors of the PseudoBox using the control polygon
+        if let Some(pb) = pseudo_box.as_mut() {
+            let p00 = euclid_at(sur, 0, 0)?;
+            let p10 = euclid_at(sur, n, 0)?;
+            let p01 = euclid_at(sur, 0, m)?;
+            let p11 = euclid_at(sur, n, m)?;
+
+            let v1 = (p00 - p10) + (p01 - p11);
+            let v2 = (p00 - p01) + (p10 - p11);
+            let v1_ls = v1.length_squared();
+            if v1_ls > EFF_ZERO_SQ {
+                let [b1, b2, b3] = v1
+                    .make_unit_ortho_vectors(Some(v2))
+                    .unwrap_or([Vec3::UNDEF; 3]);
+                *pb = PseudoBox::new(); // Initialize it
+                                        // (SetBasis status ignored)
+                let _ = pb.set_basis(b1, b2, b3);
+            } else {
+                *pb = PseudoBox::new(); // Initialize it
+            }
+
+            // when given a guess for the basis vectors
+            if let Some(g) = req.pseudo_guess {
+                trial_pseudo_box.init();
+                let [g0, g1, g2] = *g.basis();
+                let _ = trial_pseudo_box.set_basis(g0, g1, g2);
+            }
+        }
+
+        // Compute polar bounding box really fast for analytics
+        if let (Some(pol), true) = (polar_box.as_mut(), analytic) {
+            const V_CNT: usize = 10;
+            let mut norm = [Vec3::UNDEF; V_CNT];
+
+            // get center normal
+            norm[9] = evaluate_normal(self, uv_domain.evaluate(0.5, 0.5))?;
+
+            if planar {
+                pol.add_vector(norm[9], None);
+                if polar_guess.is_some() {
+                    trial_polar_box.add_vector(norm[9], None);
+                }
+            } else {
+                // get corner normals
+                norm[5] = evaluate_normal(self, uv_domain.evaluate(0.0, 0.0))?;
+                norm[6] = evaluate_normal(self, uv_domain.evaluate(1.0, 0.0))?;
+                norm[7] = evaluate_normal(self, uv_domain.evaluate(1.0, 1.0))?;
+                norm[8] = evaluate_normal(self, uv_domain.evaluate(0.0, 1.0))?;
+
+                // Build a central vector that can be used as a good PolarBox base vector
+                norm[0] = if n <= 2 && m <= 2 {
+                    (norm[5] + norm[6] + norm[7] + norm[8]) / 4.0
+                } else {
+                    norm[9]
+                };
+
+                // when we have a midPoint vector for the polar box
+                if norm[0].length_squared() > EFF_ZERO_SQ {
+                    // get mid side normals
+                    norm[1] = evaluate_normal(self, uv_domain.evaluate(0.0, 0.5))?;
+                    norm[2] = evaluate_normal(self, uv_domain.evaluate(1.0, 0.5))?;
+                    norm[3] = evaluate_normal(self, uv_domain.evaluate(0.5, 0.0))?;
+                    norm[4] = evaluate_normal(self, uv_domain.evaluate(0.5, 1.0))?;
+
+                    // build the polar box by adding all the vectors
+                    pol.reset();
+                    for v in norm {
+                        pol.add_vector(v, None);
+                    }
+
+                    if let Some(g) = polar_guess {
+                        guess_basis = Some(polar_guess_basis(g));
+                        trial_polar_box.reset();
+                        for v in norm {
+                            trial_polar_box.add_vector(v, guess_basis);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Do a little work to try to get the polar box to be centered - use the
+        // derivatives of the midpoints to establish the base line vector.
+        if let (Some(pol), false) = (polar_box.as_mut(), analytic) {
+            let n0 = evaluate_normal(self, uv_domain.evaluate(0.5, 0.5))?;
+            pol.add_vector(n0, None);
+            let n1 = evaluate_normal(self, uv_domain.evaluate(1.0, 0.5))?;
+            pol.add_vector(n1, None);
+            let n2 = evaluate_normal(self, uv_domain.evaluate(0.5, 1.0))?;
+            pol.add_vector(n2, None);
+
+            if let Some(g) = polar_guess {
+                guess_basis = Some(polar_guess_basis(g));
+                trial_polar_box.reset();
+                trial_polar_box.add_vector(n0, guess_basis);
+                trial_polar_box.add_vector(n1, guess_basis);
+                trial_polar_box.add_vector(n2, guess_basis);
+            }
+        }
+
+        // iter over the BSpline SurfaceNet ControlPoints
+        let net_polar = polar_box.is_some() && !analytic;
+        if normal_box.is_some() || pseudo_box.is_some() || net_polar {
+            for i in 0..=n {
+                for j in 0..=m {
+                    // get controlPoint[i][j]
+                    let point = euclid_at(sur, i, j)?;
+
+                    // add control points (or their differences) to requested bounding boxes
+                    if let Some(nb) = normal_box.as_mut() {
+                        if i == 0 && j == 0 {
+                            *nb = Extent3d::from_points(point, point);
+                        } else {
+                            nb.add_point(point);
+                        }
+                    }
+                    if let Some(pb) = pseudo_box.as_mut() {
+                        pb.add_point(point);
+                        if req.pseudo_guess.is_some() {
+                            trial_pseudo_box.add_point(point);
+                        }
+                    }
+                    if let (Some(pol), true) = (polar_box.as_mut(), net_polar) {
+                        // get control net tangent vectors
+                        let mut add = |cross: Vec3, pol: &mut PolarBox| {
+                            pol.add_vector(cross, None);
+                            if polar_guess.is_some() {
+                                trial_polar_box.add_vector(cross, guess_basis);
+                            }
+                        };
+                        let dv0 = if j > 1 {
+                            Some(point - euclid_at(sur, i, j - 1)?)
+                        } else {
+                            None
+                        };
+                        let dv1 = if j < m {
+                            Some(euclid_at(sur, i, j + 1)? - point)
+                        } else {
+                            None
+                        };
+                        if i > 1 {
+                            let du0 = point - euclid_at(sur, i - 1, j)?;
+                            if let Some(dv0) = dv0 {
+                                add(du0.cross(dv0), pol);
+                            }
+                            if let Some(dv1) = dv1 {
+                                add(du0.cross(dv1), pol);
+                            }
+                        }
+                        if i < n {
+                            let du1 = euclid_at(sur, i + 1, j)? - point;
+                            if let Some(dv0) = dv0 {
+                                add(du1.cross(dv0), pol);
+                            }
+                            if let Some(dv1) = dv1 {
+                                add(du1.cross(dv1), pol);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // save the better Psuedo box
+            if let (Some(pb), Some(_)) = (pseudo_box.as_mut(), req.pseudo_guess) {
+                if trial_pseudo_box.volume() < pb.volume() - EFF_ZERO {
+                    *pb = trial_pseudo_box;
+                }
+            }
+
+            // save the better Polar box
+            if let (Some(pol), true, Some(_)) = (polar_box.as_mut(), net_polar, polar_guess) {
+                if trial_polar_box.polar_area() < pol.polar_area() - EFF_ZERO {
+                    *pol = trial_polar_box;
+                }
+            }
+        }
+
+        // When asked, expand the normal box by the zone tolerance
+        if req.expand_by_zone_tol {
+            if let Some(nb) = normal_box.as_mut() {
+                nb.expand_absolute(owner_zone_tolerance(self)?);
+            }
+            // When asked, expand the pPseudoBox box by the zone tolerance
+            if let Some(pb) = pseudo_box.as_mut() {
+                pb.expand_absolute(owner_zone_tolerance(self)?);
+            }
+        }
+
+        Ok(BoundingBoxes {
+            normal: normal_box,
+            pseudo: pseudo_box,
+            polar: polar_box,
+        })
+    }
+
+    // ---- factories --------------------------------------------------------------------
+
+    /// The non-rational bilinear surface interpolating four corners
+    /// (`CreateBilinearSurface`): `S(0,0) = u0v0`, `S(1,0) = u1v0`, `S(0,1) = u0v1`,
+    /// `S(1,1) = u1v1`.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when NLib fails.
+    pub fn create_bilinear_surface(
+        u0v0: Point3,
+        u1v0: Point3,
+        u0v1: Point3,
+        u1v1: Point3,
+    ) -> Result<Self> {
+        // create an NLib NonRational bilinear BSpline Surface interpolating the 4 corner points
+        let sur = corner_pts(u0v0, u1v0, u0v1, u1v1).map_err(nl_err(OP_BILINEAR))?;
+        Ok(Self::from_gw_nurb(&sur))
+    }
+
+    /// The surface of STEP canonical data (`CreateCanonical`): distinct knots expanded
+    /// by their multiplicities, Euclidean control points (row by row), weights (the
+    /// surface is non-rational when all are within `SM_EFF_ZERO` of 1) and an
+    /// optional domain overriding the parameter bounds; built with `N_Iges128Srf`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a degree outside 1..=32, a weight count other than the point
+    /// count, a point count other than the product of the counts the knots and degrees
+    /// give, fewer multiplicities than knots or no control points; `SM_ERR` when NLib
+    /// fails.
+    pub fn create_canonical(data: &CanonicalSurfaceData<'_>) -> Result<Self> {
+        let u_degree = data.u_degree;
+        let v_degree = data.v_degree;
+        let cps = data.control_points;
+
+        // checkinput
+        check(
+            (1..=32).contains(&u_degree),
+            OP_CANON,
+            "u degree outside 1..=32",
+        )?;
+        check(
+            (1..=32).contains(&v_degree),
+            OP_CANON,
+            "v degree outside 1..=32",
+        )?;
+
+        // If have weights make sure have right number of them
+        if let Some(w) = data.weights {
+            if !w.is_empty() && w.len() != cps.len() {
+                return Err(invalid(OP_CANON, "weight count differs from point count"));
+            }
+        }
+
+        // Make sNewUKnots / sNewVKnots arrays with one entry for each multiplicity
+        let expand = |knots: &[f64], mults: &[usize]| -> Result<Vec<f64>> {
+            let mut out = Vec::new();
+            for (i, &knot) in knots.iter().enumerate() {
+                let mult = *mults
+                    .get(i)
+                    .ok_or_else(|| invalid(OP_CANON, "fewer multiplicities than knots"))?;
+                out.extend(core::iter::repeat_n(knot, mult));
+            }
+            Ok(out)
+        };
+        let new_u_knots = expand(data.u_knots, data.u_multiplicities)?;
+        let new_v_knots = expand(data.v_knots, data.v_multiplicities)?;
+
+        // Get number of ControlPoints (ULONG arithmetic)
+        let num_u_cpts = new_u_knots.len().wrapping_sub(u_degree).wrapping_sub(1);
+        let num_v_cpts = new_v_knots.len().wrapping_sub(v_degree).wrapping_sub(1);
+
+        // check input - number of ControlPoints is consistent with Knot Count and degree
+        if num_u_cpts.wrapping_mul(num_v_cpts) != cps.len() {
+            return Err(invalid(
+                OP_CANON,
+                "point count inconsistent with knots and degrees",
+            ));
+        }
+        if num_u_cpts == 0
+            || num_v_cpts == 0
+            || num_u_cpts > new_u_knots.len()
+            || num_v_cpts > new_v_knots.len()
+        {
+            // upstream builds k1 = -1 or wraps its sizes
+            return Err(invalid(OP_CANON, "no control points"));
+        }
+
+        // when weights are all 1.0 within tolerance, make BSpline non-rational.
+        let mut non1_weight = false;
+        if let Some(w) = data.weights {
+            for &wi in w {
+                if (wi - 1.0).abs() > EFF_ZERO {
+                    non1_weight = true;
+                }
+            }
+        }
+
+        // set up weight rows (rational with given weights, else all 1.0)
+        let weights_flat: Vec<f64> = match data.weights {
+            Some(w) if non1_weight && !w.is_empty() => w.to_vec(),
+            _ => vec![1.0; cps.len()],
+        };
+        let rows = |k: usize| k * num_v_cpts..(k + 1) * num_v_cpts;
+        let mut w_rows: Vec<Vec<f64>> = Vec::with_capacity(num_u_cpts);
+        let mut p_rows: Vec<Vec<Point3>> = Vec::with_capacity(num_u_cpts);
+        for k in 0..num_u_cpts {
+            let wr = weights_flat
+                .get(rows(k))
+                .ok_or_else(|| invalid(OP_CANON, "too few weights"))?;
+            let pr = cps
+                .get(rows(k))
+                .ok_or_else(|| invalid(OP_CANON, "too few control points"))?;
+            w_rows.push(wr.to_vec());
+            p_rows.push(pr.to_vec());
+        }
+
+        let knot = |k: &[f64], i: usize| -> Result<f64> {
+            k.get(i)
+                .copied()
+                .ok_or_else(|| invalid(OP_CANON, "too few knots"))
+        };
+
+        // init u and v to domain min/max
+        let (u, v) = if let Some(d) = &data.uv_domain {
+            ([d.min().x, d.max().x], [d.min().y, d.max().y])
+        } else {
+            // get u and v boundary values from the knot arrays
+            (
+                [
+                    knot(&new_u_knots, u_degree)?,
+                    knot(&new_u_knots, num_u_cpts)?,
+                ],
+                [
+                    knot(&new_v_knots, v_degree)?,
+                    knot(&new_v_knots, num_v_cpts)?,
+                ],
+            )
+        };
+
+        // build the Nlib BSpline object
+        let sur = iges_128_surface(&Entity128 {
+            k1: num_u_cpts - 1,
+            k2: num_v_cpts - 1,
+            m1: u_degree,
+            m2: v_degree,
+            s: &new_u_knots,
+            t: &new_v_knots,
+            w: &w_rows,
+            pts: &p_rows,
+            u,
+            v,
+        })
+        .map_err(nl_err(OP_CANON))?;
+
+        // build NMTlib SmBSpline from Nlib Nurb
+        let mut srf = Self::from_gw_nurb(&sur);
+        srf.form = data.form;
+        srf.knot_type = data.knot_type;
+        Ok(srf)
+    }
+
+    /// `sm_CreateConePatch`: the cone (or cylinder) patch of [`create_cone_patch`]
+    /// with the circle in u (`SM_SP_U`, normal outward) or v (any other value, normal
+    /// inward).
+    ///
+    /// [`create_cone_patch`]: BSplineSurface::create_cone_patch
+    fn create_cone_patch_dir(
+        reference_frame: &Axis2Placement,
+        bottom_radius: f64,
+        top_radius: f64,
+        start_angle_deg: f64,
+        end_angle_deg: f64,
+        height: f64,
+        parameterization: NurbCircleParam,
+        srf_param: SurfParamType,
+    ) -> Result<Self> {
+        check(bottom_radius >= 0.0, OP_CONE, "negative bottom radius")?;
+        check(top_radius >= 0.0, OP_CONE, "negative top radius")?;
+        check(
+            (0.0..=360.0).contains(&start_angle_deg),
+            OP_CONE,
+            "start angle outside [0, 360]",
+        )?;
+        check(
+            (0.0..=360.0).contains(&end_angle_deg),
+            OP_CONE,
+            "end angle outside [0, 360]",
+        )?;
+
+        let (c, x, y) = extract_frame(reference_frame);
+
+        let ctp = match parameterization {
+            NurbCircleParam::Quadratic => ConicType::Quadratic, // degree 2
+            NurbCircleParam::Quintic => ConicType::Quintic,     // degree 5
+        };
+
+        let dir = nl_dir(srf_param);
+        let sur = cyl_cone(
+            &CylCone {
+                center: c,
+                x,
+                y,
+                rb: bottom_radius,
+                rt: top_radius,
+                start: start_angle_deg,
+                end: end_angle_deg,
+                h: height,
+            },
+            ctp,
+            dir,
+        )
+        .map_err(nl_err(OP_CONE))?;
+
+        let mut srf = Self::from_gw_nurb(&sur);
+        srf.set_b_spline_surface_form(BSplineSurfaceForm::ConicalSurf);
+        if are_same(bottom_radius, top_radius) {
+            srf.set_b_spline_surface_form(BSplineSurfaceForm::CylindricalSurf);
+        }
+        Ok(srf)
+    }
+
+    /// A cone (or, with equal radii, cylinder) patch (`CreateConePatch`): the base
+    /// circle of radius `bottom_radius` lies in the XY plane of `reference_frame` (angle
+    /// 0 on its X axis), the top circle of radius `top_radius` at `height` along its Z
+    /// axis; the side runs counter-clockwise from `start_angle_deg` to
+    /// `end_angle_deg`. The circle is the u direction (normal outward).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a negative (or NaN) radius or an angle outside [0, 360];
+    /// `SM_ERR` when NLib fails (e.g. both radii zero).
+    pub fn create_cone_patch(
+        reference_frame: &Axis2Placement,
+        bottom_radius: f64,
+        top_radius: f64,
+        start_angle_deg: f64,
+        end_angle_deg: f64,
+        height: f64,
+        parameterization: NurbCircleParam,
+    ) -> Result<Self> {
+        Self::create_cone_patch_dir(
+            reference_frame,
+            bottom_radius,
+            top_radius,
+            start_angle_deg,
+            end_angle_deg,
+            height,
+            parameterization,
+            SurfParamType::U,
+        )
+    }
+
+    /// The surface swept by `curve_to_sweep` along `sweep_vector` (`CreateLinearSweep`):
+    /// linear in u (`S(0, v)` is the curve), the curve's parameterisation in v. A 2D
+    /// curve's NURB is made 3D in place first (see the module docs).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a sweep vector shorter than `SM_EFF_ZERO`; `SM_ERR` when the
+    /// curve has no NURB or NLib fails.
+    pub fn create_linear_sweep(
+        curve_to_sweep: &mut BSplineCurve,
+        sweep_vector: Vec3,
+    ) -> Result<Self> {
+        // locals
+        let dist = sweep_vector.length();
+
+        // check state - need nonZero SweepVector
+        if dist < EFF_ZERO {
+            return Err(invalid(OP_SWEEP, "zero sweep vector"));
+        }
+        let w = sweep_vector.unitize()?;
+
+        // pass the call along
+        let cur = curve_to_sweep
+            .get_or_create_gw_nurb()
+            .map_err(nl_err(OP_SWEEP))?;
+        // extruded surface is linear in u direction
+        let sur = extrude_crv(cur, w, dist, Direction::U).map_err(nl_err(OP_SWEEP))?;
+
+        // set output
+        Ok(Self::from_gw_nurb(&sur))
+    }
+
+    /// The offset of this surface by `signed_offset_distance` along its normal, within
+    /// `approx_tol_3d` (`CreateOffsetSurface`): passed to
+    /// `SmSurface::CreateOffsetSurface`, which returns an `SmSurface` (an offset
+    /// surface, approximated when necessary); the result type follows that port.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmSurface::CreateOffsetSurface` is not ported yet.
+    pub fn create_offset_surface(
+        &self,
+        signed_offset_distance: f64,
+        approx_tol_3d: f64,
+    ) -> Result<Self> {
+        // Create implicit offset surface
+        surface_create_offset_surface(self, signed_offset_distance, approx_tol_3d)
+    }
+
+    // ---- editing ----------------------------------------------------------------------
+
+    /// Scales the control points by `scale` (about the origin, when given) and then
+    /// rotates and moves them by `rotate_n_move` (`Transform`); the identity frame
+    /// with no or unit scale changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB (upstream crashes).
+    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        let identity_scale = Vec3::new(1.0, 1.0, 1.0);
+
+        // no work - identity transform
+        if rotate_n_move.is_identity(EFF_ZERO) && scale.is_none_or(|s| s.approx_eq(identity_scale))
+        {
+            return Ok(());
+        }
+
+        let rp = rotate_n_move.origin();
+        let rx = rotate_n_move.x_axis();
+        let ry = rotate_n_move.y_axis();
+        let sz = rotate_n_move.z_axis();
+
+        let s = scale.unwrap_or(identity_scale);
+        let rm = [
+            [rx.x * s.x, ry.x * s.y, sz.x * s.z, rp.x],
+            [rx.y * s.x, ry.y * s.y, sz.y * s.z, rp.y],
+            [rx.z * s.x, ry.z * s.y, sz.z * s.z, rp.z],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let mut rma = RealMatrix::new(3, 3, MatrixType::Full, 3)?;
+        for (i, row) in rm.iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                rma.set(i, j, v)?;
+            }
+        }
+
+        let sur = self.get_or_create_gw_nurb().map_err(|_| sm_err(OP_XFORM))?;
+        // (N_SrfTransform status ignored)
+        let _ = sur.transform(&rma);
+        Ok(())
+    }
+
+    // ---- inversion --------------------------------------------------------------------
+
+    /// The parameters of `point_on_surf` (which must lie on the surface within
+    /// `tol_3d`) and its location (`STEPInversion`): a local solve from `uv_guess`
+    /// when given, else a global solve; a pole, or a seam of a closed direction when
+    /// several solutions exist.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: the solves call `SmSurface::LocalPointSolve` /
+    /// `GlobalPointSolve`. `SM_ERR` when no solution is found.
+    pub fn step_inversion(
+        &self,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+    ) -> Result<(Point2, LocationType)> {
+        // init output
+        let mut location = LocationType::Interior;
+
+        // intersect point with Surface
+        let mut solutions: Vec<Point2> = Vec::new();
+
+        // If a guess is given, try a local solve first.
+        let mut local_succeeded = false;
+        if let Some(guess) = uv_guess {
+            let (ok, sol) = local_point_solve(self, anal_domain, point_on_surf, guess)?;
+            local_succeeded = ok;
+            if local_succeeded {
+                solutions.push(sol);
+            }
+        }
+
+        if !local_succeeded {
+            solutions.extend(global_point_solve(
+                self,
+                anal_domain,
+                point_on_surf,
+                tol_3d,
+            )?);
+        }
+
+        // Point not close enough to surface - error
+        let Some(&uv) = solutions.first() else {
+            return Err(sm_err(OP_STEP_INV));
+        };
+
+        // when point is on a singular boundary
+        if is_singularity(self, uv)? {
+            location = LocationType::Pole;
+        }
+
+        // done for interior and pole points
+        if location == LocationType::Pole || solutions.len() == 1 {
+            return Ok((uv, location));
+        }
+
+        // when surface is closed in U direction and solution on Seam
+        if is_closed(self, anal_domain, SurfParamType::U)? {
+            let ivl = Extent1d::from_min_max(anal_domain.min().x, anal_domain.max().x);
+            if ivl.is_value_on_boundary(uv.x, EFF_ZERO).0 {
+                location = LocationType::USeam;
+            }
+        }
+
+        // when surface is closed in V direction and solution on Seam
+        if is_closed(self, anal_domain, SurfParamType::V)? {
+            let ivl = Extent1d::from_min_max(anal_domain.min().y, anal_domain.max().y);
+            if ivl.is_value_on_boundary(uv.y, EFF_ZERO).0 {
+                location = if location == LocationType::Interior {
+                    LocationType::VSeam
+                } else {
+                    LocationType::UvSeam
+                };
+            }
+        }
+
+        Ok((uv, location))
+    }
+
+    // ---- database ---------------------------------------------------------------------
+
+    /// Reads a surface written by `WriteToDB` (`ReadFromDB`): `n m`, `p q`, the
+    /// rational flag, for `version > 32` the knot type and form, then the control
+    /// points (`wx wy wz`, plus `w` when rational, v index fastest), `n+p+2` u knots and
+    /// `m+q+2` v knots (one group per line in ASCII files). The knots are not fixed up.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a rational flag other than 0 or 1; `InvalidInput` for an
+    /// unreadable or negative header, a knot type or form outside its enum, or a
+    /// short binary stream (upstream: undefined values).
+    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
+        let bad = |reason: &'static str| invalid(OP_READ, reason);
+
+        let mut knot_type_code: u64 = KnotType::Unspecified as u64;
+        let mut form_code: u64 = BSplineSurfaceForm::Unspecified as u64;
+
+        // Get parameters from the top
+        let ascii = db.file_type() == FileType::Ascii;
+        let (n, m, p, q, rat) = if ascii {
+            let s = db.in_stream_mut().ok_or_else(|| bad("no input stream"))?;
+            let n = s.extract_long();
+            let m = s.extract_long();
+            db.go_to_next_line();
+            let s = db.in_stream_mut().ok_or_else(|| bad("no input stream"))?;
+            let p = s.extract_short();
+            let q = s.extract_short();
+            db.go_to_next_line();
+            let s = db.in_stream_mut().ok_or_else(|| bad("no input stream"))?;
+            let rat = s.extract_short();
+            db.go_to_next_line();
+            if version > 32 {
+                if let Some(v) = db
+                    .in_stream_mut()
+                    .and_then(crate::topology::database_io::InputStream::extract_ulong)
+                {
+                    knot_type_code = v;
+                }
+                db.go_to_next_line();
+                if let Some(v) = db
+                    .in_stream_mut()
+                    .and_then(crate::topology::database_io::InputStream::extract_ulong)
+                {
+                    form_code = v;
+                }
+                db.go_to_next_line();
+            }
+            match (n, m, p, q, rat) {
+                (Some(n), Some(m), Some(p), Some(q), Some(rat)) => (n, m, p, q, rat),
+                _ => return Err(bad("unreadable header (uninitialised upstream)")),
+            }
+        } else {
+            let n = db.read_long()?;
+            let m = db.read_long()?;
+            let p = db.read_short()?;
+            let q = db.read_short()?;
+            let rat = db.read_short()?;
+            if version > 32 {
+                knot_type_code = db.read_ulong()?;
+                form_code = db.read_ulong()?;
+            }
+            (n, m, p, q, rat)
+        };
+
+        // surface knot counts
+        let to_size = |x: i64| usize::try_from(x).map_err(|_| bad("negative size"));
+        let (n, m) = (to_size(n)?, to_size(m)?);
+        let (p, q) = (to_size(i64::from(p))?, to_size(i64::from(q))?);
+        let r = n + p + 1;
+        let s = m + q + 1;
+
+        // allocate Sur memory
+        let mut sur = allocate_nurb_surface(n, m, p, q, r, s)?;
+
+        // Read in data
+        let rational = match rat {
+            0 => false,
+            1 => true,
+            // Wrong type
+            _ => return Err(sm_err(OP_READ)),
+        };
+        let mut wx = f64::NAN;
+        let mut wy = f64::NAN;
+        let mut wz = f64::NAN;
+        let mut w = f64::NAN;
+        let mut first = true;
+        for i in 0..=n {
+            for j in 0..=m {
+                if ascii {
+                    let s = db.in_stream_mut().ok_or_else(|| bad("no input stream"))?;
+                    let mut all = true;
+                    let targets: [&mut f64; 4] = [&mut wx, &mut wy, &mut wz, &mut w];
+                    for (k, t) in targets.into_iter().enumerate() {
+                        if k == 3 && !rational {
+                            break;
+                        }
+                        match s.extract_double() {
+                            Some(x) => *t = x,
+                            None => all = false,
+                        }
+                    }
+                    if first && !all {
+                        return Err(bad("unreadable control point (uninitialised upstream)"));
+                    }
+                    db.go_to_next_line();
+                } else {
+                    wx = db.read_double()?;
+                    wy = db.read_double()?;
+                    wz = db.read_double()?;
+                    if rational {
+                        w = db.read_double()?;
+                    }
+                }
+                first = false;
+                *sur.cpt_mut(i, j)? = CPoint::new(wx, wy, wz, if rational { w } else { NOW });
+            }
+        }
+
+        // for every U knot, then every V knot
+        for i in 0..=r {
+            let k = if ascii {
+                let x = db
+                    .in_stream_mut()
+                    .and_then(crate::topology::database_io::InputStream::extract_double);
+                db.go_to_next_line();
+                x
+            } else {
+                Some(db.read_double()?)
+            };
+            if let (Some(k), Some(slot)) = (k, sur.u_knots_mut().get_mut(i)) {
+                *slot = k;
+            }
+        }
+        for j in 0..=s {
+            let k = if ascii {
+                let x = db
+                    .in_stream_mut()
+                    .and_then(crate::topology::database_io::InputStream::extract_double);
+                db.go_to_next_line();
+                x
+            } else {
+                Some(db.read_double()?)
+            };
+            if let (Some(k), Some(slot)) = (k, sur.v_knots_mut().get_mut(j)) {
+                *slot = k;
+            }
+        }
+
+        // output locals
+        let knot_type = knot_type_from_code(knot_type_code)
+            .ok_or_else(|| bad("knot type outside SmKnotType"))?;
+        let form = BSplineSurfaceForm::from_code(form_code)
+            .ok_or_else(|| bad("form outside SmBSplineSurfaceForm"))?;
+
+        // set output
+        Ok(Self {
+            nurb: Some(sur),
+            nurb_is_borrowed: false,
+            out_of_bounds_enabled: false,
+            knot_type,
+            form,
+        })
+    }
+}
+
+/// `SmKnotType` with upstream value `code`, if any.
+fn knot_type_from_code(code: u64) -> Option<KnotType> {
+    Some(match code {
+        0 => KnotType::UniformKnots,
+        1 => KnotType::Unspecified,
+        2 => KnotType::QuasiUniformKnots,
+        3 => KnotType::PiecewiseBezierKnots,
+        4 => KnotType::Unknown,
+        _ => return None,
+    })
+}
+
+/// The guess basis vector a polar box guess contributes: its basis 2 when its domain is
+/// wider in x than in y, else basis 1.
+fn polar_guess_basis(g: &PolarBox) -> Vec3 {
+    let d = g.domain();
+    let [_, b1, b2] = *g.basis();
+    if d.x_length() > d.y_length() {
+        b2
+    } else {
+        b1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bilinear() -> BSplineSurface {
+        BSplineSurface::create_bilinear_surface(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(10.0, 0.0, 0.0),
+            Point3::new(0.0, 10.0, 0.0),
+            Point3::new(10.0, 10.0, 0.0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn bilinear_counts_and_domain() {
+        let s = bilinear();
+        assert_eq!(s.degree(SurfParamType::U), 1);
+        assert_eq!(s.degree(SurfParamType::V), 1);
+        assert_eq!(s.number_control_points(SurfParamType::U), 2);
+        assert_eq!(s.number_control_points(SurfParamType::Both), 4);
+        assert_eq!(s.number_natural_knots(SurfParamType::V), 4);
+        assert!(!s.is_rational());
+        let d = s.natural_uv_domain();
+        assert_eq!(
+            (d.u_min(), d.v_min(), d.u_max(), d.v_max()),
+            (0.0, 0.0, 1.0, 1.0)
+        );
+        let net = s.control_point_net().unwrap();
+        assert_eq!(net.points.len(), 4);
+        assert!(net.weights.is_empty());
+        assert_eq!(net.points[1], Point3::new(0.0, 10.0, 0.0));
+    }
+
+    #[test]
+    fn empty_surface_queries() {
+        let mut s = BSplineSurface::new();
+        assert_eq!(s.degree(SurfParamType::U), 0);
+        assert_eq!(s.number_control_points(SurfParamType::Both), 0);
+        assert!(!s.is_rational());
+        assert!(s.make_nurb().is_err());
+        assert!(s.knots(SurfParamType::U, None).is_err());
+        assert!(matches!(
+            s.canonical(),
+            Err(SolidError::Upstream { code: 1006, .. })
+        ));
+        assert!(s.copy().gw_nurb().is_none());
+        assert!(s.approx_eq(&BSplineSurface::new()));
+    }
+
+    #[test]
+    fn canonical_round_trip() {
+        let pts: Vec<Point3> = (0..6)
+            .map(|k| Point3::new(f64::from(k / 3), f64::from(k % 3), f64::from(k)))
+            .collect();
+        let data = CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 2,
+            control_points: &pts,
+            form: BSplineSurfaceForm::QuadricSurf,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 2.0],
+            knot_type: KnotType::PiecewiseBezierKnots,
+            weights: Some(&[1.0, 2.0, 1.0, 1.0, 2.0, 1.0]),
+            uv_domain: None,
+        };
+        let s = BSplineSurface::create_canonical(&data).unwrap();
+        assert!(s.is_rational());
+        let c = s.canonical().unwrap();
+        assert_eq!(c.u_degree, 1);
+        assert_eq!(c.v_degree, 2);
+        assert_eq!(c.form, BSplineSurfaceForm::QuadricSurf);
+        assert_eq!(c.u_multiplicities, vec![2, 2]);
+        assert_eq!(c.weights.len(), 6);
+        for (a, b) in c.control_points.iter().zip(&pts) {
+            assert!((*a - *b).length() < 1e-12);
+        }
+        let mut bad = data;
+        bad.u_degree = 0;
+        assert!(matches!(
+            BSplineSurface::create_canonical(&bad),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn greville_and_knots() {
+        let s = bilinear();
+        assert_eq!(s.greville_abscissa(SurfParamType::U, 0).unwrap(), 0.0);
+        assert_eq!(s.greville_abscissa(SurfParamType::U, 5).unwrap(), 1.0);
+        let (k, m) = s.knots(SurfParamType::V, None).unwrap();
+        assert_eq!(k, vec![0.0, 1.0]);
+        assert_eq!(m, vec![2, 2]);
+    }
+
+    #[test]
+    fn transform_moves_net() {
+        let mut s = bilinear();
+        let mut f = Axis2Placement::default();
+        f.set_canonical(
+            Point3::new(1.0, 2.0, 3.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        )
+        .unwrap();
+        s.transform(&f, Some(Vec3::new(2.0, 2.0, 2.0))).unwrap();
+        let net = s.control_point_net().unwrap();
+        assert_eq!(net.points[3], Point3::new(21.0, 22.0, 3.0));
+    }
+
+    #[test]
+    fn cone_patch_forms() {
+        let f = Axis2Placement::default();
+        let cyl = BSplineSurface::create_cone_patch(
+            &f,
+            1.0,
+            1.0,
+            0.0,
+            360.0,
+            1.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        assert_eq!(cyl.form(), BSplineSurfaceForm::CylindricalSurf);
+        assert!(cyl.is_rational());
+        let cone = BSplineSurface::create_cone_patch(
+            &f,
+            2.0,
+            1.0,
+            0.0,
+            90.0,
+            1.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        assert_eq!(cone.form(), BSplineSurfaceForm::ConicalSurf);
+        assert!(BSplineSurface::create_cone_patch(
+            &f,
+            -1.0,
+            1.0,
+            0.0,
+            90.0,
+            1.0,
+            NurbCircleParam::Quadratic
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn back_edges_are_unported() {
+        let s = bilinear();
+        assert!(s.is_kind_of(BSplineSurface::TYPE).unwrap());
+        assert!(matches!(
+            s.is_kind_of(PLANE_TYPE),
+            Err(SolidError::Unported { .. })
+        ));
+        let req = BoundingBoxRequest {
+            normal: true,
+            ..BoundingBoxRequest::default()
+        };
+        assert!(matches!(
+            s.calculate_bounding_box(&s.natural_uv_domain(), &req),
+            Err(SolidError::Unported { .. })
+        ));
+        assert!(s.is_parallel_to_vector(Vec3::new(0.0, 0.0, 0.0)).unwrap());
+    }
+
+    #[test]
+    fn read_ascii_db() {
+        let text = "1 1\n1 1\n0\n0 0 0\n0 1 0\n1 0 0\n1 1 1\n0\n0\n1\n1\n0\n0\n1\n1\n";
+        let mut db = DatabaseReader::new();
+        db.open_for_read(text.as_bytes().to_vec(), FileType::Ascii);
+        let s = BSplineSurface::read_from_db(&mut db, 30).unwrap();
+        assert_eq!(s.number_control_points(SurfParamType::Both), 4);
+        let (_, _, cps) = s.control_points().unwrap();
+        assert_eq!(cps[3].z, 1.0);
+        assert_eq!(cps[3].w, NOW);
+    }
+}

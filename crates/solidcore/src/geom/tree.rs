@@ -1045,10 +1045,13 @@ impl<O: Copy + PartialEq> Tree<O> {
             // (SM_ASSERT on SmSurface::IsKindOf, unit surface.surface_p2, not ported: debug only)
             let aux = self.surface_aux(cur, OP)?;
             if aux.surface.is_some() && (n.parent.is_none() || owner_surface != aux.surface) {
-                // UNPORTED(nurbs.b_spline_surface_p1): SmBSplineSurface::GetGwNurbPointer
+                // SmBSplineSurface::GetGwNurbPointer is ported (nurbs.b_spline_surface_p1),
+                // but the subdivision surface behind the opaque handle `O` and a
+                // BezierPatchRef for its NURB only exist once the surface cache owns them.
+                // UNPORTED(surface.surface_cache_p1): SmBSplineSurface::GetGwNurbPointer
                 return Err(SolidError::Unported {
                     upstream: "SmBSplineSurface::GetGwNurbPointer",
-                    unit: "nurbs.b_spline_surface_p1",
+                    unit: "surface.surface_cache_p1",
                 });
             }
             match n.parent {
