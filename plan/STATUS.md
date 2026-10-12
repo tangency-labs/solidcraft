@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **17** (14,296 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table` |
-| Partial | **4** (3,780 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement` |
-| Ported (green + partial) | 21 units, 18,076 upstream lines (4.7%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 4 (4,444 lines): `geom.geom_utility_p2`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
+| Partial | **6** (6,070 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.object` |
+| Ported (green + partial) | 23 units, 20,366 upstream lines (5.3%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 7 (7,364 lines): `geom.local_solve1d`, `geom.local_solve_nd`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box` |
 | Blocked | 0 |
 | Todo | 235 (365,383 lines) |
 
@@ -81,6 +81,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
 | `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), 3815 bit-identical | 233 (`geom.geom_utility_p1`: `AreCoaxial` -> `smgu_LinePointDistance`) |
 | `geom.geom_utility_p2` | `geom::geom_utility::p2` | 3270 cases (70 fixture + 3200 generated), 740 bit-identical | 2530 (`geom.geom_utility_p1`: segment/point, line, plane, determinant and best-fit-line helpers) |
+| `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
 
 ## Ready set
 
