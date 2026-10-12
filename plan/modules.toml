@@ -309,9 +309,9 @@ depends_on = ["geom.attribute", "geom.context", "geom.extent3d", "geom.tree"]
 est_lines = 673
 layer = 3
 tests = ["prog_test:my_test_polynomial", "SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-geom.object-a1"
+claimed_at = "2026-10-12T20:05:41Z"
 notes = "38 fns; largest: SmShape::SmShape, SmObject::Notify, SmThreadLocalStorage::SetBeenThroughNew, SmThreadLocalStorage::GetBeenThroughNew; cycle back-edges (call into later units; stub or co-port): query.poly(24), topology.proto_topology_p1(20), blend.fillet_solver_p1(16), blend.fillet_standard_solver_p1(12), blend.fillet_geom_p1(10), query.brep(7), blend.fillet_custom_solver(6), blend.fillet_executive_p1(6), geom.a_object(6), geom.grid(6), intersect.point_class(6), intersect.ray_tracer(6), query.tess(6), topology.edge(5), topology.topology(5), curve.composite_curve_p1(4), surface.cone_p1(4), topology.brep_p1(4), topology.loopuse(4), topology.shell(4), curve.curve_p2(3), surface.surface_p1(3), surface.surface_p2(3), topology.vertex(3), blend.fillet_corner_p1(2), boolean.merge_p1(2), boolean.topology_intersector_p1(2), curve.conic(2), curve.crv_in_volume(2), curve.crv_on_surf(2), curve.curve_cache(2), curve.ellipse_p1(2), curve.ellipse_p2(2), curve.hermite_curve(2), curve.hyperbola(2), curve.iso_curve(2), curve.line(2), curve.offset_curve(2), curve.parabola(2), curve.projected_curve(2), curve.tangent_field(2), geom.solution_array(2), geom.transform(2), intersect.curve_class_p1(2), nurbs.b_spline_curve_p1(2), nurbs.b_spline_surface_p1(2), surface.b_spline_volume(2), surface.bend_volume(2), surface.curve_bounded_surface(2), surface.offset_surface(2), surface.plane_p1(2), surface.sphere(2), surface.srf_in_volume(2), surface.surf_of_extrusion_p1(2), surface.surf_of_revolution_p1(2), surface.surface_cache_p1(2), surface.surface_cache_p2(2), surface.torus(2), surface.trim_srf_cache(2), surface.twist_volume(2), surface.unbend_volume(2), surface.volume_p1(2), sweep.topology_sweep(2), topology.brep_cache(2), topology.brep_data(2), topology.brep_p4(2), topology.edgeuse_p1(2), topology.edgeuse_p2(2), topology.face_p1(2), topology.face_p4(2), topology.vertexuse(2), curve.curve_p6(1), query.edge(1), query.face_p1(1), topology.face_p2(1); unit-SCC #22 (220 units); hazards: thread_local; 321 upstream test entry points reach this unit"
 
 [[unit]]
