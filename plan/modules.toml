@@ -881,9 +881,9 @@ depends_on = ["nlib.basis_basic", "nlib.knots", "nlib.math", "nlib.srf_basic", "
 est_lines = 1380
 layer = 12
 tests = ["SM_API_test:TestSmCreateSurfaceFromRandomPoints", "SM_API_test:TestSmCreateExtrude", "prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect", "prog_test:my_test_GlobalCC_intersect", "prog_test:my_test_GlobalCSI"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-nlib.srf_tool_p3-a1"
+claimed_at = "2026-10-12T23:00:00Z"
 notes = "3 fns; largest: N_SrfRemoveAllKnots, N_SrfJoin, N_MakeSrfsCompatible; unit-SCC #22 (220 units); 199 upstream test entry points reach this unit"
 
 [[unit]]
