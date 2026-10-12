@@ -608,10 +608,10 @@ depends_on = ["nlib.basis_basic", "nlib.bezier", "nlib.crv_basic", "nlib.crv_too
 est_lines = 1676
 layer = 6
 tests = ["SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-nlib.funcs_adv-a1"
 claimed_at = "2026-10-12T21:07:22Z"
-notes = "5 fns; largest: N_CrvFuncMultiplyCrv, N_CrvFuncMultiplyCrv4d, N_CrvFuncMultiplyCrvFunc, N_CrvFuncRefine; 159 upstream test entry points reach this unit"
+notes = "5 fns (N_CrvFuncRefine, N_CrvFuncDeriv, N_CrvFuncMultiplyCrvFunc, N_CrvFuncMultiplyCrv, N_CrvFuncMultiplyCrv4d); difftest green: 2080 cases (80 fixture incl. 6 upstream .smc curves + 2000 generated), 0 deferred, bit-exact; no UNPORTED(nlib.funcs_adv) stubs existed to wire"
 
 [[unit]]
 id = "nlib.srf_fit"
