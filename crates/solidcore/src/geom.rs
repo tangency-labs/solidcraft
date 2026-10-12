@@ -7,6 +7,7 @@
 //! `plan/modules.toml`.
 
 pub mod assert_array;
+pub mod attribute;
 pub mod context;
 pub mod extent1d;
 pub mod extent3d;
