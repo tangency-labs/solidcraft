@@ -101,10 +101,10 @@ depends_on = ["geom.extent3d"]
 est_lines = 1259
 layer = 1
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-geom.tree-a1"
 claimed_at = "2026-10-12T19:33:41Z"
-notes = "34 fns; largest: SmTree::AddToSpatialTree, SmTree::RmFromSpatialTree, SmTreeNode::PropagateToParents, SmTreeNode::GetBotSide; cycle back-edges (call into later units; stub or co-port): geom.vector3d(5), geom.object(2), surface.surface_cache_p1(2), curve.curve_cache(1), nurbs.b_spline_surface_p1(1), surface.surface_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest: 618 cases (18 fixture + 600 generated), 611 pass bit-identical, 7 deferred (nurbs.b_spline_surface_p1 6, surface.surface_cache_p1 1); 34 fns; largest: SmTree::AddToSpatialTree, SmTree::RmFromSpatialTree, SmTreeNode::PropagateToParents, SmTreeNode::GetBotSide; cycle back-edges (call into later units; stub or co-port): geom.vector3d(5), geom.object(2), surface.surface_cache_p1(2), curve.curve_cache(1), nurbs.b_spline_surface_p1(1), surface.surface_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "nlib.geom"
