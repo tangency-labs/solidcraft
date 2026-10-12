@@ -1,0 +1,2580 @@
+{
+ "cases": [
+  {
+   "name": "heal_points_pts",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "inputs": {
+    "kind": "heal",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tol": 0.001,
+    "dup": [
+     0,
+     5,
+     10,
+     29
+    ],
+    "extra": []
+   }
+  },
+  {
+   "name": "heal_points_pts_loose",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "inputs": {
+    "kind": "heal",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "tol": 0.2,
+    "dup": [],
+    "extra": []
+   }
+  },
+  {
+   "name": "heal_fitcrv_incremental",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "inputs": {
+    "kind": "heal",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "tol": 0.01,
+    "dup": [
+     1,
+     2
+    ],
+    "extra": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.004,
+      5.0,
+      0.0
+     ],
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      3.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "heal_section00_incremental",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "inputs": {
+    "kind": "heal",
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    },
+    "tol": 0.0001,
+    "dup": [
+     0,
+     3,
+     7
+    ],
+    "extra": [
+     [
+      24.926257,
+      -0.07056,
+      0.437473
+     ],
+     [
+      24.92626,
+      -0.07056,
+      0.43747
+     ]
+    ]
+   }
+  },
+  {
+   "name": "heal_section05",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "inputs": {
+    "kind": "heal",
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    },
+    "tol": 0.001,
+    "dup": [
+     2
+    ],
+    "extra": []
+   }
+  },
+  {
+   "name": "heal_section10_tol0",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "inputs": {
+    "kind": "heal",
+    "pts": {
+     "$pts": "PointSet/Section10.pts"
+    },
+    "tol": 0.0,
+    "dup": [
+     4
+    ],
+    "extra": []
+   }
+  },
+  {
+   "name": "unsized_model",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 2,
+     "y": 2,
+     "z": 2,
+     "bbox": null,
+     "est": 0
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.1,
+      "track": false
+     },
+     {
+      "op": "map_point",
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 3
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "zero_voxels_unsized",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 0,
+     "y": 0,
+     "z": 0,
+     "bbox": null,
+     "est": 4
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "tol": 0.1,
+      "track": false
+     },
+     {
+      "op": "find"
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "neighbours_3x3x3",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 3,
+     "y": 3,
+     "z": 3,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 10
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.3333333333333333,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.6666666666666666,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.5,
+       0.3333333333333333,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.5,
+       0.6666666666666666,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 4,
+      "p": [
+       0.5,
+       0.5,
+       0.3333333333333333
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 5,
+      "p": [
+       0.5,
+       0.5,
+       0.6666666666666666
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 6,
+      "p": [
+       0.3333333333333333,
+       0.3333333333333333,
+       0.3333333333333333
+      ],
+      "tol": 0.01,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 7,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.4,
+      "track": true
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "find",
+      "mode": 1,
+      "hist": true
+     },
+     {
+      "op": "find",
+      "mode": 2,
+      "buckets": [
+       13,
+       13,
+       0,
+       26
+      ],
+      "hist": true
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "map_points_outside",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 2,
+     "y": 3,
+     "z": 4,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 0
+    },
+    "ops": [
+     {
+      "op": "map_point",
+      "p": [
+       -0.5,
+       0.2,
+       0.2
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       -3.2,
+       0.2,
+       0.2
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       1.5,
+       2,
+       3
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       0.25,
+       0.5,
+       0.75
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       1e+30,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "map_point",
+      "p": [
+       -1e+30,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 0
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 7
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 23
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 24
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 100
+     },
+     {
+      "op": "indices_to_index",
+      "ix": 1,
+      "iy": 2,
+      "iz": 3
+     },
+     {
+      "op": "index_to_indices",
+      "index": 23
+     },
+     {
+      "op": "index_to_indices",
+      "index": 1000
+     }
+    ]
+   }
+  },
+  {
+   "name": "one_d_voxels",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 5,
+     "y": 1,
+     "z": 1,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0
+     ],
+     "est": 80
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.1,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.2,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.30000000000000004,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 4,
+      "p": [
+       0.4,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 5,
+      "p": [
+       0.5,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 6,
+      "p": [
+       0.6000000000000001,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 7,
+      "p": [
+       0.7000000000000001,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 8,
+      "p": [
+       0.8,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 9,
+      "p": [
+       0.9,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 10,
+      "p": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "add",
+      "item": 11,
+      "p": [
+       0.3,
+       0,
+       0
+      ],
+      "tol": 0.02,
+      "track": true
+     },
+     {
+      "op": "map_point",
+      "p": [
+       0.55,
+       1,
+       2
+      ]
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "two_d_voxels",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 4,
+     "y": 4,
+     "z": 1,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      0
+     ],
+     "est": 200
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.25,
+       0.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.5,
+       0.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.75,
+       0.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 4,
+      "p": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 5,
+      "p": [
+       0.0,
+       0.25,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 6,
+      "p": [
+       0.25,
+       0.25,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 7,
+      "p": [
+       0.5,
+       0.25,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 8,
+      "p": [
+       0.75,
+       0.25,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 9,
+      "p": [
+       1.0,
+       0.25,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 10,
+      "p": [
+       0.0,
+       0.5,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 11,
+      "p": [
+       0.25,
+       0.5,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 12,
+      "p": [
+       0.5,
+       0.5,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 13,
+      "p": [
+       0.75,
+       0.5,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 14,
+      "p": [
+       1.0,
+       0.5,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 15,
+      "p": [
+       0.0,
+       0.75,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 16,
+      "p": [
+       0.25,
+       0.75,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 17,
+      "p": [
+       0.5,
+       0.75,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 18,
+      "p": [
+       0.75,
+       0.75,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 19,
+      "p": [
+       1.0,
+       0.75,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 20,
+      "p": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 21,
+      "p": [
+       0.25,
+       1.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 22,
+      "p": [
+       0.5,
+       1.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 23,
+      "p": [
+       0.75,
+       1.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 24,
+      "p": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 30,
+      "p": [
+       0.5,
+       0.5,
+       0.0
+      ],
+      "tol": 0.5,
+      "track": false
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "head_only_compare_and_alias",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 2,
+     "y": 1,
+     "z": 1,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 0
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.2,
+       0.5,
+       0.5
+      ],
+      "tol": 0.001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.2005,
+       0.5,
+       0.5
+      ],
+      "tol": 0.001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.2006,
+       0.5,
+       0.5
+      ],
+      "tol": 0.001,
+      "track": false
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "remove",
+      "item": 0
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "find",
+      "limit": 3
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "remove_paths",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 4,
+     "y": 2,
+     "z": 2,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 20
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.1,
+       0.3,
+       0.3
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.30000000000000004,
+       0.3,
+       0.301
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.5,
+       0.3,
+       0.302
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.7000000000000001,
+       0.3,
+       0.303
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.1,
+       0.3,
+       0.304
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.30000000000000004,
+       0.3,
+       0.305
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.5,
+       0.3,
+       0.306
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.7000000000000001,
+       0.3,
+       0.307
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.1,
+       0.3,
+       0.308
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.30000000000000004,
+       0.3,
+       0.309
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.5,
+       0.3,
+       0.31
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.7000000000000001,
+       0.3,
+       0.311
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": -1,
+      "p": [
+       0.9,
+       0.9,
+       0.9
+      ],
+      "tol": 0.05,
+      "track": false
+     },
+     {
+      "op": "remove",
+      "item": 3
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "remove",
+      "item": 0
+     },
+     {
+      "op": "remove",
+      "item": 0
+     },
+     {
+      "op": "remove",
+      "item": 9
+     },
+     {
+      "op": "remove",
+      "item": -1
+     },
+     {
+      "op": "find_items",
+      "item": 0
+     },
+     {
+      "op": "find_items",
+      "item": 1
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "set_size",
+      "x": 2,
+      "y": 2,
+      "z": 2,
+      "bbox": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "est": 3
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "growth_after_all_removed",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 1,
+     "y": 1,
+     "z": 1,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 0
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.1,
+       0.2,
+       0.3
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.1,
+       0.2,
+       0.301
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.1,
+       0.2,
+       0.302
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.1,
+       0.2,
+       0.303
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 4,
+      "p": [
+       0.1,
+       0.2,
+       0.304
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 5,
+      "p": [
+       0.1,
+       0.2,
+       0.305
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 6,
+      "p": [
+       0.1,
+       0.2,
+       0.306
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 7,
+      "p": [
+       0.1,
+       0.2,
+       0.307
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 8,
+      "p": [
+       0.1,
+       0.2,
+       0.308
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 9,
+      "p": [
+       0.1,
+       0.2,
+       0.309
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 10,
+      "p": [
+       0.1,
+       0.2,
+       0.31
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 11,
+      "p": [
+       0.1,
+       0.2,
+       0.311
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 12,
+      "p": [
+       0.1,
+       0.2,
+       0.312
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 13,
+      "p": [
+       0.1,
+       0.2,
+       0.313
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 14,
+      "p": [
+       0.1,
+       0.2,
+       0.314
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 15,
+      "p": [
+       0.1,
+       0.2,
+       0.315
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 16,
+      "p": [
+       0.1,
+       0.2,
+       0.316
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 17,
+      "p": [
+       0.1,
+       0.2,
+       0.317
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 18,
+      "p": [
+       0.1,
+       0.2,
+       0.318
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 19,
+      "p": [
+       0.1,
+       0.2,
+       0.319
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 20,
+      "p": [
+       0.1,
+       0.2,
+       0.32
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 21,
+      "p": [
+       0.1,
+       0.2,
+       0.321
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 22,
+      "p": [
+       0.1,
+       0.2,
+       0.322
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 23,
+      "p": [
+       0.1,
+       0.2,
+       0.323
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 24,
+      "p": [
+       0.1,
+       0.2,
+       0.324
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 25,
+      "p": [
+       0.1,
+       0.2,
+       0.325
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 26,
+      "p": [
+       0.1,
+       0.2,
+       0.326
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 27,
+      "p": [
+       0.1,
+       0.2,
+       0.327
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 28,
+      "p": [
+       0.1,
+       0.2,
+       0.328
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 29,
+      "p": [
+       0.1,
+       0.2,
+       0.329
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 30,
+      "p": [
+       0.1,
+       0.2,
+       0.32999999999999996
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 31,
+      "p": [
+       0.1,
+       0.2,
+       0.33099999999999996
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 32,
+      "p": [
+       0.1,
+       0.2,
+       0.33199999999999996
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 33,
+      "p": [
+       0.1,
+       0.2,
+       0.33299999999999996
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 34,
+      "p": [
+       0.1,
+       0.2,
+       0.33399999999999996
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 35,
+      "p": [
+       0.1,
+       0.2,
+       0.33499999999999996
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 36,
+      "p": [
+       0.1,
+       0.2,
+       0.33599999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 37,
+      "p": [
+       0.1,
+       0.2,
+       0.33699999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 38,
+      "p": [
+       0.1,
+       0.2,
+       0.33799999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 39,
+      "p": [
+       0.1,
+       0.2,
+       0.33899999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 40,
+      "p": [
+       0.1,
+       0.2,
+       0.33999999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 41,
+      "p": [
+       0.1,
+       0.2,
+       0.34099999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 42,
+      "p": [
+       0.1,
+       0.2,
+       0.34199999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 43,
+      "p": [
+       0.1,
+       0.2,
+       0.34299999999999997
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 44,
+      "p": [
+       0.1,
+       0.2,
+       0.344
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 45,
+      "p": [
+       0.1,
+       0.2,
+       0.345
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 46,
+      "p": [
+       0.1,
+       0.2,
+       0.346
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 47,
+      "p": [
+       0.1,
+       0.2,
+       0.347
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 48,
+      "p": [
+       0.1,
+       0.2,
+       0.348
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 49,
+      "p": [
+       0.1,
+       0.2,
+       0.349
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 50,
+      "p": [
+       0.1,
+       0.2,
+       0.35
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 51,
+      "p": [
+       0.1,
+       0.2,
+       0.351
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 52,
+      "p": [
+       0.1,
+       0.2,
+       0.352
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 53,
+      "p": [
+       0.1,
+       0.2,
+       0.353
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 54,
+      "p": [
+       0.1,
+       0.2,
+       0.354
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 55,
+      "p": [
+       0.1,
+       0.2,
+       0.355
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 56,
+      "p": [
+       0.1,
+       0.2,
+       0.356
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 57,
+      "p": [
+       0.1,
+       0.2,
+       0.357
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "remove",
+      "item": 0
+     },
+     {
+      "op": "remove",
+      "item": 1
+     },
+     {
+      "op": "remove",
+      "item": 2
+     },
+     {
+      "op": "remove",
+      "item": 3
+     },
+     {
+      "op": "remove",
+      "item": 4
+     },
+     {
+      "op": "remove",
+      "item": 5
+     },
+     {
+      "op": "remove",
+      "item": 6
+     },
+     {
+      "op": "remove",
+      "item": 7
+     },
+     {
+      "op": "remove",
+      "item": 8
+     },
+     {
+      "op": "remove",
+      "item": 9
+     },
+     {
+      "op": "remove",
+      "item": 10
+     },
+     {
+      "op": "remove",
+      "item": 11
+     },
+     {
+      "op": "remove",
+      "item": 12
+     },
+     {
+      "op": "remove",
+      "item": 13
+     },
+     {
+      "op": "remove",
+      "item": 14
+     },
+     {
+      "op": "remove",
+      "item": 15
+     },
+     {
+      "op": "remove",
+      "item": 16
+     },
+     {
+      "op": "remove",
+      "item": 17
+     },
+     {
+      "op": "remove",
+      "item": 18
+     },
+     {
+      "op": "remove",
+      "item": 19
+     },
+     {
+      "op": "remove",
+      "item": 20
+     },
+     {
+      "op": "remove",
+      "item": 21
+     },
+     {
+      "op": "remove",
+      "item": 22
+     },
+     {
+      "op": "remove",
+      "item": 23
+     },
+     {
+      "op": "remove",
+      "item": 24
+     },
+     {
+      "op": "remove",
+      "item": 25
+     },
+     {
+      "op": "remove",
+      "item": 26
+     },
+     {
+      "op": "remove",
+      "item": 27
+     },
+     {
+      "op": "remove",
+      "item": 28
+     },
+     {
+      "op": "remove",
+      "item": 29
+     },
+     {
+      "op": "remove",
+      "item": 30
+     },
+     {
+      "op": "remove",
+      "item": 31
+     },
+     {
+      "op": "remove",
+      "item": 32
+     },
+     {
+      "op": "remove",
+      "item": 33
+     },
+     {
+      "op": "remove",
+      "item": 34
+     },
+     {
+      "op": "remove",
+      "item": 35
+     },
+     {
+      "op": "remove",
+      "item": 36
+     },
+     {
+      "op": "remove",
+      "item": 37
+     },
+     {
+      "op": "remove",
+      "item": 38
+     },
+     {
+      "op": "remove",
+      "item": 39
+     },
+     {
+      "op": "remove",
+      "item": 40
+     },
+     {
+      "op": "remove",
+      "item": 41
+     },
+     {
+      "op": "remove",
+      "item": 42
+     },
+     {
+      "op": "remove",
+      "item": 43
+     },
+     {
+      "op": "remove",
+      "item": 44
+     },
+     {
+      "op": "remove",
+      "item": 45
+     },
+     {
+      "op": "remove",
+      "item": 46
+     },
+     {
+      "op": "remove",
+      "item": 47
+     },
+     {
+      "op": "remove",
+      "item": 48
+     },
+     {
+      "op": "remove",
+      "item": 49
+     },
+     {
+      "op": "remove",
+      "item": 50
+     },
+     {
+      "op": "remove",
+      "item": 51
+     },
+     {
+      "op": "remove",
+      "item": 52
+     },
+     {
+      "op": "remove",
+      "item": 53
+     },
+     {
+      "op": "remove",
+      "item": 54
+     },
+     {
+      "op": "remove",
+      "item": 55
+     },
+     {
+      "op": "remove",
+      "item": 56
+     },
+     {
+      "op": "remove",
+      "item": 57
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "add",
+      "item": 100,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 101,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.0001,
+      "track": false
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "remove",
+      "item": 3
+     },
+     {
+      "op": "remove",
+      "item": 100
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "growth_from_empty",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 4,
+     "y": 1,
+     "z": 1,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 0
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.0,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.05,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.1,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.15000000000000002,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 4,
+      "p": [
+       0.2,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 5,
+      "p": [
+       0.25,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 6,
+      "p": [
+       0.30000000000000004,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 7,
+      "p": [
+       0.35000000000000003,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "find",
+      "hist": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "estimate_capacity",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 4,
+     "y": 1,
+     "z": 1,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 1
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.0,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.05,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.1,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.15000000000000002,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 4,
+      "p": [
+       0.2,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 5,
+      "p": [
+       0.25,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 6,
+      "p": [
+       0.30000000000000004,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 7,
+      "p": [
+       0.35000000000000003,
+       0.5,
+       0.5
+      ],
+      "tol": 0.01,
+      "track": false
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "find",
+      "hist": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "zero_tolerance_identical",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 2,
+     "y": 2,
+     "z": 2,
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "est": 10
+    },
+    "ops": [
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.0,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.0,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 2,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.0,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 3,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.0,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 9,
+      "p": [
+       0.25,
+       0.25,
+       0.25
+      ],
+      "tol": 0.0,
+      "track": false
+     },
+     {
+      "op": "find",
+      "hist": true
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "inverted_box",
+   "upstream_ref": "source/SMLib/inc/SmHashTable.h",
+   "inputs": {
+    "kind": "program",
+    "ctor": {
+     "x": 2,
+     "y": 2,
+     "z": 2,
+     "bbox": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      1
+     ],
+     "est": 0
+    },
+    "ops": [
+     {
+      "op": "map_point",
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "voxel_bbox",
+      "index": 1
+     },
+     {
+      "op": "add",
+      "item": 0,
+      "p": [
+       0.5,
+       0.5,
+       0.5
+      ],
+      "tol": 0.1,
+      "track": false
+     },
+     {
+      "op": "add",
+      "item": 1,
+      "p": [
+       0.55,
+       0.5,
+       0.5
+      ],
+      "tol": 0.1,
+      "track": false
+     },
+     {
+      "op": "find"
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -14,6 +14,7 @@ pub mod extent1d;
 pub mod extent2d;
 pub mod extent3d;
 pub mod geom_utility;
+pub mod hash_table;
 pub mod matrix;
 pub mod periodic_extent1d;
 pub mod polynomial;
