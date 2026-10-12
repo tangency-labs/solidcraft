@@ -48,6 +48,7 @@
 
 use super::p1::REMOVAL_PARAM_TOL;
 use crate::error::{NlibCode, Result, SolidError};
+use crate::math::max2;
 use crate::nurbs::basis_basic::{
     compatible_knot_array, compatible_knot_vectors_to_tol, find_all_span_maxima, SpanMaxima,
     COMPATIBLE_KNOT_TOL,
@@ -55,6 +56,7 @@ use crate::nurbs::basis_basic::{
 use crate::nurbs::bezier::{degree_reduce_coefs, reduce_degree as bez_reduce_degree};
 use crate::nurbs::crv_basic::{make_rat_compatible, Curve};
 use crate::nurbs::geom::{dist_cpt_cpt_homo, Interval};
+use crate::nurbs::index::{get, oob, set, storage, sx, ux};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{WEIGHT_MAX, WEIGHT_MIN};
@@ -71,63 +73,6 @@ const SMAD: f64 = f64::MIN_POSITIVE;
 /// Upstream `NL_UNITSPAN`.
 const UNIT_SPAN: Interval = Interval::new(0.0, 1.0);
 
-const OP_REMOVE_KNOTS: &str = "nurbs::crv_tool::p2::Curve::remove_knots";
-const OP_REDUCE_ONCE: &str = "nurbs::crv_tool::p2::Curve::reduce_degree_once";
-const OP_COMPAT: &str = "nurbs::crv_tool::p2::make_compatible_knot_tol";
-const OP_DEGEN: &str = "nurbs::crv_tool::p2::Curve::remove_degen_segs";
-const OP_ADJ: &str = "nurbs::crv_tool::p2::make_compatible_adj_knots";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (malformed curve or arguments)",
-    }
-}
-
-/// `usize` -> signed index.
-fn sx(u: usize, op: &'static str) -> Result<isize> {
-    isize::try_from(u).map_err(|_| oob(op))
-}
-
-/// Signed index -> `usize`, rejecting negative values.
-fn ux(i: isize, op: &'static str) -> Result<usize> {
-    usize::try_from(i).map_err(|_| oob(op))
-}
-
-/// `a[i]`.
-#[inline]
-fn get<T: Copy>(a: &[T], i: isize, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i))
-        .copied()
-        .ok_or_else(|| oob(op))
-}
-
-/// `a[i] = v`.
-#[inline]
-fn set<T>(a: &mut [T], i: isize, v: T, op: &'static str) -> Result<()> {
-    let slot = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| oob(op))?;
-    *slot = v;
-    Ok(())
-}
-
-/// Zero-filled storage for `hi + 1` entries.
-fn storage<T: Clone + Default>(hi: isize, op: &'static str) -> Result<Vec<T>> {
-    let len = ux(hi, op)?.checked_add(1).ok_or_else(|| oob(op))?;
-    let mut v = Vec::new();
-    v.try_reserve_exact(len).map_err(|_| oob(op))?;
-    v.resize(len, T::default());
-    Ok(v)
-}
-
 /// Resizes `v` to hold `hi + 1` entries (upstream `N_Realloc1d*Array`; new entries
 /// are zero).
 fn realloc<T: Clone + Default>(v: &mut Vec<T>, hi: isize, op: &'static str) -> Result<()> {
@@ -139,26 +84,6 @@ fn realloc<T: Clone + Default>(v: &mut Vec<T>, hi: isize, op: &'static str) -> R
 /// A curve over whole arrays `qw[0..=n]`, `uq[0..=m]`.
 fn curve(qw: Vec<CPoint>, p: usize, uq: Vec<f64>, op: &'static str) -> Result<Curve> {
     Curve::new(qw, p, uq).map_err(|_| oob(op))
-}
-
-/// Upstream `NL_MAX`.
-#[inline]
-fn nl_max<T: PartialOrd>(x: T, y: T) -> T {
-    if x > y {
-        x
-    } else {
-        y
-    }
-}
-
-/// Upstream `NL_MIN`.
-#[inline]
-fn nl_min<T: PartialOrd>(x: T, y: T) -> T {
-    if x < y {
-        x
-    } else {
-        y
-    }
 }
 
 /// `N_BasisFindAllSpanMaxima(knt, i, p, tol, ...)`: `Ok(Ok(extrema))`, or `Ok(Err(e))`
@@ -230,7 +155,7 @@ fn combine_bounds(
 
         let a = (get(&maxl, i, op)? - get(&minr, i - 1, op)?).abs();
         let b = (get(&maxr, i - 1, op)? - get(&minl, i, op)?).abs();
-        set(max, i, nl_max(a, b), op)?;
+        set(max, i, max2(a, b), op)?;
     }
     let last = oml * omb * get(&maxr, p, op)?;
     set(max, p + 1, if abs { last.abs() } else { last }, op)
@@ -266,7 +191,7 @@ impl Curve {
     /// Errors with the error of `N_BasisFindAllSpanMaxima` when its last failing call
     /// was the last one to set upstream's error flag (see the module deviations).
     pub fn remove_knots(&self, tol: f64) -> Result<Curve> {
-        const OP: &str = OP_REMOVE_KNOTS;
+        const OP: &str = "nurbs::crv_tool::p2::Curve::remove_knots";
         let pu = self.degree();
         let p = sx(pu, OP)?;
         let mut n = sx(self.n(), OP)?;
@@ -480,7 +405,7 @@ impl Curve {
 
             // Shift down some parameters.
             if s == 1 {
-                let v = nl_max(get(&er, r - 1, OP)?, get(&er, r, OP)?);
+                let v = max2(get(&er, r - 1, OP)?, get(&er, r, OP)?);
                 set(&mut er, r - 1, v, OP)?;
             }
             if s > 1 {
@@ -515,8 +440,8 @@ impl Curve {
             }
 
             // Update error bounds.
-            let k = nl_max(r - p, p + 1);
-            let l = nl_min(n, r + p - s);
+            let k = (r - p).max(p + 1);
+            let l = n.min(r + p - s);
             for i in k..=l {
                 if get(&uq, i, OP)? != get(&uq, i + 1, OP)? && get(&br, i, OP)? != NOT_REMOVABLE {
                     let e = max_err(&qw, &uq, n, m, i, get(&sr, i, OP)?)?;
@@ -549,7 +474,7 @@ impl Curve {
     /// `N_BasisFindAllSpanMaxima` when its failing call was the last one to set
     /// upstream's error flag (see the module deviations).
     pub fn reduce_degree_once(&self, tol: f64) -> Result<DegreeReduction> {
-        const OP: &str = OP_REDUCE_ONCE;
+        const OP: &str = "nurbs::crv_tool::p2::Curve::reduce_degree_once";
         let pw = self.cpts();
         let up = self.knots();
         let pu = self.degree();
@@ -893,7 +818,7 @@ impl Curve {
     /// Errors with the errors of [`Curve::degen_segs`], knot insertion and knot
     /// removal.
     pub fn remove_degen_segs(&self, tol: f64) -> Result<Option<DegenSegRemoval>> {
-        const OP: &str = OP_DEGEN;
+        const OP: &str = "nurbs::crv_tool::p2::Curve::remove_degen_segs";
         let up = self.knots();
         let pu = self.degree();
         let p = sx(pu, OP)?;
@@ -1323,7 +1248,7 @@ fn merge_and_refine(
 /// Errors with `InvalidInput` for an empty set, with the errors of degree
 /// elevation, knot merging and refinement (the curves keep the changes made before).
 pub fn make_compatible_knot_tol(curves: &mut [Curve], knot_tol: f64) -> Result<()> {
-    const OP: &str = OP_COMPAT;
+    const OP: &str = "nurbs::crv_tool::p2::make_compatible_knot_tol";
     let mut knot_tol = knot_tol;
     if curves.is_empty() {
         return Err(oob(OP));
@@ -1383,7 +1308,7 @@ pub fn make_compatible(curves: &mut [Curve]) -> Result<()> {
 /// elevation, knot removal, knot merging and refinement (the curves keep the
 /// changes made before).
 pub fn make_compatible_adj_knots(curves: &mut [Curve], tol: f64) -> Result<()> {
-    const OP: &str = OP_ADJ;
+    const OP: &str = "nurbs::crv_tool::p2::make_compatible_adj_knots";
     if curves.is_empty() {
         return Err(oob(OP));
     }
@@ -1423,7 +1348,7 @@ pub fn make_compatible_adj_knots(curves: &mut [Curve], tol: f64) -> Result<()> {
         if dd - v <= tol {
             // Must remove this knot.
             if m == 2 * phs + 1 {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
             *c = c.remove_knot(v, ph, BIGD)?.curve;
         }
