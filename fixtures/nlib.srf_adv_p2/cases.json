@@ -1,0 +1,4212 @@
+{
+ "cases": [
+  {
+   "name": "Surface_ext_u_s_g1_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g2_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g1_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g2_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g1_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g2_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g1_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g2_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_s_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_u_e_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_s_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_v_e_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_zero_cmax",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); zero distance (G1/G2 zero-distance iso-curve extension loops forever upstream, not run)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 0.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_zero_g1r",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms); zero distance (G1/G2 zero-distance iso-curve extension loops forever upstream, not run)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 0.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_negative",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": -2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_depth_limit",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 2.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 11,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_ext_depth_10",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dist": 30.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 10,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_normal_deriv_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "Surface_normal_deriv_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": 0.3,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "Surface_normal_deriv_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "Surface_normal_deriv_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "Surface_normal_deriv_4",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": 0.77,
+    "v": 0.21,
+    "ufl": 1,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "Surface_normal_deriv_5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": 0.25,
+    "v": 0.9,
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g1_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g1_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g2_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g2_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_cmax_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_cmax_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g1r_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g1r_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g1_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g1_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g2_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g2_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_cmax_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_cmax_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g1r_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g1r_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g1_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g1_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g2_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g2_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_cmax_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_cmax_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g1r_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g1r_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g1_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g1_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g2_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g2_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_cmax_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_cmax_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g1r_small",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g1r_small_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g1_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g2_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_cmax_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_s_g1r_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g1_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g2_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_cmax_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_u_e_g1r_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g1_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g2_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_cmax_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_s_g1r_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g1_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g2_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_cmax_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_v_e_g1r_large_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_zero_cmax",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); zero distance (G1/G2 zero-distance iso-curve extension loops forever upstream, not run)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 0.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_zero_g1r",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data); zero distance (G1/G2 zero-distance iso-curve extension loops forever upstream, not run)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 0.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_negative",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": -40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_depth_limit",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 40.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 11,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_ext_depth_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dist": 900.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 10,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_deriv_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_deriv_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": 0.3,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_deriv_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_deriv_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_deriv_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": 0.77,
+    "v": 0.21,
+    "ufl": 1,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_deriv_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": 0.25,
+    "v": 0.9,
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g1_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g2_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g1_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g2_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g1_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g2_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g1_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g1_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g2_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g2_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_cmax_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_cmax_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g1r_small",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g1r_small_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_s_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_u_e_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_s_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g1_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g2_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_cmax_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_v_e_g1r_large_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); N_SrfExtendByDist as called by SmBSplineSurfaceNLib.cpp:4568",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_zero_cmax",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); zero distance (G1/G2 zero-distance iso-curve extension loops forever upstream, not run)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_zero_g1r",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms); zero distance (G1/G2 zero-distance iso-curve extension loops forever upstream, not run)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_negative",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": -0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_depth_limit",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 0.8,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 11,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_ext_depth_10",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dist": 12.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 10,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_normal_deriv_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb_normal_deriv_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": 0.3,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb_normal_deriv_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "offset_nurb_normal_deriv_3",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "offset_nurb_normal_deriv_4",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": 0.77,
+    "v": 0.21,
+    "ufl": 1,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "offset_nurb_normal_deriv_5",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": 0.25,
+    "v": 0.9,
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "rectangle_ext_u_s_g1",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_s_g2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_s_cmax",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_s_g1r",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_e_g1",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_e_g2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_e_cmax",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_u_e_g1r",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_s_g1",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_s_g2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_s_cmax",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_s_g1r",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_e_g1",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_e_g2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_e_cmax",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_ext_v_e_g1r",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "dist": 1.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "depth": 0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_normal_deriv",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "u": 0.4,
+    "v": 0.6,
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "collapsed_normal_deriv_at_pole",
+   "upstream_ref": "edge case: degenerate normal",
+   "inputs": {
+    "op": "normal_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "u": 0.0,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1
+   }
+  }
+ ]
+}
