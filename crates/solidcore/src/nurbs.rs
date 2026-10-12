@@ -29,6 +29,7 @@ pub mod math;
 pub mod nurbs_crv;
 pub mod nurbs_srf;
 pub mod spiral;
+pub mod srf_adv;
 pub mod srf_basic;
 pub mod srf_common;
 pub mod srf_fit;
