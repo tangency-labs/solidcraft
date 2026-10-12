@@ -1,8 +1,14 @@
 [package]
 name = "solidcore"
+description = "B-rep solid modeling kernel: a Rust port of NVIDIA's SMLib"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+rust-version.workspace = true
 publish = false
 
 [dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

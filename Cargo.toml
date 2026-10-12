@@ -7,3 +7,54 @@ default-members = ["crates/solidcore"]
 edition = "2021"
 license = "Apache-2.0"
 version = "0.1.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+thiserror = "2"
+
+# Lints shared by every crate that opts in with `[lints] workspace = true`.
+# solidcore-ffi is the only crate allowed to contain `unsafe`: it opts in and
+# overrides with `#![allow(unsafe_code)]` at its crate root (deny, not forbid,
+# so that override is possible). Test code may unwrap/expect/panic/index: see
+# clippy.toml.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+unreachable_pub = "allow"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Library code must not abort on input-derived data: return SolidError instead.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+# Justified pedantic allows (port fidelity):
+# - upstream compares doubles exactly (e.g. against SM_UNDEF_DOUBLE); keep its semantics
+float_cmp = "allow"
+# - upstream math uses u, v, w, i, j, k, dU, dV ... naming; renaming hurts traceability
+many_single_char_names = "allow"
+similar_names = "allow"
+# - upstream constants are copied digit-for-digit
+unreadable_literal = "allow"
+excessive_precision = "allow"
+# - integer/float conversions are pervasive in ported index/knot arithmetic
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# - ported functions keep upstream structure, which is often long
+too_many_lines = "allow"
+too_many_arguments = "allow"
+# - suggests f64::midpoint, which changes numerics vs upstream (a+b)/2
+manual_midpoint = "allow"
+# - every fallible fn returns SolidError; a per-fn "# Errors" section is noise
+missing_errors_doc = "allow"
+# - modules mirror upstream names (nurbs::NurbsCurve etc.)
+module_name_repetitions = "allow"
+# - thousands of ported getters; #[must_use] is added deliberately where it matters
+must_use_candidate = "allow"

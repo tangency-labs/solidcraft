@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Must match ATTRIBUTION.md / AGENTS.md (full SHA so a shallow fetch works).
+  UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
+  UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: cargo test --workspace
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo check -p solidcore --target wasm32-unknown-unknown
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+
+  difftest:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip when no unit is green
+        id: green
+        run: |
+          if [ -f plan/modules.toml ] && grep -Eq '^\s*status\s*=\s*"green"' plan/modules.toml; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No green units in plan/modules.toml; nothing to difftest."
+          fi
+
+      - name: Clone upstream at pinned commit
+        if: steps.green.outputs.any == 'true'
+        run: |
+          git init upstream
+          git -C upstream remote add origin "$UPSTREAM_REPO"
+          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+            || git -C upstream fetch origin
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+
+      - name: Install C++ build tools
+        if: steps.green.outputs.any == 'true'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
+
+      - name: Cache C++ reference build
+        if: steps.green.outputs.any == 'true'
+        id: cpp-cache
+        uses: actions/cache@v4
+        with:
+          path: bin/cpp
+          key: cpp-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/**') }}
+
+      - name: Build C++ reference
+        if: steps.green.outputs.any == 'true' && steps.cpp-cache.outputs.cache-hit != 'true'
+        run: harness/cpp/build.sh --jobs "$(nproc)"
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.green.outputs.any == 'true'
+        with:
+          workspaces: ". -> bin"
+          key: difftest
+
+      - name: Difftest green units
+        if: steps.green.outputs.any == 'true'
+        run: cargo run -p difftest --features cpp -- --green

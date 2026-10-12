@@ -1,0 +1,6 @@
+//! Curve geometry: lines, conics, B-splines, offset/projected/iso/composite curves,
+//! as a concrete `enum` with evaluation, derivatives, closest point and length.
+//!
+//! Upstream: `SmCurve`, `SmLine`, `SmCircle`, `SmEllipse`, `SmParabola`,
+//! `SmHyperbola`, `SmBSplineCurve`, `SmOffsetCurve`, `SmCompositeCurve`, `SmIsoCurve`,
+//! `SmProjectedCurve`, `SmCurveClass` in `source/SMLib`, and `SM_API/SmApiCurves`.

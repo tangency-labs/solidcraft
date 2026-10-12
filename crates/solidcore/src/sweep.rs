@@ -1,0 +1,6 @@
+//! Sweeps: extrusion, revolution, translational and rotational sweeps, skinning
+//! (lofting) of profiles into surfaces and solids.
+//!
+//! Upstream: `SmSweepGeometryCreation`, `SmTransSweepGeometry`,
+//! `SmRotationalSweepGeometry`, `SmTopologySweep` in `source/SMLib`, and the sweep
+//! entry points of `SM_API/SmApiBrep` and `SM_API/SmApiSurfaces`.

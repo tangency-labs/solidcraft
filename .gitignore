@@ -1,5 +1,13 @@
-upstream/
-bin/
+# Upstream C++ checkout (cloned locally / in CI, never committed)
+/upstream
+
+# All build output: cargo target-dir and C++ build (bin/cpp/)
+/bin
 target/
 /build/
+# Editors / OS
 *.swp
+*~
+.DS_Store
+.idea/
+.vscode/
