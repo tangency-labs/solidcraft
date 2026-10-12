@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **42** (45,999 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv` |
+| Green | **43** (47,233 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3` |
 | Partial | **10** (9,147 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object` |
-| Ported (green + partial) | 52 units, 55,146 upstream lines (14.2%); about 59,800 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
-| Claimed | 3 (4,068 lines): `nlib.crv_fit_p3`, `nlib.crv_adv_p1`, `nlib.crv_common` |
+| Ported (green + partial) | 53 units, 56,380 upstream lines (14.5%); about 59,800 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 2 (2,834 lines): `nlib.crv_adv_p1`, `nlib.crv_common` |
 | Blocked | 0 |
 | Todo | 205 (328,689 lines) |
 
@@ -91,6 +91,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `nlib.iges` | `nurbs::iges` | 2029 cases (29 fixture + 2000 generated), max_rel_err 0 | bit-identical; entity data passed as `Entity126` / `Entity128` |
 | `nlib.srf_tool_p1` | `nurbs::srf_tool::p1` | 3132 cases (132 fixture + 3000 generated), max_rel_err 0 | bit-identical; `extract_patch` takes a `Rectangle` |
 | `nlib.crv_fit_p1` | `nurbs::crv_fit::p1` | 2084 cases (84 fixture + 2000 generated), max_rel_err 0 | bit-identical; `M[2i+1][-1]` write ported as is (findings.md) |
+| `nlib.crv_fit_p3` | `nurbs::crv_fit::p3` | 2242 cases (242 fixture on FitCrvPoints.pts / Points.pts and the upstream driver call shapes, edge cases + 2000 generated), max_rel_err 0 | bit-identical; errors upstream ignores in the end-derivative estimate are returned, `NL_INHERITED` reads the caller curve's knots (findings.md) |
 | `geom.point_set` | `geom::point_set` | 2029 cases (29 fixture + 2000 generated), max_rel_err 0 | bit-identical; unprojected tight-box angles and centroid block quirk kept (findings.md) |
 | `topology.topology` | `topology::topology` | 657 cases (57 fixture + 600 generated scripts), max_rel_err 0 | bit-identical; `SmTopologyChangeCallback::Execute` unused upstream and not ported; dangling-callback UB on tracker destruction skipped (findings.md) |
 | `nlib.crv_nurb` | `nurbs::crv_nurb` | 2871 cases (871 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/polygon/circle and reversed-line curves, edge cases + 2000 generated), max_rel_err 0 | bit-identical; promoted from partial when `nlib.crv_geom` wired `N_CrvArcLength` (`N_CrvGetDegenSegs`) |
