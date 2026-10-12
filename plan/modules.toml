@@ -543,9 +543,9 @@ depends_on = ["geom.extent1d", "geom.extent3d", "geom.geom_utility_p1", "geom.po
 est_lines = 383
 layer = 6
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.hermite_curve-a1"
+claimed_at = "2026-10-12T21:03:28Z"
 notes = "18 fns; largest: SmHermiteCurve::Evaluate, SmHermiteCurve::CalculateBoundingBox, SmHermiteCurve::ReadFromDB, SmHermiteCurve::GetKnots; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(3), curve.curve_p5(3); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
