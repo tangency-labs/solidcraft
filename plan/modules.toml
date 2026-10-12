@@ -790,10 +790,10 @@ depends_on = ["nlib.crv_adv_p2", "nlib.crv_basic", "nlib.crv_common", "nlib.crv_
 est_lines = 346
 layer = 10
 tests = ["prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect", "prog_test:my_test_GlobalCC_intersect", "prog_test:my_test_GlobalCSI", "prog_test:my_test_surface_curve_intersect", "prog_test:my_test_cci_nurb"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-nlib.crv_offset-a1"
 claimed_at = "2026-10-12T22:47:21Z"
-notes = "1 fns; largest: N_CrvOffsetPtSampling; 181 upstream test entry points reach this unit"
+notes = "difftest green: 1555 cases (55 fixture + 1500 generated), 0 deferred, max_rel_err 0; 1 fns; largest: N_CrvOffsetPtSampling; 181 upstream test entry points reach this unit"
 
 [[unit]]
 id = "nlib.srf_nurb"
