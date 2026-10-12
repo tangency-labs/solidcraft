@@ -6,6 +6,7 @@
 //! `SmPseudoBox`, `SmTol`, `SmTransform`, `SmMatrix` and related `geom.*` units of
 //! `plan/modules.toml`.
 
+pub mod a_object;
 pub mod assert_array;
 pub mod attribute;
 pub mod axis2_placement;
