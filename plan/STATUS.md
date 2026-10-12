@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **26** (23,756 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2` |
-| Partial | **6** (6,169 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array` |
-| Ported (green + partial) | 32 units, 29,925 upstream lines (7.7%); about 37,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 5 (5,832 lines): `nlib.crv_basic`, `geom.pseudo_box`, `geom.global_solver`, `geom.transform`, `geom.tools` |
+| Partial | **7** (7,711 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic` |
+| Ported (green + partial) | 33 units, 31,467 upstream lines (8.1%); about 37,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 4 (4,290 lines): `geom.pseudo_box`, `geom.global_solver`, `geom.transform`, `geom.tools` |
 | Blocked | 0 |
 | Todo | 223 (352,146 lines) |
 
@@ -92,18 +92,15 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
 | `geom.grid` | `geom::grid` | 615 cases (15 fixture + 600 generated), 613 bit-identical; a 30,015-case run was also clean | 2 (`surface.surface_cache_p1` 1: `SmSurfaceGridElement::Init`; `surface.surface_p2` 1: `ExpandHierarchy`) |
 | `geom.solution_array` | `geom::solution_array` | 810 cases (10 fixture + 800 generated), 754 bit-identical | 56 (object geometry: `curve.curve_p2` 16, `topology.face_p2` 14, `topology.edge` 12, `surface.surface_p2` 9, `topology.vertex` 5) |
+| `nlib.crv_basic` | `nurbs::crv_basic` | 3417 cases (417 fixture incl. the six pt_TestFiles .smc curves, .sms cross-boundary derivatives, SM_API_test rectangle/polygon segments, my_test_reversed_line_join lines + 3000 generated), 3139 bit-identical; a 30,000-case run was also clean | 278 (`nlib.crv_tool_p2`: every `N_CrvsAreCoincident` case, via `N_CrvsMakeCompatible`) |
 
 ## Ready set
 
-Nothing is ready to claim: every `todo` unit whose dependencies are otherwise
-green/partial waits on a claimed unit.
+Ready (todo, every dependency green/partial): `nlib.crv_fit_p1` (1707), `nlib.crv_tool_p1`
+(1371), `nlib.iges` (1055), `nlib.srf_tool_p1` (1678), all layer 5. Waiting on a claimed unit:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 5 | `nlib.crv_fit_p1` | 1707 | `nlib.crv_basic` |
-| 5 | `nlib.crv_tool_p1` | 1371 | `nlib.crv_basic` |
-| 5 | `nlib.iges` | 1055 | `nlib.crv_basic` |
-| 5 | `nlib.srf_tool_p1` | 1678 | `nlib.crv_basic` |
 | 6 | `curve.hermite_curve` | 383 | `geom.pseudo_box` |
 | 6 | `geom.point_set` | 694 | `geom.pseudo_box` |
 | 6 | `geom.a_object` | 935 | `geom.transform` |
