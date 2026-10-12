@@ -138,11 +138,6 @@ pub fn asin(x: f64) -> f64 {
     x.asin()
 }
 
-/// `SM_IS_ZERO_SQUARED(a)` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())`.
-fn is_zero_squared(a: f64) -> bool {
-    tol::in_tol(a, tol::scaled_zero_sq())
-}
-
 /// `SM_DEG2RAD(a)` = `a * (SM_PI / 180.0)`.
 fn deg_to_rad(a: f64) -> f64 {
     a * (PI / 180.0)
@@ -793,7 +788,7 @@ impl Vec3 {
         let v1_len_sq = self.length_squared();
         let v2_len_sq = o.length_squared();
 
-        if is_zero_squared(v1_len_sq) || is_zero_squared(v2_len_sq) {
+        if tol::is_zero_squared(v1_len_sq) || tol::is_zero_squared(v2_len_sq) {
             return Err(SolidError::InvalidInput {
                 operation: "geom::vector3d::Vec3::angle_between",
                 reason: "zero-length vector",

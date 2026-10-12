@@ -14,6 +14,7 @@
 //! | [`ids`]                                           | the `SM_AI_*` attribute ids                      |
 //! | [`tag_ids`]                                       | the `SM_TI_*` tag id types                       |
 //! | [`type_code`]                                     | the `Sm*Attribute_TYPE` / `SmObject_TYPE` values |
+//! | [`region_type`]                                   | the region type literals of `SmMergeRegionAttribute` |
 //! | [`Attribute::new`]                                | `SmAttribute(ULONG, SmAttributeBehaviorType)`    |
 //! | [`Attribute::generic`]                            | `SmGenericAttribute(...)`                        |
 //! | [`Attribute::long`]                               | `SmLongAttribute(...)`                           |
@@ -33,6 +34,7 @@
 //! | [`MergeRegionData::has_this_infinite_region`] / [`MergeRegionData::has_other_infinite_region`] | `HasThisInfiniteRegion` / `HasOtherInfiniteRegion` |
 //! | [`MergeRegionData::has_any_solid`]                | `SmMergeRegionAttribute::HasAnySolid`            |
 //! | [`MergeRegionData::set_regions`]                  | `SmMergeRegionAttribute::SetRegions`             |
+//! | `append_new_regions` (private)                    | the two accumulation loops of `SmMergeRegionAttribute::Merge` |
 //! | [`AttributeStore`]                                | the heap of attributes plus every `SmAObject::m_pAttributes` list |
 //! | [`AttributeStore::destroy`]                       | `SmAttribute::~SmAttribute` (`delete pAttr`)     |
 //! | [`AttributeStore::add_user`] / [`AttributeStore::remove_user`] / [`AttributeStore::users`] | `AddUser` / `RemoveUser` / `GetUsers` |
@@ -218,6 +220,17 @@ pub mod type_code {
     pub const COLOR: i64 = 12066;
 }
 
+/// Source region types stored in [`MergeRegionData`] (upstream literals in
+/// `SmMergeRegionAttribute::Merge`).
+pub mod region_type {
+    /// Internal solid region.
+    pub const SOLID: i64 = 0;
+    /// Internal void region.
+    pub const VOID: i64 = 1;
+    /// The infinite region.
+    pub const INFINITE: i64 = 2;
+}
+
 /// `SM_UNDEF_ULONG`: the id a destroyed attribute is left with.
 pub const UNDEF_ULONG: u64 = 123_456_789;
 
@@ -363,7 +376,7 @@ impl TagData {
 /// `SmMergeRegionAttribute` data: the input regions of both Boolean operands that
 /// share points with the output region carrying the attribute.
 ///
-/// Region types: `0` internal solid, `1` internal void, `2` infinite region.
+/// Region types are the [`region_type`] values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeRegionData {
     /// `m_eOperation`: the `SmBooleanOperationType` value (`0` = `SM_BO_UNKNOWN`).
@@ -418,23 +431,23 @@ impl MergeRegionData {
     /// `HasThisInfiniteRegion`: some "this" source region is the infinite region.
     #[must_use]
     pub fn has_this_infinite_region(&self) -> bool {
-        self.this_types.contains(&2)
+        self.this_types.contains(&region_type::INFINITE)
     }
 
     /// `HasOtherInfiniteRegion`: some "other" source region is the infinite region.
     #[must_use]
     pub fn has_other_infinite_region(&self) -> bool {
-        self.other_types.contains(&2)
+        self.other_types.contains(&region_type::INFINITE)
     }
 
     /// `HasAnySolid(flag)`: some source region in the requested set (`flag & 1`:
-    /// "this" sources, `flag & 2`: "other" sources) is solid (type `0`).
+    /// "this" sources, `flag & 2`: "other" sources) is [`region_type::SOLID`].
     #[must_use]
     pub fn has_any_solid(&self, this_other_flag: u64) -> bool {
-        if this_other_flag & 1 != 0 && self.this_types.contains(&0) {
+        if this_other_flag & 1 != 0 && self.this_types.contains(&region_type::SOLID) {
             return true;
         }
-        if this_other_flag & 2 != 0 && self.other_types.contains(&0) {
+        if this_other_flag & 2 != 0 && self.other_types.contains(&region_type::SOLID) {
             return true;
         }
         false
@@ -461,23 +474,16 @@ impl MergeRegionData {
                 entity: None,
             });
         }
-        let bad = || SolidError::InvalidInput {
-            operation: OP,
-            reason: "index past the end of a parallel region list",
-        };
-        if index >= self.this_types.len()
-            || index >= self.other_regions.len()
-            || index >= self.other_types.len()
-        {
-            return Err(bad());
-        }
         let (Some(tr), Some(tt), Some(or), Some(ot)) = (
             self.this_regions.get_mut(index),
             self.this_types.get_mut(index),
             self.other_regions.get_mut(index),
             self.other_types.get_mut(index),
         ) else {
-            return Err(bad());
+            return Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "index past the end of a parallel region list",
+            });
         };
         *tr = this_region;
         *tt = this_type;
@@ -1208,34 +1214,18 @@ impl AttributeStore {
                 .attr_mut(out, OP)?
                 .merge_region_data_mut()
                 .ok_or_else(|| not_live(OP))?;
-            for (i, &r) in src.this_regions.iter().enumerate() {
-                if !dst.this_regions.contains(&r) {
-                    let t = src
-                        .this_types
-                        .get(i)
-                        .copied()
-                        .ok_or(SolidError::InvalidInput {
-                            operation: OP,
-                            reason: "region type list shorter than region list",
-                        })?;
-                    dst.this_regions.push(r);
-                    dst.this_types.push(t);
-                }
-            }
-            for (i, &r) in src.other_regions.iter().enumerate() {
-                if !dst.other_regions.contains(&r) {
-                    let t = src
-                        .other_types
-                        .get(i)
-                        .copied()
-                        .ok_or(SolidError::InvalidInput {
-                            operation: OP,
-                            reason: "region type list shorter than region list",
-                        })?;
-                    dst.other_regions.push(r);
-                    dst.other_types.push(t);
-                }
-            }
+            append_new_regions(
+                &mut dst.this_regions,
+                &mut dst.this_types,
+                &src.this_regions,
+                &src.this_types,
+            )?;
+            append_new_regions(
+                &mut dst.other_regions,
+                &mut dst.other_types,
+                &src.other_regions,
+                &src.other_types,
+            )?;
             return Ok(());
         }
         let out = if let Some(out) = out {
@@ -1247,17 +1237,19 @@ impl AttributeStore {
             new
         };
         let add_region = if in1.is_none() { orig1 } else { orig2 };
-        let region_type = if region_is_infinite(add_region)? {
-            2
+        let add_type = if region_is_infinite(add_region)? {
+            region_type::INFINITE
+        } else if region_is_void(add_region)? {
+            region_type::VOID
         } else {
-            i64::from(region_is_void(add_region)?)
+            region_type::SOLID
         };
         let dst = self
             .attr_mut(out, OP)?
             .merge_region_data_mut()
             .ok_or_else(|| not_live(OP))?;
         dst.this_regions.push(add_region);
-        dst.this_types.push(region_type);
+        dst.this_types.push(add_type);
         Ok(())
     }
 
@@ -1359,6 +1351,27 @@ impl AttributeStore {
         }
         Ok(indices)
     }
+}
+
+/// One half of `SmMergeRegionAttribute::Merge`'s accumulation: appends each source
+/// region not yet in `dst_regions`, with its type, in source order.
+fn append_new_regions(
+    dst_regions: &mut Vec<ObjectKey>,
+    dst_types: &mut Vec<i64>,
+    src_regions: &[ObjectKey],
+    src_types: &[i64],
+) -> Result<()> {
+    for (i, &r) in src_regions.iter().enumerate() {
+        if !dst_regions.contains(&r) {
+            let t = src_types.get(i).copied().ok_or(SolidError::InvalidInput {
+                operation: "geom::attribute::AttributeStore::merge",
+                reason: "region type list shorter than region list",
+            })?;
+            dst_regions.push(r);
+            dst_types.push(t);
+        }
+    }
+    Ok(())
 }
 
 /// `GOTO_NEXT_ATTLINE`: consume through the next `'\n'`.

@@ -60,7 +60,7 @@
 //!   returned with success, as upstream.
 
 use crate::error::{Result, SolidError};
-use crate::geom::tol::{in_tol, scaled_zero};
+use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{sqrt, Vec3};
 use crate::math::EFF_ZERO;
 
@@ -86,11 +86,6 @@ fn sm_err(operation: &'static str) -> SolidError {
         code: SM_ERR,
         entity: None,
     }
-}
-
-/// `SM_IS_ZERO(a)`: `|a| <= SM_EFF_ZERO`.
-fn is_zero(a: f64) -> bool {
-    in_tol(a, scaled_zero())
 }
 
 /// A dense `rows x cols` matrix stored row-major (`SmMatrix`).

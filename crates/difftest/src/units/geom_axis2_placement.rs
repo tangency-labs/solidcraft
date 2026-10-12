@@ -176,7 +176,10 @@ fn build(p: &PlacementIn) -> Result<(f64, Axis2Placement), HarnessError> {
             q
         }
         Kind::Plane => Axis2Placement::from_plane(v0, p.d),
-        Kind::FromTo => Axis2Placement::from_to(v0, v1, v2, v3, v4, v5),
+        Kind::FromTo => Axis2Placement::from_to(
+            &Axis2Placement::new(v0, v1, v2),
+            &Axis2Placement::new(v3, v4, v5),
+        ),
         Kind::Rotated => {
             let mut q = Axis2Placement::new(v0, v1, v2);
             q.rotate_about_axis_at_point(p.d, v3, v4);

@@ -50,10 +50,10 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::matrix::Matrix;
-use crate::geom::tol::{in_tol, scaled_zero, tol3d, ZONE_TOL_3D};
+use crate::geom::tol::{in_tol, is_zero, tol3d, ZONE_TOL_3D};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
-use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, max3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// Upstream `SM_ERR` (generic error status).
 const SM_ERR: i32 = 1001;
@@ -65,35 +65,6 @@ fn sm_err(operation: &'static str) -> SolidError {
         code: SM_ERR,
         entity: None,
     }
-}
-
-/// `smos_Max(a, b)`: `a > b ? a : b`.
-fn smax(a: f64, b: f64) -> f64 {
-    if a > b {
-        a
-    } else {
-        b
-    }
-}
-
-/// `smos_3Max(a, b, c)`.
-fn smax3(a: f64, b: f64, c: f64) -> f64 {
-    if a > b {
-        if a > c {
-            a
-        } else {
-            c
-        }
-    } else if b > c {
-        b
-    } else {
-        c
-    }
-}
-
-/// `SM_IS_ZERO(a)`: `|a| <= SM_EFF_ZERO`.
-fn is_zero(a: f64) -> bool {
-    in_tol(a, scaled_zero())
 }
 
 /// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`.
@@ -677,7 +648,7 @@ pub fn segment_segment_intersect(
     other_end: Point3,
     tolerance: f64,
 ) -> Result<Vec<Point3>> {
-    let tol = smax(tolerance, EFF_ZERO);
+    let tol = max2(tolerance, EFF_ZERO);
     let mut points: Vec<Point3> = Vec::with_capacity(2);
 
     // other start / end on this segment
@@ -1035,7 +1006,7 @@ pub fn intersect_two_planes(
     let plane3_norm = v1.cross(v2);
 
     if plane3_norm.length_squared() < EFF_ZERO_SQ {
-        let scaled_zero = EFF_ZERO * (1.0 + smax(p1.max_dimension(), p2.max_dimension()));
+        let scaled_zero = EFF_ZERO * (1.0 + max2(p1.max_dimension(), p2.max_dimension()));
         let dist1 = (p2 - p1).dot(v1);
         let dist2 = (p1 - p2).dot(v2);
         return Ok(PlanesIntersection::Parallel {
@@ -1260,10 +1231,10 @@ pub fn evaluate_curve_continuity(
     let second2_max = second2.max_dimension();
     let third2_max = third2.map_or(1.0, Vec3::max_dimension);
 
-    let pos12_max = smax(pos1_max, pos2_max);
-    let vec12_max = smax(vec1_max, vec2_max);
-    let second12_max = smax(second1_max, second2_max);
-    let third12_max = smax(third1_max, third2_max);
+    let pos12_max = max2(pos1_max, pos2_max);
+    let vec12_max = max2(vec1_max, vec2_max);
+    let second12_max = max2(second1_max, second2_max);
+    let third12_max = max2(third1_max, third2_max);
 
     // C0
     let scaled_zero = EFF_ZERO * (1.0 + pos12_max);
@@ -1341,8 +1312,8 @@ pub fn evaluate_curve_continuity(
         }
 
         let this_scaled_zero =
-            ZONE_TOL_3D / 10.0 * (1.0 + smax3(vec12_max, second12_max, third12_max));
-        scaled_zero = smax(scaled_zero, this_scaled_zero);
+            ZONE_TOL_3D / 10.0 * (1.0 + max3(vec12_max, second12_max, third12_max));
+        scaled_zero = max2(scaled_zero, this_scaled_zero);
         let g3_target = t1 - a1 * a1 * a1 * t2 - 3.0 * a1 * a2 * second2;
         let (g3_gap, _) = line_point_distance(Point3::ZERO, vec2, g3_target)?;
         if g3_gap > scaled_zero {

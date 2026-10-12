@@ -15,6 +15,7 @@
 //! | [`Transform::transform_vector`] | `SmTransform::TransformVector`              |
 //! | [`EFF_ZERO`] etc.            | `SM_EFF_ZERO` etc.                             |
 //! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
+//! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max` |
 //!
 //! ## Why not `glam`/`nalgebra`
 //!
@@ -69,6 +70,67 @@ pub fn is_infinite_param(a: f64) -> bool {
         || a == -INFINITE_PARAMETER
         || a == INFINITE_PARAMETER_SQRT
         || a == -INFINITE_PARAMETER_SQRT
+}
+
+/// `smos_Max(a, b)`: `a > b ? a : b`.
+///
+/// Unlike [`f64::max`], the result for a NaN operand follows the comparison
+/// (`b` when either is NaN), as upstream's macro does.
+#[must_use]
+pub fn max2(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// `smos_Min(a, b)`: `a < b ? a : b` (NaN handling as [`max2`]).
+#[must_use]
+pub fn min2(a: f64, b: f64) -> f64 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// `smos_3Max(a, b, c)`, with upstream's comparison order.
+#[must_use]
+pub fn max3(a: f64, b: f64, c: f64) -> f64 {
+    if a > b {
+        if a > c {
+            a
+        } else {
+            c
+        }
+    } else if b > c {
+        b
+    } else {
+        c
+    }
+}
+
+/// `smos_3Min(a, b, c)`, with upstream's comparison order.
+#[must_use]
+pub fn min3(a: f64, b: f64, c: f64) -> f64 {
+    if a < b {
+        if a < c {
+            a
+        } else {
+            c
+        }
+    } else if b < c {
+        b
+    } else {
+        c
+    }
+}
+
+/// `smos_4Max(a, b, c, d)` = `smos_Max(smos_Max(a, b), smos_Max(c, d))`.
+#[must_use]
+pub fn max4(a: f64, b: f64, c: f64, d: f64) -> f64 {
+    max2(max2(a, b), max2(c, d))
 }
 
 /// An affine 3D transform stored as upstream's row-vector 4×4 matrix

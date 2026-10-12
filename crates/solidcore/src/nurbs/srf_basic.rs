@@ -9,7 +9,7 @@
 //! | Rust                                         | Upstream                          |
 //! |----------------------------------------------|-----------------------------------|
 //! | [`Surface`]                                  | `NL_SURFACE` (with its `NL_CNET` and `NL_KNOTVECTOR`s) |
-//! | [`Surface::new`], [`Surface::with_indices`]  | `N_SrfFromCNetAndKnotVectors`     |
+//! | [`Surface::new`], [`Surface::with_indices`], [`SurfaceIndices`] | `N_SrfFromCNetAndKnotVectors` |
 //! | [`Surface::n`], [`Surface::m`], [`Surface::array_sizes`] | `N_SrfGetArraySizes`  |
 //! | [`Surface::p`], [`Surface::q`], [`Surface::degrees`] | `N_SrfGetDegrees`         |
 //! | [`Surface::cpt`], [`Surface::row`], [`Surface::rows`], [`Surface::cpts`] | `N_SrfGetCPts` |
@@ -75,7 +75,7 @@ use crate::nurbs::geom::{
     dist_pt_pt, dist_signed_pt_plane, plane_pt_normal_to_implicit, Rectangle,
 };
 use crate::nurbs::knots::{KnotVector, MAX_DEGREE};
-use crate::nurbs::math::{combine4_pts, CPoint, MODEL_TOL, NOW};
+use crate::nurbs::math::{combine2_pts, combine4_pts, CPoint, MODEL_TOL, NOW};
 
 /// Minimum valid weight (`NL_WMIN`).
 pub const WEIGHT_MIN: f64 = 1.0e-03;
@@ -118,7 +118,7 @@ pub enum Direction {
 impl Direction {
     /// The upstream flag value.
     #[must_use]
-    pub fn flag(self) -> i32 {
+    pub const fn flag(self) -> i32 {
         match self {
             Direction::U => 1,
             Direction::V => 2,
@@ -128,7 +128,7 @@ impl Direction {
 
     /// The direction for an upstream flag value, `None` for any other value.
     #[must_use]
-    pub fn from_flag(flag: i32) -> Option<Self> {
+    pub const fn from_flag(flag: i32) -> Option<Self> {
         match flag {
             1 => Some(Direction::U),
             2 => Some(Direction::V),
@@ -157,6 +157,24 @@ pub struct AverageLen {
     pub lu: f64,
     /// Average length of the v-direction control polygons.
     pub lv: f64,
+}
+
+/// The highest indices and the degrees of a [`Surface`] (upstream `NL_SURFACE`'s
+/// `n`, `m`, `p`, `q` and its knot vectors' `r`, `s`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SurfaceIndices {
+    /// Highest u index of the control net.
+    pub n: usize,
+    /// Highest v index of the control net.
+    pub m: usize,
+    /// Degree in u.
+    pub p: usize,
+    /// Degree in v.
+    pub q: usize,
+    /// Highest index of the u knot vector.
+    pub r: usize,
+    /// Highest index of the v knot vector.
+    pub s: usize,
 }
 
 /// A NURBS surface (upstream `NL_SURFACE`): control net `Pw[0..=n][0..=m]`, degrees
@@ -244,18 +262,13 @@ impl Surface {
     /// with a net and knot vectors whose indices may be below their storage).
     ///
     /// Errors with `InvalidInput` when the storage does not hold the indices.
-    #[allow(clippy::too_many_arguments)]
     pub fn with_indices(
         net: Vec<Vec<CPoint>>,
-        n: usize,
-        m: usize,
-        p: usize,
-        q: usize,
         u: Vec<f64>,
-        r: usize,
         v: Vec<f64>,
-        s: usize,
+        idx: SurfaceIndices,
     ) -> Result<Self> {
+        let SurfaceIndices { n, m, p, q, r, s } = idx;
         if !net_holds(&net, n, m) {
             return Err(invalid(OP_WITH_INDICES, "control net smaller than (n, m)"));
         }
@@ -273,6 +286,19 @@ impl Surface {
             v,
             s,
         })
+    }
+
+    /// All indices and degrees.
+    #[must_use]
+    pub fn indices(&self) -> SurfaceIndices {
+        SurfaceIndices {
+            n: self.n,
+            m: self.m,
+            p: self.p,
+            q: self.q,
+            r: self.r,
+            s: self.s,
+        }
     }
 
     /// Highest u index of the control net.
@@ -438,15 +464,8 @@ impl Surface {
     ///
     /// Errors with `InvalidInput` (and changes nothing) when the storage does not hold
     /// the new indices (upstream would index past its arrays later).
-    pub fn set_size_indices(
-        &mut self,
-        n: usize,
-        m: usize,
-        p: usize,
-        q: usize,
-        r: usize,
-        s: usize,
-    ) -> Result<()> {
+    pub fn set_size_indices(&mut self, idx: SurfaceIndices) -> Result<()> {
+        let SurfaceIndices { n, m, p, q, r, s } = idx;
         if !net_holds(&self.net, n, m) || self.u.len() <= r || self.v.len() <= s {
             return Err(invalid(OP_SET_SIZE, "storage smaller than the indices"));
         }
@@ -492,7 +511,7 @@ impl Surface {
     /// allocated, an existing one is resized with [`size_arrays`] (keeping storage
     /// that is large enough), then the net and knots in use are copied.
     pub fn copy_into(&self, dst: &mut Option<Surface>) {
-        let sur = size_arrays(dst, self.n, self.m, self.p, self.q, self.r, self.s);
+        let sur = size_arrays(dst, self.indices());
         for (qrow, prow) in sur.net.iter_mut().zip(self.rows()) {
             for (q, p) in qrow.iter_mut().zip(prow) {
                 *q = *p;
@@ -801,14 +820,14 @@ impl Surface {
         let p01 = self.cpt(0, m)?.to_euclid();
         let p11 = self.cpt(n, m)?.to_euclid();
         let p = combine4_pts(0.25, p00, 0.25, p10, 0.25, p01, 0.25, p11);
-        let a = vector_combine(0.5, p00, 0.5, p10);
-        let b = vector_combine(0.5, p10, 0.5, p11);
+        let a = combine2_pts(0.5, p00, 0.5, p10);
+        let b = combine2_pts(0.5, p10, 0.5, p11);
         let c = a - p;
         let d = b - p;
-        let lv = magnitude(c);
-        let lu = magnitude(d);
+        let lv = c.length();
+        let lu = d.length();
         let nrm = c.cross(d);
-        let ln = magnitude(nrm);
+        let ln = nrm.length();
         let split = if lu > lv { Direction::V } else { Direction::U };
         if ln < MODEL_TOL {
             return Ok(Flatness {
@@ -886,20 +905,6 @@ impl Surface {
     }
 }
 
-/// `alf*a + bet*b` (`N_VectorCombine`).
-fn vector_combine(alf: f64, a: Vec3, bet: f64, b: Vec3) -> Vec3 {
-    Vec3::new(
-        alf * a.x + bet * b.x,
-        alf * a.y + bet * b.y,
-        alf * a.z + bet * b.z,
-    )
-}
-
-/// `sqrt(a . a)` (`N_VectorMagnitude`).
-fn magnitude(a: Vec3) -> f64 {
-    (a.x * a.x + a.y * a.y + a.z * a.z).sqrt()
-}
-
 /// One direction of `N_SrfReparamToInterval`: `U[0..=p] = lo`,
 /// `U[p+1..=r-p-1]` mapped affinely, `U[r-p..=r] = hi`. Requires `p <= r`.
 fn rescale(u: &mut [f64], r: usize, p: usize, lo: f64, hi: f64) -> Result<()> {
@@ -946,15 +951,8 @@ pub fn make_rat_compatible(surfaces: &mut [Surface]) {
 /// indices in use are at least the requested ones ([`Surface::is_sized`]) keeps its
 /// storage; otherwise new zero-filled storage replaces it. In every case the indices
 /// and degrees are then set to the requested values. Returns the sized surface.
-pub fn size_arrays(
-    slot: &mut Option<Surface>,
-    n: usize,
-    m: usize,
-    p: usize,
-    q: usize,
-    r: usize,
-    s: usize,
-) -> &mut Surface {
+pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> &mut Surface {
+    let SurfaceIndices { n, m, p, q, r, s } = idx;
     let fresh = || Surface {
         net: zero_net(n, m),
         n,
@@ -970,8 +968,7 @@ pub fn size_arrays(
         Some(sur) => {
             // The storage always holds the indices in use, so `set_size_indices`
             // cannot fail once `is_sized` passed.
-            if sur.is_sized(n, m, r, s).is_err() || sur.set_size_indices(n, m, p, q, r, s).is_err()
-            {
+            if sur.is_sized(n, m, r, s).is_err() || sur.set_size_indices(idx).is_err() {
                 *sur = fresh();
             }
             sur
@@ -1024,7 +1021,15 @@ mod tests {
     #[test]
     fn counts_and_weights() {
         let mut s = bilinear();
-        s.set_size_indices(1, 1, 2, 1, 3, 3).unwrap();
+        s.set_size_indices(SurfaceIndices {
+            n: 1,
+            m: 1,
+            p: 2,
+            q: 1,
+            r: 3,
+            s: 3,
+        })
+        .unwrap();
         assert!(matches!(
             s.counts_are_valid(),
             Err(SolidError::Nlib {

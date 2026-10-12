@@ -10,7 +10,7 @@
 //! | `Copy` / `Clone`                              | copy constructor                                      |
 //! | [`Axis2Placement::new`]                       | `SmAxis2Placement(Origin, XAxis, YAxis)` (orient)     |
 //! | [`Axis2Placement::from_plane`]                | `SmAxis2Placement(const SmVector3d&, double)` (plane) |
-//! | [`Axis2Placement::from_to`]                   | `SmAxis2Placement(FromO, FromX, FromY, ToO, ToX, ToY)` |
+//! | [`Axis2Placement::from_to`]                   | `SmAxis2Placement(FromO, FromX, FromY, ToO, ToX, ToY)` (takes the two built systems) |
 //! | [`Axis2Placement::origin`]                    | `GetOrigin`, `GetOriginRef`                           |
 //! | [`Axis2Placement::x_axis`]                    | `GetXAxis`, `GetXAxisRef`                             |
 //! | [`Axis2Placement::y_axis`]                    | `GetYAxis`, `GetYAxisRef`                             |
@@ -34,6 +34,8 @@
 //! | [`Axis2Placement::are_coaxial`]               | `AreCoaxial`                                          |
 //!
 //! Deviations:
+//! - The from/to constructor's six vectors become two placements built with
+//!   [`Axis2Placement::new`] (what upstream builds internally).
 //! - Out-params become return values (`GetCanonical`, `GetMatrix`, `GetMirrorMatrix`,
 //!   `TransformPoint`, `TransformVector`, `TransformAxis2Placement`, `Invert`); the
 //!   4x4 matrices are `[[f64; 4]; 4]` in upstream's `padMat[row][col]` layout.
@@ -55,8 +57,9 @@
 //!   part of this unit.
 
 use crate::error::{Result, SolidError};
-use crate::geom::tol::{in_tol, scaled_zero2};
+use crate::geom::tol::are_same;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::EFF_ZERO;
 
 /// A right-handed coordinate system: an origin and unit, perpendicular X and Y axes
 /// (Z is X × Y). As a transformation it maps local coordinates `[u v w]` to
@@ -136,19 +139,12 @@ impl Axis2Placement {
     }
 
     /// From/to constructor: the placement mapping coordinates of the `from` system
-    /// to the `to` system, `inverse(from) * to` (both built with [`new`](Self::new)).
+    /// to the `to` system, `inverse(from) * to`. Upstream builds both systems from
+    /// origin/X/Y triples with the orient constructor; pass
+    /// [`new`](Self::new)`(origin, x, y)` for each.
     #[must_use]
-    pub fn from_to(
-        from_origin: Point3,
-        from_x_axis: Vec3,
-        from_y_axis: Vec3,
-        to_origin: Point3,
-        to_x_axis: Vec3,
-        to_y_axis: Vec3,
-    ) -> Self {
-        let from = Self::new(from_origin, from_x_axis, from_y_axis);
-        let to = Self::new(to_origin, to_x_axis, to_y_axis);
-        from.invert().transform_axis2_placement(&to)
+    pub fn from_to(from: &Self, to: &Self) -> Self {
+        from.invert().transform_axis2_placement(to)
     }
 
     /// The origin (`GetOrigin`, `GetOriginRef`).
@@ -196,21 +192,21 @@ impl Axis2Placement {
         self.y_axis = y_axis;
 
         // make sure X Axis is a unit vector
-        if (self.x_axis.dot(self.x_axis) - 1.0).abs() > crate::math::EFF_ZERO / 100.0 {
+        if (self.x_axis.dot(self.x_axis) - 1.0).abs() > EFF_ZERO / 100.0 {
             let unit = self.x_axis.unitize();
             self.x_axis = self.x_axis.unitize_or_z();
             unit?;
         }
 
         // make sure Y Axis is a unit vector
-        if (self.y_axis.dot(self.y_axis) - 1.0).abs() > crate::math::EFF_ZERO / 100.0 {
+        if (self.y_axis.dot(self.y_axis) - 1.0).abs() > EFF_ZERO / 100.0 {
             let unit = self.y_axis.unitize();
             self.y_axis = self.y_axis.unitize_or_z();
             unit?;
         }
 
         // make sure vectors are perpendicular
-        if self.x_axis.dot(self.y_axis).abs() > crate::math::EFF_ZERO {
+        if self.x_axis.dot(self.y_axis).abs() > EFF_ZERO {
             let [x, y, _] = x_axis.make_unit_ortho_vectors(Some(y_axis))?;
             self.x_axis = x;
             self.y_axis = y;
@@ -411,9 +407,7 @@ impl Axis2Placement {
             (self.y_axis.y, other.y_axis.y),
             (self.y_axis.z, other.y_axis.z),
         ];
-        pairs
-            .iter()
-            .all(|&(a, b)| in_tol(a - b, scaled_zero2(&a, &b)))
+        pairs.iter().all(|&(a, b)| are_same(a, b))
     }
 
     /// True when every origin and axis component is within `tol` of the identity
@@ -471,9 +465,9 @@ mod tests {
     #[test]
     fn identity_and_init() {
         let mut p = Axis2Placement::new(Vec3::new(1.0, 2.0, 3.0), Vec3::Y, Vec3::Z);
-        assert!(!p.is_identity(crate::math::EFF_ZERO));
+        assert!(!p.is_identity(EFF_ZERO));
         p.init();
-        assert!(p.is_identity(crate::math::EFF_ZERO));
+        assert!(p.is_identity(EFF_ZERO));
         assert_eq!(Axis2Placement::default(), Axis2Placement::IDENTITY);
         assert_eq!(p.z_axis(), Vec3::Z);
     }
@@ -555,12 +549,8 @@ mod tests {
     #[test]
     fn from_to_maps_frames() {
         let p = Axis2Placement::from_to(
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::X,
-            Vec3::Y,
-            Vec3::new(0.0, 5.0, 0.0),
-            Vec3::Y,
-            -Vec3::X,
+            &Axis2Placement::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X, Vec3::Y),
+            &Axis2Placement::new(Vec3::new(0.0, 5.0, 0.0), Vec3::Y, -Vec3::X),
         );
         assert!(close(
             p.transform_point(Vec3::new(1.0, 0.0, 0.0)),

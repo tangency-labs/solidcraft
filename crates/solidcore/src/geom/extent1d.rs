@@ -78,41 +78,14 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::BoundaryType;
-use crate::geom::tol::{in_tol, scaled_zero2, tol3d};
+use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::math::{
-    is_infinite_param, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER, UNDEF_DOUBLE,
+    is_infinite_param, max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER,
+    UNDEF_DOUBLE,
 };
 
 /// Upstream status `SM_ERR`.
 const SM_ERR: i32 = 1001;
-
-/// `smos_Max(a, b)`: `a > b ? a : b`.
-fn smax(a: f64, b: f64) -> f64 {
-    if a > b {
-        a
-    } else {
-        b
-    }
-}
-
-/// `smos_Min(a, b)`: `a < b ? a : b`.
-fn smin(a: f64, b: f64) -> f64 {
-    if a < b {
-        a
-    } else {
-        b
-    }
-}
-
-/// `SM_ARE_SAME(a, b)`: `|a - b| <= max(scaled zero of a, scaled zero of b)`.
-fn are_same(a: f64, b: f64) -> bool {
-    in_tol(a - b, scaled_zero2(&a, &b))
-}
-
-/// `SM_ARE_SAME_TO_TOL(a, b, tol)`: `|a - b| <= |tol|`.
-fn are_same_to_tol(a: f64, b: f64, tol: f64) -> bool {
-    in_tol(a - b, tol3d(tol))
-}
 
 /// Classification of a value against an interval (`SmExtentPointType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -299,7 +272,7 @@ impl Extent1d {
     /// The larger absolute end value (`GetMaxDimension`).
     #[must_use]
     pub fn max_dimension(&self) -> f64 {
-        smax(self.max.abs(), self.min.abs())
+        max2(self.max.abs(), self.min.abs())
     }
 
     /// True when `t` is in the lower half of the interval (`t <= mid`): evaluate
@@ -400,8 +373,8 @@ impl Extent1d {
     #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         Self {
-            min: smin(self.min, other.min),
-            max: smax(self.max, other.max),
+            min: min2(self.min, other.min),
+            max: max2(self.max, other.max),
         }
     }
 
@@ -428,8 +401,8 @@ impl Extent1d {
             });
         }
         Ok(Self {
-            min: smax(self.min, other.min),
-            max: smin(self.max, other.max),
+            min: max2(self.min, other.min),
+            max: min2(self.max, other.max),
         })
     }
 
@@ -769,8 +742,8 @@ impl Extent1d {
 
         if other_min < other_max - EFF_ZERO {
             if (this_min <= other_max + EFF_ZERO) && (this_max >= other_min - EFF_ZERO) {
-                let min = smax(this_min, other_min);
-                let mut max = smin(this_max, other_max);
+                let min = max2(this_min, other_min);
+                let mut max = min2(this_max, other_max);
                 if are_same(min, max) {
                     max = min;
                 }
@@ -792,7 +765,7 @@ impl Extent1d {
                         other_max = this_min;
                     }
                     if !(this_closed && are_same(this_min, other_max)) {
-                        out.push(Self::from_min_max(this_min, smin(this_max, other_max)));
+                        out.push(Self::from_min_max(this_min, min2(this_max, other_max)));
                     }
                 }
                 if this_max >= other_min - EFF_ZERO {
@@ -800,7 +773,7 @@ impl Extent1d {
                         other_min = this_max;
                     }
                     if !(this_closed && are_same(this_max, other_min)) {
-                        out.push(Self::from_min_max(smax(this_min, other_min), this_max));
+                        out.push(Self::from_min_max(max2(this_min, other_min), this_max));
                     }
                 }
             }
@@ -904,7 +877,7 @@ impl Extent1d {
     pub fn is_value_on_periodic_boundary(&self, v: f64, period: f64, tol: f64) -> (bool, f64) {
         let c = self.contains_periodic_value(v, period, tol);
         let on = c.dist_to_min < tol || c.dist_to_max < tol;
-        (on, smin(c.dist_to_min, c.dist_to_max))
+        (on, min2(c.dist_to_min, c.dist_to_max))
     }
 }
 

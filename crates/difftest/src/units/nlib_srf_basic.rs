@@ -23,7 +23,9 @@ use serde_json::Value;
 
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
-use solidcore::nurbs::srf_basic::{make_rat_compatible, size_arrays, Direction, Surface};
+use solidcore::nurbs::srf_basic::{
+    make_rat_compatible, size_arrays, Direction, Surface, SurfaceIndices,
+};
 use solidcore::{Result as SolidResult, SolidError};
 use solidcore_ffi::units::nlib_srf_basic::{self as ffi, Op};
 use solidcore_ffi::FfiError;
@@ -196,6 +198,12 @@ fn encode(s: &InlineSrf, o: &mut Vec<f64>) -> Result<(), HarnessError> {
     Ok(())
 }
 
+/// `[n, m, p, q, r, s]` as [`SurfaceIndices`].
+fn indices(idx: &[usize; 6]) -> SurfaceIndices {
+    let [n, m, p, q, r, s] = *idx;
+    SurfaceIndices { n, m, p, q, r, s }
+}
+
 fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let (_, used) = shape(s)?;
     let net = s
@@ -203,17 +211,15 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
         .iter()
         .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
         .collect();
-    Surface::with_indices(
-        net,
-        used[0],
-        used[1],
-        s.p,
-        s.q,
-        s.u.clone(),
-        used[2],
-        s.v.clone(),
-        used[3],
-    )
+    let idx = SurfaceIndices {
+        n: used[0],
+        m: used[1],
+        p: s.p,
+        q: s.q,
+        r: used[2],
+        s: used[3],
+    };
+    Surface::with_indices(net, s.u.clone(), s.v.clone(), idx)
     .map_err(|e| harness(format!("rust surface: {e}")))
 }
 
@@ -461,7 +467,7 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
                     st = status(&s.reparam_to_interval(rect, dir));
                 }
                 Kind::SetSize { idx } => {
-                    st = status(&s.set_size_indices(idx[0], idx[1], idx[2], idx[3], idx[4], idx[5]));
+                    st = status(&s.set_size_indices(indices(idx)));
                 }
                 Kind::CopyNull => {
                     let mut slot = None;
@@ -475,7 +481,7 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
                 }
                 Kind::SizeArrays { idx } => {
                     let mut slot = Some(s);
-                    let sized = size_arrays(&mut slot, idx[0], idx[1], idx[2], idx[3], idx[4], idx[5]);
+                    let sized = size_arrays(&mut slot, indices(idx));
                     let (n, m, r, ss) = sized.array_sizes();
                     let (p, q) = sized.degrees();
                     o.push(0.0);

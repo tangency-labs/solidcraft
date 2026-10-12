@@ -82,10 +82,10 @@
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent3d::{BoundaryType, Extent3d};
-use crate::geom::tol::{in_tol, scaled_zero2, tol3d, ScaledZero};
+use crate::geom::tol::{are_same, are_same_to_tol, is_zero_to_tol, tol3d, ScaledZero};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
-use crate::math::{is_infinite_param, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::math::{is_infinite_param, max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 
 /// Upstream status `SM_ERR`.
 const SM_ERR: i32 = 1001;
@@ -101,39 +101,6 @@ pub const SS_UMAX: u32 = 4;
 /// `SM_SS_VMAX`: the point is on the `v = VMax` boundary.
 pub const SS_VMAX: u32 = 8;
 
-/// `smos_Max(a, b)`: `a > b ? a : b`.
-fn smax(a: f64, b: f64) -> f64 {
-    if a > b {
-        a
-    } else {
-        b
-    }
-}
-
-/// `smos_Min(a, b)`: `a < b ? a : b`.
-fn smin(a: f64, b: f64) -> f64 {
-    if a < b {
-        a
-    } else {
-        b
-    }
-}
-
-/// `SM_ARE_SAME(a, b)`: `|a - b| <= max(scaled zero of a, scaled zero of b)`.
-fn are_same(a: f64, b: f64) -> bool {
-    in_tol(a - b, scaled_zero2(&a, &b))
-}
-
-/// `SM_ARE_SAME_TO_TOL(a, b, tol)`: `|a - b| <= |tol|`.
-fn are_same_to_tol(a: f64, b: f64, tol: f64) -> bool {
-    in_tol(a - b, tol3d(tol))
-}
-
-/// `SM_IS_ZERO_TO_TOL(a, tol)`: `|a| <= |tol|`.
-fn is_zero_to_tol(a: f64, tol: f64) -> bool {
-    in_tol(a, tol3d(tol))
-}
-
 /// `x - d` unless `x` is an unbounded marker (`ExpandAbsolute`/`ExpandRelative`).
 fn shrink_unless_infinite(x: f64, d: f64) -> f64 {
     x - if is_infinite_param(x) { 0.0 } else { d }
@@ -142,32 +109,6 @@ fn shrink_unless_infinite(x: f64, d: f64) -> f64 {
 /// `x + d` unless `x` is an unbounded marker.
 fn grow_unless_infinite(x: f64, d: f64) -> f64 {
     x + if is_infinite_param(x) { 0.0 } else { d }
-}
-
-/// One coordinate of `Evaluate`: exact end values at 0 and 1.
-fn lerp_exact(min: f64, max: f64, t: f64) -> f64 {
-    if t == 0.0 {
-        min
-    } else if t == 1.0 {
-        max
-    } else {
-        min + t * (max - min)
-    }
-}
-
-/// One coordinate of `ClassifyPoint2d`.
-fn classify_coord(p: f64, min: f64, max: f64, tol: f64) -> ExtentPointType {
-    if (p - min).abs() <= tol && (p - max).abs() <= tol {
-        ExtentPointType::Both
-    } else if (p - min).abs() <= tol {
-        ExtentPointType::Start
-    } else if (p - max).abs() <= tol {
-        ExtentPointType::End
-    } else if p - min >= 0.0 && max - p >= 0.0 {
-        ExtentPointType::Inside
-    } else {
-        ExtentPointType::Outside
-    }
 }
 
 /// One coordinate of `Inversion`: `num / den`, or `1` / `-1` for a (near) zero
@@ -213,7 +154,7 @@ impl ScaledZero for Extent2d {
     /// `SmTol::GetScaledZero(const SmExtent2d&)`: `SM_EFF_ZERO * (1 + max |coord|)`
     /// over both corners.
     fn scaled_zero(&self) -> f64 {
-        tol3d(EFF_ZERO * (1.0 + smax(self.min.max_dimension(), self.max.max_dimension())))
+        tol3d(EFF_ZERO * (1.0 + max2(self.min.max_dimension(), self.max.max_dimension())))
     }
 }
 
@@ -302,7 +243,7 @@ impl Extent2d {
     pub fn set_min_max(&mut self, min: Point2, max: Point2) -> Result<()> {
         if min.x > max.x || min.y > max.y {
             return Err(SolidError::InvalidInput {
-                operation: "geom::extent2d::set_min_max",
+                operation: "geom::extent2d::Extent2d::set_min_max",
                 reason: "min > max",
             });
         }
@@ -322,7 +263,7 @@ impl Extent2d {
     ) -> Result<()> {
         if min_x > max_x || min_y > max_y {
             return Err(SolidError::InvalidInput {
-                operation: "geom::extent2d::set_min_max_coords",
+                operation: "geom::extent2d::Extent2d::set_min_max_coords",
                 reason: "min > max",
             });
         }
@@ -429,7 +370,7 @@ impl Extent2d {
     /// Largest absolute coordinate of either corner (`GetMaxDimension`).
     #[must_use]
     pub fn max_dimension(&self) -> f64 {
-        smax(self.min.max_dimension(), self.max.max_dimension())
+        max2(self.min.max_dimension(), self.max.max_dimension())
     }
 
     /// The diagonal `max - min` (`GetSize`).
@@ -454,8 +395,8 @@ impl Extent2d {
     #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         Self {
-            min: Vec2::new(smin(self.min.x, other.min.x), smin(self.min.y, other.min.y)),
-            max: Vec2::new(smax(self.max.x, other.max.x), smax(self.max.y, other.max.y)),
+            min: Vec2::new(min2(self.min.x, other.min.x), min2(self.min.y, other.min.y)),
+            max: Vec2::new(max2(self.max.x, other.max.x), max2(self.max.y, other.max.y)),
         }
     }
 
@@ -464,13 +405,13 @@ impl Extent2d {
     pub fn intersect(&self, other: &Self) -> Result<Self> {
         if self.are_disjoint(other, 0.0) {
             return Err(SolidError::InvalidInput {
-                operation: "geom::extent2d::intersect",
+                operation: "geom::extent2d::Extent2d::intersect",
                 reason: "disjoint extents",
             });
         }
         Ok(Self {
-            min: Vec2::new(smax(self.min.x, other.min.x), smax(self.min.y, other.min.y)),
-            max: Vec2::new(smin(self.max.x, other.max.x), smin(self.max.y, other.max.y)),
+            min: Vec2::new(max2(self.min.x, other.min.x), max2(self.min.y, other.min.y)),
+            max: Vec2::new(min2(self.max.x, other.max.x), min2(self.max.y, other.max.y)),
         })
     }
 
@@ -603,8 +544,8 @@ impl Extent2d {
     ) -> (ExtentPointType, ExtentPointType) {
         let tol_v = tol_v.unwrap_or(tol_u);
         (
-            classify_coord(p.x, self.min.x, self.max.x, tol_u),
-            classify_coord(p.y, self.min.y, self.max.y, tol_v),
+            Extent1d::from_raw(self.min.x, self.max.x).classify_point(p.x, tol_u),
+            Extent1d::from_raw(self.min.y, self.max.y).classify_point(p.y, tol_v),
         )
     }
 
@@ -682,8 +623,8 @@ impl Extent2d {
     #[must_use]
     pub fn evaluate(&self, nx: f64, ny: f64) -> Point2 {
         self.clamp_point(Vec2::new(
-            lerp_exact(self.min.x, self.max.x, nx),
-            lerp_exact(self.min.y, self.max.y, ny),
+            Extent1d::from_raw(self.min.x, self.max.x).evaluate(nx),
+            Extent1d::from_raw(self.min.y, self.max.y).evaluate(ny),
         ))
     }
 
@@ -693,7 +634,7 @@ impl Extent2d {
     /// default `tol = SM_EFF_ZERO`).
     pub fn inversion(&self, p: Point2, tol: f64) -> Result<Point2> {
         let err = || SolidError::Upstream {
-            operation: "geom::extent2d::inversion",
+            operation: "geom::extent2d::Extent2d::inversion",
             code: SM_ERR,
             entity: None,
         };
@@ -822,7 +763,7 @@ impl Extent2d {
             }
         }
 
-        (ivl.max() > ivl.min() - smax(tol_u, tol_v)).then_some(ivl)
+        (ivl.max() > ivl.min() - max2(tol_u, tol_v)).then_some(ivl)
     }
 
     /// True when `u` is in the lower half of the u interval (`GetULeftEval`).
@@ -852,7 +793,7 @@ impl Extent2d {
         let n = self
             .inversion(p, EFF_ZERO)
             .map_err(|_| SolidError::Upstream {
-                operation: "geom::extent2d::point_map_to_domain",
+                operation: "geom::extent2d::Extent2d::point_map_to_domain",
                 code: SM_ERR,
                 entity: None,
             })?;
