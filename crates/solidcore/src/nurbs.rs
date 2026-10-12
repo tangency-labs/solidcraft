@@ -7,6 +7,7 @@
 
 pub mod basis_basic;
 pub mod bezier;
+pub mod funcs_basic;
 pub mod geom;
 pub mod knots;
 pub mod math;

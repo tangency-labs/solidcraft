@@ -680,3 +680,25 @@ Upstream behaviour worth knowing:
   `Cross` adds nothing) the result box keeps its previous basis and domain. The port
   returns a fresh box; the difftest compares upstream through a fresh temporary plus
   `operator=`, which is what `PolarBox::assign` reproduces.
+
+## nlib.funcs_basic (green; no disagreements)
+
+Difftest: 3130 cases (130 fixture + 3000 generated), bit-identical (max_rel_err 0); a
+50,130-case run is also clean. Fixtures evaluate the control-point coordinates of the
+upstream `.smc` / `.sms` test files as scalar curve / surface functions, plus edge cases.
+
+- **Unchecked indices.** `N_CFuncSetSizeIndices` / `N_SFuncSetSizeIndices` and
+  `N_CrvFuncSetPtrs` trust the caller; indices past the storage make later reads go out of
+  bounds. The evaluators (`N_CFuncEval`, `N_CFuncDerivs`, `N_SrfFuncEvalPt`) read the value
+  *storage* at `spn-p..=spn` with `spn <= m-p-1` and never compare with `n` (so a value array
+  shorter than `m - p` entries is read past its end, while a larger storage is read beyond
+  the indices in use). The Rust port reads the storage as well (same results) and returns
+  `InvalidInput` instead of reading past it; the FFI wrapper refuses such inputs.
+- **`N_CFuncSizeArrays` / `N_SFuncSizeArrays` compare with the indices in use**, not the
+  storage: an existing function whose indices were shrunk cannot be regrown within its own
+  storage (`NL_STO_ERR`). Kept (note `nlib.srf_basic`'s `size_arrays` reallocates instead,
+  following `N_SrfSizeArrays`).
+- A function is "NULL" (`N_CrvAreFuncArraysNULL`) when any pointer is NULL **or** the degree
+  is `-1`; Rust uses `Option<CurveFunction>` / `Option<SurfaceFunction>`, so partly NULL
+  functions cannot be expressed. Storage upstream allocates with `malloc` is zero-filled.
+- No `UNPORTED(nlib.funcs_basic)` stubs existed to wire.
