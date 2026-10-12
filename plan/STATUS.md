@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **41** (43,799 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic` |
+| Green | **42** (45,999 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv` |
 | Partial | **10** (9,147 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object` |
-| Ported (green + partial) | 51 units, 52,946 upstream lines (13.6%); about 59,800 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
-| Claimed | 4 (6,268 lines): `nlib.crv_fit_p3`, `nurbs.nurbs_crv`, `nlib.crv_adv_p1`, `nlib.crv_common` |
+| Ported (green + partial) | 52 units, 55,146 upstream lines (14.2%); about 59,800 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 3 (4,068 lines): `nlib.crv_fit_p3`, `nlib.crv_adv_p1`, `nlib.crv_common` |
 | Blocked | 0 |
 | Todo | 205 (328,689 lines) |
 
@@ -96,6 +96,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `nlib.crv_nurb` | `nurbs::crv_nurb` | 2871 cases (871 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/polygon/circle and reversed-line curves, edge cases + 2000 generated), max_rel_err 0 | bit-identical; promoted from partial when `nlib.crv_geom` wired `N_CrvArcLength` (`N_CrvGetDegenSegs`) |
 | `nlib.crv_geom` | `nurbs::crv_geom` | 1723 cases (223 fixture on the six pt_TestFiles .smc curves + edge cases, 1500 generated incl. circles, lines, degenerate and closed curves), max_rel_err 0 | bit-identical; closest-point best values on failure and polyline non-termination quirks in findings.md |
 | `nlib.crv_tool_p2` | `nurbs::crv_tool::p2` | 2124 cases (124 fixture on the six pt_TestFiles .smc curves and curve pairs, in-place and out-of-place C++ forms, degenerate-segment edge cases + 2000 generated), max_rel_err 0 | bit-identical; RemoveKnots / ReduceDegree(Once) / MakeCompatible* / RemoveDegenSegs; wired N_CrvsMakeCompatible into crv_basic |
+| `nurbs.nurbs_crv` | `nurbs::nurbs_crv` | 4089 cases (1089 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/polygon edges and edge cases + 3000 generated), max_rel_err 0 | bit-identical; `sm_BasisEval` flags the domain ends, `sm_CrvTrim` returns `NL_INP_ERR` (findings.md) |
 | `nlib.crv_basic` | `nurbs::crv_basic` | 3417 cases (417 fixture incl. the six pt_TestFiles .smc curves, .sms cross-boundary derivatives, SM_API_test rectangle/polygon segments, my_test_reversed_line_join lines + 3000 generated), max_rel_err 0 | bit-identical; promoted from partial when `nlib.crv_tool_p2` wired `N_CrvsMakeCompatible` (`N_CrvsAreCoincident` maps its NLib errors to false, as upstream) |
 
 ## Partial units
