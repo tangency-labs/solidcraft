@@ -16,7 +16,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | Ported (green + partial) | 37 units, 35,757 upstream lines (9.2%); about 37,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
 | Claimed | 5 (6,746 lines): `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `geom.a_object` |
 | Blocked | 0 |
-| Todo | 223 (352,146 lines) |
+| Todo | 218 (345,400 lines) |
 
 ## What Wave 0 produced
 
