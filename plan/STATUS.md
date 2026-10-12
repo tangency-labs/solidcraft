@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **7** (6,036 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array` |
+| Green | **8** (7,280 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom` |
 | Partial | **3** (3,304 lines): `geom.extent3d`, `geom.tol`, `geom.tree` |
-| Ported (green + partial) | 10 units, 9,340 upstream lines (2.4%); about 9,750 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 5 (4,638 lines): `geom.attribute`, `geom.context`, `geom.extent1d`, `geom.vector3d`, `nlib.geom` |
+| Ported (green + partial) | 11 units, 10,584 upstream lines (2.7%); about 10,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 4 (3,394 lines): `geom.attribute`, `geom.context`, `geom.extent1d`, `geom.vector3d` |
 | Blocked | 0 |
 | Todo | 245 |
 
