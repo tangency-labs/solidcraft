@@ -10,6 +10,7 @@ pub mod basis_basic;
 pub mod bezier;
 pub mod crv_basic;
 pub mod crv_fit;
+pub mod crv_nurb;
 pub mod crv_tool;
 pub mod funcs_adv;
 pub mod funcs_basic;

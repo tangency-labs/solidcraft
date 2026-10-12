@@ -42,9 +42,6 @@
 //! - `N_CrvRemoveKnot` returns its error flag after finishing the removal when the last
 //!   `N_BasisFindGlobalMax` it called failed (it then assumes a maximum of `1`); the
 //!   Rust method returns only that error then, not the curve.
-//! - `N_CrvRemoveKnot` on a rational curve calls `N_CrvGetMinMaxWeightsAndPts` (unit
-//!   `nlib.crv_nurb`), which is not ported yet: [`Curve::remove_knot`] returns
-//!   [`SolidError::Unported`] for rational curves until it is.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
@@ -627,8 +624,7 @@ impl Curve {
     ///
     /// Errors with [`NlibCode::Parameter`] when `u` is on or outside the ends of the
     /// knot vector, with the error of `N_BasisFindGlobalMax` when its last call failed
-    /// (see the module deviations), and with [`SolidError::Unported`] for a rational
-    /// curve (until unit `nlib.crv_nurb` is ported).
+    /// (see the module deviations).
     pub fn remove_knot(&self, u: f64, nu: usize, tol: f64) -> Result<KnotRemoval> {
         const OP: &str = OP_REMOVE;
         let pw = self.cpts();
@@ -641,13 +637,12 @@ impl Curve {
         let rational = self.is_rational();
 
         // Adjust removal tolerance in case of rational curves.
-        if rational {
-            // UNPORTED(nlib.crv_nurb): N_CrvGetMinMaxWeightsAndPts
-            return Err(SolidError::Unported {
-                upstream: "N_CrvGetMinMaxWeightsAndPts",
-                unit: "nlib.crv_nurb",
-            });
-        }
+        let tol = if rational {
+            let mm = self.min_max_weights_and_pts();
+            (tol * mm.wmin) / (1.0 + mm.pmax)
+        } else {
+            tol
+        };
 
         let lto = REMOVAL_PARAM_TOL * (get(up, m, OP)? - get(up, 0, OP)?).abs();
 
@@ -1152,15 +1147,15 @@ mod tests {
     }
 
     #[test]
-    fn remove_knot_rational_is_unported() {
+    fn remove_knot_rational_unit_weights() {
+        let plain = cubic();
         let mut c = cubic();
         for p in c.cpts_mut() {
             p.w = 1.0;
         }
-        assert!(matches!(
-            c.remove_knot(0.5, 1, 1.0),
-            Err(SolidError::Unported { .. })
-        ));
+        // Unit weights: the tolerance is unchanged (wmin = 1, pmax = 0).
+        let r = c.remove_knot(0.5, 1, 1.0).unwrap();
+        assert_eq!(r.removed, plain.remove_knot(0.5, 1, 1.0).unwrap().removed);
     }
 
     #[test]

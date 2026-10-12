@@ -970,28 +970,20 @@
       "values_compared": 6967
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "curve0_remove_knot_tight",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_tool_p1/cases.json#121 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve))",
-      "values_compared": 0
+      "values_compared": 6955
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "curve0_remove_knot_loose",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_tool_p1/cases.json#122 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve))",
-      "values_compared": 0
+      "values_compared": 6935
     },
     {
       "max_rel_err": 0.0,
@@ -1114,16 +1106,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "curve0_remove_non_knot",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_tool_p1/cases.json#138 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve))",
-      "values_compared": 0
+      "values_compared": 6955
     },
     {
       "max_rel_err": 0.0,
@@ -1478,16 +1466,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0040",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173292",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -1826,16 +1810,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0083",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173335",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -2014,16 +1994,12 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173358",
-      "values_compared": 0
+      "values_compared": 79
     },
     {
       "max_rel_err": 0.0,
@@ -3050,16 +3026,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0235",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173487",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -3246,16 +3218,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0259",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173511",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -3442,16 +3410,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0283",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173535",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -3526,16 +3490,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0293",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173545",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3586,16 +3546,12 @@
       "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0300",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173552",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -3614,16 +3570,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0303",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173555",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -3978,16 +3930,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0348",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173600",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -4294,16 +4242,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173639",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -4666,16 +4610,12 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0433",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173685",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -4806,16 +4746,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0450",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173702",
-      "values_compared": 0
+      "values_compared": 28
     },
     {
       "max_rel_err": 0.0,
@@ -4842,16 +4778,12 @@
       "values_compared": 85
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0454",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173706",
-      "values_compared": 0
+      "values_compared": 45
     },
     {
       "max_rel_err": 0.0,
@@ -5310,16 +5242,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0512",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173764",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -5474,16 +5402,12 @@
       "values_compared": 68
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0532",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173784",
-      "values_compared": 0
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -5742,16 +5666,12 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0565",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173817",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -5946,16 +5866,12 @@
       "values_compared": 137
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0590",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173842",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -6222,16 +6138,12 @@
       "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0624",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173876",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -6298,16 +6210,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173885",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -6558,16 +6466,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0665",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173917",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -6658,16 +6562,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0677",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173929",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6726,16 +6626,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0685",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173937",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -6850,28 +6746,20 @@
       "values_compared": 68
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0700",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173952",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0701",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173953",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -7050,16 +6938,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0724",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173976",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -7142,16 +7026,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0735",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037173987",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -7450,16 +7330,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0773",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174025",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -7486,16 +7362,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0777",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174029",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -7562,16 +7434,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0786",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174038",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -7606,16 +7474,12 @@
       "values_compared": 68
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0791",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174043",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "max_rel_err": 0.0,
@@ -7762,16 +7626,12 @@
       "values_compared": 87
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0810",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174062",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -7918,16 +7778,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0829",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174081",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -8082,16 +7938,12 @@
       "values_compared": 124
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0849",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174101",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -8366,16 +8218,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0884",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174136",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -8442,16 +8290,12 @@
       "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0893",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174145",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -8478,16 +8322,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0897",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174149",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -8658,16 +8498,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0919",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174171",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -8814,16 +8650,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0938",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174190",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -9146,16 +8978,12 @@
       "values_compared": 167
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0979",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174231",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -9278,16 +9106,12 @@
       "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen0995",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174247",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -9794,16 +9618,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1059",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174311",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -9862,16 +9682,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174319",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -10026,16 +9842,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174339",
-      "values_compared": 0
+      "values_compared": 34
     },
     {
       "max_rel_err": 0.0,
@@ -10166,16 +9978,12 @@
       "values_compared": 80
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1104",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174356",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -10282,16 +10090,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1118",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174370",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -10502,16 +10306,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1145",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174397",
-      "values_compared": 0
+      "values_compared": 44
     },
     {
       "max_rel_err": 0.0,
@@ -10698,16 +10498,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1169",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174421",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10782,16 +10578,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174431",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -10802,16 +10594,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1181",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174433",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10918,28 +10706,20 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1195",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174447",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1196",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174448",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10950,16 +10730,12 @@
       "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1198",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174450",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -10994,16 +10770,12 @@
       "values_compared": 70
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174455",
-      "values_compared": 0
+      "values_compared": 79
     },
     {
       "max_rel_err": 0.0,
@@ -11278,16 +11050,12 @@
       "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1238",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174490",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -11330,16 +11098,12 @@
       "values_compared": 113
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1244",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174496",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -11486,16 +11250,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1263",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174515",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -11690,16 +11450,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1288",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174540",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -11742,16 +11498,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1294",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174546",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
       "max_rel_err": 0.0,
@@ -12154,16 +11906,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1345",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174597",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -12550,16 +12298,12 @@
       "values_compared": 26
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1394",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174646",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -12914,16 +12658,12 @@
       "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1439",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174691",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -13158,16 +12898,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1469",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174721",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -13298,16 +13034,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1486",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174738",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -13358,16 +13090,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1493",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174745",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -13410,16 +13138,12 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174751",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -13510,16 +13234,12 @@
       "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1511",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174763",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -13962,16 +13682,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1567",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174819",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "max_rel_err": 0.0,
@@ -14878,16 +14594,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1681",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174933",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -15194,16 +14906,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1720",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174972",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -15374,16 +15082,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1742",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037174994",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -15738,16 +15442,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1787",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037175039",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -15974,16 +15674,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1816",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037175068",
-      "values_compared": 0
+      "values_compared": 45
     },
     {
       "max_rel_err": 0.0,
@@ -16098,16 +15794,12 @@
       "values_compared": 65
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1831",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037175083",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "max_rel_err": 0.0,
@@ -16118,16 +15810,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1833",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037175085",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -16186,16 +15874,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1841",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037175093",
-      "values_compared": 0
+      "values_compared": 45
     },
     {
       "max_rel_err": 0.0,
@@ -17430,16 +17114,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "N_CrvGetMinMaxWeightsAndPts",
-        "unit": "nlib.crv_nurb"
-      },
       "max_rel_err": 0.0,
       "name": "gen1996",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10546632507037175248",
-      "values_compared": 0
+      "values_compared": 28
     },
     {
       "max_rel_err": 0.0,
@@ -17467,17 +17147,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 80,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2063,
+  "cases_passed": 2143,
   "cases_total": 2143,
-  "deferred_by_unit": {
-    "nlib.crv_nurb": 80
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "nlib.crv_tool_p1"
 }

@@ -16,9 +16,7 @@
 //!
 //! A curve input is inline (`cpts` `[x, y, z, w]`, degree `p`, knots `u`) or an
 //! upstream `.smc` file (`{"smc": {"$upstream_file": "curve0.smc"}}`, read here as
-//! `N_CrvReadFromFilePtr` does). `remove_knot` on a rational curve is deferred on the
-//! Rust side until `N_CrvGetMinMaxWeightsAndPts` (unit `nlib.crv_nurb`) is ported.
-//! Every run has at least [`MIN_GENERATED`] generated cases.
+//! `N_CrvReadFromFilePtr` does). Every run has at least [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
