@@ -400,10 +400,10 @@ depends_on = ["geom.extent2d", "geom.tol", "geom.vector2d", "geom.vector3d"]
 est_lines = 979
 layer = 4
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-geom.polar_box-a1"
 claimed_at = "2026-10-12T20:15:15Z"
-notes = "19 fns; largest: SmPolarBox::AddVector3d, SmPolarBox::AreDisjoint, SmPolarBox::ComputePolarCoord, SmPolarBox::EvaluateNormalized; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "green: 3030 difftest cases (30 fixture programs + 3000 generated), bit-identical, 0 deferred; 19 fns; largest: SmPolarBox::AddVector3d, SmPolarBox::AreDisjoint, SmPolarBox::ComputePolarCoord, SmPolarBox::EvaluateNormalized; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "geom.solution_array"
