@@ -9,6 +9,7 @@ pub mod basis_adv;
 pub mod basis_basic;
 pub mod bezier;
 pub mod crv_basic;
+pub mod crv_tool;
 pub mod funcs_basic;
 pub mod geom;
 pub mod iges;
