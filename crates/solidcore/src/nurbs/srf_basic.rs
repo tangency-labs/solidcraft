@@ -419,6 +419,16 @@ impl Surface {
         self.v.get(..=self.s).unwrap_or(&[])
     }
 
+    /// Mutable u knots `U[0..=r]`.
+    pub fn u_knots_mut(&mut self) -> &mut [f64] {
+        self.u.get_mut(..=self.r).unwrap_or(&mut [])
+    }
+
+    /// Mutable v knots `V[0..=s]`.
+    pub fn v_knots_mut(&mut self) -> &mut [f64] {
+        self.v.get_mut(..=self.s).unwrap_or(&mut [])
+    }
+
     /// The knot vectors over the knot storage (`N_SrfGetKnotVectors`).
     pub fn knot_vectors(&self) -> Result<(KnotVector<'_>, KnotVector<'_>)> {
         Ok((
