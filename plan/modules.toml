@@ -335,10 +335,10 @@ depends_on = ["nlib.basis_basic", "nlib.geom", "nlib.knots", "nlib.math"]
 est_lines = 361
 layer = 3
 tests = ["SM_API_test:TestSmCreateSurfaceFromRandomPoints", "SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-nlib.basis_adv-a1"
 claimed_at = "2026-10-12T20:17:12Z"
-notes = "4 fns; largest: N_BasisDerivsArray, N_GetCompatibleKnotArrayMult, N_BasisInsertKnots, N_BasisIncreaseKnotMult; 211 upstream test entry points reach this unit"
+notes = "4 fns; green: 1744 difftest cases (244 fixture + 1500 generated), 0 deferred, bit-identical (max_rel_err 0); 100,244-case run also clean. See plan/findings.md"
 
 [[unit]]
 id = "nlib.bezier"
