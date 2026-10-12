@@ -62,7 +62,7 @@
 //!   `ClearAttributes`, `GetAttributes` and `FindAttribute` (unit `geom.a_object`)
 //!   are the attribute-list half of the attribute/user relation and are ported here
 //!   as [`AttributeStore`] methods (`// CO-PORT(geom.a_object)`); `SmObject::IsKindOf`
-//!   (unit `geom.object`) is the last entry of [`Attribute::is_kind_of`]'s chain.
+//!   ([`crate::geom::object::is_kind_of`]) is the last entry of [`Attribute::is_kind_of`]'s chain.
 //!   `SmObject::GetContext` / `SetContext` have no counterpart (no per-object
 //!   contexts).
 //! - **Unported.** `SmMergeRegionAttribute::Merge` first asks both regions for their
@@ -91,6 +91,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::{Result, SolidError};
+use crate::geom::object;
 use crate::math::Vec3;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
@@ -721,8 +722,8 @@ impl Attribute {
             AttributeValue::Tag(_) => &[type_code::TAG],
             AttributeValue::Color(_) => &[type_code::COLOR, type_code::VECTOR3D],
         };
-        // CO-PORT(geom.object): SmObject::IsKindOf (`SmObject_TYPE == t`) ends the chain.
-        own.contains(&t) || t == type_code::ATTRIBUTE || t == type_code::OBJECT
+        // SmObject::IsKindOf ends the chain.
+        own.contains(&t) || t == type_code::ATTRIBUTE || object::is_kind_of(t)
     }
 
     /// `IsPropagatedThroughBooleans`: only colour attributes are propagated from the

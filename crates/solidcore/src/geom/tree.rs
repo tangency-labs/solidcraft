@@ -68,12 +68,11 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
+use crate::geom::object;
 use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQ};
 
 /// `SmTree_TYPE` (`CONT_BASE_TYPE + 150`).
 const SM_TREE_TYPE: i32 = 12150;
-/// `SmObject_TYPE` (`OS_BASE_TYPE + 1`).
-const SM_OBJECT_TYPE: i32 = 11001;
 
 /// Index of a node in [`Tree::nodes`] (upstream `SmTreeNode*`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -517,8 +516,8 @@ impl<O: Copy + PartialEq> Tree<O> {
     /// True for `SmTree_TYPE` and its base `SmObject_TYPE` (`IsKindOf`).
     #[must_use]
     pub const fn is_kind_of(&self, t: i32) -> bool {
-        // CO-PORT(geom.object): SmObject::IsKindOf (SM_COMMON_BASE: t == SmObject_TYPE)
-        t == SM_TREE_TYPE || t == SM_OBJECT_TYPE
+        // SM_COMMON_BASE ends the chain with SmObject::IsKindOf.
+        t == SM_TREE_TYPE || object::is_kind_of(t as i64)
     }
 
     /// The owning cache, if any (`GetOwner`).
