@@ -14,9 +14,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | Green | **58** (68,242 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb`, `nlib.crv_adv_p2`, `nlib.srf_tool_p2`, `nlib.crv_offset`, `nurbs.nurbs_srf`, `nlib.crv_approx`, `nlib.srf_tool_p3`, `nlib.srf_adv_p3`, `nlib.srf_tool_p4`, `nlib.srf_adv_p2`, `nlib.srf_adv_p4` |
 | Partial | **13** (15,625 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_surface_p1`, `nurbs.b_spline_curve_n_lib` |
 | Ported (green + partial) | 71 units, 83,867 upstream lines (21.6%); about 86,100 Rust lines in `crates/solidcore/src` |
-| Claimed | 1 (1,872 lines): `nurbs.b_spline_curve_p2` |
+| Claimed | 2 (3,842 lines): `nurbs.b_spline_curve_p2`, `nlib.srf_adv_p5` |
 | Blocked | 0 |
-| Todo | 188 (302,164 lines) |
+| Todo | 187 (300,194 lines) |
 
 ## What Wave 0 produced
 
@@ -126,8 +126,8 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 
 ## Ready set
 
-Ready (todo, every dependency green/partial): `nlib.srf_adv_p1` (layer 15, 1188 lines),
-`nlib.srf_adv_p5` (layer 15, 1970 lines). Waiting only on a claimed unit:
+Ready (todo, every dependency green/partial): `nlib.srf_adv_p1` (layer 15, 1188 lines).
+Waiting only on a claimed unit:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
@@ -492,10 +492,9 @@ status, plus fmt, clippy, tests and the wasm32 check.
 
 ## Resume note (2026-10-12, after style review batch #10)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). One unit is claimed
-  (`nurbs.b_spline_curve_p2`, worktree `../solidcore-wt/nurbs.b_spline_curve_p2`);
-  check `git worktree list` before you claim. Ready: `nlib.srf_adv_p1`,
-  `nlib.srf_adv_p5` (see Ready set).
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Two units are claimed
+  (`nurbs.b_spline_curve_p2`, `nlib.srf_adv_p5`); check `git worktree list` before you
+  claim. Ready: `nlib.srf_adv_p1` (see Ready set).
 - For worktrees branched before batch #10: the private `nl_err` helpers are now
   `SolidError::nl_ser`, and `NL_BIGD` is `nurbs::math::BIGD`. Earlier API changes
   still apply: `BSplineCurve::edit_parameterization(&Extent1d)`,
