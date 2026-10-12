@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **56** (63,917 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb`, `nlib.crv_adv_p2`, `nlib.srf_tool_p2`, `nlib.crv_offset`, `nurbs.nurbs_srf`, `nlib.crv_approx`, `nlib.srf_tool_p3`, `nlib.srf_adv_p3`, `nlib.srf_tool_p4` |
-| Partial | **11** (11,041 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1` |
-| Ported (green + partial) | 67 units, 74,958 upstream lines (19.3%); about 78,600 Rust lines in `crates/solidcore/src` |
-| Claimed | 3 (6,681 lines): `nurbs.b_spline_curve_n_lib`, `nlib.srf_adv_p2`, `nurbs.b_spline_surface_p1` |
+| Partial | **12** (12,831 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_surface_p1` |
+| Ported (green + partial) | 68 units, 76,748 upstream lines (19.8%); about 78,600 Rust lines in `crates/solidcore/src` |
+| Claimed | 2 (4,891 lines): `nurbs.b_spline_curve_n_lib`, `nlib.srf_adv_p2` |
 | Blocked | 0 |
 | Todo | 190 (306,264 lines) |
 
@@ -110,7 +110,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 
 | Unit | Rust module | difftest | Deferred on |
 |---|---|---|---|
-| `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
+| `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`surface.surface_cache_p1`: `GetBezierPtr`, and `GetGwNurbPointer` of the opaque subdivision surface) |
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
 | `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
 | `geom.grid` | `geom::grid` | 615 cases (15 fixture + 600 generated), 613 bit-identical; a 30,015-case run was also clean | 2 (`surface.surface_cache_p1` 1: `SmSurfaceGridElement::Init`; `surface.surface_p2` 1: `ExpandHierarchy`) |
@@ -121,6 +121,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.global_solver` | `geom::global_solver` | 620 cases, 611 bit-identical | 9 (`curve.curve_p2`) |
 | `curve.hermite_curve` | `curve::hermite_curve` | 2131 cases (131 fixture + 2000 generated), 2038 bit-identical | 93 (`curve.curve_p2`: `SmCurve::IsKindOf`) |
 | `nurbs.b_spline_curve_p1` | `nurbs::b_spline_curve::p1` | 2216 cases (216 fixture on the six pt_TestFiles .smc curves, smSweepTest lines/circles, edge cases + 2000 generated), 2156 bit-identical; a 30,216-case run was also clean | 60 (`curve.curve_p2` 59: `EvaluateContinuity` / `IsKindOf` / `ApproximateLength`; `curve.curve_p1` 1: `TessellateByBisection`) |
+| `nurbs.b_spline_surface_p1` | `nurbs::b_spline_surface::p1` | 2120 cases (120 fixture on the three pt_TestFiles .sms surfaces incl. ReadFromDB, prog_test cone/bilinear patches, canonical, sweep, edge cases + 2000 generated), 1985 bit-identical | 135 (`surface.surface_p2` 102: `SmSurface::IsKindOf` (bounding boxes, parallelism); `surface.surface_p1` 33: offset, degenerate-curve test, STEP inversion solves) |
 
 ## Ready set
 
