@@ -29,7 +29,7 @@
 //! | `set_unbounded`         | `set_unbounded`                                  | `SetUnbounded` |
 //! | `approximate_unbounded` | `approximate_unbounded_expanded`                 | `ApproximateUnbounded` |
 //! | `circumscribe`          | deferred (unit `geom.pseudo_box`)                | `SmExtent3d(SmPseudoBox)`, `Circumscribe` |
-//! | `intervals`             | deferred (unit `geom.extent1d`)                  | `GetU/V/WInterval`, `SetU/VInterval` |
+//! | `intervals`             | `u/v/w_interval`, `set_u/v_interval`             | `GetU/V/WInterval`, `SetU/VInterval` |
 //!
 //! Upstream statuses are compared as the int `status` (0 = `SM_SUCCESS`, else the
 //! `SM_ERR_*` value; Rust `InvalidInput` is 1007). Every run has at least
@@ -38,6 +38,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::{Extent3d, LineHit};
 use solidcore::math::{Point3, Vec3, INFINITE_PARAMETER, INFINITE_PARAMETER_SQRT};
 use solidcore::SolidError;
@@ -511,12 +512,15 @@ fn rust_flat(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
                 "SmExtent3d::Circumscribe",
             )));
         }
-        Inputs::Intervals { .. } => {
-            // UNPORTED(geom.extent1d): SmExtent3d::GetUInterval
-            return Ok(Err(Output::deferred(
-                "geom.extent1d",
-                "SmExtent3d::GetUInterval",
-            )));
+        Inputs::Intervals { e, u, v } => {
+            let mut x = ext(*e);
+            for ivl in [x.u_interval(), x.v_interval(), x.w_interval()] {
+                o.extend([ivl.min(), ivl.max()]);
+            }
+            x.set_u_interval(&Extent1d::from_min_max(u[0], u[1]));
+            x.set_v_interval(&Extent1d::from_min_max(v[0], v[1]));
+            o.extend([0.0, 0.0]);
+            o.extend(ext6(&x));
         }
     }
     Ok(Ok(o))
@@ -648,7 +652,7 @@ fn direction(rng: &mut Rng) -> P3 {
 fn gen_inputs(rng: &mut Rng) -> Inputs {
     let scale = *rng.choose(&[1.0, 10.0, 1e-3, 1e4]).unwrap_or(&1.0);
     let e = extent(rng, scale);
-    match rng.below(24) {
+    match rng.below(25) {
         0 => Inputs::FromPoints {
             a: point(rng, scale),
             b: point(rng, scale),
@@ -752,6 +756,16 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             center: rng.chance(0.6).then(|| point(rng, scale)),
             half_size: *rng.choose(&[33.0, 1.0, 10.0, 0.0, -5.0]).unwrap_or(&33.0),
         },
+        23 => {
+            let mut ivl = || {
+                let a = coord(rng, scale);
+                let b = if rng.chance(0.2) { a } else { coord(rng, scale) };
+                [a, b]
+            };
+            let u = ivl();
+            let v = ivl();
+            Inputs::Intervals { e, u, v }
+        }
         _ => Inputs::SetUnbounded { e },
     }
 }

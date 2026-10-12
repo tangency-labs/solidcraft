@@ -5,6 +5,7 @@
 #include "sc_shim.h"
 
 #include <SmContext.h>
+#include <SmExtent1d.h>
 #include <SmExtent3d.h>
 #include <SmRelation.h>
 #include <SmTol.h>
@@ -41,6 +42,7 @@ enum ScTolOp : int32_t
     OP_SCALED_ZERO_N = 21,     // GetScaledZero{,Sq,Sqrt}(o1[, o2[, o3[, o4]]]) (n = small)
     OP_TOL_CTORS = 22,         // all tolerance constructors and operator=(double) of a0
     OP_TOL_MUL = 23,           // SmTol3d t(a0); t *= a1
+    OP_MAP_TO_1D = 24,         // MapTo1d(SmTol3d(a0), v(a1..a3), SmExtent1d(a4, a5))
 };
 
 // Object kinds for OP_SCALED_ZERO_N (6 doubles each in `objs`).
@@ -50,6 +52,7 @@ enum ScTolKind : int32_t
     KIND_VEC2 = 1,    // SmVector2d(d[0], d[1])
     KIND_VEC3 = 2,    // SmVector3d(d[0], d[1], d[2])
     KIND_EXTENT3 = 3, // SmExtent3d(d[0..6])
+    KIND_EXTENT1 = 4, // SmExtent1d(d[0], d[1])
 };
 
 namespace
@@ -63,6 +66,7 @@ template <class F> void sc_with_obj(int32_t kind, const double* d, F f)
     case KIND_VEC2: f(SmVector2d(d[0], d[1])); break;
     case KIND_VEC3: f(SmVector3d(d[0], d[1], d[2])); break;
     case KIND_EXTENT3: f(SmExtent3d(d[0], d[1], d[2], d[3], d[4], d[5])); break;
+    case KIND_EXTENT1: f(SmExtent1d(d[0], d[1])); break;
     default: f(d[0]); break;
     }
 }
@@ -223,6 +227,14 @@ SC_EXPORT int32_t sc_geom_tol_op(int32_t op, double model_size, double ratio, co
         }
         else
             return SC_ERR_ARG;
+        break;
+    }
+    case OP_MAP_TO_1D:
+    {
+        SmTol3d sTol(a[0]);
+        SmVector3d sDeriv(a[1], a[2], a[3]);
+        const SmExtent1d sIvl(a[4], a[5]);
+        put(SmTol::MapTo1d(sTol, sDeriv, sIvl));
         break;
     }
     case OP_TOL_CTORS:

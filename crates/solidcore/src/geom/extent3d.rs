@@ -51,12 +51,13 @@
 //! | [`Extent3d::is_init`]                  | `IsInit`                                       |
 //! | [`Extent3d::boundary_types`], [`Extent3d::is_bounded`] | `IsBounded`                    |
 //! | [`Extent3d::any_bounds`]               | `AnyBounds`                                    |
+//! | [`Extent3d::u_interval`], [`Extent3d::v_interval`], [`Extent3d::w_interval`] | `GetUInterval`, `GetVInterval`, `GetWInterval` |
+//! | [`Extent3d::set_u_interval`], [`Extent3d::set_v_interval`] | `SetUInterval`, `SetVInterval` |
 //! | [`Extent3d::approximate_unbounded`], [`Extent3d::approximate_unbounded_expanded`] | `ApproximateUnbounded` |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Not here yet (they need types of later units; see the `UNPORTED` markers below):
-//! `GetUInterval`/`GetVInterval`/`GetWInterval`, `SetUInterval`/`SetVInterval`
-//! (`SmExtent1d`, unit `geom.extent1d`), and `Circumscribe` /
+//! `Circumscribe` /
 //! `SmExtent3d(const SmPseudoBox&)` (`SmPseudoBox`, unit `geom.pseudo_box`).
 //!
 //! Deviations:
@@ -70,6 +71,9 @@
 //!   untouched.
 //! - Status codes: `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; the
 //!   `SM_ERR` of `ComputeConeBoundTo` is [`SolidError::Upstream`] with code 1001.
+//! - `SetUInterval`/`SetVInterval` only validate their argument under
+//!   `SM_DEBUG_CODE`; in the release build they always succeed, so the Rust methods
+//!   return nothing.
 //! - The destructor's "undefined" sentinel values have no Rust counterpart (a dropped
 //!   value cannot be used); [`Extent3d::is_defined`] still checks for them.
 //! - `SM_ASSERT*` debug checks are not ported (they do not change results).
@@ -77,15 +81,13 @@
 //!   inside (it ORs the two tests). See `plan/findings.md`.
 
 use crate::error::{Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::{asin, sqrt};
 use crate::math::{
     is_infinite_param, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, INFINITE_PARAMETER, PI,
     UNDEF_DOUBLE,
 };
 
-// UNPORTED(geom.extent1d): SmExtent3d::GetUInterval, SmExtent3d::GetVInterval,
-// SmExtent3d::GetWInterval, SmExtent3d::SetUInterval, SmExtent3d::SetVInterval need
-// `SmExtent1d`; add them as `Extent3d` methods when `geom::extent1d` lands.
 // UNPORTED(geom.pseudo_box): SmExtent3d::Circumscribe and SmExtent3d(const SmPseudoBox&)
 // need `SmPseudoBox`; add them as `Extent3d` methods when `geom::pseudo_box` lands.
 
@@ -479,6 +481,36 @@ impl Extent3d {
     #[must_use]
     pub fn max_length(&self) -> f64 {
         smax3(self.x_length(), self.y_length(), self.z_length())
+    }
+
+    /// The x interval, ends swapped if inverted (`GetUInterval`).
+    #[must_use]
+    pub fn u_interval(&self) -> Extent1d {
+        Extent1d::from_min_max(self.min.x, self.max.x)
+    }
+
+    /// The y interval, ends swapped if inverted (`GetVInterval`).
+    #[must_use]
+    pub fn v_interval(&self) -> Extent1d {
+        Extent1d::from_min_max(self.min.y, self.max.y)
+    }
+
+    /// The z interval, ends swapped if inverted (`GetWInterval`).
+    #[must_use]
+    pub fn w_interval(&self) -> Extent1d {
+        Extent1d::from_min_max(self.min.z, self.max.z)
+    }
+
+    /// Sets the x bounds from `ivl` (`SetUInterval`).
+    pub fn set_u_interval(&mut self, ivl: &Extent1d) {
+        self.min.x = ivl.min();
+        self.max.x = ivl.max();
+    }
+
+    /// Sets the y bounds from `ivl` (`SetVInterval`).
+    pub fn set_v_interval(&mut self, ivl: &Extent1d) {
+        self.min.y = ivl.min();
+        self.max.y = ivl.max();
     }
 
     /// Largest absolute coordinate of either corner (`GetMaxDimension`).

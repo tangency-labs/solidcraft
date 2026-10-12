@@ -37,7 +37,8 @@
 //! | [`xsect_tol_3d`]                       | `SmTol::GetXSectTol3d(SmSmallTopoType)`        |
 //! | [`context_xsect_tol_3d`]               | `SmTol::GetXSectTol3d(const SmContext*, SmSmallTopoType)` |
 //! | [`scaled_zero`], [`scaled_zero_sq`], [`scaled_zero_sqrt`] | `SmTol::GetScaledZero()`, `GetScaledZeroSq()`, `GetScaledZeroSqrt()` |
-//! | [`ScaledZero`] (`f64`, [`Vec2`], [`Vec3`], [`Extent3d`]) | `SmTol::GetScaledZero(const double)`, `(const SmVector2d&)`, `(const SmVector3d&)`, `(const SmExtent3d&)` |
+//! | [`ScaledZero`] (`f64`, [`Vec2`], [`Vec3`], [`Extent1d`], [`Extent3d`]) | `SmTol::GetScaledZero(const double)`, `(const SmVector2d&)`, `(const SmVector3d&)`, `(const SmExtent1d&)`, `(const SmExtent3d&)` |
+//! | [`map_to_1d`]                          | `SmTol::MapTo1d(SmTol3d&, SmVector3d&, const SmExtent1d&)` |
 //! | [`scaled_zero_sq_of`], [`scaled_zero_sqrt_of`] | unary `GetScaledZeroSq<cA>`, `GetScaledZeroSqrt<cA>` |
 //! | [`scaled_zero2`], [`scaled_zero_sq2`], [`scaled_zero_sqrt2`] | binary `GetScaledZero<cA,cB>`, `...Sq`, `...Sqrt` |
 //! | [`scaled_zero3`], [`scaled_zero_sq3`], [`scaled_zero_sqrt3`] | tertiary templates     |
@@ -64,7 +65,7 @@
 //!
 //! Not here yet (they need types of later units; see the `UNPORTED` markers below):
 //! every overload taking an `SmObject`, `SmCurve`, `SmSurface`, `SmVolume`,
-//! `SmPseudoBox`, `SmExtent1d`, `SmExtent2d`, `SmBrep`, `SmBrepData`, a topology
+//! `SmPseudoBox`, `SmExtent2d`, `SmBrep`, `SmBrepData`, a topology
 //! entity, a classification / interval object, or `SmEvalNFunctionsObject`.
 //!
 //! Deviations:
@@ -90,6 +91,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Result, SolidError};
 use crate::geom::context::Context;
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::sqrt as sm_sqrt;
@@ -114,8 +116,6 @@ use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF
 // UNPORTED(surface.surface_p1): SmTol::MapTo2d(const SmTol3d&, const SmVector2d&, [const
 // SmVector2d&,] const SmSurface&) and SmTol::GetScaledZero(const SmSurface&) need
 // SmSurface::Evaluate1stDerivatives / GetNaturalUVDomain / ApproximateSize.
-// UNPORTED(geom.extent1d): SmTol::MapTo1d(SmTol3d&, SmVector3d&, const SmExtent1d&) and
-// SmTol::GetScaledZero(const SmExtent1d&) need SmExtent1d.
 // UNPORTED(geom.extent2d): SmTol::GetScaledZero(const SmExtent2d&) needs SmExtent2d.
 // UNPORTED(geom.pseudo_box): SmTol::GetScaledZero(const SmPseudoBox&) needs SmPseudoBox.
 // UNPORTED(surface.volume_p1): SmTol::GetScaledZero(const SmVolume&) needs SmVolume.
@@ -569,6 +569,23 @@ fn rad_to_deg(a: f64) -> f64 {
     a * (180.0 / PI)
 }
 
+// ---- parameter-space mapping ------------------------------------------------------
+
+/// Maps the 3D tolerance `tol` to a curve's parameter space at a point with first
+/// derivative `deriv`: `tol / |deriv|`, or `natural_interval.length() / 100` where the
+/// derivative is (near) zero (`SmTol::MapTo1d(SmTol3d&, SmVector3d&, const
+/// SmExtent1d&)`). `tol` is the value of an `SmTol3d` (already `fabs`).
+#[must_use]
+pub fn map_to_1d(tol: f64, deriv: Vec3, natural_interval: &Extent1d) -> f64 {
+    let scaled_zero = scaled_zero();
+    let deriv_size = deriv.length();
+    tol3d(if deriv_size < scaled_zero {
+        natural_interval.length() / 100.0
+    } else {
+        tol / deriv_size
+    })
+}
+
 // ---- scaled zeros ------------------------------------------------------------------
 
 /// The default scaled zero, `SM_EFF_ZERO` (`SmTol::GetScaledZero()`).
@@ -612,6 +629,13 @@ impl ScaledZero for Vec2 {
 
 impl ScaledZero for Vec3 {
     /// `SmTol::GetScaledZero(const SmVector3d&)`: `SM_EFF_ZERO * (1 + max |coord|)`.
+    fn scaled_zero(&self) -> f64 {
+        tol3d(EFF_ZERO * (1.0 + self.max_dimension()))
+    }
+}
+
+impl ScaledZero for Extent1d {
+    /// `SmTol::GetScaledZero(const SmExtent1d&)`: `SM_EFF_ZERO * (1 + max |end|)`.
     fn scaled_zero(&self) -> f64 {
         tol3d(EFF_ZERO * (1.0 + self.max_dimension()))
     }
