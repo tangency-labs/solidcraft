@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **16** (13,703 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic` |
+| Green | **17** (14,296 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table` |
 | Partial | **4** (3,780 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement` |
-| Ported (green + partial) | 20 units, 17,483 upstream lines (4.5%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 5 (5,037 lines): `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
+| Ported (green + partial) | 21 units, 18,076 upstream lines (4.7%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 4 (4,444 lines): `geom.geom_utility_p2`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
 | Blocked | 0 |
 | Todo | 235 (365,383 lines) |
 
@@ -100,11 +100,16 @@ units land:
 `nlib.basis_basic` and `nlib.srf_basic` are on the critical path (-> `nlib.bezier`,
 `nlib.basis_adv` -> ... -> blend). `geom.object` unblocks two units and owns the
 `CO-PORT(geom.object)` / `CO-PORT(geom.a_object)` sites.
+| `geom.hash_table` | `geom::hash_table` | 619 cases (19 fixture incl. SmHealData coincident-vertex replays + 600 generated), max_rel_err 0 | bit-identical; a 10,019-case run was also clean; upstream use-after-free and quirks in findings.md |
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 16 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 17 green
   units is bit-identical (`max_rel_err = 0`).
+- `geom.hash_table`: `SmObjsInVoxels::IncMaxItemCount` leaves every bucket item pointing
+  into the freed point-item array when a model with items grows (port uses indices; shim
+  refuses it); `FindCoincidentPairs` only pairs items with the bucket head and overwrites
+  stored points through a reference (both kept).
 - `geom.attribute`: several upstream undefined-behaviour paths (double delete, NULL
   dereference in `SmMergeRegionAttribute::Merge`, writes past "other" lists) return
   `InvalidInput` in Rust and are skipped on both sides; shim liveness is predicted.
