@@ -45,6 +45,7 @@ use crate::nurbs::bezier::calc_length;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_nurb::CurveType;
 use crate::nurbs::geom::{dist_pt_pt, dist_sq_pt_pt, normalize, pt_along_vector, PI};
+use crate::nurbs::index::{get, oob, set, sx};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{float_op_is_bad, CPoint, FloatOp};
 
@@ -57,47 +58,6 @@ pub const POLYLINE_MAX_SPLITS: usize = 1 << 22;
 
 /// Upstream `ctl` of `N_CrvArcLength`: relative tolerance of the line / circle test.
 const ARC_TYPE_TOL: f64 = 1.0e-09;
-
-const OP_CLOSEST: &str = "nurbs::crv_geom::Curve::closest_pt";
-const OP_ARC: &str = "nurbs::crv_geom::Curve::arc_length";
-const OP_POLY: &str = "nurbs::crv_geom::Curve::approx_with_polyline";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (malformed curve or arguments)",
-    }
-}
-
-/// `usize` -> signed index.
-fn sx(u: usize, op: &'static str) -> Result<isize> {
-    isize::try_from(u).map_err(|_| oob(op))
-}
-
-/// `a[i]`.
-#[inline]
-fn get<T: Copy>(a: &[T], i: isize, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i))
-        .copied()
-        .ok_or_else(|| oob(op))
-}
-
-/// `a[i] = v`.
-#[inline]
-fn set<T>(a: &mut [T], i: isize, v: T, op: &'static str) -> Result<()> {
-    let slot = usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| oob(op))?;
-    *slot = v;
-    Ok(())
-}
 
 /// How a tolerance argument is interpreted (`NL_ABSOLUTE = 1`, `NL_RELATIVE = 2`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -150,6 +110,13 @@ pub struct Polyline {
     pub params: Vec<f64>,
 }
 
+/// One entry of the subdivision stack of [`Curve::approx_with_polyline`]: Bezier
+/// control points and their parameter interval.
+struct StackSeg {
+    cpts: Vec<CPoint>,
+    range: [f64; 2],
+}
+
 impl Curve {
     /// Point `Q = C(u)` closest to `p` by Newton iteration from `u0`, with point
     /// coincidence tolerance `top` and zero-cosine tolerance `toc` (`N_CrvClosestPt`).
@@ -162,8 +129,9 @@ impl Curve {
         if let Some(e) = s.error {
             return Err(e);
         }
-        s.best
-            .ok_or_else(|| nlib(OP_CLOSEST, NlibCode::Convergence))
+        s.best.ok_or_else(|| {
+            SolidError::nlib("nurbs::crv_geom::Curve::closest_pt", NlibCode::Convergence)
+        })
     }
 
     /// [`Curve::closest_pt`] with the iteration limit `itlim` (upstream `NL_ITLIM`),
@@ -178,7 +146,7 @@ impl Curve {
         toc: f64,
         itlim: usize,
     ) -> Result<ClosestPtSearch> {
-        const OP: &str = OP_CLOSEST;
+        const OP: &str = "nurbs::crv_geom::Curve::closest_pt_search";
         let uk = self.knots();
         let m = sx(self.m(), OP)?;
         let u_first = get(uk, 0, OP)?;
@@ -228,7 +196,7 @@ impl Curve {
 
             // Check #2: zero cosine.
             if float_op_is_bad(num, der * dis, FloatOp::Division) {
-                return fail(best, nlib(OP, NlibCode::Convergence));
+                return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
             }
 
             let zco = num.abs() / (der * dis);
@@ -242,7 +210,7 @@ impl Curve {
             let den = dot + der * der;
 
             if float_op_is_bad(num, den, FloatOp::Division) {
-                return fail(best, nlib(OP, NlibCode::Convergence));
+                return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
             }
 
             let uold = unew;
@@ -258,7 +226,7 @@ impl Curve {
                         ucount = 0;
                     } else {
                         if ucount >= 2 {
-                            return fail(best, nlib(OP, NlibCode::Convergence));
+                            return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
                         }
                         unew = uold;
                         ucount += 1;
@@ -271,7 +239,7 @@ impl Curve {
                         ucount = 0;
                     } else {
                         if ucount >= 2 {
-                            return fail(best, nlib(OP, NlibCode::Convergence));
+                            return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
                         }
                         unew = uold;
                         ucount += 1;
@@ -299,7 +267,7 @@ impl Curve {
 
         // If no convergence, error out.
         if k >= itlim {
-            return fail(best, nlib(OP, NlibCode::Convergence));
+            return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
         }
 
         Ok(ClosestPtSearch { best, error: None })
@@ -316,7 +284,7 @@ impl Curve {
     /// Errors with the errors of [`Curve::extract_seg`], [`Curve::bbox_max_diag_dist`],
     /// [`Curve::get_type`] and [`calc_length`].
     pub fn arc_length(&self, ul: f64, ur: f64, tol: f64, kind: ToleranceKind) -> Result<f64> {
-        const OP: &str = OP_ARC;
+        const OP: &str = "nurbs::crv_geom::Curve::arc_length";
 
         // Take care of parameter degeneracy.
         if (ur - ul).abs() < PTOL {
@@ -458,7 +426,7 @@ impl Curve {
     /// Errors with the errors of [`Curve::decompose_bez`] and [`calc_length`], and
     /// with [`SolidError::NotConverged`] after [`POLYLINE_MAX_SPLITS`] splits.
     pub fn approx_with_polyline(&self, tol: f64, kind: ToleranceKind) -> Result<Polyline> {
-        const OP: &str = OP_POLY;
+        const OP: &str = "nurbs::crv_geom::Curve::approx_with_polyline";
         let pu = self.degree();
 
         // Handle p = 1 as special case.
@@ -493,38 +461,41 @@ impl Curve {
 
         let p = sx(pu, OP)?;
 
-        // The stack of Bezier segments (control points, parameter interval); the
-        // last entry is the top.
-        let mut cp_stack: Vec<Vec<CPoint>> = Vec::new();
-        let mut pm_stack: Vec<[f64; 2]> = Vec::new();
+        // The stack of Bezier segments (upstream's parallel `cps` / `pms` stacks);
+        // the last entry is the top.
+        let mut stack: Vec<StackSeg> = Vec::new();
 
         for bez in bezs.iter().rev() {
             let uk = bez.knots();
             let kk = sx(bez.m(), OP)?;
-            pm_stack.push([get(uk, 0, OP)?, get(uk, kk, OP)?]);
+            let range = [get(uk, 0, OP)?, get(uk, kk, OP)?];
 
             let pw = bez.cpts();
-            let mut row = Vec::new();
+            let mut cpts = Vec::new();
             for jj in 0..=p {
-                row.push(get(pw, jj, OP)?);
+                cpts.push(get(pw, jj, OP)?);
             }
-            cp_stack.push(row);
+            stack.push(StackSeg { cpts, range });
         }
 
         // Initialize the points and parameters.
-        let first_row = cp_stack.last().ok_or_else(|| oob(OP))?;
-        let first = get(first_row, 0, OP)?.to_euclid();
+        let first_seg = stack.last().ok_or_else(|| oob(OP))?;
+        let first = get(&first_seg.cpts, 0, OP)?.to_euclid();
         let mut points = vec![first];
-        let mut params = vec![pm_stack.last().ok_or_else(|| oob(OP))?[0]];
+        let mut params = vec![first_seg.range[0]];
         let mut last_pt = first;
 
         // Now subdivide the segments until the stack is empty.
         let tolsq = tol * tol;
         let mut splits = 0usize;
 
-        while let Some(row) = cp_stack.last_mut() {
+        loop {
             // Upstream `top EQ 0`.
-            let top_is_bottom = pm_stack.len() == 1;
+            let top_is_bottom = stack.len() == 1;
+            let Some(seg) = stack.last_mut() else {
+                break;
+            };
+            let row = &mut seg.cpts;
 
             // Check if this segment has converged.
             let p1 = get(row, 0, OP)?.to_euclid();
@@ -567,8 +538,8 @@ impl Curve {
                     }
                 }
 
-                let pm = pm_stack.pop().ok_or_else(|| oob(OP))?;
-                cp_stack.pop();
+                let pm = seg.range;
+                stack.pop();
 
                 if dd > 0.01 * tol {
                     points.push(p2);
@@ -597,13 +568,12 @@ impl Curve {
                     set(&mut left, kk, get(row, 0, OP)?, OP)?;
                 }
 
-                let pm = pm_stack.last_mut().ok_or_else(|| oob(OP))?;
+                let pm = &mut seg.range;
                 let lo = pm[0];
                 pm[0] = 0.5 * (pm[0] + pm[1]);
-                let new_pm = [lo, pm[0]];
+                let range = [lo, pm[0]];
 
-                cp_stack.push(left);
-                pm_stack.push(new_pm);
+                stack.push(StackSeg { cpts: left, range });
             }
         }
 
