@@ -608,9 +608,9 @@ depends_on = ["nlib.basis_basic", "nlib.bezier", "nlib.crv_basic", "nlib.crv_too
 est_lines = 1676
 layer = 6
 tests = ["SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-nlib.funcs_adv-a1"
+claimed_at = "2026-10-12T21:07:22Z"
 notes = "5 fns; largest: N_CrvFuncMultiplyCrv, N_CrvFuncMultiplyCrv4d, N_CrvFuncMultiplyCrvFunc, N_CrvFuncRefine; 159 upstream test entry points reach this unit"
 
 [[unit]]
