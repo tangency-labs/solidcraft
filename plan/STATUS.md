@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **26** (23,756 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2` |
-| Partial | **5** (4,850 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid` |
-| Ported (green + partial) | 31 units, 28,606 upstream lines (7.4%); about 36,200 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 2 (2,861 lines): `geom.solution_array`, `nlib.crv_basic` |
+| Partial | **6** (6,169 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array` |
+| Ported (green + partial) | 32 units, 29,925 upstream lines (7.7%); about 37,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 1 (1,542 lines): `nlib.crv_basic` |
 | Blocked | 0 |
 | Todo | 227 (356,436 lines) |
 
@@ -91,6 +91,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
 | `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
 | `geom.grid` | `geom::grid` | 615 cases (15 fixture + 600 generated), 613 bit-identical; a 30,015-case run was also clean | 2 (`surface.surface_cache_p1` 1: `SmSurfaceGridElement::Init`; `surface.surface_p2` 1: `ExpandHierarchy`) |
+| `geom.solution_array` | `geom::solution_array` | 810 cases (10 fixture + 800 generated), 754 bit-identical | 56 (object geometry: `curve.curve_p2` 16, `topology.face_p2` 14, `topology.edge` 12, `surface.surface_p2` 9, `topology.vertex` 5) |
 
 ## Ready set
 
@@ -267,7 +268,8 @@ without `cpp`), tests and the wasm32 check.
 - Remaining partial waits: `geom.extent3d` on `geom.pseudo_box`, `geom.tree` on
   `nurbs.b_spline_surface_p1`/`surface.surface_cache_p1`, `geom.attribute` on
   `topology.shell`, `geom.object` on the topology units, `geom.grid` on the surface
-  caches.
+  caches, `geom.solution_array` on curve/surface/edge/face/vertex geometry (also
+  `query.poly`, `surface.volume_p1`, `topology.topology` stubs, not reached by its cases).
 - `RUSTDOCFLAGS="-D warnings" cargo doc -p solidcore --no-deps` is clean (batch #4
   fixed a redundant explicit link in `nurbs/geom.rs`); keep it that way.
 - Style review batch #5: `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`,
