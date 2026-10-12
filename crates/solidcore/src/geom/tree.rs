@@ -32,7 +32,8 @@
 //! | [`Tree::propagate_to_parents`]         | `SmTreeNode::PropagateToParents`                |
 //! | [`Tree::neighbors`]                    | `SmTreeNode::GetNeighbors`                      |
 //! | [`Tree::left_neighbors`] .. [`Tree::top_neighbors`] | `SmTreeNode::GetLeftNeighbors` .. `GetTopNeighbors` |
-//! | `right_side` .. `bot_side` (private)   | `SmTreeNode::GetRightSide`, `GetLeftSide`, `GetTopSide`, `GetBotSide` |
+//! | `collect_neighbors` (private)          | the shared body of `GetLeftNeighbors` .. `GetTopNeighbors` |
+//! | `side` (private)                       | `SmTreeNode::GetRightSide`, `GetLeftSide`, `GetTopSide`, `GetBotSide` |
 //! | [`TreeNode`], [`TreeNode::new`]        | `SmTreeNode`, `SmTreeNode()`                    |
 //! | [`TreeNode::bounding_box`]             | `SmTreeNode::GetBoundingBox`                    |
 //! | [`ObjectList`]                         | `SmObjectList`                                  |
@@ -51,7 +52,11 @@
 //!   [`SurfaceAux`] subdivision data, or nothing. Code that would cast `m_pData` to
 //!   the wrong type (undefined behaviour upstream) returns
 //!   [`SolidError::InvalidInput`]; so does any use of a missing node/list id, a
-//!   missing top node or a cyclic object list.
+//!   missing top node, a cyclic object list or cyclic parent/child links.
+//! - The neighbour searches return a new `Vec` instead of appending to the
+//!   caller's `SmTArray`; the four direction-specific recursions (and the four
+//!   `Get*Side` functions) share one body parameterised by the
+//!   search direction, with the parent recursion turned into a loop.
 //! - The single-point constructor always allocates its node (and object-list
 //!   item) in the tree's arenas; upstream can also use caller-owned memory, which
 //!   is then invisible to `GetAllTreeNodes`/`GetNodeCount`.
@@ -419,14 +424,55 @@ fn int_bit(count: u64) -> u64 {
     i64::from(1i32.wrapping_shl(count as u32)) as u64
 }
 
-/// Which child of its parent a subdivision node is (the `bLeft`/`bRight`/`bBot`/
-/// `bTop` flags of the neighbour searches).
-enum ChildSide {
-    Left,
-    Right,
-    Bot,
-    Top,
-    Bad,
+/// A side of a subdivision node's domain: the split direction that separates it
+/// and whether it is the child-1 half (left for `U`, bottom for `V`). Used both
+/// for which child of its parent a node is (the `bLeft`/`bRight`/`bBot`/`bTop`
+/// flags of the neighbour searches) and for the direction of a search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Side {
+    /// `SplitDir::U` or `SplitDir::V`.
+    axis: SplitDir,
+    /// True for the child-1 half (left / bottom).
+    first: bool,
+}
+
+impl Side {
+    const LEFT: Self = Self::new(SplitDir::U, true);
+    const RIGHT: Self = Self::new(SplitDir::U, false);
+    const BOT: Self = Self::new(SplitDir::V, true);
+    const TOP: Self = Self::new(SplitDir::V, false);
+
+    const fn new(axis: SplitDir, first: bool) -> Self {
+        Self { axis, first }
+    }
+
+    /// The opposite half on the same axis.
+    const fn opposite(self) -> Self {
+        Self {
+            axis: self.axis,
+            first: !self.first,
+        }
+    }
+
+    /// The operation name used in errors of a search in this direction.
+    const fn op(self) -> &'static str {
+        match (self.axis, self.first) {
+            (SplitDir::U, true) => "geom::tree::Tree::left_neighbors",
+            (SplitDir::U, false) => "geom::tree::Tree::right_neighbors",
+            (SplitDir::V, true) => "geom::tree::Tree::bot_neighbors",
+            (SplitDir::V, false) => "geom::tree::Tree::top_neighbors",
+            (SplitDir::Unknown, _) => "geom::tree::Tree::neighbors",
+        }
+    }
+}
+
+/// Error for parent/child links that loop back on themselves (upstream would
+/// recurse or loop forever).
+fn cyclic_links(operation: &'static str) -> SolidError {
+    SolidError::InvalidInput {
+        operation,
+        reason: "tree node links are cyclic",
+    }
 }
 
 impl<O: Copy + PartialEq> Tree<O> {
@@ -455,11 +501,6 @@ impl<O: Copy + PartialEq> Tree<O> {
     pub fn from_point(point: Point3, point_size: f64, with_object_list: bool) -> Self {
         let mut tree = Self::new(None);
         let mut node = TreeNode::zeroed();
-        node.aux_type = AuxDataType::None;
-        node.data = NodeData::None;
-        node.child1 = None;
-        node.child2 = None;
-        node.parent = None;
         node.bbox = Extent3d::from_point(point);
         node.bbox.expand_absolute(point_size);
         if with_object_list {
@@ -865,7 +906,12 @@ impl<O: Copy + PartialEq> Tree<O> {
         };
 
         let mut cur = Some(found);
+        let mut steps = 0usize;
         while let Some(id) = cur {
+            steps += 1;
+            if steps > self.nodes.len() {
+                return Err(cyclic_links("geom::tree::Tree::rm_from_spatial_tree"));
+            }
             let node = *self.node(id)?;
             let head = if node.aux_type == AuxDataType::ObjectList {
                 node.list_head()
@@ -906,7 +952,7 @@ impl<O: Copy + PartialEq> Tree<O> {
     pub fn find_node(&self, bbox: &Extent3d) -> Result<Option<NodeId>> {
         const OP: &str = "geom::tree::Tree::find_node";
         let mut id = self.top_id(OP)?;
-        loop {
+        for _ in 0..=self.nodes.len() {
             let node = self.node(id)?;
             let Some(c1) = node.child1 else {
                 return Ok(Some(id));
@@ -928,6 +974,7 @@ impl<O: Copy + PartialEq> Tree<O> {
             }
             return Ok(Some(id));
         }
+        Err(cyclic_links(OP))
     }
 
     /// The object-list items of `node`, in list order
@@ -1011,32 +1058,37 @@ impl<O: Copy + PartialEq> Tree<O> {
     /// (`GetFirstBezierPatch`). `None` for nodes that are not surface
     /// subdivision nodes or have no shape.
     pub fn first_bezier_patch(&self, node: NodeId) -> Result<Option<BezierPatchRef>> {
-        let n = self.node(node)?;
-        if n.aux_type == AuxDataType::BezierSurface {
-            // UNPORTED(surface.surface_cache_p1): SmBezierPatch::GetBezierPtr
-            return Err(SolidError::Unported {
-                upstream: "SmBezierPatch::GetBezierPtr",
-                unit: "surface.surface_cache_p1",
-            });
-        }
-        if n.aux_type.is_surface_subdivision() {
+        const OP: &str = "geom::tree::Tree::first_bezier_patch";
+        // upstream recurses into the parent; a loop with a cycle guard here
+        let mut cur = node;
+        for _ in 0..=self.nodes.len() {
+            let n = self.node(cur)?;
+            if n.aux_type == AuxDataType::BezierSurface {
+                // UNPORTED(surface.surface_cache_p1): SmBezierPatch::GetBezierPtr
+                return Err(SolidError::Unported {
+                    upstream: "SmBezierPatch::GetBezierPtr",
+                    unit: "surface.surface_cache_p1",
+                });
+            }
+            if !n.aux_type.is_surface_subdivision() {
+                return Ok(None);
+            }
             let owner_surface = self.owner_object()?;
             // (SM_ASSERT on SmSurface::IsKindOf, unit surface.surface_p2, not ported: debug only)
-            let aux = self.surface_aux(node, "geom::tree::Tree::first_bezier_patch")?;
+            let aux = self.surface_aux(cur, OP)?;
             if aux.surface.is_some() && (n.parent.is_none() || owner_surface != aux.surface) {
                 // UNPORTED(nurbs.b_spline_surface_p1): SmBSplineSurface::GetGwNurbPointer
                 return Err(SolidError::Unported {
                     upstream: "SmBSplineSurface::GetGwNurbPointer",
                     unit: "nurbs.b_spline_surface_p1",
                 });
-            } else if let Some(p) = n.parent {
-                if owner_surface != aux.surface {
-                    return self.first_bezier_patch(p);
-                }
             }
-            return Ok(None);
+            match n.parent {
+                Some(p) if owner_surface != aux.surface => cur = p,
+                _ => return Ok(None),
+            }
         }
-        Ok(None)
+        Err(cyclic_links(OP))
     }
 
     /// After `node`'s mark or class changed, updates its ancestors
@@ -1046,7 +1098,7 @@ impl<O: Copy + PartialEq> Tree<O> {
     pub fn propagate_to_parents(&mut self, node: NodeId) -> Result<()> {
         const OP: &str = "geom::tree::Tree::propagate_to_parents";
         let mut cur = node;
-        loop {
+        for _ in 0..=self.nodes.len() {
             let n = *self.node(cur)?;
             if !n.aux_type.is_surface_subdivision() {
                 return Ok(());
@@ -1100,57 +1152,60 @@ impl<O: Copy + PartialEq> Tree<O> {
             }
             cur = parent;
         }
+        Err(cyclic_links(OP))
     }
 
-    /// Appends the left, right, bottom and top leaf neighbours of `node`
-    /// (`GetNeighbors`); nothing for non-subdivision nodes.
-    pub fn neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
+    /// The left, right, bottom and top leaf neighbours of `node`, in that order
+    /// (`GetNeighbors`); empty for non-subdivision nodes.
+    pub fn neighbors(&self, node: NodeId) -> Result<Vec<NodeId>> {
+        let mut out = Vec::new();
         if !self.node(node)?.aux_type.is_surface_subdivision() {
-            return Ok(());
+            return Ok(out);
         }
-        self.left_neighbors(node, out)?;
-        self.right_neighbors(node, out)?;
-        self.bot_neighbors(node, out)?;
-        self.top_neighbors(node, out)
+        for toward in [Side::LEFT, Side::RIGHT, Side::BOT, Side::TOP] {
+            self.collect_neighbors(node, toward, &mut out)?;
+        }
+        Ok(out)
     }
 
-    /// Appends the leaf nodes left of `node` (`GetLeftNeighbors`).
-    pub fn left_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
-        self.left_neighbors_bits(node, out, 0, 0)
+    /// The leaf nodes left of `node` (`GetLeftNeighbors`).
+    pub fn left_neighbors(&self, node: NodeId) -> Result<Vec<NodeId>> {
+        self.neighbors_toward(node, Side::LEFT)
     }
 
-    /// Appends the leaf nodes right of `node` (`GetRightNeighbors`).
-    pub fn right_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
-        self.right_neighbors_bits(node, out, 0, 0)
+    /// The leaf nodes right of `node` (`GetRightNeighbors`).
+    pub fn right_neighbors(&self, node: NodeId) -> Result<Vec<NodeId>> {
+        self.neighbors_toward(node, Side::RIGHT)
     }
 
-    /// Appends the leaf nodes below `node` (`GetBotNeighbors`).
-    pub fn bot_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
-        self.bot_neighbors_bits(node, out, 0, 0)
+    /// The leaf nodes below `node` (`GetBotNeighbors`).
+    pub fn bot_neighbors(&self, node: NodeId) -> Result<Vec<NodeId>> {
+        self.neighbors_toward(node, Side::BOT)
     }
 
-    /// Appends the leaf nodes above `node` (`GetTopNeighbors`).
-    pub fn top_neighbors(&self, node: NodeId, out: &mut Vec<NodeId>) -> Result<()> {
-        self.top_neighbors_bits(node, out, 0, 0)
+    /// The leaf nodes above `node` (`GetTopNeighbors`).
+    pub fn top_neighbors(&self, node: NodeId) -> Result<Vec<NodeId>> {
+        self.neighbors_toward(node, Side::TOP)
     }
 
-    /// Where `node` sits under its parent `parent` (per the parent's split
-    /// direction).
-    fn child_side(&self, node: NodeId, parent: NodeId, op: &'static str) -> Result<ChildSide> {
+    fn neighbors_toward(&self, node: NodeId, toward: Side) -> Result<Vec<NodeId>> {
+        let mut out = Vec::new();
+        self.collect_neighbors(node, toward, &mut out)?;
+        Ok(out)
+    }
+
+    /// Which half of `parent` the node `node` is (per the parent's split
+    /// direction); `None` when the split direction is unknown or `node` is not a
+    /// child of `parent`.
+    fn child_side(&self, node: NodeId, parent: NodeId, op: &'static str) -> Result<Option<Side>> {
         let p = self.node(parent)?;
         let split = self.surface_aux(parent, op)?.split_dir;
         let is1 = p.child1 == Some(node);
         let is2 = p.child2 == Some(node);
-        Ok(if split == SplitDir::U && is1 {
-            ChildSide::Left
-        } else if split == SplitDir::U && is2 {
-            ChildSide::Right
-        } else if split == SplitDir::V && is1 {
-            ChildSide::Bot
-        } else if split == SplitDir::V && is2 {
-            ChildSide::Top
-        } else {
-            ChildSide::Bad
+        Ok(match split {
+            SplitDir::U | SplitDir::V if is1 => Some(Side::new(split, true)),
+            SplitDir::U | SplitDir::V if is2 => Some(Side::new(split, false)),
+            SplitDir::U | SplitDir::V | SplitDir::Unknown => None,
         })
     }
 
@@ -1164,136 +1219,49 @@ impl<O: Copy + PartialEq> Tree<O> {
         })
     }
 
-    /// `GetLeftNeighbors` with the recursion's split bits/count.
-    fn left_neighbors_bits(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        mut bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        const OP: &str = "geom::tree::Tree::left_neighbors";
-        let n = self.node(node)?;
-        if !n.aux_type.is_surface_subdivision() {
-            return Ok(());
-        }
-        if count == 0 {
-            bits = 0;
-        }
-        let Some(parent) = n.parent else {
-            return Ok(());
-        };
-        match self.child_side(node, parent, OP)? {
-            ChildSide::Left => self.left_neighbors_bits(parent, out, bits, count),
-            ChildSide::Right => {
-                let sib = self.child(parent, true, OP)?;
-                self.right_side(sib, out, bits, count, 0, 0)
+    /// Appends the leaf neighbours of `node` on side `toward` (the shared body of
+    /// `GetLeftNeighbors` .. `GetTopNeighbors`). Climbs while `node` is on the
+    /// `toward` half of its parent, recording in `(bits, count)` which halves of
+    /// the cross-direction splits it came from; at the first parent where it is
+    /// on the opposite half, collects the matching leaves of the sibling's facing
+    /// side.
+    fn collect_neighbors(&self, node: NodeId, toward: Side, out: &mut Vec<NodeId>) -> Result<()> {
+        let op = toward.op();
+        let (mut cur, mut bits, mut count) = (node, 0u64, 0u64);
+        for _ in 0..=self.nodes.len() {
+            let n = self.node(cur)?;
+            if !n.aux_type.is_surface_subdivision() {
+                return Ok(());
             }
-            ChildSide::Bot => self.left_neighbors_bits(parent, out, bits, count + 1),
-            ChildSide::Top => {
-                self.left_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
+            if count == 0 {
+                bits = 0;
             }
-            ChildSide::Bad => Ok(()),
-        }
-    }
-
-    /// `GetRightNeighbors` with the recursion's split bits/count.
-    fn right_neighbors_bits(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        mut bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        const OP: &str = "geom::tree::Tree::right_neighbors";
-        let n = self.node(node)?;
-        if !n.aux_type.is_surface_subdivision() {
-            return Ok(());
-        }
-        if count == 0 {
-            bits = 0;
-        }
-        let Some(parent) = n.parent else {
-            return Ok(());
-        };
-        match self.child_side(node, parent, OP)? {
-            ChildSide::Left => {
-                let sib = self.child(parent, false, OP)?;
-                self.left_side(sib, out, bits, count, 0, 0)
+            let Some(parent) = n.parent else {
+                return Ok(());
+            };
+            let Some(side) = self.child_side(cur, parent, op)? else {
+                return Ok(());
+            };
+            if side.axis == toward.axis {
+                if side.first != toward.first {
+                    let sibling = self.child(parent, toward.first, op)?;
+                    let search = SideSearch {
+                        target_bits: bits,
+                        target_count: count,
+                        facing: toward.opposite(),
+                        op,
+                    };
+                    return self.side(sibling, out, &search, 0, 0, 0);
+                }
+            } else {
+                if !side.first {
+                    bits |= int_bit(count);
+                }
+                count += 1;
             }
-            ChildSide::Right => self.right_neighbors_bits(parent, out, bits, count),
-            ChildSide::Bot => self.right_neighbors_bits(parent, out, bits, count + 1),
-            ChildSide::Top => {
-                self.right_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
-            }
-            ChildSide::Bad => Ok(()),
+            cur = parent;
         }
-    }
-
-    /// `GetBotNeighbors` with the recursion's split bits/count.
-    fn bot_neighbors_bits(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        mut bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        const OP: &str = "geom::tree::Tree::bot_neighbors";
-        let n = self.node(node)?;
-        if !n.aux_type.is_surface_subdivision() {
-            return Ok(());
-        }
-        if count == 0 {
-            bits = 0;
-        }
-        let Some(parent) = n.parent else {
-            return Ok(());
-        };
-        match self.child_side(node, parent, OP)? {
-            ChildSide::Left => self.bot_neighbors_bits(parent, out, bits, count + 1),
-            ChildSide::Right => {
-                self.bot_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
-            }
-            ChildSide::Bot => self.bot_neighbors_bits(parent, out, bits, count),
-            ChildSide::Top => {
-                let sib = self.child(parent, true, OP)?;
-                self.top_side(sib, out, bits, count, 0, 0)
-            }
-            ChildSide::Bad => Ok(()),
-        }
-    }
-
-    /// `GetTopNeighbors` with the recursion's split bits/count.
-    fn top_neighbors_bits(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        mut bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        const OP: &str = "geom::tree::Tree::top_neighbors";
-        let n = self.node(node)?;
-        if !n.aux_type.is_surface_subdivision() {
-            return Ok(());
-        }
-        if count == 0 {
-            bits = 0;
-        }
-        let Some(parent) = n.parent else {
-            return Ok(());
-        };
-        match self.child_side(node, parent, OP)? {
-            ChildSide::Left => self.top_neighbors_bits(parent, out, bits, count + 1),
-            ChildSide::Right => {
-                self.top_neighbors_bits(parent, out, bits | int_bit(count), count + 1)
-            }
-            ChildSide::Bot => {
-                let sib = self.child(parent, false, OP)?;
-                self.bot_side(sib, out, bits, count, 0, 0)
-            }
-            ChildSide::Top => self.top_neighbors_bits(parent, out, bits, count),
-            ChildSide::Bad => Ok(()),
-        }
+        Err(cyclic_links(op))
     }
 
     /// Whether the descendants `(bits << 1) | 0` and `(bits << 1) | 1` one split
@@ -1307,19 +1275,22 @@ impl<O: Copy + PartialEq> Tree<O> {
         ((bits << 1) == want, ((bits << 1) | 1) == want)
     }
 
-    /// Shared body of the four `Get*Side` functions: `through` is the split
-    /// direction that passes straight to child `through_first` (1) or 2; the
-    /// other direction filters children by the target bits.
+    /// The `Get*Side` functions: appends the leaves of `node` on side
+    /// `search.facing` whose cross-direction position matches the target bits.
+    /// Splits along the facing axis pass straight to the facing child; cross
+    /// splits descend into the children that line up with the target.
     fn side(
         &self,
         node: NodeId,
         out: &mut Vec<NodeId>,
-        target: (u64, u64),
+        search: &SideSearch,
         mut bits: u64,
         count: u64,
-        through: (SplitDir, bool),
-        op: &'static str,
+        depth: usize,
     ) -> Result<()> {
+        if depth > self.nodes.len() {
+            return Err(cyclic_links(search.op));
+        }
         let n = self.node(node)?;
         if !n.aux_type.is_surface_subdivision() {
             return Ok(());
@@ -1327,114 +1298,44 @@ impl<O: Copy + PartialEq> Tree<O> {
         if count == 0 {
             bits = 0;
         }
-        let split = self.surface_aux(node, op)?.split_dir;
-        let cross = match through.0 {
+        let split = self.surface_aux(node, search.op)?.split_dir;
+        let facing = search.facing.axis;
+        let cross = match facing {
             SplitDir::U => SplitDir::V,
             SplitDir::V => SplitDir::U,
             SplitDir::Unknown => SplitDir::Unknown,
         };
         if n.child1.is_none() {
             out.push(node);
-        } else if split == through.0 {
-            let c = self.child(node, through.1, op)?;
-            self.side(c, out, target, bits, count, through, op)?;
+        } else if split == facing {
+            let c = self.child(node, search.facing.first, search.op)?;
+            self.side(c, out, search, bits, count, depth + 1)?;
         } else if split == cross {
-            let (b1, b2) = Self::split_targets(target.0, target.1, bits, count);
+            let (b1, b2) =
+                Self::split_targets(search.target_bits, search.target_count, bits, count);
             if b1 {
-                let c1 = self.child(node, true, op)?;
-                self.side(c1, out, target, bits << 1, count + 1, through, op)?;
+                let c1 = self.child(node, true, search.op)?;
+                self.side(c1, out, search, bits << 1, count + 1, depth + 1)?;
             }
             if b2 {
-                let c2 = self.child(node, false, op)?;
-                self.side(c2, out, target, (bits << 1) | 1, count + 1, through, op)?;
+                let c2 = self.child(node, false, search.op)?;
+                self.side(c2, out, search, (bits << 1) | 1, count + 1, depth + 1)?;
             }
         }
         Ok(())
     }
+}
 
-    /// `GetRightSide`: right-most descendants matching the target bits.
-    fn right_side(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        target_bits: u64,
-        target_count: u64,
-        bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        self.side(
-            node,
-            out,
-            (target_bits, target_count),
-            bits,
-            count,
-            (SplitDir::U, false),
-            "geom::tree::Tree::right_side",
-        )
-    }
-
-    /// `GetLeftSide`: left-most descendants matching the target bits.
-    fn left_side(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        target_bits: u64,
-        target_count: u64,
-        bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        self.side(
-            node,
-            out,
-            (target_bits, target_count),
-            bits,
-            count,
-            (SplitDir::U, true),
-            "geom::tree::Tree::left_side",
-        )
-    }
-
-    /// `GetTopSide`: top-most descendants matching the target bits.
-    fn top_side(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        target_bits: u64,
-        target_count: u64,
-        bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        self.side(
-            node,
-            out,
-            (target_bits, target_count),
-            bits,
-            count,
-            (SplitDir::V, false),
-            "geom::tree::Tree::top_side",
-        )
-    }
-
-    /// `GetBotSide`: bottom-most descendants matching the target bits.
-    fn bot_side(
-        &self,
-        node: NodeId,
-        out: &mut Vec<NodeId>,
-        target_bits: u64,
-        target_count: u64,
-        bits: u64,
-        count: u64,
-    ) -> Result<()> {
-        self.side(
-            node,
-            out,
-            (target_bits, target_count),
-            bits,
-            count,
-            (SplitDir::V, true),
-            "geom::tree::Tree::bot_side",
-        )
-    }
+/// The fixed arguments of one `Get*Side` descent.
+struct SideSearch {
+    /// `lSplitBits` of the neighbour search.
+    target_bits: u64,
+    /// `lSplitCount` of the neighbour search.
+    target_count: u64,
+    /// The side of the sibling that faces the searching node.
+    facing: Side,
+    /// Operation name for errors.
+    op: &'static str,
 }
 
 #[cfg(test)]
@@ -1557,15 +1458,33 @@ mod tests {
     #[test]
     fn grid_neighbors() {
         let (t, [_, _, _, lb, lt, rb, rt]) = grid();
-        let mut v = Vec::new();
-        t.right_neighbors(lb, &mut v).unwrap();
-        assert_eq!(v, vec![rb]);
-        v.clear();
-        t.left_neighbors(rt, &mut v).unwrap();
-        assert_eq!(v, vec![lt]);
-        v.clear();
-        t.neighbors(lt, &mut v).unwrap();
-        assert_eq!(v, vec![rt, lb]);
+        assert_eq!(t.right_neighbors(lb).unwrap(), vec![rb]);
+        assert_eq!(t.left_neighbors(rt).unwrap(), vec![lt]);
+        assert_eq!(t.top_neighbors(lb).unwrap(), vec![lt]);
+        assert_eq!(t.bot_neighbors(rt).unwrap(), vec![rb]);
+        assert_eq!(t.neighbors(lt).unwrap(), vec![rt, lb]);
+    }
+
+    #[test]
+    fn cyclic_links_are_errors() {
+        // a subdivision node that is its own parent and child
+        let (mut t, [_, l, ..]) = grid();
+        let a = t.node_mut(l).unwrap();
+        a.parent = Some(l);
+        a.child1 = Some(l);
+        assert!(matches!(
+            t.left_neighbors(l),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        // a spatial tree whose top node is its own child
+        let mut s: Tree<u32> = Tree::new_spatial(&ext([0.0; 3], [4.0; 3]));
+        let top = s.node_mut(NodeId(0)).unwrap();
+        top.child1 = Some(NodeId(0));
+        top.child2 = Some(NodeId(0));
+        assert!(matches!(
+            s.find_node(&unit_box()),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]

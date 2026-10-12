@@ -372,21 +372,11 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
         match op {
             DOp::Neighbors { node } => {
                 let n = NodeId(*node as usize);
-                let mut l = Vec::new();
-                t.left_neighbors(n, &mut l)?;
-                put(&mut o, &l);
-                l.clear();
-                t.right_neighbors(n, &mut l)?;
-                put(&mut o, &l);
-                l.clear();
-                t.bot_neighbors(n, &mut l)?;
-                put(&mut o, &l);
-                l.clear();
-                t.top_neighbors(n, &mut l)?;
-                put(&mut o, &l);
-                l.clear();
-                t.neighbors(n, &mut l)?;
-                put(&mut o, &l);
+                put(&mut o, &t.left_neighbors(n)?);
+                put(&mut o, &t.right_neighbors(n)?);
+                put(&mut o, &t.bot_neighbors(n)?);
+                put(&mut o, &t.top_neighbors(n)?);
+                put(&mut o, &t.neighbors(n)?);
             }
             DOp::Propagate { node } => t.propagate_to_parents(NodeId(*node as usize))?,
             DOp::Set {
