@@ -1,0 +1,107 @@
+//! Deterministic per-unit JSON report (`reports/difftest/<unit>.json`).
+//!
+//! No timestamps, no paths outside the repo, sorted keys, stable floats.
+//! Passing cases are listed compactly; failing cases include their inputs
+//! and the first recorded mismatches so they can be reproduced.
+
+use std::fmt::Write as _;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde_json::{json, Map, Value};
+
+use crate::compare::REL_TOL;
+use crate::json::{num, to_canonical_string};
+use crate::runner::{CaseResult, UnitResult};
+use crate::HarnessError;
+
+fn case_json(c: &CaseResult) -> Value {
+    let mut m = Map::new();
+    m.insert("name".into(), json!(c.name));
+    m.insert("source".into(), json!(c.source.describe()));
+    m.insert("pass".into(), json!(c.pass()));
+    m.insert("max_rel_err".into(), num(c.diff.max_rel_err));
+    m.insert("values_compared".into(), json!(c.diff.values_compared));
+    if c.both_errored {
+        m.insert("both_errored".into(), json!(true));
+    }
+    if !c.pass() {
+        m.insert("inputs".into(), c.inputs.clone());
+        m.insert("mismatch_count".into(), json!(c.diff.mismatch_count));
+        let mm: Vec<Value> = c
+            .diff
+            .mismatches
+            .iter()
+            .map(|x| {
+                let mut o = Map::new();
+                o.insert("field".into(), json!(x.field));
+                o.insert("cpp".into(), json!(x.cpp));
+                o.insert("rust".into(), json!(x.rust));
+                if let Some(r) = x.rel_err {
+                    o.insert("rel_err".into(), num(r));
+                }
+                Value::Object(o)
+            })
+            .collect();
+        m.insert("mismatches".into(), Value::Array(mm));
+        if let Some(h) = &c.harness_error {
+            m.insert("harness_error".into(), json!(h));
+        }
+    }
+    Value::Object(m)
+}
+
+/// Builds the report value for a unit.
+pub fn unit_report(r: &UnitResult) -> Value {
+    let floors: Vec<Value> = r
+        .abs_floors
+        .iter()
+        .map(|f| json!({"key": f.key, "abs": num(f.abs), "why": f.why}))
+        .collect();
+    let errored = r.cases.iter().filter(|c| c.both_errored).count();
+    let mut m = Map::new();
+    m.insert("unit".into(), json!(r.unit));
+    m.insert("pass".into(), json!(r.pass()));
+    m.insert("rel_tol".into(), num(REL_TOL));
+    m.insert("abs_floors".into(), Value::Array(floors));
+    m.insert("seeds".into(), json!(r.seeds));
+    m.insert("cases_total".into(), json!(r.cases.len()));
+    m.insert("cases_failed".into(), json!(r.failed()));
+    m.insert("cases_both_errored".into(), json!(errored));
+    m.insert("max_rel_err".into(), num(r.max_rel_err()));
+    m.insert(
+        "cases".into(),
+        Value::Array(r.cases.iter().map(case_json).collect()),
+    );
+    if let Some(h) = &r.harness_error {
+        m.insert("harness_error".into(), json!(h));
+    }
+    Value::Object(m)
+}
+
+/// Writes `<dir>/<unit>.json`; returns the path.
+pub fn write_unit_report(dir: &Path, r: &UnitResult) -> Result<PathBuf, HarnessError> {
+    fs::create_dir_all(dir).map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?;
+    let path = dir.join(format!("{}.json", r.unit));
+    fs::write(&path, to_canonical_string(&unit_report(r)))
+        .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
+    Ok(path)
+}
+
+/// One-line summary, e.g. `PASS harness.selftest cases=40 failed=0 max_rel_err=1.1e-16`.
+pub fn summary_line(r: &UnitResult) -> String {
+    let mut s = format!(
+        "{} {} cases={} failed={} max_rel_err={:e}",
+        if r.pass() { "PASS" } else { "FAIL" },
+        r.unit,
+        r.cases.len(),
+        r.failed(),
+        r.max_rel_err()
+    );
+    if let Some(h) = &r.harness_error {
+        let _ = write!(s, " harness_error={h:?}");
+    } else if r.cases.is_empty() {
+        s.push_str(" (no cases)");
+    }
+    s
+}

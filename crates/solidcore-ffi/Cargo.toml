@@ -4,5 +4,21 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 publish = false
+description = "Safe Rust wrappers over extern \"C\" shims into the upstream SMLib C++ kernel (difftest oracle)."
+# Lets dependents' build scripts read DEP_SOLIDCORE_CPP_* (e.g. LIB_DIR for rpath).
+links = "solidcore_cpp"
+build = "build.rs"
+
+[features]
+default = []
+# Compile harness/cpp/shim/*.cpp and link bin/cpp/lib. Without it the crate is empty.
+cpp = []
 
 [dependencies]
+
+[build-dependencies]
+cc = "1.2"
+serde_json = "1"
+
+[lints]
+workspace = true

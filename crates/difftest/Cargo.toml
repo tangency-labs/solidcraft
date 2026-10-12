@@ -4,5 +4,20 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 publish = false
+description = "Side-by-side comparison runner: solidcore (Rust) vs upstream SMLib (C++ via solidcore-ffi)."
+build = "build.rs"
+
+[features]
+default = []
+# Link the C++ kernel and register the unit runners in src/units/. Required to run.
+cpp = ["solidcore-ffi/cpp"]
 
 [dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-ffi = { path = "../solidcore-ffi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[lints]
+workspace = true
