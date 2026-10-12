@@ -8,6 +8,7 @@
 //! | Rust                                   | Upstream                                  |
 //! |----------------------------------------|-------------------------------------------|
 //! | [`Kernel`]                             | `SmContext`                               |
+//! | [`Kernel::context`]                    | `SmContext` marks, flags and own tolerance (see [`crate::geom::context`]) |
 //! | [`Tolerances::zone_tol_3d`]            | `SmContext::m_sThisZoneTol3d`, `SM_ZONE_TOL_3D` |
 //! | [`Tolerances::xsect_tol_3d`]           | `SM_XSECT_TOL_3D`                         |
 //! | [`Tolerances::approx_tol_3d`]          | `SM_APPROX_TOL_3D`                        |
@@ -23,6 +24,8 @@
 //! depend on random draws therefore cannot match the C++ bit for bit; difftests of such
 //! code must compare outcomes that are invariant to the draw (and say so in
 //! `plan/findings.md`).
+
+use crate::geom::context::Context;
 
 /// Geometric tolerances in model units (upstream defaults from `SmMath.h`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -155,6 +158,9 @@ pub struct Kernel {
     pub rng: Rng,
     /// Memoisation caches.
     pub caches: Caches,
+    /// The session's modeling context (marks, Boolean flag, callbacks, its own
+    /// model size estimate); created with the defaults, as `SmApiGetOrCreateContext`.
+    pub context: Context,
 }
 
 impl Default for Kernel {
@@ -171,6 +177,7 @@ impl Kernel {
             tolerances: options.tolerances,
             rng: Rng::new(options.seed),
             caches: Caches::default(),
+            context: Context::default(),
         }
     }
 }

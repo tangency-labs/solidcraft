@@ -269,18 +269,20 @@ fn rust_values(op: Op, i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, Harnes
     Ok(match op {
         Op::SizeEstimate => v1(tol::size_estimate_to_zone_tol_3d(a(0))),
         Op::InTol => v1(flag(tol::in_tol(a(0), tol::tol3d(a(1))))),
-        Op::CalcFaceZone => v1(tol::calc_face_zone_tol_3d(&k)),
+        Op::CalcFaceZone => v1(tol::calc_face_zone_tol_3d(&k, None)),
         Op::CalcEdgeZone => v1(tol::calc_edge_zone_tol_3d(
             &k,
             a(0),
             a(1),
             i.flag.then(|| tol::zone_tol3d(&k, a(2))),
+            None,
         )),
         Op::CalcVertexZone => v1(tol::calc_vertex_zone_tol_3d(
             &k,
             a(0),
             a(1),
             i.flag.then(|| tol::zone_tol3d(&k, a(2))),
+            None,
         )),
         Op::EffZeros => Ok(vec![
             tol::eff_zero(),
@@ -317,11 +319,11 @@ fn rust_values(op: Op, i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, Harnes
         ))),
         Op::GapGain => v1(tol::gap_gain(&k)),
         Op::ZoneSys => v1(tol::zone_tol_3d(&k, small)),
-        Op::ZoneCtx => v1(tol::context_zone_tol_3d(&k, small)),
+        Op::ZoneCtx => v1(tol::context_zone_tol_3d(&k, None, small)),
         Op::ApproxSys => v1(tol::approx_tol_3d(&k, small)),
-        Op::ApproxCtx => v1(tol::context_approx_tol_3d(&k, small)),
+        Op::ApproxCtx => v1(tol::context_approx_tol_3d(&k, None, small)),
         Op::XSectSys => v1(tol::xsect_tol_3d(&k, small)),
-        Op::XSectCtx => v1(tol::context_xsect_tol_3d(&k, small)),
+        Op::XSectCtx => v1(tol::context_xsect_tol_3d(&k, None, small)),
         Op::ScaledZeroSys => Ok(vec![
             tol::scaled_zero(),
             tol::scaled_zero_sq(),
