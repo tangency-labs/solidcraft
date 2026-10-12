@@ -50,9 +50,7 @@
 //! - `N_CrvGetLinearSegs` and `N_CrvGetDegenSegs` return C arrays plus their highest
 //!   index; the Rust methods return `Vec`s (empty for upstream's `n = -1`).
 //! - `N_CrvGetDegenSegs` ignores the error flags of its `N_CrvEval` calls (it then
-//!   reads a point left unset); [`Curve::degen_segs`] propagates them. It calls
-//!   `N_CrvArcLength` (unit `nlib.crv_geom`), not ported yet: the method returns
-//!   [`SolidError::Unported`] whenever that call is reached.
+//!   reads a point left unset); [`Curve::degen_segs`] propagates them.
 //! - `N_CrvGetType` writes some outputs before failing in its circle branch; on an
 //!   error [`Curve::get_type`] returns only the error. Its "not a line / circle" exits
 //!   (including the cleared errors of `N_CrvEval` / `N_CrvEvalCurvature`) are
@@ -71,6 +69,7 @@ use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::crv_basic::Curve;
+use crate::nurbs::crv_geom::ToleranceKind;
 use crate::nurbs::geom::{
     dist_pt_pt, normalize, polygon_bbox, project_pt_plane, pt_along_vector, vector_diff_cpts,
     vectors_angle, vectors_cos_angle, Interval, MinMaxBox, Plane, LINE_TOL,
@@ -985,9 +984,7 @@ impl Curve {
     /// Parameter intervals `[u1, u2]` (merged over consecutive spans) whose image has
     /// arc length at most `tol` (`N_CrvGetDegenSegs`).
     ///
-    /// Errors with the errors of [`Curve::eval`] and with [`SolidError::Unported`]
-    /// when the arc length of a span is needed (`N_CrvArcLength`, unit
-    /// `nlib.crv_geom`, not ported yet).
+    /// Errors with the errors of [`Curve::eval`] and [`Curve::arc_length`].
     pub fn degen_segs(&self, tol: f64) -> Result<Vec<(f64, f64)>> {
         const OP: &str = OP_DEGEN;
         let p = sx(self.degree(), OP)?;
@@ -1015,7 +1012,12 @@ impl Curve {
                     }
                 }
 
-                let d1 = self.arc_length(get(uk, ii, OP)?, get(uk, ii + 1, OP)?, tol)?;
+                let d1 = self.arc_length(
+                    get(uk, ii, OP)?,
+                    get(uk, ii + 1, OP)?,
+                    tol,
+                    ToleranceKind::Absolute,
+                )?;
 
                 if d1 > tol {
                     len = 0.0;
@@ -1043,17 +1045,6 @@ impl Curve {
             }
         }
         Ok(sg)
-    }
-
-    /// Absolute arc length of the span `[u1, u2]` to within `tol` (upstream
-    /// `N_CrvArcLength(cur, u1, u2, tol, NL_ABSOLUTE, &len)`, unit `nlib.crv_geom`).
-    fn arc_length(&self, u1: f64, u2: f64, tol: f64) -> Result<f64> {
-        let _ = (self, u1, u2, tol);
-        // UNPORTED(nlib.crv_geom): N_CrvArcLength
-        Err(SolidError::Unported {
-            upstream: "N_CrvArcLength",
-            unit: "nlib.crv_geom",
-        })
     }
 
     /// Rescales the knots to `[ul, ur]` without changing the geometry
@@ -1616,13 +1607,7 @@ mod tests {
             vec![0.0; 4].into_iter().chain([1.0; 4]).collect(),
         )
         .unwrap();
-        assert!(matches!(
-            pt.degen_segs(1e-6),
-            Err(SolidError::Unported {
-                unit: "nlib.crv_geom",
-                ..
-            })
-        ));
+        assert_eq!(pt.degen_segs(1e-6).unwrap(), vec![(0.0, 1.0)]);
     }
 
     #[test]
