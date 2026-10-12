@@ -12,11 +12,11 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **56** (63,917 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb`, `nlib.crv_adv_p2`, `nlib.srf_tool_p2`, `nlib.crv_offset`, `nurbs.nurbs_srf`, `nlib.crv_approx`, `nlib.srf_tool_p3`, `nlib.srf_adv_p3`, `nlib.srf_tool_p4` |
-| Partial | **12** (12,831 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_surface_p1` |
-| Ported (green + partial) | 68 units, 76,748 upstream lines (19.8%); about 78,600 Rust lines in `crates/solidcore/src` |
-| Claimed | 2 (4,891 lines): `nurbs.b_spline_curve_n_lib`, `nlib.srf_adv_p2` |
+| Partial | **13** (15,625 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_surface_p1`, `nurbs.b_spline_curve_n_lib` |
+| Ported (green + partial) | 69 units, 79,542 upstream lines (20.5%); about 83,600 Rust lines in `crates/solidcore/src` |
+| Claimed | 2 (4,325 lines): `nlib.srf_adv_p2`, `nlib.srf_adv_p4` |
 | Blocked | 0 |
-| Todo | 190 (306,264 lines) |
+| Todo | 189 (304,036 lines) |
 
 ## What Wave 0 produced
 
@@ -122,14 +122,14 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `curve.hermite_curve` | `curve::hermite_curve` | 2131 cases (131 fixture + 2000 generated), 2038 bit-identical | 93 (`curve.curve_p2`: `SmCurve::IsKindOf`) |
 | `nurbs.b_spline_curve_p1` | `nurbs::b_spline_curve::p1` | 2216 cases (216 fixture on the six pt_TestFiles .smc curves, smSweepTest lines/circles, edge cases + 2000 generated), 2156 bit-identical; a 30,216-case run was also clean | 60 (`curve.curve_p2` 59: `EvaluateContinuity` / `IsKindOf` / `ApproximateLength`; `curve.curve_p1` 1: `TessellateByBisection`) |
 | `nurbs.b_spline_surface_p1` | `nurbs::b_spline_surface::p1` | 2120 cases (120 fixture on the three pt_TestFiles .sms surfaces incl. ReadFromDB, prog_test cone/bilinear patches, canonical, sweep, edge cases + 2000 generated), 1985 bit-identical | 135 (`surface.surface_p2` 102: `SmSurface::IsKindOf` (bounding boxes, parallelism); `surface.surface_p1` 33: offset, degenerate-curve test, STEP inversion solves) |
+| `nurbs.b_spline_curve_n_lib` | `nurbs::b_spline_curve_n_lib` | 2282 cases (282 fixture on the six pt_TestFiles .smc curves, FitCrvPoints.pts / Points.pts, my_test_curve_interface, the smSurfaceTest helix, TestSmMakeCurvesCompatible, SM_API_test rectangle/polygon edges and edge cases + 2000 generated), 2132 bit-identical; a 100,282-case run was also clean | 150 (`nurbs.b_spline_curve_p2`: `IsIntersectorApprox` (every `SetIntersectionCurveThroughPoint`), `DegreeElevate` (`DeformToEndPointTargets` of degree < 3 or even)) |
 
 ## Ready set
 
-Ready (todo, every dependency green/partial): none. Waiting only on a claimed unit:
+Ready (todo, every dependency green/partial): `nurbs.b_spline_curve_p2` (layer 12, 1872 lines). Waiting only on a claimed unit:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 12 | `nurbs.b_spline_curve_p2` | 1872 | `nurbs.b_spline_curve_n_lib` |
 | 13 | `nlib.srf_tool_p4` | 1005 | `nlib.srf_tool_p3` |
 
 ## Recent findings (details in `plan/findings.md`)
