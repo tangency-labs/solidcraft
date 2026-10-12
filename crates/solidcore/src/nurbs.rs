@@ -6,3 +6,4 @@
 //! `SmNurbs*` / `SmBSpline*` wrappers. Units are listed in `plan/modules.toml`.
 
 pub mod knots;
+pub mod math;
