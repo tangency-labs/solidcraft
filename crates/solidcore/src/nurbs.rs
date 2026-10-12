@@ -21,6 +21,7 @@ pub mod iges;
 pub(crate) mod index;
 pub mod knots;
 pub mod math;
+pub mod nurbs_crv;
 pub mod srf_basic;
 pub mod srf_fit;
 pub mod srf_tool;
