@@ -39,6 +39,7 @@
 //!   (an error flag without an error number) also returns `InvalidInput`.
 
 use crate::error::{NlibCode, Result, SolidError};
+use crate::math::max2;
 use crate::nurbs::basis_basic::find_global_max;
 use crate::nurbs::bezier::{elevation_matrix, srf_elevate_degree};
 use crate::nurbs::geom::dist_cpt_cpt_homo;
@@ -47,8 +48,7 @@ use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 
 use super::p1::{
-    at, at2, check_interior, ix, nlib, oob, put, put2, span_mult, surface, sx, zeros1, zeros2,
-    Local, Net,
+    at, at2, check_interior, ix, oob, put, put2, span_mult, surface, sx, zeros1, zeros2, Local, Net,
 };
 
 /// Upstream `sto`: relative parameter tolerance of the basis maxima searched by
@@ -70,15 +70,6 @@ fn transpose(w: &Net) -> Net {
     (0..cols)
         .map(|j| w.iter().filter_map(|row| row.get(j).copied()).collect())
         .collect()
-}
-
-/// `NL_MAX(a, b)`: `a > b ? a : b`.
-fn nl_max(a: f64, b: f64) -> f64 {
-    if a > b {
-        a
-    } else {
-        b
-    }
 }
 
 /// `n + 1` rows of `w`, each cut to `m + 1` entries.
@@ -148,7 +139,7 @@ pub fn remove_knot_conditional(
             check_interior(vp, t, OP)?;
             span_mult(vp, q, t, OP)?
         }
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
     };
 
     // Limit removal count to multiplicity of knot.
@@ -315,7 +306,7 @@ fn remove_conditional_rows(
                 oml = 1.0 - lam;
                 let maxl = global_max(kq, i - 1, &mut error)?;
                 let maxr = global_max(kq, i, &mut error)?;
-                nl_max(lam * al * maxl, oml * omd * maxr)
+                max2(lam * al * maxl, oml * omd * maxr)
             } else {
                 lam = 0.5;
                 oml = 0.5;
@@ -498,7 +489,7 @@ pub fn remove_one_knot(
     let (lines, deg, kn) = match dir {
         Direction::U => (transpose(&pw), p, u),
         Direction::V => (pw, q, v),
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
     };
 
     let first = r - deg;
@@ -604,13 +595,13 @@ pub fn elevate_degree(sur: &Surface, t: usize, dir: Direction) -> Result<Surface
     let (lines, hi, deg, kn, rk) = match dir {
         Direction::U => (transpose(&pw), n, p, up, r),
         Direction::V => (pw, m, q, vp, s),
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
     };
 
     // Check parameters and compute highest indexes.
     let degu = ix(deg, OP)?;
     if degu.checked_add(t).is_none_or(|d| d > MAX_DEGREE) {
-        return Err(nlib(OP, NlibCode::Degree));
+        return Err(SolidError::nlib(OP, NlibCode::Degree));
     }
     let kv = KnotVector::from_slice(kn)?;
     kv.validate(degu)?;

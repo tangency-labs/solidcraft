@@ -131,7 +131,7 @@ use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, NOW, NOZ};
 use crate::nurbs::nurbs_crv::{
     allocate_nurb_curve, copy_nurb_curve, crv_derivs, crv_eval, crv_remove_knots, extract_frame,
-    fixup_knot_vector, get_knots,
+    fixup_knot_vector, get_knots, to_euclid,
 };
 
 /// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
@@ -297,10 +297,6 @@ impl Default for BSplineCurve {
     }
 }
 
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::sm_err(operation)
-}
-
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
@@ -318,19 +314,7 @@ fn check(ok: bool, operation: &'static str, reason: &'static str) -> Result<()> 
 fn nl_err(operation: &'static str) -> impl Fn(SolidError) -> SolidError {
     move |e| match e {
         SolidError::Unported { .. } => e,
-        _ => sm_err(operation),
-    }
-}
-
-/// `TO_EUCLID` (`SmNurbsCrv.h`): homogeneous to Euclidean by division, a missing `z`
-/// becomes `0`.
-fn to_euclid(from: CPoint) -> Point3 {
-    if from.w == NOW {
-        let z = if from.z == NOZ { 0.0 } else { from.z };
-        Point3::new(from.x, from.y, z)
-    } else {
-        let z = if from.z == NOZ { 0.0 } else { from.z / from.w };
-        Point3::new(from.x / from.w, from.y / from.w, z)
+        _ => SolidError::sm_err(operation),
     }
 }
 
@@ -573,13 +557,17 @@ impl BSplineCurve {
             // A plain B-spline cannot make its NURB; the status is ignored upstream.
             let _ = self.make_nurb();
         }
-        self.nurb.as_mut().ok_or_else(|| sm_err(OP_NURB))
+        self.nurb
+            .as_mut()
+            .ok_or_else(|| SolidError::sm_err(OP_NURB))
     }
 
     /// The NURB for read-only callers (`GetOrCreateGwNurbPointer` through a const
     /// cast).
     fn nurb_ref(&self) -> Result<&Curve> {
-        self.nurb.as_ref().ok_or_else(|| sm_err(OP_NURB))
+        self.nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::sm_err(OP_NURB))
     }
 
     /// Makes the NURB from the analytic data (`MakeNurb`); a plain B-spline has none.
@@ -589,7 +577,7 @@ impl BSplineCurve {
     /// `SM_ERR` when there is no NURB.
     pub fn make_nurb(&mut self) -> Result<()> {
         if self.nurb.is_none() {
-            return Err(sm_err(OP_NURB));
+            return Err(SolidError::sm_err(OP_NURB));
         }
         Ok(())
     }
@@ -903,14 +891,14 @@ impl BSplineCurve {
             return pw
                 .first()
                 .map(|&p| to_euclid(p))
-                .ok_or_else(|| sm_err(OP_EVAL_PT));
+                .ok_or_else(|| SolidError::sm_err(OP_EVAL_PT));
         }
         // low work - end point evaluation
         else if t == natural_interval.max() {
             return pw
                 .last()
                 .map(|&p| to_euclid(p))
-                .ok_or_else(|| sm_err(OP_EVAL_PT));
+                .ok_or_else(|| SolidError::sm_err(OP_EVAL_PT));
         }
 
         // LEFT/RIGHT doesn't matter on C0 curves for point evals
@@ -954,7 +942,7 @@ impl BSplineCurve {
         let side = if from_left { Side::Left } else { Side::Right };
         let mut pv = crv_derivs(cur, t, side, num_derivs).map_err(nl_err(OP_EVAL))?;
         if pv.len() != num_derivs + 1 {
-            return Err(sm_err(OP_EVAL));
+            return Err(SolidError::sm_err(OP_EVAL));
         }
 
         // When asked, find a direction for zero-length first derivatives from the
@@ -1053,15 +1041,14 @@ impl BSplineCurve {
         Ok(())
     }
 
-    /// Reparameterises the knots to `new_param` (`EditParameterization`; `notify`,
-    /// upstream default `TRUE`, only controls the post-edit notification). Nothing
-    /// changes when the interval ends are already the same within the scaled zero.
+    /// Reparameterises the knots to `new_param` (`EditParameterization`; its `notify`
+    /// flag only controls the omitted post-edit notification). Nothing changes when
+    /// the interval ends are already the same within the scaled zero.
     ///
     /// # Errors
     ///
     /// `SM_ERR` without a NURB.
-    pub fn edit_parameterization(&mut self, new_param: &Extent1d, notify: bool) -> Result<()> {
-        let _ = notify;
+    pub fn edit_parameterization(&mut self, new_param: &Extent1d) -> Result<()> {
         // get current interval
         let old = self.natural_interval();
 
@@ -1073,7 +1060,7 @@ impl BSplineCurve {
         // MakeNurb() can fail for degenerate inputs: fail gracefully.
         let cur = self
             .get_or_create_gw_nurb()
-            .map_err(|_| sm_err(OP_REPARAM))?;
+            .map_err(|_| SolidError::sm_err(OP_REPARAM))?;
         let ivl = Interval {
             ul: new_param.min(),
             ur: new_param.max(),
@@ -1116,7 +1103,7 @@ impl BSplineCurve {
         // handle weights
         if let Some(w) = weight {
             if pw.w == NOW {
-                return Err(sm_err(OP_EDIT_END));
+                return Err(SolidError::sm_err(OP_EDIT_END));
             }
             pw.w = w;
         }
@@ -1185,7 +1172,7 @@ impl BSplineCurve {
             self.nurb = None;
         }
         let Some(src) = gw_nurb else {
-            return Err(sm_err(
+            return Err(SolidError::sm_err(
                 "nurbs::b_spline_curve::p1::BSplineCurve::set_from_gw_nurb",
             ));
         };
@@ -1219,7 +1206,9 @@ impl BSplineCurve {
             }
         }
 
-        let cur = self.get_or_create_gw_nurb().map_err(|_| sm_err(OP_XFORM))?;
+        let cur = self
+            .get_or_create_gw_nurb()
+            .map_err(|_| SolidError::sm_err(OP_XFORM))?;
         cur.transform(&rma)
     }
 
@@ -1488,17 +1477,17 @@ impl BSplineCurve {
 
         // both radii must have same length
         if (radius - radius2).abs() > tol {
-            return Err(sm_err(OP_ARC));
+            return Err(SolidError::sm_err(OP_ARC));
         }
 
         // angular sweep must be nonDegenerate
         if angle_rad.abs() < EFF_ZERO_SQRT {
-            return Err(sm_err(OP_ARC));
+            return Err(SolidError::sm_err(OP_ARC));
         }
 
         // center, start, and end points can't be colinear
         if angle_rad.abs() > PI - EFF_ZERO_SQRT {
-            return Err(sm_err(OP_ARC));
+            return Err(SolidError::sm_err(OP_ARC));
         }
 
         // make sure Z vec is oriented for a counterClockwise arc
@@ -1509,7 +1498,7 @@ impl BSplineCurve {
 
         // arc angular sweep should be positive
         if angle_rad < EFF_ZERO {
-            return Err(sm_err(OP_ARC));
+            return Err(SolidError::sm_err(OP_ARC));
         }
 
         // define arc origin, x axis, and y axis placement
@@ -1600,7 +1589,7 @@ impl BSplineCurve {
     ) -> Result<()> {
         // check input
         let (&[p0, p1], &mut [t0, t1]) = (points, &mut *tangents) else {
-            return Err(sm_err(OP_FAIR));
+            return Err(SolidError::sm_err(OP_FAIR));
         };
 
         let mut scale1 = 1.0;
@@ -1862,7 +1851,7 @@ mod tests {
     #[test]
     fn edits() {
         let mut c = cubic();
-        c.edit_parameterization(&Extent1d::from_min_max(2.0, 4.0), true)
+        c.edit_parameterization(&Extent1d::from_min_max(2.0, 4.0))
             .unwrap();
         assert_eq!(c.natural_interval(), Extent1d::from_min_max(2.0, 4.0));
         let mut m = c.create_mirror_curve(&Axis2Placement::default()).unwrap();

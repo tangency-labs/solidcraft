@@ -77,7 +77,7 @@ use crate::nurbs::geom::{
     LinePlaneIsect, LineSeg, MinMaxBox, Plane, Rectangle, LINE_TOL,
 };
 use crate::nurbs::index::{get, get2, oob, set, set2, sx, ux};
-use crate::nurbs::knots::{Side, MAX_DEGREE};
+use crate::nurbs::knots::{KnotVector, Side, MAX_DEGREE};
 use crate::nurbs::math::{
     combine4_pts, float_op_is_bad, pascal_triangle, CPoint, FloatOp, RealMatrix, MAX_DERIVATIVE,
     MODEL_TOL, NOW, NOZ,
@@ -94,10 +94,6 @@ type BasisFunctions = [[f64; NP]; NP];
 
 /// `NL_DERIVATIVES`.
 type Derivatives = [[f64; NP]; MAX_DERIVATIVE + 1];
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -408,7 +404,7 @@ fn univariate_derivs(
     let mut ndu: BasisFunctions = [[0.0; NP]; NP];
 
     // Compute all non-vanishing basis functions.
-    let knt = crate::nurbs::knots::KnotVector::new(uk, m)?;
+    let knt = KnotVector::new(uk, m)?;
     let ku = sx(knt.find_span(pu, t, side)?, op)?;
 
     // Get maximum derivative index and set zero derivatives.
@@ -528,7 +524,7 @@ impl Surface {
     /// Errors with [`NlibCode::MaxDerivative`] when `udr` or `vdr` exceeds
     /// `NL_MAXDER`, with [`NlibCode::Convergence`] when the rational denominator is
     /// not invertible, and with the errors of
-    /// [`crate::nurbs::knots::KnotVector::find_span`].
+    /// [`KnotVector::find_span`].
     pub fn basis_derivs(
         &self,
         u: f64,
@@ -545,7 +541,7 @@ impl Surface {
 
         // Check order of derivatives.
         if udr > MAX_DERIVATIVE || vdr > MAX_DERIVATIVE {
-            return Err(nlib(OP, NlibCode::MaxDerivative));
+            return Err(SolidError::nlib(OP, NlibCode::MaxDerivative));
         }
         if pu > MAX_DEGREE || qu > MAX_DEGREE {
             return Err(invalid(
@@ -601,7 +597,7 @@ impl Surface {
             };
             let d00 = get2(&d, 0, 0, OP)?;
             if float_op_is_bad(1.0, d00, FloatOp::Division) {
-                return Err(nlib(OP, NlibCode::Convergence));
+                return Err(SolidError::nlib(OP, NlibCode::Convergence));
             }
             let inv_w00 = 1.0 / d00;
 
@@ -654,7 +650,7 @@ impl Surface {
     /// Point `S(u, v)` (`N_SrfEvalPt`): curve evaluations only, with the dimension and
     /// rationality taken from `Pw[0][0]` for every control point.
     ///
-    /// Errors with the errors of [`crate::nurbs::knots::KnotVector::basis_eval`].
+    /// Errors with the errors of [`KnotVector::basis_eval`].
     pub fn eval(&self, u: f64, v: f64, ufl: Side, vfl: Side) -> Result<Vec3> {
         const OP: &str = "nurbs::srf_nurb::Surface::eval";
         let p00 = self.cpt(0, 0)?;
@@ -925,7 +921,7 @@ impl Surface {
                     set(vp, q + j, c - a, OP)?;
                 }
             }
-            Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+            Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
         }
         Ok(())
     }
@@ -1005,7 +1001,7 @@ impl Surface {
                     set(&mut vq, s - q - j, c - get(vp, q + j, OP)?, OP)?;
                 }
             }
-            Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+            Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
         }
         Surface::new(net, idx.p, idx.q, uq, vq)
     }
@@ -1055,7 +1051,7 @@ impl Surface {
 
         // Check for bad input data.
         if level > 1 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         let mut uboo = false;
         let mut vboo = false;
@@ -1142,7 +1138,7 @@ impl Surface {
                     ii += 1;
                 }
                 if ii >= s {
-                    return Err(nlib(OP, NlibCode::Knot));
+                    return Err(SolidError::nlib(OP, NlibCode::Knot));
                 }
             }
         }
@@ -1204,7 +1200,7 @@ impl Surface {
                     ii += 1;
                 }
                 if ii >= r {
-                    return Err(nlib(OP, NlibCode::Knot));
+                    return Err(SolidError::nlib(OP, NlibCode::Knot));
                 }
             }
         }
@@ -1273,7 +1269,7 @@ impl Surface {
         if mag <= 0.001 * MODEL_TOL || nsv.is_err() {
             sv = Vec3::ZERO;
             if pole == 1 {
-                return Err(nlib(OP, NlibCode::Geometry));
+                return Err(SolidError::nlib(OP, NlibCode::Geometry));
             }
             pole = 2;
         } else if let Ok((x, _)) = nsv {
@@ -1301,7 +1297,7 @@ impl Surface {
         };
 
         if n.length() < 0.001 * MODEL_TOL {
-            return Err(nlib(OP, NlibCode::Geometry));
+            return Err(SolidError::nlib(OP, NlibCode::Geometry));
         }
         let (n, _) = normalize(n)?;
         Ok(PtDerivNormal { p, su, sv, n })

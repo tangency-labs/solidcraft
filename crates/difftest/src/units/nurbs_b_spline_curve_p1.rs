@@ -946,8 +946,9 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
             ]);
         }
         OpIn::Greville { index } => o.push(c.greville_abscissa(*index)?),
-        OpIn::EditParam { ivl, notify } => {
-            c.edit_parameterization(&Extent1d::from_min_max(ivl[0], ivl[1]), *notify)?;
+        // `notify` only reaches the C++ side (the Rust port has no notifications).
+        OpIn::EditParam { ivl, .. } => {
+            c.edit_parameterization(&Extent1d::from_min_max(ivl[0], ivl[1]))?;
         }
         OpIn::EditEnd { p, start, w } => c.edit_end_point(v3(*p), *start, *w)?,
         OpIn::Fixup { tol } => c.fixup_knot_vector(*tol)?,

@@ -23,6 +23,7 @@
 //! | [`crv_derivs`]                     | `sm_CrvDerivs`                              |
 //! | [`basis_eval`]                     | `sm_BasisEval`                              |
 //! | [`crv_eval`]                       | `sm_CrvEval`                                |
+//! | `to_euclid` (crate)                | `TO_EUCLID` (`SmNurbsCrv.h`)                |
 //! | [`crv_remove_knots`]               | `sm_CrvRemoveKnots`                         |
 //! | [`basis_find_all_span_maxima`]     | `sm_BasisFindAllSpanMaxima`                 |
 //! | [`basis_i_eval`]                   | `sm_BasisIEval`                             |
@@ -1001,6 +1002,19 @@ pub fn basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<
     Ok(Basis { span, values: n })
 }
 
+/// `TO_EUCLID`: homogeneous to Euclidean by dividing by `w` (no reciprocal, unlike
+/// [`CPoint::to_euclid`]); a missing `z` becomes `0`.
+#[must_use]
+pub(crate) fn to_euclid(cw: CPoint) -> Vec3 {
+    if cw.w != NOW {
+        let z = if cw.z != NOZ { cw.z / cw.w } else { 0.0 };
+        Vec3::new(cw.x / cw.w, cw.y / cw.w, z)
+    } else {
+        let z = if cw.z != NOZ { cw.z } else { 0.0 };
+        Vec3::new(cw.x, cw.y, z)
+    }
+}
+
 /// The point at `u` of a curve (`sm_CrvEval`): `Sum_i(N[i] * Pw[i])` mapped to
 /// Euclidean space (a missing `z` becomes `0`).
 ///
@@ -1050,14 +1064,7 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
         }
     }
 
-    // TO_EUCLID: divides by w (no reciprocal).
-    Ok(if cw.w != NOW {
-        let z = if cw.z != NOZ { cw.z / cw.w } else { 0.0 };
-        Vec3::new(cw.x / cw.w, cw.y / cw.w, z)
-    } else {
-        let z = if cw.z != NOZ { cw.z } else { 0.0 };
-        Vec3::new(cw.x, cw.y, z)
-    })
+    Ok(to_euclid(cw))
 }
 
 // ---- knot removal -------------------------------------------------------------------

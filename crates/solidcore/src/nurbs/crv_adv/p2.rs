@@ -84,25 +84,8 @@ use crate::nurbs::math::{float_op_is_bad, CPoint, FloatOp, MODEL_TOL};
 /// closedness test that decides between periodic wrapping and extension.
 pub const G1_ANGLE_TOL: f64 = 0.1;
 
-const OP_OFFSET_MAX2: &str = "nurbs::crv_adv::p2::Curve::offset_max_2nd_deriv";
-const OP_UNBOUNDED: &str = "nurbs::crv_adv::p2::Curve::eval_unbounded_pts_and_derivs";
-const OP_REMOVE: &str = "nurbs::crv_adv::p2::Curve::remove_knots_deriv_constraints";
-const OP_REFINE: &str = "nurbs::crv_adv::p2::Curve::refine_to_knot_vector";
-const OP_SUM_DIFF: &str = "nurbs::crv_adv::p2::Curve::sum_diff";
-const OP_NON_RAT_DERIV: &str = "nurbs::crv_adv::p2::Curve::non_rat_first_deriv";
-const OP_RAT_DERIV: &str = "nurbs::crv_adv::p2::Curve::rat_first_deriv";
-const OP_LINEAR: &str = "nurbs::crv_adv::p2::Curve::linear_multiply";
-const OP_REPARAM_RAT: &str = "nurbs::crv_adv::p2::Curve::reparam_rat";
-const OP_REPARAM_WEIGHTS: &str = "nurbs::crv_adv::p2::Curve::reparam_weights";
-const OP_MULT_KNOTS: &str = "nurbs::crv_adv::p2::Curve::reparam_mult_knots";
-const OP_END_WEIGHTS: &str = "nurbs::crv_adv::p2::Curve::reparam_end_weights";
-
 /// Upstream `NL_UNITSPAN`.
 const UNIT_SPAN: Interval = Interval::new(0.0, 1.0);
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 /// Which ends of a curve keep their end derivatives in
 /// [`Curve::remove_knots_deriv_constraints`] (`NL_NO = 0`, `NL_START = 1`,
@@ -238,7 +221,7 @@ impl Curve {
     ///
     /// The errors of [`Curve::decompose_bez`] and [`Curve::planar_offset_derivs`].
     pub fn offset_max_2nd_deriv(&self, d: f64, normal: Vec3) -> Result<f64> {
-        const OP: &str = OP_OFFSET_MAX2;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::offset_max_2nd_deriv";
 
         // Get locals and decompose into Bezier segments.
         let p = sx(self.degree(), OP)?;
@@ -293,7 +276,7 @@ impl Curve {
         cont: Continuity,
         state: &mut UnboundedEval,
     ) -> Result<Vec<Vec3>> {
-        const OP: &str = OP_UNBOUNDED;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::eval_unbounded_pts_and_derivs";
         let stuck = || SolidError::NotConverged {
             operation: OP,
             iterations: 0,
@@ -390,22 +373,13 @@ impl Curve {
         whr: ConstrainedEnds,
         der: usize,
     ) -> Result<Curve> {
-        const OP: &str = OP_REMOVE;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::remove_knots_deriv_constraints";
         let p = sx(self.degree(), OP)?;
         let der = sx(der, OP)?;
         self.remove_knots_constrained(
             tol,
-            |r, n| {
-                let mut blocked = false;
-                if whr.start() && r <= p + der {
-                    blocked = true;
-                }
-                // Upstream: `r >= n - der + 1` (same for integers).
-                if whr.end() && r > n - der {
-                    blocked = true;
-                }
-                blocked
-            },
+            // Upstream's end test is `r >= n - der + 1` (the same for integers).
+            |r, n| (whr.start() && r <= p + der) || (whr.end() && r > n - der),
             OP,
         )
     }
@@ -419,7 +393,7 @@ impl Curve {
     /// [`NlibCode::Input`] for an empty `x`, `x[0] <= U[0]` or `x[r] >= U[m]`, and the
     /// errors of the knot span search.
     pub fn refine_to_knot_vector(&self, x: &[f64]) -> Result<Vec<CPoint>> {
-        const OP: &str = OP_REFINE;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::refine_to_knot_vector";
 
         // Get local notation.
         let pw = self.cpts();
@@ -433,13 +407,13 @@ impl Curve {
         // Check input parameters.
         let r = sx(x.len(), OP)? - 1;
         if r < 0 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         if get(x, 0, OP)? <= get(uk, 0, OP)? {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         if get(x, r, OP)? >= get(uk, m, OP)? {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
 
         // Find knot spans.
@@ -506,7 +480,7 @@ impl Curve {
     /// [`compatible_knot_array_mult`] (non-rational), of the curve function products
     /// and of [`curve_from_num_and_denom`] (rational).
     pub fn sum_diff(&self, other: &Curve, opr: SumDiff) -> Result<Curve> {
-        const OP: &str = OP_SUM_DIFF;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::sum_diff";
 
         // Get rational flags.
         let rat_p = self.is_rational();
@@ -617,7 +591,7 @@ impl Curve {
     /// [`NlibCode::Numerical`] when the quotient `(p-k+1) / (U[i+p+1] - U[i+k])` would
     /// overflow or underflow.
     pub fn non_rat_first_deriv(&self, d: usize) -> Result<Curve> {
-        const OP: &str = OP_NON_RAT_DERIV;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::non_rat_first_deriv";
 
         // Get locals and check error.
         let pw = self.cpts();
@@ -627,10 +601,10 @@ impl Curve {
         let m = sx(self.m(), OP)?;
         let d = sx(d, OP)?;
         if d > p {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         if self.is_rational() {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
 
         // See if memory is needed.
@@ -651,11 +625,11 @@ impl Curve {
             for i in 0..=n - k {
                 let (hi, lo) = (get(uk, i + p + 1, OP)?, get(uk, i + k, OP)?);
                 if hi == lo {
-                    return Err(nlib(OP, NlibCode::Derivative));
+                    return Err(SolidError::nlib(OP, NlibCode::Derivative));
                 }
                 let num = p as f64 - k as f64 + 1.0;
                 if float_op_is_bad(num, hi - lo, FloatOp::Division) {
-                    return Err(nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
                 }
                 let alf = num / (hi - lo);
                 let c = CPoint::combine2(alf, get(&tw, i + 1, OP)?, -alf, get(&tw, i, OP)?);
@@ -696,7 +670,7 @@ impl Curve {
     /// [`increase_knot_mult`], [`Curve::non_rat_first_deriv`], [`Curve::sum_diff`],
     /// [`Curve::elevate_degree`] and [`curve_from_num_and_denom`].
     pub fn rat_first_deriv(&self) -> Result<Curve> {
-        const OP: &str = OP_RAT_DERIV;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::rat_first_deriv";
 
         // Check if non-rational.
         if !self.is_rational() {
@@ -753,7 +727,7 @@ impl Curve {
     ///
     /// The errors of [`greville_abscissa`] (degree 0).
     pub fn linear_multiply(&mut self, s0: f64, s1: f64) -> Result<()> {
-        const OP: &str = OP_LINEAR;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::linear_multiply";
         if (s0 - s1).abs() < PTOL {
             let s = (s0 + s1) / 2.0;
             self.constant_multiply(s);
@@ -793,18 +767,18 @@ impl Curve {
     pub fn reparam_rat(&self, alf: f64, bet: f64, gam: f64, del: f64) -> Result<Curve> {
         let mut out = None;
         self.copy_into(&mut out)?;
-        let mut cur = out.ok_or_else(|| oob(OP_REPARAM_RAT))?;
+        let mut cur = out.ok_or_else(|| oob("nurbs::crv_adv::p2::Curve::reparam_rat"))?;
         cur.reparam_rat_in_place(alf, bet, gam, del)?;
         Ok(cur)
     }
 
     /// `N_CrvReparamRat` with the output curve equal to the input.
     fn reparam_rat_in_place(&mut self, alf: f64, bet: f64, gam: f64, del: f64) -> Result<()> {
-        const OP: &str = OP_REPARAM_RAT;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::reparam_rat";
 
         // Check coefficients.
         if (alf * del - bet * gam) < PTOL {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
 
         // Get local notation.
@@ -822,7 +796,7 @@ impl Curve {
             let num = alf * ui + bet;
             let den = gam * ui + del;
             if float_op_is_bad(num, den, FloatOp::Division) {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
             set(uq, i, num / den, OP)?;
         }
@@ -861,7 +835,7 @@ impl Curve {
     /// The errors of [`Curve::reparam_rat`] (the curve is left modified as far as it
     /// got).
     pub fn reparam_weights(&mut self, w: f64, c: f64, d: f64) -> Result<()> {
-        const OP: &str = OP_REPARAM_WEIGHTS;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::reparam_weights";
 
         // Check rationality.
         if !self.is_rational() {
@@ -902,7 +876,7 @@ impl Curve {
     ///
     /// The errors of [`Curve::arc_length`].
     pub fn reparam_mult_knots(&self, tol: f64) -> Result<Curve> {
-        const OP: &str = OP_MULT_KNOTS;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::reparam_mult_knots";
 
         // Get local notation.
         let pw = self.cpts();
@@ -981,7 +955,7 @@ impl Curve {
     /// errors of [`Curve::reparam_to_interval`]. The curve is left modified as far as
     /// upstream got.
     pub fn reparam_end_weights(&mut self, wt0: f64, wtn: f64) -> Result<()> {
-        const OP: &str = OP_END_WEIGHTS;
+        const OP: &str = "nurbs::crv_adv::p2::Curve::reparam_end_weights";
 
         // Check rationality.
         if !self.is_rational() {
@@ -1006,7 +980,7 @@ impl Curve {
         let gam = wn - w0;
         let del = w0;
         if (alf * del - bet * gam) < PTOL {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
 
         let uk = self.knots().to_vec();
@@ -1016,7 +990,7 @@ impl Curve {
             let c = get(pw, i, OP)?;
             set(&mut w, i, c.w, OP)?;
             if float_op_is_bad(1.0, c.w, FloatOp::Division) {
-                return Err(nlib(OP, NlibCode::Weight));
+                return Err(SolidError::nlib(OP, NlibCode::Weight));
             }
             let fact = 1.0 / c.w;
             set(pw, i, c.scale(fact), OP)?;
@@ -1032,7 +1006,7 @@ impl Curve {
             }
             let wi = get(&w, i, OP)?;
             if float_op_is_bad(wi, fact, FloatOp::Division) {
-                return Err(nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nlib(OP, NlibCode::Numerical));
             }
             let wi = wi / fact;
             set(&mut w, i, wi, OP)?;
@@ -1053,7 +1027,7 @@ impl Curve {
             let num = alf * ui + bet;
             let den = gam * ui + del;
             if float_op_is_bad(num, den, FloatOp::Division) {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
             set(uq, i, num / den, OP)?;
         }

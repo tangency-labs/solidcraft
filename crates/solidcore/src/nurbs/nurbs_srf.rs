@@ -57,21 +57,21 @@
 //!   ([`EFF_ZERO`]); its `SM_ASSERT` on the box has no counterpart. It returns the
 //!   errors of [`Surface::bbox`] (upstream ignores `N_SrfGetBBox`'s flag).
 
-// Branches keep upstream's `if( x NEQ NL_NOW ) ... else ...` order for traceability.
-#![allow(clippy::if_not_else)]
 // `v = v / d` is upstream `operator/`; `Vec3 /= d` ports `operator/=`, which skips
 // tiny divisors, so the suggested rewrite would change results.
 #![allow(clippy::assign_op_pattern)]
 
-use crate::error::{Result, SolidError};
+use crate::error::{NlibCode, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::vector3d::{acos, sqrt};
 use crate::math::{max2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, PI};
+use crate::nurbs::index::oob;
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::math::CPoint;
+use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::srf_basic::{Direction, Surface};
 use crate::nurbs::srf_tool::p1 as srf_tool;
 
@@ -158,17 +158,6 @@ impl Acc {
             v_chord_height: req.v_chord_height.then(|| sqrt(self.v_ch)),
             uv_chord_height: req.uv_chord_height.then(|| sqrt(self.uv_ch)),
         }
-    }
-}
-
-/// `TO_EUCLID` of `SmNurbsCrv.h`: divides by `w` (no reciprocal).
-fn to_euclid(c: CPoint) -> Point3 {
-    if c.w != NOW {
-        let z = if c.z != NOZ { c.z / c.w } else { 0.0 };
-        Vec3::new(c.x / c.w, c.y / c.w, z)
-    } else {
-        let z = if c.z != NOZ { c.z } else { 0.0 };
-        Vec3::new(c.x, c.y, z)
     }
 }
 
@@ -675,13 +664,6 @@ pub fn compute_surf_constants(
     Ok(acc.finish(req))
 }
 
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (invalid surface)",
-    }
-}
-
 /// A zero-filled surface with highest control point indices `n`, `m`, degrees `p`,
 /// `q` and highest knot indices `r`, `s` (`sm_AllocateNurbSurface`, memory from
 /// `smos_Calloc`).
@@ -1015,7 +997,7 @@ pub fn decompose_srf(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
 /// ([`Direction::V`]) (`sm_SplitSrf`). Returns the left part over `[min, t]` and the
 /// right part over `[t, max]`.
 ///
-/// Errors: [`crate::error::NlibCode::Parameter`] for an end or outside parameter;
+/// Errors: [`NlibCode::Parameter`] for an end or outside parameter;
 /// the errors of `N_BasisFindSpanAndMult` and of
 /// [`crate::nurbs::srf_tool::p1::split`]; `InvalidInput` for [`Direction::UV`].
 pub fn split_srf(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surface)> {
@@ -1035,10 +1017,7 @@ pub fn split_srf(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surf
         }
     };
     if kn.is_end_param(t) {
-        return Err(SolidError::nlib(
-            OP_SPLIT,
-            crate::error::NlibCode::Parameter,
-        ));
+        return Err(SolidError::nlib(OP_SPLIT, NlibCode::Parameter));
     }
     kn.find_span_and_mult(deg, t, Side::Left)?;
 
@@ -1068,6 +1047,7 @@ pub fn is_nsrf_degenerate(sur: &Surface, tol3d: f64) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nurbs::math::NOW;
 
     fn grid(n: usize, m: usize, f: impl Fn(usize, usize) -> [f64; 3]) -> Net {
         (0..=n)

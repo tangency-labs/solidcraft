@@ -22,7 +22,7 @@
 //! - The `N_CrvCompress` step only trims storage and is kept for fidelity.
 
 use crate::error::{NlibCode, Result, SolidError};
-use crate::math::Vec3;
+use crate::math::{max2, Vec3};
 use crate::nurbs::crv_adv::p2::ConstrainedEnds;
 use crate::nurbs::crv_basic::{ConicType, Curve};
 use crate::nurbs::crv_common::{circ_arc, Arc};
@@ -63,13 +63,18 @@ impl OffsetParam {
     }
 }
 
+/// A sample count upstream's `NL_INDEX` arithmetic cannot represent.
+const fn unrepresentable() -> SolidError {
+    SolidError::InvalidInput {
+        operation: OP,
+        reason: "sample count not representable",
+    }
+}
+
 /// `(NL_INDEX)del` of a sample count: errors where upstream's cast is undefined.
 fn count(del: f64) -> Result<isize> {
     if !(0.0..1.0e15).contains(&del) {
-        return Err(SolidError::InvalidInput {
-            operation: OP,
-            reason: "sample count not representable",
-        });
+        return Err(unrepresentable());
     }
     Ok(del as isize)
 }
@@ -183,16 +188,12 @@ impl Curve {
             let muu = seg.offset_max_2nd_deriv(d, b)?;
             let num = 0.125 * muu;
             let s = num.sqrt();
-            // NL_MAX(a, b) = ((a) > (b) ? (a) : (b)).
-            let gro = if f2 > s { f2 } else { s };
+            let gro = max2(f2, s);
             let mut del = f1 * gro;
             del = del.ceil();
             let c = count(del)?;
             nu.push(c);
-            mu = mu.checked_add(c).ok_or(SolidError::InvalidInput {
-                operation: OP,
-                reason: "sample count not representable",
-            })?;
+            mu = mu.checked_add(c).ok_or_else(unrepresentable)?;
         }
 
         // Compute parameters.
