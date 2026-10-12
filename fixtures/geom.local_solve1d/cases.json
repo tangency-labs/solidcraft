@@ -1,0 +1,8129 @@
+{
+ "cases": [
+  {
+   "name": "circle_closest_0_alg0",
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point via SmCurvePropertyEFO); source/SMLib/src/SmLocalSolve1d.cpp:751",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      1.0,
+      1.0,
+      -0.7,
+      0.0,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1,
+     3.0,
+     6.2
+    ],
+    "periodic": true,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     6.283185307179586
+    ]
+   }
+  },
+  {
+   "name": "circle_closest_0_alg3",
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point via SmCurvePropertyEFO); source/SMLib/src/SmLocalSolve1d.cpp:751",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      1.0,
+      1.0,
+      -0.7,
+      0.0,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1,
+     3.0,
+     6.2
+    ],
+    "periodic": true,
+    "algorithm": 3,
+    "interval": [
+     0.0,
+     6.283185307179586
+    ]
+   }
+  },
+  {
+   "name": "circle_closest_1_alg0",
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point via SmCurvePropertyEFO); source/SMLib/src/SmLocalSolve1d.cpp:751",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      2.5,
+      1.0,
+      -3.0,
+      0.0,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1,
+     3.0,
+     6.2
+    ],
+    "periodic": true,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     6.283185307179586
+    ]
+   }
+  },
+  {
+   "name": "circle_closest_1_alg3",
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point via SmCurvePropertyEFO); source/SMLib/src/SmLocalSolve1d.cpp:751",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      2.5,
+      1.0,
+      -3.0,
+      0.0,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1,
+     3.0,
+     6.2
+    ],
+    "periodic": true,
+    "algorithm": 3,
+    "interval": [
+     0.0,
+     6.283185307179586
+    ]
+   }
+  },
+  {
+   "name": "circle_closest_2_alg0",
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point via SmCurvePropertyEFO); source/SMLib/src/SmLocalSolve1d.cpp:751",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      0.3,
+      1.0,
+      -5.5,
+      0.0,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1,
+     3.0,
+     6.2
+    ],
+    "periodic": true,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     6.283185307179586
+    ]
+   }
+  },
+  {
+   "name": "circle_closest_2_alg3",
+   "upstream_ref": "tests/prog_test (my_test_surface_closest_point via SmCurvePropertyEFO); source/SMLib/src/SmLocalSolve1d.cpp:751",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      0.3,
+      1.0,
+      -5.5,
+      0.0,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1,
+     3.0,
+     6.2
+    ],
+    "periodic": true,
+    "algorithm": 3,
+    "interval": [
+     0.0,
+     6.283185307179586
+    ]
+   }
+  },
+  {
+   "name": "poly_root_unit_interval",
+   "upstream_ref": "tests/prog_test (my_test_drop_point); source/SMLib/src/SmLocalSolve1d.cpp:889",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "poly_root_outside_interval_clamps",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1017",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -3.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "guess_outside_interval",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:785",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     1.0000001,
+     2.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "serendipity_found_answer",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:858",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.5,
+      1.0
+     ],
+     "found_tol": 0.001
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5004,
+     0.2
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "no_interval_constructor",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolve1d.h:307",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0,
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 0
+   }
+  },
+  {
+   "name": "no_interval_atan",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolve1d.h:307",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 3,
+     "p": [
+      1.0,
+      3.0,
+      0.2,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5
+    ],
+    "periodic": false,
+    "algorithm": 0
+   }
+  },
+  {
+   "name": "zero_derivative_nudge",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:962",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -1.0,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "bad_first_eval_tweak",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:816",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ],
+     "fail_first": 1
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.4,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "bad_first_eval_tweak_down",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:825",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ],
+     "fail_first": 1,
+     "partial": true
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "bad_first_and_tweak_eval",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:843",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ],
+     "fail_first": 2
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.4
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "bad_first_eval_no_interval",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:806",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ],
+     "fail_first": 1,
+     "partial": true
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.4
+    ],
+    "periodic": false,
+    "algorithm": 0
+   }
+  },
+  {
+   "name": "base_class_evaluator",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolve1d.h:86",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 99,
+     "p": []
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "base_class_evaluator_no_interval",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolve1d.h:86",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 99,
+     "p": []
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5
+    ],
+    "periodic": false,
+    "algorithm": 0
+   }
+  },
+  {
+   "name": "eval_fails_mid_iteration",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1087",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ],
+     "fail_lo": 0.25,
+     "fail_hi": 0.35
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_interval",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:975",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.3,
+     0.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "cube_root_diverges",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1045",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 4,
+     "p": [
+      1.0,
+      0.1,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.3
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cube_root_periodic",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1021",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 4,
+     "p": [
+      1.0,
+      0.1,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.3
+    ],
+    "periodic": true,
+    "algorithm": 0,
+    "interval": [
+     -1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "abs_kink_no_root",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1235",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 5,
+     "p": [
+      1.0,
+      0.2,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "sqrt_exact_oscillation",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:941",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 1,
+     "p": [
+      1.0,
+      0.1,
+      0.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.15,
+     0.6
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -30.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "sqrt_oscillation_no_root",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:653",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 1,
+     "p": [
+      1.0,
+      0.1,
+      0.3
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.6
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -30.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "newton_cycle_cubic_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:669",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      2.0,
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -30.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "newton_cycle_cubic_alg1",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:669",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      2.0,
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 1,
+    "interval": [
+     -30.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "newton_cycle_cubic_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:669",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      2.0,
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -30.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "newton_cycle_cubic_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:669",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      2.0,
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -30.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g0_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g0_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g0_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g1_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g1_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g1_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g2_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g2_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.999
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g2_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.999
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g3_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g3_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.001
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g3_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.001
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g4_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g4_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g4_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g5_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g5_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g5_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g6_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g6_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g6_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g7_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.95
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g7_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.95
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_g7_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.95
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_midfail",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:438",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ],
+     "fail_lo": -0.01,
+     "fail_hi": 0.01
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s1_guessfail",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:478",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ],
+     "fail_lo": -0.52,
+     "fail_hi": -0.48
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0,
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g0_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g0_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g0_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g1_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g1_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g1_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g2_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g2_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.999
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g2_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.999
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g3_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g3_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.001
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g3_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.001
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g4_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g4_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g4_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g5_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g5_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g5_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g6_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g6_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g6_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g7_alg0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.95
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g7_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.95
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_g7_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:451",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.95
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_midfail",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:438",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ],
+     "fail_lo": -0.01,
+     "fail_hi": 0.01
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_cycle_s-1_guessfail",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:478",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ],
+     "fail_lo": -0.52,
+     "fail_hi": -0.48
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0,
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1154",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -0.2
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     0.0,
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "trig_brent_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1179",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      1.0,
+      3.0,
+      0.4,
+      0.2,
+      0.1
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0,
+     0.0,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_fail_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -0.2
+     ],
+     "fail_lo": -0.6,
+     "fail_hi": 0.25
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1154",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -0.2
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     0.0,
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "trig_brent_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1179",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      1.0,
+      3.0,
+      0.4,
+      0.2,
+      0.1
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0,
+     0.0,
+     1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_fail_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -0.2
+     ],
+     "fail_lo": -0.6,
+     "fail_hi": 0.25
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "desired_accuracy_set",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolve1d.h:255",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.3,
+      1.0,
+      0.7
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     0.0,
+     1.0
+    ],
+    "desired": 0.0001
+   }
+  },
+  {
+   "name": "loose_acceptable",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1276",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 2,
+     "p": [
+      1.0,
+      9.0,
+      0.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 0.6,
+    "guesses": [
+     0.4
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "bisection_level0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "level": 0,
+    "lo_t": 1.0,
+    "hi_t": 2.0,
+    "lo_f": -1.0,
+    "hi_f": 2.0
+   }
+  },
+  {
+   "name": "bisection_level0_hi",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "level": 0,
+    "lo_t": 1.0,
+    "hi_t": 2.0,
+    "lo_f": -3.0,
+    "hi_f": 2.0
+   }
+  },
+  {
+   "name": "bisection_sqrt2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "level": 40,
+    "lo_t": 1.0,
+    "hi_t": 2.0,
+    "lo_f": -1.0,
+    "hi_f": 2.0
+   }
+  },
+  {
+   "name": "bisection_reversed",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      2.0,
+      0.0,
+      -1.0
+     ]
+    },
+    "level": 40,
+    "lo_t": 1.0,
+    "hi_t": 2.0,
+    "lo_f": 1.0,
+    "hi_f": -2.0
+   }
+  },
+  {
+   "name": "bisection_collapsed",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "level": 10,
+    "lo_t": 1.0,
+    "hi_t": 1.0,
+    "lo_f": -1.0,
+    "hi_f": 1.0
+   }
+  },
+  {
+   "name": "bisection_collapsed_lo_better",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "level": 10,
+    "lo_t": 1.0,
+    "hi_t": 1.0,
+    "lo_f": -0.5,
+    "hi_f": 1.0
+   }
+  },
+  {
+   "name": "bisection_collapsed_hi_better",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -2.0,
+      0.0,
+      1.0
+     ]
+    },
+    "level": 10,
+    "lo_t": 1.0,
+    "hi_t": 1.0,
+    "lo_f": -1.0,
+    "hi_f": 0.5
+   }
+  },
+  {
+   "name": "bisection_exact_zero",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -1.0,
+      1.0
+     ]
+    },
+    "level": 10,
+    "lo_t": 0.0,
+    "hi_t": 2.0,
+    "lo_f": -1.0,
+    "hi_f": 1.0
+   }
+  },
+  {
+   "name": "bisection_found_answer",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -1.0,
+      1.0
+     ],
+     "found_tol": 0.5
+    },
+    "level": 10,
+    "lo_t": 0.0,
+    "hi_t": 3.0,
+    "lo_f": -1.0,
+    "hi_f": 2.0
+   }
+  },
+  {
+   "name": "bisection_eval_fails",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:287",
+   "inputs": {
+    "op": "bisection",
+    "func": {
+     "kind": 0,
+     "p": [
+      -1.0,
+      1.0
+     ],
+     "fail_first": 1
+    },
+    "level": 10,
+    "lo_t": 0.0,
+    "hi_t": 3.0,
+    "lo_f": -1.0,
+    "hi_f": 2.0
+   }
+  },
+  {
+   "name": "brent_min_parabola",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0,
+      -0.6,
+      1.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.1,
+    "cx": 2.0,
+    "tol": 1e-10,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_max_gauss",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      0.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.0,
+    "cx": 2.0,
+    "tol": 1e-12,
+    "maximize": true
+   }
+  },
+  {
+   "name": "brent_reversed_bracket",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      0.0
+     ]
+    },
+    "ax": 2.0,
+    "bx": 0.5,
+    "cx": -1.0,
+    "tol": 1e-12,
+    "maximize": true
+   }
+  },
+  {
+   "name": "brent_abs_kink",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 5,
+     "p": [
+      1.0,
+      0.25,
+      0.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.0,
+    "cx": 1.0,
+    "tol": 1e-12,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_tight_tol0",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0,
+      -0.6,
+      1.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.1,
+    "cx": 2.0,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_flat",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.0,
+    "cx": 1.0,
+    "tol": 1e-12,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_linear",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0,
+      2.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.0,
+    "cx": 1.0,
+    "tol": 1e-12,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_eval_fails_first",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0,
+      -0.6,
+      1.0
+     ],
+     "fail_first": 1
+    },
+    "ax": -1.0,
+    "bx": 0.1,
+    "cx": 2.0,
+    "tol": 1e-10,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_eval_fails_later",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0,
+      -0.6,
+      1.0
+     ],
+     "fail_lo": 0.25,
+     "fail_hi": 0.35
+    },
+    "ax": -1.0,
+    "bx": 0.1,
+    "cx": 2.0,
+    "tol": 1e-10,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_huge_values",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1.0,
+      -0.6,
+      1.0
+     ]
+    },
+    "ax": -1000000000000000.0,
+    "bx": 999999999999999.0,
+    "cx": 1000000000000000.0,
+    "tol": 1e-16,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_trig_many_iters",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 2,
+     "p": [
+      1.0,
+      40.0,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "ax": -1.0,
+    "bx": 0.0,
+    "cx": 1.0,
+    "tol": 1e-14,
+    "maximize": false
+   }
+  },
+  {
+   "name": "queue_alternating",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:23",
+   "inputs": {
+    "op": "queue",
+    "size": 8,
+    "step": 2,
+    "steps": [
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "queue_wraps",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:23",
+   "inputs": {
+    "op": "queue",
+    "size": 3,
+    "step": 2,
+    "steps": [
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "queue_step3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:23",
+   "inputs": {
+    "op": "queue",
+    "size": 8,
+    "step": 3,
+    "steps": [
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "queue_monotone",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:23",
+   "inputs": {
+    "op": "queue",
+    "size": 8,
+    "step": 2,
+    "steps": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "queue_size1",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:23",
+   "inputs": {
+    "op": "queue",
+    "size": 1,
+    "step": 2,
+    "steps": [
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.85
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.7
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.55
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.4
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.25
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.1
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.95
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.8
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.6500000000000001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.35
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.2000000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.05
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.8999999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.75
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.6000000000000001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.4500000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.30000000000000027
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.1499999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_20",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_21",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1499999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_22",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.2999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_23",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.44999999999999973
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_24",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_25",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.75
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_26",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.8999999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_27",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0499999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_28",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2000000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_29",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.3499999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_30",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_31",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.6499999999999995
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_32",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.7999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_33",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.9500000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_34",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.0999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_35",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.25
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_36",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.3999999999999995
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_37",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.55
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_38",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.7
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_39",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.8499999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s1_40",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.5
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.35
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.2
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.05
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.9
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.75
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.6000000000000001
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.44999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.30000000000000004
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.15000000000000013
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1499999999999999
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.2999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.44999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.6000000000000001
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.75
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.8999999999999999
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0499999999999998
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.1999999999999997
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.35
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s1_20",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      0.4,
+      0.0,
+      -2.2,
+      0.0,
+      1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.5
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.85
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.7
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.55
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.4
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.25
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.1
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.95
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.8
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.6500000000000001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.35
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.2000000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.05
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.8999999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.75
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.6000000000000001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.4500000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.30000000000000027
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.1499999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_20",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_21",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1499999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_22",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.2999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_23",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.44999999999999973
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_24",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_25",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.75
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_26",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.8999999999999999
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_27",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0499999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_28",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.2000000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_29",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.3499999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_30",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_31",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.6499999999999995
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_32",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.7999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_33",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.9500000000000002
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_34",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.0999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_35",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.25
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_36",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.3999999999999995
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_37",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.55
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_38",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.7
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_39",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.8499999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_s-1_40",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.0
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.5
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.35
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.2
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.05
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.9
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.75
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.6000000000000001
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.44999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.30000000000000004
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.15000000000000013
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.1499999999999999
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.2999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.44999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.6000000000000001
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.75
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.8999999999999999
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.0499999999999998
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.1999999999999997
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.35
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "quartic_sweep_brent_s-1_20",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:683",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 0,
+     "p": [
+      -0.4,
+      0.0,
+      2.2,
+      0.0,
+      -1.0
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.5
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -20.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_window_alg2_0.001",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -0.2
+     ],
+     "fail_lo": 0.299,
+     "fail_hi": 0.301
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     0.9,
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_window_alg2_1e-05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -0.2
+     ],
+     "fail_lo": 0.29999,
+     "fail_hi": 0.30001
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     0.9,
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_window_alg3_0.001",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      2.0,
+      0.3,
+      0.2
+     ],
+     "fail_lo": 0.299,
+     "fail_hi": 0.301
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     0.9,
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "gauss_brent_window_alg3_1e-05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      2.0,
+      0.3,
+      0.2
+     ],
+     "fail_lo": 0.29999,
+     "fail_hi": 0.30001
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.5,
+     0.9,
+     0.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "brent_step_below_precision",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      10000060000.09,
+      -200000.6,
+      1.0
+     ]
+    },
+    "ax": 99999.0,
+    "bx": 100000.0,
+    "cx": 100002.0,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_step_below_precision_max",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      -10000060000.09,
+      200000.6,
+      -1.0
+     ]
+    },
+    "ax": 99999.0,
+    "bx": 100000.1,
+    "cx": 100002.0,
+    "tol": 0.0,
+    "maximize": true
+   }
+  },
+  {
+   "name": "valley_sweep_s1_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.6999999999999997
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.3
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.4999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.6999999999999997
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.2999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.10000000000000009
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5000000000000004
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9000000000000008
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.3000000000000003
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.7000000000000006
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.1
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.5000000000000004
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.900000000000001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.3000000000000003
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s1_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      10.0,
+      0.0,
+      0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.7000000000000006
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.5
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -3.0999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.6999999999999997
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -2.3
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.4999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0999999999999996
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.6999999999999997
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -0.2999999999999998
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.10000000000000009
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.5000000000000004
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     0.9000000000000008
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.3000000000000003
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     1.7000000000000006
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.1
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.5000000000000004
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     2.900000000000001
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.3000000000000003
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "valley_sweep_s-1_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:504",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      10.0,
+      0.0,
+      -0.5
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     3.7000000000000006
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -4.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "hump_brent_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1160",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -1.6
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0,
+     0.5,
+     1.9
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "hump_brent_fail_alg2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -1.6
+     ],
+     "fail_lo": 0.299999,
+     "fail_hi": 0.30000099999999996
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 2,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "hump_newton_alg0_2",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1209",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      1.0,
+      2.0,
+      0.3,
+      -1.6
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0,
+     1.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "hump_brent_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1160",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      2.0,
+      0.3,
+      1.6
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0,
+     0.5,
+     1.9
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "hump_brent_fail_alg3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1168",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      2.0,
+      0.3,
+      1.6
+     ],
+     "fail_lo": 0.299999,
+     "fail_hi": 0.30000099999999996
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0
+    ],
+    "periodic": false,
+    "algorithm": 3,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "hump_newton_alg0_3",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:1209",
+   "inputs": {
+    "op": "solve_it",
+    "func": {
+     "kind": 6,
+     "p": [
+      -1.0,
+      2.0,
+      0.3,
+      1.6
+     ]
+    },
+    "acceptable": 1e-09,
+    "guesses": [
+     -1.0,
+     1.9
+    ],
+    "periodic": false,
+    "algorithm": 0,
+    "interval": [
+     -2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "brent_large_x_00",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      268445286.48999995,
+      -32768.6,
+      1.0
+     ]
+    },
+    "ax": 16383.0,
+    "bx": 16384.1,
+    "cx": 16386.0,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_01",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      1073762140.2561004,
+      -65536.62000000001,
+      1.0
+     ]
+    },
+    "ax": 32767.010000000006,
+    "bx": 32768.14000000001,
+    "cx": 32770.01,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_02",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      2415950561.3824,
+      -98304.64,
+      1.0
+     ]
+    },
+    "ax": 49151.02,
+    "bx": 49152.18,
+    "cx": 49154.02,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_03",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      4295010549.8689,
+      -131072.66,
+      1.0
+     ]
+    },
+    "ax": 65535.03,
+    "bx": 65536.22,
+    "cx": 65538.03,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_04",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      6710942105.715599,
+      -163840.68,
+      1.0
+     ]
+    },
+    "ax": 81919.04,
+    "bx": 81920.26,
+    "cx": 81922.04,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_05",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      9663745228.9225,
+      -196608.7,
+      1.0
+     ]
+    },
+    "ax": 98303.05,
+    "bx": 98304.3,
+    "cx": 98306.05,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_06",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      13153419919.4896,
+      -229376.72,
+      1.0
+     ]
+    },
+    "ax": 114687.06,
+    "bx": 114688.34,
+    "cx": 114690.06,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_07",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      17179966177.4169,
+      -262144.74,
+      1.0
+     ]
+    },
+    "ax": 131071.06999999999,
+    "bx": 131072.37999999998,
+    "cx": 131074.07,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_08",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      21743384002.70439,
+      -294912.75999999995,
+      1.0
+     ]
+    },
+    "ax": 147455.08,
+    "bx": 147456.41999999995,
+    "cx": 147458.08,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_09",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      26843673395.352097,
+      -327680.77999999997,
+      1.0
+     ]
+    },
+    "ax": 163839.09,
+    "bx": 163840.45999999996,
+    "cx": 163842.09,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_10",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      32480834355.359997,
+      -360448.8,
+      1.0
+     ]
+    },
+    "ax": 180223.1,
+    "bx": 180224.49999999997,
+    "cx": 180226.1,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_11",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      38654866882.72809,
+      -393216.81999999995,
+      1.0
+     ]
+    },
+    "ax": 196607.11,
+    "bx": 196608.53999999995,
+    "cx": 196610.11,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_12",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      45365770977.45639,
+      -425984.83999999997,
+      1.0
+     ]
+    },
+    "ax": 212991.12,
+    "bx": 212992.57999999996,
+    "cx": 212994.12,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_13",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      52613546639.5449,
+      -458752.86,
+      1.0
+     ]
+    },
+    "ax": 229375.13,
+    "bx": 229376.62,
+    "cx": 229378.13,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_14",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      60398193868.9936,
+      -491520.88,
+      1.0
+     ]
+    },
+    "ax": 245759.14,
+    "bx": 245760.66,
+    "cx": 245762.14,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_15",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      68719712665.8025,
+      -524288.9,
+      1.0
+     ]
+    },
+    "ax": 262143.15000000002,
+    "bx": 262144.7,
+    "cx": 262146.15,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_16",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      77578103029.97157,
+      -557056.9199999999,
+      1.0
+     ]
+    },
+    "ax": 278527.16,
+    "bx": 278528.73999999993,
+    "cx": 278530.16,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_17",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      86973364961.50089,
+      -589824.94,
+      1.0
+     ]
+    },
+    "ax": 294911.17,
+    "bx": 294912.77999999997,
+    "cx": 294914.17,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_18",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      96905498460.39038,
+      -622592.96,
+      1.0
+     ]
+    },
+    "ax": 311295.18,
+    "bx": 311296.81999999995,
+    "cx": 311298.18,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_19",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      107374503526.64009,
+      -655360.98,
+      1.0
+     ]
+    },
+    "ax": 327679.19,
+    "bx": 327680.86,
+    "cx": 327682.19,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_20",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      118380380160.25,
+      -688129.0,
+      1.0
+     ]
+    },
+    "ax": 344063.2,
+    "bx": 344064.89999999997,
+    "cx": 344066.2,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_21",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      129923128361.22011,
+      -720897.02,
+      1.0
+     ]
+    },
+    "ax": 360447.21,
+    "bx": 360448.94,
+    "cx": 360450.21,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_22",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      142002748129.55038,
+      -753665.0399999999,
+      1.0
+     ]
+    },
+    "ax": 376831.22,
+    "bx": 376832.9799999999,
+    "cx": 376834.22,
+    "tol": 0.0,
+    "maximize": false
+   }
+  },
+  {
+   "name": "brent_large_x_23",
+   "upstream_ref": "source/SMLib/src/SmLocalSolve1d.cpp:77",
+   "inputs": {
+    "op": "brent",
+    "func": {
+     "kind": 0,
+     "p": [
+      154619239465.24088,
+      -786433.0599999999,
+      1.0
+     ]
+    },
+    "ax": 393215.23,
+    "bx": 393217.01999999996,
+    "cx": 393218.23,
+    "tol": 0.0,
+    "maximize": false
+   }
+  }
+ ]
+}
