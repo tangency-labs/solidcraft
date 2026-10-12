@@ -1,0 +1,8 @@
+[package]
+name = "solidcore"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]

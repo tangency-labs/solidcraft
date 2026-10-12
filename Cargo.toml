@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["crates/solidcore", "crates/solidcore-ffi", "crates/difftest"]
+default-members = ["crates/solidcore"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
