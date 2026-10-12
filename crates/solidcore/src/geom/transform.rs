@@ -1,0 +1,741 @@
+//! General linear (4x4 matrix) transforms from a `uvw` parameter space to an `xyz`
+//! projection space, the simplest volume map.
+//!
+//! Upstream: `source/SMLib/inc/SmTransform.h`, `source/SMLib/src/SmTransform.cpp`.
+//!
+//! | Rust                                              | Upstream                                              |
+//! |---------------------------------------------------|-------------------------------------------------------|
+//! | [`Transform`]                                     | `SmTransform`                                         |
+//! | [`Transform::IDENTITY`], `Default`                | `SmTransform(const SmContext* = NULL)` (identity)     |
+//! | [`Transform::new`]                                | `SmTransform(cpContext, ToOrigin, ToX, ToY, cpToZ)`   |
+//! | `Clone` / `Copy`                                  | `SmTransform(const SmTransform&, SmBoolean)`, `Copy`  |
+//! | `Drop` (implicit)                                 | `~SmTransform`                                        |
+//! | [`Transform::approx_eq`]                          | `operator==` (the transform's own members)            |
+//! | [`Transform::matrix`]                             | `m_adT` (field access)                                |
+//! | [`Transform::natural_param_domain`]               | `GetNaturalParamDomain`                               |
+//! | [`Transform::to_origin`], [`Transform::to_disp`]  | `GetToOrigin`, `GetToDisp`                            |
+//! | [`Transform::to_x_axis`], [`Transform::to_y_axis`], [`Transform::to_z_axis`] | `GetToXAxis`, `GetToYAxis`, `GetToZAxis` |
+//! | [`Transform::set_to_origin`], [`Transform::set_to_disp`] | `SetToOrigin`, `SetToDisp` (vector and three-double forms) |
+//! | [`Transform::set_to_x_axis`], [`Transform::set_to_y_axis`], [`Transform::set_to_z_axis`] | `SetToXAxis`, `SetToYAxis`, `SetToZAxis` (both forms) |
+//! | [`Transform::init_ext`]                           | `InitExt`                                             |
+//! | [`Transform::init`]                               | `Init`                                                |
+//! | [`Transform::set_canonical`]                      | `SetCanonical`                                        |
+//! | [`Transform::transform_vector`]                   | `TransformVector`                                     |
+//! | [`Transform::inv_transform_point`]                | `InvTransformPoint`                                   |
+//! | [`Transform::inv_transform_vector`]               | `InvTransformVector`                                  |
+//! | [`Transform::concat_transform`]                   | `ConcatTransform`                                     |
+//! | [`Transform::scale_simple`]                       | `ScaleSimple`                                         |
+//! | [`Transform::transform_simple`]                   | `TransformSimple`                                     |
+//! | [`Transform::invert_simple`]                      | `InvertSimple`                                        |
+//! | [`Transform::set_axis2_placement`]                | `SetAxis2Placement`                                   |
+//! | [`Transform::evaluate_simple`]                    | `EvaluateSimple`                                      |
+//! | [`Transform::evaluate_bounding_box_simple`]       | `EvaluateBoundingBoxSimple`                           |
+//! | [`Transform::inv_evaluate_guess_point_simple`]    | `InvEvaluateGuessPointSimple`                         |
+//! | [`Transform::global_point_solve_simple`]          | `GlobalPointSolveSimple`                              |
+//! | [`Transform::local_point_solve_simple`]           | `LocalPointSolveSimple`                               |
+//! | [`Transform::is_bounded_simple`]                  | `IsBoundedSimple`                                     |
+//! | [`Transform::is_curve_in_param_domain_simple`]    | `IsCurveInParamDomainSimple`                          |
+//! | [`Transform::has_discontinuities_simple`]         | `HasDiscontinuitiesSimple`                            |
+//! | [`Transform::read_from_db`]                       | `ReadFromDB`                                          |
+//! | [`Transform::TYPE`], [`Transform::type_code`], [`Transform::type_string`], [`Transform::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
+//! | [`Transform::is_kind_of`]                         | `IsKindOf`                                            |
+//!
+//! Deviations:
+//! - **Volume base.** `SmTransform` derives from `SmVolume` (context, attributes,
+//!   compounding next/orient maps). That base belongs to the `surface.volume_*`
+//!   units, which will hold a [`Transform`] for the transform part. Here a
+//!   [`Transform`] is the matrix only: the constructors and `Copy` copy the matrix
+//!   (the base part of the copy constructor, with its `bSimpleMapOnly` flag, is the
+//!   volume's), and [`Transform::approx_eq`] is the member comparison
+//!   `operator==` runs after `SmVolume::operator==` (same type, equal compounding
+//!   maps) has passed. Calls the transform makes into the unported volume base
+//!   (`SmVolume::IsKindOf`, `SmVolume::ReadFromDB`, `SmVolume::EvaluatePoint`,
+//!   `SmDiscontinuities3d::Init`) return [`SolidError::Unported`].
+//! - **Pseudo boxes.** `EvaluateBoundingBoxSimple` builds `SmPseudoBox`es
+//!   (unit `geom.pseudo_box`, not ported yet). Only its "no output requested"
+//!   early return is ported; any requested output returns
+//!   [`SolidError::Unported`]. Upstream dereferences a null `pOptParamPseudoBox`
+//!   when an output is requested without one (`plan/findings.md`).
+//! - Out-params become return values. `InvTransformPoint`, `InvTransformVector`
+//!   and `InvEvaluateGuessPointSimple` return `Err` (upstream `SM_ERR`, code 1001)
+//!   for a singular axes sub-matrix, where upstream leaves the output unset.
+//!   `EvaluateSimple` returns the `(n+1)^3` derivative array. `GlobalPointSolveSimple`
+//!   returns `Ok(())` for upstream's `rbFoundAnswer = TRUE` and `Err` (`SM_ERR`)
+//!   for `FALSE`, after updating the solution array exactly as upstream does in
+//!   both cases; the volume itself (`m_apObjects[0] = this`) is passed in as the
+//!   caller's object handle.
+//! - `IsCurveInParamDomainSimple` ignores its curve upstream and takes none here;
+//!   `HasDiscontinuitiesSimple`'s optional `SmDiscontinuities3d*` becomes a flag
+//!   (`bCalcGeometric` is unused upstream and dropped).
+//! - `GetToXAxis` and friends return copies; writes go through the setters.
+//! - `GetMemoryUsed`, `Dump`, `DrawAxis`, `AssertValid`, `WriteToDB` and the members
+//!   upstream never reaches from the kernel (`TransformPoint`, `MirrorSimple`,
+//!   `RotateAboutAxis*`, `DecomposeToAngles`, ... listed in
+//!   `harness/callgraph/unused_functions.txt`) are not part of this unit.
+
+use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::inverse_3x3;
+use crate::geom::geom_utility::p2::{inverse_4x4, mult_4x4};
+use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
+use crate::geom::tol::is_zero;
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::INFINITE_PARAMETER;
+use crate::topology::database_io::{DatabaseReader, FileType};
+
+/// Upstream `SM_ERR`.
+const SM_ERR: i32 = 1001;
+
+/// `GW_MAX_DERIV`: the highest derivative `EvaluateSimple` accepts.
+pub const MAX_DERIV: usize = 5;
+
+fn sm_err(operation: &'static str) -> SolidError {
+    SolidError::Upstream {
+        operation,
+        code: SM_ERR,
+        entity: None,
+    }
+}
+
+/// A general linear transform, the 4x4 matrix `T` of `SmTransform`, mapping a
+/// parameter-space point `[u v w 1]` to the projection-space point `[u v w 1] * T`.
+///
+/// Rows 0..2 hold the images of the `u`, `v`, `w` unit vectors (the "to" axes),
+/// row 3 the image of the origin (the displacement); column 3 is the projective
+/// part, `(0, 0, 0, 1)` for affine transforms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    m: [[f64; 4]; 4],
+}
+
+impl Default for Transform {
+    /// The identity transform (`SmTransform()`).
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+fn row(v: Vec3) -> [f64; 3] {
+    v.to_array()
+}
+
+impl Transform {
+    /// `SmTransform_TYPE` (`VOL_BASE_TYPE + 8`).
+    pub const TYPE: i64 = 22008;
+
+    /// `SmVolume_TYPE` (`VOL_BASE_TYPE + 1`).
+    const VOLUME_TYPE: i64 = 22001;
+
+    /// The identity transform (`SmTransform()` / `Init`).
+    pub const IDENTITY: Self = Self {
+        m: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+
+    /// The transform taking the parameter axes to `x_axis`, `y_axis`, `z_axis`
+    /// (`x_axis × y_axis` when `None`) and the parameter origin to `origin`
+    /// (`SmTransform(cpContext, ToOrigin, ToXAxis, ToYAxis, cpToZAxis)`).
+    #[must_use]
+    pub fn new(origin: Point3, x_axis: Vec3, y_axis: Vec3, z_axis: Option<Vec3>) -> Self {
+        // SmVolume(cpContext) leaves m_adT uninitialised; SetCanonical writes every entry.
+        let mut t = Self::IDENTITY;
+        t.set_canonical(origin, x_axis, y_axis, z_axis);
+        t
+    }
+
+    /// The 4x4 matrix `m_adT[row][col]`.
+    #[must_use]
+    pub const fn matrix(&self) -> &[[f64; 4]; 4] {
+        &self.m
+    }
+
+    fn get_row(&self, i: usize) -> Vec3 {
+        self.m
+            .get(i)
+            .map_or(Vec3::ZERO, |r| Vec3::new(r[0], r[1], r[2]))
+    }
+
+    fn set_row(&mut self, i: usize, v: Vec3) {
+        if let Some(r) = self.m.get_mut(i) {
+            r[0] = v.x;
+            r[1] = v.y;
+            r[2] = v.z;
+        }
+    }
+
+    /// Tolerant equality of every matrix entry (`SM_IS_ZERO(a - b)`): the
+    /// transform-specific part of `operator==`.
+    #[must_use]
+    pub fn approx_eq(&self, other: &Self) -> bool {
+        self.m
+            .iter()
+            .flatten()
+            .zip(other.m.iter().flatten())
+            .all(|(a, b)| is_zero(a - b))
+    }
+
+    /// The parameter domain, unbounded in every direction (`GetNaturalParamDomain`).
+    #[must_use]
+    pub const fn natural_param_domain(&self) -> Extent3d {
+        Extent3d::from_bounds(
+            -INFINITE_PARAMETER,
+            -INFINITE_PARAMETER,
+            -INFINITE_PARAMETER,
+            INFINITE_PARAMETER,
+            INFINITE_PARAMETER,
+            INFINITE_PARAMETER,
+        )
+    }
+
+    /// The image of the parameter origin, row 3 (`GetToOrigin`).
+    #[must_use]
+    pub fn to_origin(&self) -> Point3 {
+        self.get_row(3)
+    }
+
+    /// The image of the `u` unit vector, row 0 (`GetToXAxis`).
+    #[must_use]
+    pub fn to_x_axis(&self) -> Vec3 {
+        self.get_row(0)
+    }
+
+    /// The image of the `v` unit vector, row 1 (`GetToYAxis`).
+    #[must_use]
+    pub fn to_y_axis(&self) -> Vec3 {
+        self.get_row(1)
+    }
+
+    /// The image of the `w` unit vector, row 2 (`GetToZAxis`).
+    #[must_use]
+    pub fn to_z_axis(&self) -> Vec3 {
+        self.get_row(2)
+    }
+
+    /// The displacement, same as [`Transform::to_origin`] (`GetToDisp`).
+    #[must_use]
+    pub fn to_disp(&self) -> Point3 {
+        self.to_origin()
+    }
+
+    /// Sets the projective column to `(0, 0, 0, 1)` (`InitExt`).
+    pub fn init_ext(&mut self) {
+        self.m[0][3] = 0.0;
+        self.m[2][3] = 0.0;
+        self.m[1][3] = 0.0;
+        self.m[3][3] = 1.0;
+    }
+
+    /// Sets row 3 (`SetToOrigin`).
+    pub fn set_to_origin(&mut self, v: Vec3) {
+        self.set_row(3, v);
+    }
+
+    /// Sets row 0 (`SetToXAxis`).
+    pub fn set_to_x_axis(&mut self, v: Vec3) {
+        self.set_row(0, v);
+    }
+
+    /// Sets row 1 (`SetToYAxis`).
+    pub fn set_to_y_axis(&mut self, v: Vec3) {
+        self.set_row(1, v);
+    }
+
+    /// Sets row 2 (`SetToZAxis`).
+    pub fn set_to_z_axis(&mut self, v: Vec3) {
+        self.set_row(2, v);
+    }
+
+    /// Sets the displacement, row 3 (`SetToDisp`).
+    pub fn set_to_disp(&mut self, v: Vec3) {
+        self.set_to_origin(v);
+    }
+
+    /// Resets to the identity transform (`Init`).
+    pub fn init(&mut self) {
+        self.set_to_x_axis(Vec3::new(1.0, 0.0, 0.0));
+        self.set_to_y_axis(Vec3::new(0.0, 1.0, 0.0));
+        self.set_to_z_axis(Vec3::new(0.0, 0.0, 1.0));
+        self.set_to_disp(Vec3::new(0.0, 0.0, 0.0));
+        self.init_ext();
+    }
+
+    /// Sets the axes and displacement; `z_axis` defaults to `x_axis × y_axis`. Non-unit
+    /// or non-orthogonal axes add scaling or shear (`SetCanonical`).
+    pub fn set_canonical(
+        &mut self,
+        origin: Point3,
+        x_axis: Vec3,
+        y_axis: Vec3,
+        z_axis: Option<Vec3>,
+    ) {
+        let z = z_axis.unwrap_or_else(|| x_axis.cross(y_axis));
+        self.set_to_disp(origin);
+        self.set_to_x_axis(x_axis);
+        self.set_to_y_axis(y_axis);
+        self.set_to_z_axis(z);
+        self.init_ext();
+    }
+
+    /// Maps a parameter-space vector to projection space, ignoring the displacement
+    /// (`TransformVector`).
+    #[must_use]
+    pub fn transform_vector(&self, v: Vec3) -> Vec3 {
+        let x = self.to_x_axis();
+        let y = self.to_y_axis();
+        let z = self.to_z_axis();
+        Vec3::new(
+            v.x * x.x + v.y * y.x + v.z * z.x,
+            v.x * x.y + v.y * y.y + v.z * z.y,
+            v.x * x.z + v.y * y.z + v.z * z.z,
+        )
+    }
+
+    /// Maps a projection-space point back to parameter space (`InvTransformPoint`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the axes sub-matrix is singular.
+    pub fn inv_transform_point(&self, p: Point3) -> Result<Point3> {
+        let mid = p - self.to_disp();
+        self.inv_transform_vector(mid)
+            .map_err(|_| sm_err("geom::transform::Transform::inv_transform_point"))
+    }
+
+    /// Maps a projection-space vector back to parameter space through the inverse
+    /// of the axes sub-matrix (`InvTransformVector`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the axes sub-matrix is singular (`smgu_3x3Inverse` fails).
+    pub fn inv_transform_vector(&self, v: Vec3) -> Result<Vec3> {
+        let inv = inverse_3x3(
+            &row(self.to_x_axis()),
+            &row(self.to_y_axis()),
+            &row(self.to_z_axis()),
+        )
+        .map_err(|_| sm_err("geom::transform::Transform::inv_transform_vector"))?;
+        let [i0, i1, i2] = inv.map(Vec3::from_array);
+        let t_inv = Self::new(Vec3::new(0.0, 0.0, 0.0), i0, i1, Some(i2));
+        Ok(t_inv.transform_vector(v))
+    }
+
+    /// Appends `other` to this transform sequence: `T = T * other`
+    /// (`ConcatTransform`).
+    pub fn concat_transform(&mut self, other: &Self) {
+        self.m = mult_4x4(&self.m, &other.m);
+    }
+
+    /// Scales the projection space by `scale` per coordinate, about `center` (the
+    /// origin when `None`) (`ScaleSimple`).
+    pub fn scale_simple(&mut self, scale: Vec3, center: Option<Point3>) {
+        let mut x = self.to_x_axis();
+        let mut y = self.to_y_axis();
+        let mut z = self.to_z_axis();
+        let mut d = self.to_disp();
+
+        x.x *= scale.x;
+        y.x *= scale.x;
+        z.x *= scale.x;
+
+        x.y *= scale.y;
+        y.y *= scale.y;
+        z.y *= scale.y;
+
+        x.z *= scale.z;
+        y.z *= scale.z;
+        z.z *= scale.z;
+
+        if let Some(c) = center {
+            d.x += -x.x * c.x - y.x * c.y - z.x * c.z;
+            d.y += -x.y * c.x - y.y * c.y - z.y * c.z;
+            d.z += -x.z * c.x - y.z * c.y - z.z * c.z;
+        }
+
+        self.set_to_x_axis(x);
+        self.set_to_y_axis(y);
+        self.set_to_z_axis(z);
+        self.set_to_disp(d);
+    }
+
+    /// Appends the rigid motion `rotate_n_move` and then the optional scaling
+    /// (`TransformSimple`).
+    pub fn transform_simple(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) {
+        let mut t = Self::IDENTITY;
+        t.set_axis2_placement(rotate_n_move);
+        self.concat_transform(&t);
+        if let Some(s) = scale {
+            self.scale_simple(s, None);
+        }
+    }
+
+    /// Inverts the 4x4 matrix in place (`InvertSimple`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the matrix is singular; the transform is then unchanged.
+    pub fn invert_simple(&mut self) -> Result<()> {
+        self.m = inverse_4x4(&self.m)
+            .map_err(|_| sm_err("geom::transform::Transform::invert_simple"))?;
+        Ok(())
+    }
+
+    /// Sets this transform to the rigid motion of `placement` (`SetAxis2Placement`).
+    pub fn set_axis2_placement(&mut self, placement: &Axis2Placement) {
+        let z = placement.z_axis();
+        self.set_to_x_axis(placement.x_axis());
+        self.set_to_y_axis(placement.y_axis());
+        self.set_to_z_axis(z);
+        self.set_to_disp(placement.origin());
+        self.init_ext();
+    }
+
+    /// Position and partial derivatives at `param_point` up to order
+    /// `highest_deriv`, as the `(n+1)^3` array `D[u][v][w]` (index
+    /// `(u*(n+1)+v)*(n+1)+w`, `n = highest_deriv`). Only the position and the three
+    /// first derivatives (the axes) are non-zero (`EvaluateSimple`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` when `highest_deriv > MAX_DERIV`.
+    pub fn evaluate_simple(&self, param_point: Point3, highest_deriv: usize) -> Result<Vec<Vec3>> {
+        if highest_deriv > MAX_DERIV {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::transform::Transform::evaluate_simple",
+                reason: "highest derivative exceeds GW_MAX_DERIV",
+            });
+        }
+        let n1 = highest_deriv + 1;
+        let mut ders = vec![Vec3::new(0.0, 0.0, 0.0); n1 * n1 * n1];
+        let sv = |u: usize, v: usize, w: usize| (u * n1 + v) * n1 + w;
+
+        let x = self.to_x_axis();
+        let y = self.to_y_axis();
+        let z = self.to_z_axis();
+        let d = self.to_disp();
+
+        if let Some(p) = ders.get_mut(0) {
+            *p = d + param_point.x * x + param_point.y * y + param_point.z * z;
+        }
+        if highest_deriv >= 1 {
+            for (idx, axis) in [(sv(1, 0, 0), x), (sv(0, 1, 0), y), (sv(0, 0, 1), z)] {
+                if let Some(slot) = ders.get_mut(idx) {
+                    *slot = axis;
+                }
+            }
+        }
+        Ok(ders)
+    }
+
+    /// Projection-space bounding boxes of the parameter-space box `param_box`
+    /// (`EvaluateBoundingBoxSimple`). With neither output requested it does nothing
+    /// and returns `Ok(None)`, as upstream.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] when an output is requested: every such path builds
+    /// `SmPseudoBox`es (unit `geom.pseudo_box`).
+    pub fn evaluate_bounding_box_simple(
+        &self,
+        param_box: &Extent3d,
+        want_box: bool,
+        want_pseudo_box: bool,
+    ) -> Result<Option<Extent3d>> {
+        let _ = param_box;
+        if !want_box && !want_pseudo_box {
+            return Ok(None);
+        }
+        // UNPORTED(geom.pseudo_box): SmPseudoBox::GetBasis, SetBasis, Init, AreAligned,
+        // SetIntervals, SetUnbounded, AddPoint3d, SmExtent3d::Circumscribe(SmPseudoBox);
+        // the unaligned bounded branch also needs
+        // UNPORTED(surface.volume_p2): SmVolume::EvaluatePoint
+        Err(SolidError::Unported {
+            upstream: "SmPseudoBox::GetBasis",
+            unit: "geom.pseudo_box",
+        })
+    }
+
+    /// The parameter point mapping to `proj_point`, as the single guess of the
+    /// Newton solvers (`InvEvaluateGuessPointSimple`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the axes sub-matrix is singular.
+    pub fn inv_evaluate_guess_point_simple(&self, proj_point: Point3) -> Result<Vec<Point3>> {
+        Ok(vec![self.inv_transform_point(proj_point)?])
+    }
+
+    /// Solves for the parameter point mapping to `proj_point`
+    /// (`GlobalPointSolveSimple`). `solutions` is resized to one entry; on success
+    /// that entry becomes a single-value solution with the three parameters,
+    /// value `0` and object `this` (the volume's handle); otherwise its type becomes
+    /// [`SolutionType::Unknown`]. Other fields of the entry are left as they were.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the transform is not invertible (upstream `rbFoundAnswer =
+    /// FALSE`).
+    pub fn global_point_solve_simple<O: SolutionObject>(
+        &self,
+        proj_point: Point3,
+        solutions: &mut SolutionArray<O>,
+        this: O,
+    ) -> Result<()> {
+        solutions.set_size(1);
+        let res = self.inv_transform_point(proj_point);
+        let Some(sol) = solutions.get_mut(0) else {
+            return Err(sm_err(
+                "geom::transform::Transform::global_point_solve_simple",
+            ));
+        };
+        match res {
+            Ok(puvw) => {
+                sol.solution_type = SolutionType::SingleValue;
+                sol.num_variables = 3;
+                sol.start.solution_value = 0.0;
+                sol.start.parameters[0] = puvw.x;
+                sol.start.parameters[1] = puvw.y;
+                sol.start.parameters[2] = puvw.z;
+                sol.num_objects = 1;
+                sol.objects[0] = Some(this);
+                Ok(())
+            }
+            Err(e) => {
+                sol.solution_type = SolutionType::Unknown;
+                Err(e)
+            }
+        }
+    }
+
+    /// Solves for the parameter point mapping to `proj_point`; the guess is not
+    /// needed for a linear map (`LocalPointSolveSimple`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the transform is not invertible.
+    pub fn local_point_solve_simple<O: SolutionObject>(
+        &self,
+        proj_point: Point3,
+        this: O,
+    ) -> Result<Solution<O>> {
+        let mut solutions = SolutionArray::new();
+        self.global_point_solve_simple(proj_point, &mut solutions, this)?;
+        solutions
+            .get(0)
+            .copied()
+            .ok_or_else(|| sm_err("geom::transform::Transform::local_point_solve_simple"))
+    }
+
+    /// A transform is never bounded (`IsBoundedSimple`).
+    #[must_use]
+    pub const fn is_bounded_simple(&self) -> bool {
+        false
+    }
+
+    /// Every curve lies in the (unbounded) parameter domain
+    /// (`IsCurveInParamDomainSimple`).
+    #[must_use]
+    pub const fn is_curve_in_param_domain_simple(&self) -> bool {
+        true
+    }
+
+    /// A transform has no internal discontinuities (`HasDiscontinuitiesSimple`).
+    /// `with_disconts` is upstream's non-null `pOptDisconts`, which is reset.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] when `with_disconts` (resetting an
+    /// `SmDiscontinuities3d`).
+    pub fn has_discontinuities_simple(&self, with_disconts: bool) -> Result<bool> {
+        if with_disconts {
+            // UNPORTED(surface.volume_p1): SmDiscontinuities3d::Init
+            return Err(SolidError::Unported {
+                upstream: "SmDiscontinuities3d::Init",
+                unit: "surface.volume_p1",
+            });
+        }
+        Ok(false)
+    }
+
+    /// Reads a transform from a database stream: the four matrix rows, then the
+    /// volume base data (`ReadFromDB`).
+    ///
+    /// # Errors
+    ///
+    /// A failed binary read; [`SolidError::Unported`] for the base-class read
+    /// (`SmVolume::ReadFromDB`, unit `surface.volume_p2`).
+    pub fn read_from_db(db: &mut DatabaseReader) -> Result<Self> {
+        let mut t = Self::IDENTITY;
+        if db.file_type() == FileType::Ascii {
+            for r in 0..4 {
+                if let Some(stream) = db.in_stream_mut() {
+                    for c in 0..4 {
+                        if let Some(v) = stream.extract_double() {
+                            if let Some(cell) = t.m.get_mut(r).and_then(|row| row.get_mut(c)) {
+                                *cell = v;
+                            }
+                        }
+                    }
+                }
+                db.go_to_next_line();
+            }
+        } else {
+            for r in 0..4 {
+                for c in 0..4 {
+                    let v = db.read_double()?;
+                    if let Some(cell) = t.m.get_mut(r).and_then(|row| row.get_mut(c)) {
+                        *cell = v;
+                    }
+                }
+            }
+        }
+        // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
+        let _ = t;
+        Err(SolidError::Unported {
+            upstream: "SmVolume::ReadFromDB",
+            unit: "surface.volume_p2",
+        })
+    }
+
+    /// `SmTransform_TYPE` (`GetType`).
+    #[must_use]
+    pub const fn type_code(&self) -> i64 {
+        Self::TYPE
+    }
+
+    /// `"SmTransform_TYPE"` (`GetTypeString`).
+    #[must_use]
+    pub const fn type_string(&self) -> &'static str {
+        "SmTransform_TYPE"
+    }
+
+    /// `"SmTransform"` (`GetClassString`).
+    #[must_use]
+    pub const fn class_string(&self) -> &'static str {
+        "SmTransform"
+    }
+
+    /// True when a transform is a `t` (`IsKindOf`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] for any `t` other than [`Transform::TYPE`]: the
+    /// answer comes from `SmVolume::IsKindOf` (unit `surface.volume_p1`).
+    pub fn is_kind_of(&self, t: i64) -> Result<bool> {
+        if t == Self::TYPE {
+            return Ok(true);
+        }
+        let _ = Self::VOLUME_TYPE;
+        // UNPORTED(surface.volume_p1): SmVolume::IsKindOf
+        Err(SolidError::Unported {
+            upstream: "SmVolume::IsKindOf",
+            unit: "surface.volume_p1",
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::solution_array::ObjectKind;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct Vol;
+
+    impl SolutionObject for Vol {
+        fn kind(&self) -> ObjectKind {
+            ObjectKind::Volume
+        }
+    }
+
+    fn v(x: f64, y: f64, z: f64) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    #[test]
+    fn identity_and_canonical() {
+        let t = Transform::default();
+        assert_eq!(t, Transform::IDENTITY);
+        let c = Transform::new(v(1.0, 2.0, 3.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), None);
+        assert_eq!(c.to_z_axis(), v(0.0, 0.0, 1.0));
+        assert_eq!(c.to_disp(), v(1.0, 2.0, 3.0));
+        assert_eq!(c.matrix()[3], [1.0, 2.0, 3.0, 1.0]);
+        let mut i = c;
+        i.init();
+        assert_eq!(i, Transform::IDENTITY);
+    }
+
+    #[test]
+    fn evaluate_and_inverse_round_trip() {
+        let t = Transform::new(v(1.0, -2.0, 0.5), v(2.0, 0.0, 0.0), v(0.0, 3.0, 1.0), None);
+        let d = t.evaluate_simple(v(0.25, -1.0, 4.0), 1).unwrap();
+        assert_eq!(d.len(), 8);
+        assert_eq!(d[4], t.to_x_axis());
+        assert_eq!(d[2], t.to_y_axis());
+        assert_eq!(d[1], t.to_z_axis());
+        let back = t.inv_transform_point(d[0]).unwrap();
+        assert!((back - v(0.25, -1.0, 4.0)).length() < 1e-12);
+        assert!(t.evaluate_simple(Vec3::ZERO, MAX_DERIV + 1).is_err());
+    }
+
+    #[test]
+    fn singular_and_solvers() {
+        let flat = Transform::new(Vec3::ZERO, v(1.0, 0.0, 0.0), v(2.0, 0.0, 0.0), None);
+        assert!(flat.inv_transform_vector(v(1.0, 1.0, 1.0)).is_err());
+        let mut sols: SolutionArray<Vol> = SolutionArray::new();
+        assert!(flat
+            .global_point_solve_simple(Vec3::ZERO, &mut sols, Vol)
+            .is_err());
+        assert_eq!(sols.len(), 1);
+        assert_eq!(sols.get(0).unwrap().solution_type, SolutionType::Unknown);
+
+        let t = Transform::new(v(1.0, 1.0, 1.0), v(0.0, 1.0, 0.0), v(-1.0, 0.0, 0.0), None);
+        let s = t.local_point_solve_simple(v(1.0, 2.0, 3.0), Vol).unwrap();
+        assert_eq!(s.solution_type, SolutionType::SingleValue);
+        assert_eq!(s.num_variables, 3);
+        assert_eq!(s.objects[0], Some(Vol));
+        assert_eq!(&s.start.parameters[..3], &[1.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn concat_invert_scale() {
+        let mut a = Transform::new(v(1.0, 2.0, 3.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0), None);
+        let b = a;
+        a.invert_simple().unwrap();
+        a.concat_transform(&b);
+        assert!(a.approx_eq(&Transform::IDENTITY));
+
+        let mut s = Transform::IDENTITY;
+        s.scale_simple(v(2.0, 3.0, 4.0), Some(v(1.0, 1.0, 1.0)));
+        assert_eq!(s.to_disp(), v(-2.0, -3.0, -4.0));
+        let mut z = Transform::IDENTITY;
+        z.scale_simple(Vec3::ZERO, None);
+        assert!(z.invert_simple().is_err());
+        z.transform_simple(&Axis2Placement::IDENTITY, Some(v(1.0, 1.0, 1.0)));
+    }
+
+    #[test]
+    fn predicates_and_stubs() {
+        let t = Transform::IDENTITY;
+        assert!(!t.is_bounded_simple());
+        assert!(t.is_curve_in_param_domain_simple());
+        assert_eq!(t.has_discontinuities_simple(false), Ok(false));
+        assert!(matches!(
+            t.has_discontinuities_simple(true),
+            Err(SolidError::Unported { .. })
+        ));
+        assert_eq!(t.is_kind_of(Transform::TYPE), Ok(true));
+        assert!(t.is_kind_of(1).is_err());
+        assert_eq!(t.type_code(), 22008);
+        assert_eq!(t.type_string(), "SmTransform_TYPE");
+        assert_eq!(t.class_string(), "SmTransform");
+        let d = t.natural_param_domain();
+        assert_eq!(d.u_min(), -INFINITE_PARAMETER);
+        assert_eq!(t.evaluate_bounding_box_simple(&d, false, false), Ok(None));
+        assert!(t.evaluate_bounding_box_simple(&d, true, false).is_err());
+    }
+}

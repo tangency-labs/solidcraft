@@ -26,6 +26,7 @@ pub mod polynomial;
 pub mod solution_array;
 pub mod tol;
 pub mod tools;
+pub mod transform;
 pub mod tree;
 pub mod vector2d;
 pub mod vector3d;
