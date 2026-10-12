@@ -19,4 +19,5 @@ pub mod iges;
 pub mod knots;
 pub mod math;
 pub mod srf_basic;
+pub mod srf_fit;
 pub mod srf_tool;
