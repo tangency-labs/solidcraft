@@ -11,12 +11,12 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **52** (58,391 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb`, `nlib.crv_adv_p2`, `nlib.srf_tool_p2`, `nlib.crv_offset`, `nurbs.nurbs_srf` |
+| Green | **53** (59,299 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb`, `nlib.crv_adv_p2`, `nlib.srf_tool_p2`, `nlib.crv_offset`, `nurbs.nurbs_srf`, `nlib.crv_approx` |
 | Partial | **11** (11,041 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nurbs.b_spline_curve_p1` |
-| Ported (green + partial) | 63 units, 69,432 upstream lines (17.9%); about 73,500 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
-| Claimed | 4 (6,618 lines): `nlib.crv_approx`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3` |
+| Ported (green + partial) | 64 units, 70,340 upstream lines (18.1%); about 73,500 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 4 (7,500 lines): `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nurbs.b_spline_surface_p1` |
 | Blocked | 0 |
-| Todo | 193 (311,853 lines) |
+| Todo | 192 (310,063 lines) |
 
 ## What Wave 0 produced
 
@@ -102,6 +102,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `nlib.crv_basic` | `nurbs::crv_basic` | 3417 cases (417 fixture incl. the six pt_TestFiles .smc curves, .sms cross-boundary derivatives, SM_API_test rectangle/polygon segments, my_test_reversed_line_join lines + 3000 generated), max_rel_err 0 | bit-identical; promoted from partial when `nlib.crv_tool_p2` wired `N_CrvsMakeCompatible` (`N_CrvsAreCoincident` maps its NLib errors to false, as upstream) |
 | `nlib.crv_adv_p1` | `nurbs::crv_adv::p1` | 2670 cases (670 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/hexagon edges and edge cases + 2000 generated), max_rel_err 0; a 100,670-case run was also clean | bit-identical; `ST_curxcdr` / `ST_curxcrr` as `Curve::extend_by_*_at_depth`; in-place `ST_curxcrr` G2 recursion frees garbage upstream (findings.md) |
 | `nlib.crv_adv_p2` | `nurbs::crv_adv::p2` | 2815 cases (815 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/hexagon edges and edge cases + 2000 generated), max_rel_err 0; a 300,815-case run was also clean | bit-identical; remove_knots shares its body with N_CrvRemoveKnotsDerivConstraints; rational N_CrvSumDiffCrv over different ranges corrupts the heap upstream (findings.md) |
+| `nlib.crv_approx` | `nurbs::crv_approx` | 1646 cases (146 fixture: sm_ApproxCircArc-style counts and arc fits, ApproximateRationalCurve-style approximations of the six pt_TestFiles .smc curves and exact NURBS circles, edge cases + 1500 generated), max_rel_err 0 | bit-identical; degree 2 parabolic arcs with parallel tangents and failed tangent projections use uninitialised points upstream (ffi rejects them; the port errors) |
 
 ## Partial units
 
