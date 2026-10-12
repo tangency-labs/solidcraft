@@ -32,8 +32,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 
 **Correctness gate.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within
-`1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|,1)` unless the unit's harness documents a
-stricter form). Never loosen a tolerance to get green. A disagreement you cannot fix
+`1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|)`; an absolute floor only where a unit
+documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. A disagreement you cannot fix
 goes in `plan/findings.md` (unit, inputs, both values, suspected cause) and the unit
 stays `blocked`.
 
@@ -116,8 +116,8 @@ Every ported file starts with:
 ## 4. Swarm workflow
 
 Unit list and states: `plan/modules.toml` (format: `plan/modules.schema.md`, order:
-`plan/order.md`). Pick a `todo` unit whose `depends_on` are all `green`, lowest `layer`
-first.
+`plan/order.md`). Pick a `todo` unit whose `depends_on` are all `green` or `partial`, lowest `layer`
+first (in a swarm run, the coordinator assigns units).
 
 1. **Claim** (in the main tree, on `main`): re-read `plan/modules.toml`; set
    `status = "claimed"`, `claimed_by = "<your agent name>"`, `claimed_at = "<UTC ISO-8601>"`
@@ -154,6 +154,28 @@ first.
 Blocked (dependency missing, upstream behaviour unclear, gate cannot be met): set
 `status = "blocked"` with a reason in `notes`, write details to `plan/findings.md`, commit
 both, and move on. Never leave a unit `claimed` when you stop working on it.
+
+## 4a. Cycles, back-edges and the merge lock
+
+The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back-edges*
+(listed in each unit's `notes`: `cycle back-edges (...): <unit>(<calls>)`). Rules:
+
+- **Calling unported code.** A call into a unit that is not `green`/`partial` yet goes
+  through `Err(SolidError::Unported { upstream: "<C++ symbol>", unit: "<unit id>" })`.
+  Never panic, never fake a result. Every such site carries the comment
+  `// UNPORTED(<unit id>): <C++ symbol>` so the target's porter can find it with grep.
+- **Difftest with back-edges.** Cases whose C++ path reaches an unported callee are
+  classified `deferred` (the Rust side returns `Unported`); they are neither pass nor
+  fail. A unit with all non-deferred cases passing and >=1 deferred case is
+  **`partial`**. With zero deferred cases it is **`green`**. `partial` satisfies
+  `depends_on` for scheduling only; it is never reported as green.
+- **Wiring back-edges when you port a unit.** After your unit passes, grep
+  `UNPORTED(<your unit id>)` across `crates/solidcore`, replace each stub with the real
+  call, and re-run difftest for every unit you touched. Any unit whose deferred count
+  drops to 0 and passes becomes `green`; record this in the same commit.
+- **Merge lock.** Everything that writes the main tree (claim commit, merge, status
+  update) runs under one lock, held only briefly:
+  `flock $HOME/github/solidcore/.git/swarm.lock -c '<commands>'`.
 
 ## 5. Where things go
 
