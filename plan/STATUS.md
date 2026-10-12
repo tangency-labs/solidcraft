@@ -52,6 +52,7 @@ changes it; per-unit state lives in `plan/modules.toml`.
 |---|---|---|---|
 | `harness.selftest` | (harness only) | 28 cases, max_rel_err 0 | not a plan unit |
 | `nlib.knots` | `nurbs::knots` | 2953 cases (1753 fixture + 1200 generated), max_rel_err 0 | bit-identical; a 51,753-case run was also clean |
+| `geom.vector2d` | `geom::vector2d` | 4060 cases (60 fixture + 4000 generated), max_rel_err 0 | bit-identical; a 200,060-case run was also clean |
 
 ## Ready set for Wave 1 (todo units whose `depends_on` are all green)
 
@@ -108,4 +109,5 @@ back-edges call into `geom.vector3d`, `geom.tol` and others (listed in each unit
   `geom::vector2d` / `geom::vector3d`, but `crates/solidcore/src/math.rs` already defines
   `Vec2`/`Vec3`, mapped to `SmVector2d`/`SmVector3d`. The agent porting those units should
   extend `math.rs`, or re-export from it, rather than create duplicate types, and update
-  `rust_module` to match.
+  `rust_module` to match. *Resolved for `Vec2`:* `geom.vector2d` moved `Vec2`/`Point2` into `geom::vector2d`
+  and `math` re-exports them; `geom.vector3d` can do the same for `Vec3`.
