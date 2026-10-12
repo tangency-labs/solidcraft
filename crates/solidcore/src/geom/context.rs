@@ -17,6 +17,8 @@
 //! | [`Context::user_notify_callback`]         | `SmContext::GetUserNotifyCallback`              |
 //! | [`Context::set_user_notify_callback`]     | `SmContext::SetUserNotifyCallback` (unused upstream) |
 //! | [`Context::sys_notify_callback`]          | `SmContext::GetSysNotifyCallback`               |
+//! | [`Context::user_notify_callback_mut`], [`Context::sys_notify_callback_mut`] | the same getters, for `Execute` |
+//! | [`NotifyCallback`], [`NotifyCallback::execute`] | `SmNotifyCallback`, `SmNotifyCallback::Execute` |
 //! | [`Context::set_sys_notify_callback`]      | `SmContext::SetSysNotifyCallback`               |
 //! | [`Context::this_model_size_estimate`]     | `SmContext::GetThisModelSizeEstimate`           |
 //! | [`Context::set_this_model_size_estimate`] | `SmContext::SetThisModelSizeEstimate` (inline, `SM_USE_OLDTOL` build) |
@@ -61,14 +63,16 @@
 //!   release build and are not ported. `SmBoolean` flags are `bool`; `ULONG` marks are
 //!   `u64` incremented with wrapping arithmetic, as in C.
 //! - Notify callbacks are boxed [`NotifyCallback`] trait objects owned by the context
-//!   (upstream stores borrowed raw pointers). `Execute` is added to the trait by the
-//!   unit that ports `SmObject::Notify`.
+//!   (upstream stores borrowed raw pointers); `Execute` takes `&mut self` and is
+//!   reached through [`Context::user_notify_callback_mut`] /
+//!   [`Context::sys_notify_callback_mut`] by [`object::notify`].
 //! - `SmApiGeneral.cpp` keeps one process-global `SmContext*`; the port takes the slot
 //!   (`&mut Option<Context>`) from the caller.
 //! - The attribute-callback list, global user data (`void*`), `operator new/delete`,
 //!   `Dump`, `GetTypeString` and `IsLockedMark` are unused upstream and not ported.
 
 use crate::error::{Result, SolidError};
+use crate::geom::object;
 use crate::geom::tol;
 use crate::kernel::Kernel;
 
@@ -137,10 +141,25 @@ pub const ALL_MARKS: i32 = MarkType::AllMarks as i32;
 const MARK_IO: usize = 3;
 
 /// Receiver of topology-change notifications (`SmNotifyCallback`).
-///
-/// The notification method (`SmNotifyCallback::Execute`) is added by the unit that
-/// ports `SmObject::Notify`.
-pub trait NotifyCallback: std::fmt::Debug + Send {}
+pub trait NotifyCallback: std::fmt::Debug + Send {
+    /// `SmNotifyCallback::Execute`: called once for every [`object::notify`] of an
+    /// object whose context holds this callback, with the notifying object
+    /// (`caller`) and the operation's data objects (see
+    /// [`object::NotifyOperation`] for their meaning per operation). The status is
+    /// ignored by [`object::notify`].
+    ///
+    /// # Errors
+    ///
+    /// Whatever the callback reports.
+    fn execute(
+        &mut self,
+        operation: object::NotifyOperation,
+        caller: object::ObjectRef,
+        data1: Option<object::ObjectRef>,
+        data2: Option<object::ObjectRef>,
+        data3: Option<object::ObjectRef>,
+    ) -> Result<()>;
+}
 
 /// Shared modeling state (`SmContext`): traversal marks, the Boolean flag, notify
 /// callbacks and the context's model size estimate and zone tolerance.
@@ -214,6 +233,12 @@ impl Context {
         self.user_notify_callback.as_deref()
     }
 
+    /// The application's notify callback, for calling it (`GetUserNotifyCallback`
+    /// as used by `SmObject::Notify`).
+    pub fn user_notify_callback_mut(&mut self) -> Option<&mut (dyn NotifyCallback + 'static)> {
+        self.user_notify_callback.as_deref_mut()
+    }
+
     /// Sets the application's notify callback (`SetUserNotifyCallback`).
     pub fn set_user_notify_callback(&mut self, callback: Option<Box<dyn NotifyCallback>>) {
         self.user_notify_callback = callback;
@@ -223,6 +248,12 @@ impl Context {
     #[must_use]
     pub fn sys_notify_callback(&self) -> Option<&dyn NotifyCallback> {
         self.sys_notify_callback.as_deref()
+    }
+
+    /// The system notify callback, for calling it (`GetSysNotifyCallback` as used
+    /// by `SmObject::Notify`).
+    pub fn sys_notify_callback_mut(&mut self) -> Option<&mut (dyn NotifyCallback + 'static)> {
+        self.sys_notify_callback.as_deref_mut()
     }
 
     /// Sets the system notify callback (`SetSysNotifyCallback`; upstream only warns

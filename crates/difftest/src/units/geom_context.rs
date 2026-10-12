@@ -146,7 +146,18 @@ fn kernel(model: f64, ratio: f64) -> Kernel {
 #[derive(Debug)]
 struct Notify;
 
-impl NotifyCallback for Notify {}
+impl NotifyCallback for Notify {
+    fn execute(
+        &mut self,
+        _operation: solidcore::geom::object::NotifyOperation,
+        _caller: solidcore::geom::object::ObjectRef,
+        _data1: Option<solidcore::geom::object::ObjectRef>,
+        _data2: Option<solidcore::geom::object::ObjectRef>,
+        _data3: Option<solidcore::geom::object::ObjectRef>,
+    ) -> solidcore::Result<()> {
+        Ok(())
+    }
+}
 
 const MARKS: [MarkType; 7] = [
     MarkType::NoMark,

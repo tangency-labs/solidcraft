@@ -1,0 +1,732 @@
+{
+ "cases": [
+  {
+   "name": "types_object_and_shape",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:138",
+   "inputs": {
+    "kind": "types",
+    "ts": [
+     11001,
+     16500,
+     11000,
+     11002,
+     16000,
+     12150,
+     0,
+     -1,
+     16501
+    ]
+   }
+  },
+  {
+   "name": "types_empty",
+   "upstream_ref": "source/SMLib/src/SmShape.cpp:341",
+   "inputs": {
+    "kind": "types",
+    "ts": []
+   }
+  },
+  {
+   "name": "notify_every_operation_both_callbacks",
+   "upstream_ref": "source/SMLib/src/SmObject.cpp:118",
+   "inputs": {
+    "kind": "notify",
+    "steps": [
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 0,
+      "caller": 0,
+      "data": [
+       1,
+       0,
+       2
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 1,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 2,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       0
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 3,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       -1
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 4,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 5,
+      "caller": 0,
+      "data": [
+       1,
+       0,
+       2
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 6,
+      "caller": 0,
+      "data": [
+       1,
+       0,
+       2
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 7,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 8,
+      "caller": 0,
+      "data": [
+       0,
+       1,
+       -1
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 9,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 10,
+      "caller": 0,
+      "data": [
+       0,
+       1,
+       -1
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 11,
+      "caller": 0,
+      "data": [
+       0,
+       1,
+       -1
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 12,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 13,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 14,
+      "caller": 0,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 15,
+      "caller": 0,
+      "data": [
+       0,
+       -1,
+       -1
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 16,
+      "caller": 0,
+      "data": [
+       -1,
+       -1,
+       -1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "notify_null_context",
+   "upstream_ref": "source/SMLib/src/SmObject.cpp:257",
+   "inputs": {
+    "kind": "notify",
+    "steps": [
+     {
+      "has_context": false,
+      "user": true,
+      "sys": true,
+      "op": 15,
+      "caller": 3,
+      "data": [
+       3,
+       -1,
+       -1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "notify_user_only",
+   "upstream_ref": "source/SMLib/inc/SmContext.h:66",
+   "inputs": {
+    "kind": "notify",
+    "steps": [
+     {
+      "has_context": true,
+      "user": true,
+      "sys": false,
+      "op": 9,
+      "caller": 1,
+      "data": [
+       2,
+       4,
+       5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "notify_sys_only",
+   "upstream_ref": "source/SMLib/src/SmObject.cpp:262",
+   "inputs": {
+    "kind": "notify",
+    "steps": [
+     {
+      "has_context": true,
+      "user": false,
+      "sys": true,
+      "op": 10,
+      "caller": 5,
+      "data": [
+       5,
+       0,
+       -1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "notify_no_callbacks",
+   "upstream_ref": "source/SMLib/src/SmObject.cpp:252",
+   "inputs": {
+    "kind": "notify",
+    "steps": [
+     {
+      "has_context": true,
+      "user": false,
+      "sys": false,
+      "op": 0,
+      "caller": 2,
+      "data": [
+       1,
+       2,
+       3
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "notify_bend_volume_pre_post_edit",
+   "upstream_ref": "source/SMLib/src/SmBendVolume.cpp:284",
+   "inputs": {
+    "kind": "notify",
+    "steps": [
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 10,
+      "caller": 4,
+      "data": [
+       -1,
+       -1,
+       -1
+      ]
+     },
+     {
+      "has_context": true,
+      "user": true,
+      "sys": true,
+      "op": 11,
+      "caller": 4,
+      "data": [
+       -1,
+       -1,
+       -1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "tcv_header_example",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:300",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 0,
+    "init": 5.0,
+    "steps": [
+     [
+      0,
+      25.0
+     ],
+     [
+      2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_boolean_nested",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1419",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 1,
+    "init": 0,
+    "steps": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      2,
+      0
+     ],
+     [
+      2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_ulong_heal_counts",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:1214",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 2,
+    "init": 3,
+    "steps": [
+     [
+      0,
+      7
+     ],
+     [
+      7,
+      9
+     ],
+     [
+      0,
+      7
+     ],
+     [
+      2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_use_orig_use_temp",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8533",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 0,
+    "init": 1.5,
+    "steps": [
+     [
+      0,
+      0.25
+     ],
+     [
+      4,
+      0
+     ],
+     [
+      5,
+      0
+     ],
+     [
+      6,
+      3.0
+     ],
+     [
+      5,
+      0
+     ],
+     [
+      4,
+      0
+     ],
+     [
+      5,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_clear_keeps_value",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:318",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 0,
+    "init": 2.0,
+    "steps": [
+     [
+      0,
+      4.0
+     ],
+     [
+      3,
+      0
+     ],
+     [
+      2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_default_then_set",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:314",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 0,
+    "init": -1.0,
+    "steps": [
+     [
+      1,
+      8.0
+     ],
+     [
+      1,
+      -1.0
+     ],
+     [
+      7,
+      6.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_nan_values",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:319",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 0,
+    "init": "NaN",
+    "steps": [
+     [
+      0,
+      1.0
+     ],
+     [
+      0,
+      "NaN"
+     ],
+     [
+      2,
+      0
+     ],
+     [
+      7,
+      "inf"
+     ],
+     [
+      2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_same_value_signed_zero",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:327",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 0,
+    "init": -0.0,
+    "steps": [
+     [
+      0,
+      0.0
+     ],
+     [
+      7,
+      3.0
+     ],
+     [
+      2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_unclosed_guards",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:319",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 2,
+    "init": 0,
+    "steps": [
+     [
+      0,
+      1
+     ],
+     [
+      1,
+      2
+     ],
+     [
+      0,
+      3
+     ],
+     [
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tcv_write_only",
+   "upstream_ref": "source/SMLib/inc/SmObject.h:322",
+   "inputs": {
+    "kind": "tcv",
+    "ty": 1,
+    "init": 1,
+    "steps": [
+     [
+      7,
+      0
+     ],
+     [
+      7,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "shape_empty",
+   "upstream_ref": "source/SMLib/src/SmShape.cpp:121",
+   "inputs": {
+    "kind": "shape",
+    "source": "none"
+   }
+  },
+  {
+   "name": "shape_whole_box_brep",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2647",
+   "inputs": {
+    "kind": "shape",
+    "source": {
+     "box": [
+      0,
+      0,
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    "whole_brep": true
+   }
+  },
+  {
+   "name": "shape_single_face",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:1217",
+   "inputs": {
+    "kind": "shape",
+    "source": {
+     "box": [
+      1,
+      1,
+      1,
+      2,
+      2,
+      2
+     ]
+    },
+    "faces": [
+     2
+    ]
+   }
+  },
+  {
+   "name": "shape_edges_and_vertices",
+   "upstream_ref": "source/SMLib/src/SmShape.cpp:235",
+   "inputs": {
+    "kind": "shape",
+    "source": {
+     "box": [
+      -1,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "edges": [
+     0,
+     5,
+     5
+    ],
+    "vertices": [
+     1,
+     7
+    ]
+   }
+  },
+  {
+   "name": "shape_vertices_only",
+   "upstream_ref": "source/SMLib/src/SmShape.cpp:107",
+   "inputs": {
+    "kind": "shape",
+    "source": {
+     "box": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "vertices": [
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "shape_brep_and_face",
+   "upstream_ref": "source/SMLib/src/SmShape.cpp:137",
+   "inputs": {
+    "kind": "shape",
+    "source": {
+     "box": [
+      0,
+      0,
+      0,
+      4,
+      1,
+      1
+     ]
+    },
+    "whole_brep": true,
+    "faces": [
+     0
+    ]
+   }
+  }
+ ]
+}

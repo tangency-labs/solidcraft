@@ -104,11 +104,14 @@ use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF
 // SmTol::CalcEdgeZoneTol3d(.., SmBrep*, ..), SmTol::CalcVertexZoneTol3d(.., SmBrep*, ..)
 // need SmBrep::GetTolerance / SmBrep::SetThisModelSizeEstimate; and
 // SmTol::GetScaledZero(const SmBrep&) needs SmBrep::CalculateBoundingBox.
-// UNPORTED(geom.object): SmTol::GetZoneTol3d(const SmObject*), SmTol::GetZoneTol3d(const
+// UNPORTED(topology.topology): SmTol::GetZoneTol3d(const SmObject*), SmTol::GetZoneTol3d(const
 // SmBrepData*), SmTol::GetApproxTol3d(const SmObject*), SmTol::GetXSectTol3d(const
 // SmObject*, const SmObject*, ..), SmTol::GetZoneTol3d_ForXSectResult(const SmObject*,
 // const SmObject*), SmTol::IsDegenerate(const SmObject*), SmTol::IsClosed(const
-// SmObject*), SmTol::GetScaledZero(const SmObject&) dispatch on SmObject::IsKindOf.
+// SmObject*), SmTol::GetScaledZero(const SmObject&) dispatch on IsKindOf over
+// SmTopology (GetTolerance), SmSurface/SmCurve (GetFace/GetEdge), SmBrep, SmBrepData
+// and SmCurveClassification; geom.object (SmObject::IsKindOf) is ported, but those
+// classes have no Rust object type yet.
 // UNPORTED(curve.curve_p2): SmTol::IsDegenerate(const SmCurve*, SmExtent1d, ..),
 // SmTol::MapTo1d(SmTol3d&, double, const SmCurve&), SmTol::MapTo2d(.., double, const
 // SmCurve&, const SmSurface&) and SmTol::GetScaledZero(const SmCurve&) need
