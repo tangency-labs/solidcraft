@@ -11,7 +11,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **34** (34,567 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set` |
+| Green | **34** (34,567 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit` |
 | Partial | **12** (12,568 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nlib.crv_nurb` |
 | Ported (green + partial) | 46 units, 47,135 upstream lines (12.2%); about 47,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
 | Claimed | 3 (3,334 lines): `nlib.crv_fit_p2`, `nlib.srf_fit`, `topology.topology` |
@@ -83,6 +83,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `geom.pseudo_box` | `geom::pseudo_box` | 3011 cases (11 fixture incl. my_test_pseudobox + 3000 generated programs on 4 box registers), max_rel_err 0 | bit-identical; wired extent3d Circumscribe, tol GetScaledZero(SmPseudoBox), transform EvaluateBoundingBoxSimple (aligned branch) |
 | `nlib.funcs_adv` | `nurbs::funcs_adv` | 2080 cases (80 fixture incl. 6 pt_TestFiles .smc curves + 2000 generated), max_rel_err 0 | bit-identical; the three upstream products share one generic body; inputs rescaled in place as upstream |
 | `nlib.crv_tool_p1` | `nurbs::crv_tool::p1` | 2143 cases (143 fixture on the six pt_TestFiles .smc curves, in-place and out-of-place C++ forms + 2000 generated), max_rel_err 0 | bit-identical; promoted from partial when `nlib.crv_nurb` wired `N_CrvGetMinMaxWeightsAndPts` (rational `N_CrvRemoveKnot`) |
+| `nlib.srf_fit` | `nurbs::srf_fit` | 1556 cases (56 fixture on the TestSmCreateSurfaceFromPoints 5x7 grid and the 11 PointSet sections + 1500 generated), max_rel_err 0 | bit-identical; a 30,056-case run was also clean; N_FitSrfInterpParams always returns NL_NO, LstSqApprox ruling overwrites the caller grid (copy in Rust) |
 
 ## Partial units
 
