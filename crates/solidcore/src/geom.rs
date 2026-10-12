@@ -14,6 +14,7 @@ pub mod extent1d;
 pub mod extent2d;
 pub mod extent3d;
 pub mod geom_utility;
+pub mod grid;
 pub mod hash_table;
 pub mod local_solve1d;
 pub mod local_solve_nd;
