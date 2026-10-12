@@ -15,6 +15,7 @@
 
 #include <cstring>
 #include <memory>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -211,7 +212,11 @@ int64_t run_op(SmDatabaseIO& db, int64_t op, int64_t arg, size_t word_cap, Out& 
     case OP_EXTRACT_WORD:
     {
         std::vector<char> buf(word_cap + 2, 0);
-        *db.GetInStreamPtr() >> buf.data();
+        // Bounded: word_cap comes from a length measured before the stream was
+        // opened (and is 0 if that failed), so never trust it for an unbounded
+        // read. setw(n) stores at most n-1 chars plus NUL; equal results for any
+        // word within word_cap.
+        *db.GetInStreamPtr() >> std::setw((std::streamsize)buf.size()) >> buf.data();
         for (size_t i = 0; buf[i] != 0; ++i)
             o.ints.push_back((int64_t)(unsigned char)buf[i]);
         return 0;
