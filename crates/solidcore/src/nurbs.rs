@@ -11,6 +11,7 @@ pub mod bezier;
 pub mod crv_basic;
 pub mod crv_fit;
 pub mod crv_tool;
+pub mod funcs_adv;
 pub mod funcs_basic;
 pub mod geom;
 pub mod iges;
