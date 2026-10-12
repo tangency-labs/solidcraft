@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **36** (37,512 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2` |
+| Green | **37** (37,901 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology` |
 | Partial | **12** (12,568 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object`, `nlib.crv_nurb` |
-| Ported (green + partial) | 48 units, 50,080 upstream lines (12.9%); about 55,200 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
-| Claimed | 4 (5,066 lines): `topology.topology`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv` |
+| Ported (green + partial) | 49 units, 50,469 upstream lines (13.0%); about 55,200 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Claimed | 3 (4,677 lines): `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv` |
 | Blocked | 0 |
 | Todo | 208 (332,757 lines) |
 
@@ -92,6 +92,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `nlib.srf_tool_p1` | `nurbs::srf_tool::p1` | 3132 cases (132 fixture + 3000 generated), max_rel_err 0 | bit-identical; `extract_patch` takes a `Rectangle` |
 | `nlib.crv_fit_p1` | `nurbs::crv_fit::p1` | 2084 cases (84 fixture + 2000 generated), max_rel_err 0 | bit-identical; `M[2i+1][-1]` write ported as is (findings.md) |
 | `geom.point_set` | `geom::point_set` | 2029 cases (29 fixture + 2000 generated), max_rel_err 0 | bit-identical; unprojected tight-box angles and centroid block quirk kept (findings.md) |
+| `topology.topology` | `topology::topology` | 657 cases (57 fixture + 600 generated scripts), max_rel_err 0 | bit-identical; `SmTopologyChangeCallback::Execute` unused upstream and not ported; dangling-callback UB on tracker destruction skipped (findings.md) |
 
 ## Partial units
 
@@ -105,7 +106,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.grid` | `geom::grid` | 615 cases (15 fixture + 600 generated), 613 bit-identical; a 30,015-case run was also clean | 2 (`surface.surface_cache_p1` 1: `SmSurfaceGridElement::Init`; `surface.surface_p2` 1: `ExpandHierarchy`) |
 | `geom.solution_array` | `geom::solution_array` | 810 cases (10 fixture + 800 generated), 754 bit-identical | 56 (object geometry: `curve.curve_p2` 16, `topology.face_p2` 14, `topology.edge` 12, `surface.surface_p2` 9, `topology.vertex` 5) |
 | `nlib.crv_basic` | `nurbs::crv_basic` | 3417 cases (417 fixture incl. the six pt_TestFiles .smc curves, .sms cross-boundary derivatives, SM_API_test rectangle/polygon segments, my_test_reversed_line_join lines + 3000 generated), 3139 bit-identical; a 30,000-case run was also clean | 278 (`nlib.crv_tool_p2`: every `N_CrvsAreCoincident` case, via `N_CrvsMakeCompatible`) |
-| `geom.a_object` | `geom::a_object` | 2040 cases (40 fixture + 2000 generated), 1871 bit-identical; a 50,040-case run was also clean | 169 (`topology.brep_cache` 131: new `SmBrepCache`; `topology.shell` 37: `SmRegion::IsVoid`; `topology.topology` 1: `SmSAGObject::Notify`) |
+| `geom.a_object` | `geom::a_object` | 2040 cases (40 fixture + 2000 generated), 1872 bit-identical; a 50,040-case run was also clean | 168 (`topology.brep_cache` 131: new `SmBrepCache`; `topology.shell` 37: `SmRegion::IsVoid`) |
 | `nlib.crv_nurb` | `nurbs::crv_nurb` | 2871 cases (871 fixture on the six pt_TestFiles .smc curves, SM_API_test rectangle/polygon/circle and reversed-line curves, edge cases + 2000 generated incl. exact circles, lines, degenerate and closed curves), 2852 bit-identical | 19 (`nlib.crv_geom`: `N_CrvGetDegenSegs` cases that reach `N_CrvArcLength`) |
 | `geom.tools` | `geom::tools` | 913 cases, 721 bit-identical | 192 (`curve.curve_p2` 68, `topology.brep_p1` 64, `topology.vertex` 60) |
 | `geom.transform` | `geom::transform` | 3042 cases, 2786 bit-identical | 256 (`surface.volume_p1` / `_p2`) |
