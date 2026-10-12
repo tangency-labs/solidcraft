@@ -1,6 +1,6 @@
 # solidcore status
 
-Last updated: 2026-10-12, Wave 1 in progress (after style review batch #1). Update a
+Last updated: 2026-10-12, Wave 1 in progress (after style review batch #2). Update a
 summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
@@ -13,10 +13,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **13** (11,063 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial` |
 | Partial | **3** (3,301 lines): `geom.extent3d`, `geom.tree`, `geom.attribute` |
-| Ported (green + partial) | 16 units, 14,364 upstream lines (3.7%); about 13,400 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 5 (4,335 lines): `nlib.basis_basic`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve_nd` |
+| Ported (green + partial) | 16 units, 14,364 upstream lines (3.7%); about 20,200 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 9 (8,156 lines): `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
 | Blocked | 0 |
-| Todo | 239 |
+| Todo | 235 (365,383 lines) |
 
 ## What Wave 0 produced
 
@@ -84,24 +84,27 @@ claimed. These units become ready as soon as the listed claimed units land:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 2 | `nlib.basis_basic` | 786 | `nlib.geom` |
-| 2 | `nlib.srf_basic` | 1088 | `nlib.geom` |
-| 3 | `geom.axis2_placement` | 479 | `geom.vector3d` |
-| 3 | `geom.extent2d` | 766 | ready (deps green/partial) |
-| 3 | `geom.geom_utility_p2` | 1617 | `geom.matrix`, `geom.vector3d` |
-| 3 | `geom.hash_table` | 593 | `geom.vector3d` |
-| 3 | `geom.local_solve1d` | 1294 | ready (deps green) |
-| 3 | `geom.local_solve_nd` | 860 | `geom.matrix` |
-| 3 | `geom.object` | 673 | `geom.attribute`, `geom.context` |
-| 3 | `geom.polynomial` | 386 | `geom.vector3d` |
+| 3 | `nlib.basis_adv` | 361 | `nlib.basis_basic` |
+| 3 | `nlib.bezier` | 1154 | `nlib.srf_basic` |
+| 3 | `nlib.funcs_basic` | 538 | `nlib.basis_basic` |
+| 4 | `geom.geom_utility_p1` | 2178 | `geom.axis2_placement` |
+| 4 | `geom.grid` | 876 | `geom.object` |
+| 4 | `geom.polar_box` | 979 | `geom.extent2d` |
+| 4 | `geom.solution_array` | 1319 | `geom.object` |
 
-`nlib.geom` is on the critical path (`nlib.geom` -> `nlib.basis_basic`/`nlib.srf_basic`
--> ... -> blend). `geom.vector3d` unblocks five units.
+`nlib.basis_basic` and `nlib.srf_basic` are on the critical path (-> `nlib.bezier`,
+`nlib.basis_adv` -> ... -> blend). `geom.object` unblocks two units and owns the
+`CO-PORT(geom.object)` / `CO-PORT(geom.a_object)` sites.
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the seven ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 16 ported
   units is bit-identical (`max_rel_err = 0`).
+- `geom.attribute`: several upstream undefined-behaviour paths (double delete, NULL
+  dereference in `SmMergeRegionAttribute::Merge`, writes past "other" lists) return
+  `InvalidInput` in Rust and are skipped on both sides; shim liveness is predicted.
+- `geom.polynomial`: `SolveQuarticEqn` reads an uninitialised cubic root when the
+  tolerance is above 1 (port uses `0.0`; FFI rejects such inputs).
 - `geom.tol`: `SmRelation` returns pointer-hash order upstream; the port sorts, and the
   shim sorts the C++ results before comparing. The small-topology zone tolerance is
   1000x *larger*, not smaller.
@@ -139,18 +142,45 @@ changed, and every unit re-ran difftest with unchanged reports.
   unit lands, replace them with the shared versions. `grep -rn "CO-PORT(geom.vector3d)"`
   finds every site.
 
-## Resume note (2026-10-12)
+## Style review batch #2 (2026-10-12)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). The eight claimed units
-  above have worktrees under `../solidcore-wt/`; check `git worktree list` before you
-  claim anything.
+Reviewed `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`,
+`geom.vector3d` and `geom.context` against AGENTS.md. Numerics and operation order were
+not changed; every touched unit re-ran difftest with the same counts and
+`max_rel_err = 0` (also at `--seeds 4000`), plus fmt, clippy (with and without `cpp`),
+tests and the wasm32 check.
+
+- `geom.vector3d`: the last `CO-PORT(geom.vector3d)` copies (`sm_sqrt` in
+  `geom/matrix.rs`; `sm_sqrt`, `DistanceBetween`, `GetMaxDimension` in `geom/tree.rs`)
+  now call `vector3d::sqrt`, `Vec3::distance` and `Vec3::max_dimension`. `sqrt` lost a
+  branch that duplicated its result; `length`/`closer_than` reuse
+  `length_squared`/`distance_squared`.
+- `geom.matrix`: `is_symmetric` is one short-circuiting iterator chain.
+- `geom.periodic_extent1d`: `add_interval`'s integer `case_id` with a dead `_` arm is a
+  private `SeamCase` enum; `complement`/`set_min_max` reuse `set_full`; error paths
+  name `PeriodicExtent1d::`.
+- `geom.context`: `Context::new` builds its fields directly; `MarkLock` errors name the
+  failing method; the header lists `MarkLock::context2`.
+- `geom.assert_array`: `AssertReport` equality is one `&&` chain.
+- `nlib.geom`: **API change** `transform_matrix_from_axes(from: Frame, to: Frame)`
+  replaces eight positional `Vec3`s (new `nurbs::geom::Frame`); the clamps in
+  `vectors_cos_angle`/`vectors_angle` are single expressions; `ColinearDim::flag` is
+  `const`.
+
+## Resume note (2026-10-12, after style review batch #2)
+
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Nine claimed units have
+  worktrees under `../solidcore-wt/`; check `git worktree list` before you claim.
 - Next: merge the claimed units as they go green, then wire their back-edges
-  (`grep -rn "UNPORTED(<unit>)"`). `geom.vector3d` should also fold in the co-port
-  duplicates listed above. Re-run difftest for `geom.tol`: its 221 deferred cases wait
-  only on `geom.vector3d` and should turn it green. `geom.extent3d` waits on
-  `geom.extent1d` and `geom.pseudo_box`, and `geom.tree` on the surface cache /
-  B-spline surface units.
-- Run style review batch #2 once the current claims merge.
+  (`grep -rn "UNPORTED(<unit>)"`). `geom.object` should also fold in the
+  `CO-PORT(geom.object)` and `CO-PORT(geom.a_object)` helpers (`grep -rn "CO-PORT("`).
+  `geom.extent3d` waits on `geom.pseudo_box`, `geom.tree` on
+  `nurbs.b_spline_surface_p1`/`surface.surface_cache_p1`, `geom.attribute` on
+  `topology.shell`.
+- Callers of `nurbs::geom::transform_matrix_from_axes` (e.g. in a claimed worktree) must
+  pass two `Frame`s after merging main.
+- Style review batch #3: `geom.extent1d`, `geom.polynomial`, `geom.attribute` and the
+  units that merge next.
 
 ## Known problems
 
