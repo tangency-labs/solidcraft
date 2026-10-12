@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **23** (19,482 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv` |
-| Partial | **7** (6,946 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.object`, `geom.grid` |
-| Ported (green + partial) | 30 units, 26,428 upstream lines (6.8%); about 32,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 3 (5,039 lines): `geom.geom_utility_p1`, `geom.solution_array`, `nlib.crv_basic` |
+| Green | **26** (23,756 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2` |
+| Partial | **5** (4,850 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid` |
+| Ported (green + partial) | 31 units, 28,606 upstream lines (7.4%); about 36,200 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 2 (2,861 lines): `geom.solution_array`, `nlib.crv_basic` |
 | Blocked | 0 |
 | Todo | 227 (356,436 lines) |
 
@@ -76,6 +76,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `nlib.bezier` | `nurbs::bezier` | 2223 cases (223 fixture incl. SM_API_test rectangle/polygon segments, FitCrvPoints.pts, Points.pts, Surface.sms + 2000 generated), max_rel_err 0 | bit-identical; a 50,223-case run was also clean; dangling-matrix, NL_PascalTri bounds and recursion-limit quirks in findings.md |
 | `nlib.funcs_basic` | `nurbs::funcs_basic` | 3130 cases (130 fixture + 3000 generated), max_rel_err 0 | bit-identical; a 50k-seed run was also clean; notes in findings.md |
 | `nlib.basis_adv` | `nurbs::basis_adv` | 1744 cases (244 fixture + 1500 generated), max_rel_err 0 | bit-identical; a 100,244-case run was also clean; `N_BasisDerivsArray` unbounded span walk and `N_BasisInsertKnots` `X[mx+1]` read in findings.md |
+| `geom.geom_utility_p1` | `geom::geom_utility::p1` | 4185 cases (185 fixture incl. SM_API_test rectangle/polygon, FitCrvPoints.pts, Points.pts, PointSet sections + 4000 generated), max_rel_err 0 | bit-identical; file-static helpers tested via a namespaced compile of SmGeomUtility.cpp; best-fit-line eigenvector, silhouette and FALSE-status quirks in findings.md |
+| `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), max_rel_err 0 | bit-identical; promoted from partial when `AreCoaxial` was wired to `geom.geom_utility_p1` |
+| `geom.geom_utility_p2` | `geom::geom_utility::p2` | 3270 cases (70 fixture + 3200 generated), max_rel_err 0 | bit-identical; promoted from partial when its p1 back-edges were wired; `PointSetType` is p1's |
 
 ## Partial units
 
@@ -86,20 +89,18 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.extent3d` | `geom::extent3d` | 3086 cases, 3082 bit-identical | 4 (`geom.pseudo_box`) |
 | `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
-| `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), 3815 bit-identical | 233 (`geom.geom_utility_p1`: `AreCoaxial` -> `smgu_LinePointDistance`) |
-| `geom.geom_utility_p2` | `geom::geom_utility::p2` | 3270 cases (70 fixture + 3200 generated), 740 bit-identical | 2530 (`geom.geom_utility_p1`: segment/point, line, plane, determinant and best-fit-line helpers) |
 | `geom.object` | `geom::object` | 624 cases (24 fixture + 600 generated), 593 bit-identical | 31 (every non-empty `SmShape`: `topology.face_p2` 11, `topology.brep_p1` 10, `topology.vertex` 6, `topology.edge` 4) |
 | `geom.grid` | `geom::grid` | 615 cases (15 fixture + 600 generated), 613 bit-identical; a 30,015-case run was also clean | 2 (`surface.surface_cache_p1` 1: `SmSurfaceGridElement::Init`; `surface.surface_p2` 1: `ExpandHierarchy`) |
 
 ## Ready set
 
-Nothing is ready right now: every `todo` unit whose dependencies are green/partial
-except for claimed units waits on one of these:
+Ready: `geom.pseudo_box` (layer 5, 1508 upstream lines; unblocks `geom.extent3d`). Every
+other `todo` unit whose dependencies are green/partial except for claimed units waits on
+one of these:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 5 | `geom.pseudo_box` | 1508 | `geom.geom_utility_p1` |
-| 5 | `geom.global_solver` | 1775 | `geom.geom_utility_p1`, `geom.solution_array` |
+| 5 | `geom.global_solver` | 1775 | `geom.solution_array` |
 | 5 | `geom.tools` | 326 | `geom.solution_array` |
 | 5 | `geom.transform` | 681 | `geom.solution_array` |
 | 5 | `nlib.crv_fit_p1` | 1707 | `nlib.crv_basic` |
@@ -107,9 +108,8 @@ except for claimed units waits on one of these:
 | 5 | `nlib.iges` | 1055 | `nlib.crv_basic` |
 | 5 | `nlib.srf_tool_p1` | 1678 | `nlib.crv_basic` |
 
-`geom.geom_utility_p1` stays the biggest unblocker (233 deferred `AreCoaxial` cases of
-`geom.axis2_placement`, 2530 of `geom.geom_utility_p2`, then `geom.pseudo_box` ->
-`geom.extent3d`). `nlib.crv_basic` opens four NURBS units, `geom.solution_array` three.
+`geom.geom_utility_p1` is green and made `geom.axis2_placement` and
+`geom.geom_utility_p2` green. `nlib.crv_basic` opens four NURBS units, `geom.solution_array` three.
 
 ## Recent findings (details in `plan/findings.md`)
 
