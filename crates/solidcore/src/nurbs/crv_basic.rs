@@ -89,10 +89,9 @@
 //!   fails with `NL_INP_ERR`; [`Boundary`] cannot express such a flag. Surfaces too
 //!   small for the requested side (fewer than two rows / columns, too few knots) are
 //!   `InvalidInput` (upstream reads outside its arrays).
-//! - `N_CrvsAreCoincident` calls `N_CrvsMakeCompatible` (unit `nlib.crv_tool_p2`),
-//!   which is not ported yet: [`curves_are_coincident`] returns
-//!   [`SolidError::Unported`] until it is. Upstream maps that call's failure to
-//!   `false`; the port propagates the error.
+//! - `N_CrvsAreCoincident` maps a failure of `N_CrvsMakeCompatible` to `false`, as
+//!   upstream; `InvalidInput` (where upstream would access memory outside its arrays)
+//!   propagates.
 
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
@@ -100,6 +99,7 @@
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
+use crate::nurbs::crv_tool::p2::make_compatible;
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{
     dist_cpt_cpt_homo, dist_perp_pt_line_seg, dist_pt_pt, dist_signed_pt_plane, normalize,
@@ -969,26 +969,27 @@ pub fn make_rat_compatible(curves: &mut [Curve]) {
     }
 }
 
-/// `N_CrvsMakeCompatible` (unit `nlib.crv_tool_p2`, not ported yet).
-fn make_compatible(_p: &mut Curve, _q: &mut Curve) -> Result<()> {
-    // UNPORTED(nlib.crv_tool_p2): N_CrvsMakeCompatible
-    Err(SolidError::Unported {
-        upstream: "N_CrvsMakeCompatible",
-        unit: "nlib.crv_tool_p2",
-    })
-}
-
 /// `true` when the two curves, made compatible in place (common degree and knots),
 /// have every pair of control points closer than `tol` in homogeneous space
-/// (`N_CrvsAreCoincident`). Both curves are modified as upstream.
+/// (`N_CrvsAreCoincident`). Both curves are modified as upstream. When making them
+/// compatible fails with an NLib error the curves keep the changes made so far and
+/// the result is `false`, as upstream.
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] until `N_CrvsMakeCompatible` (unit
-/// `nlib.crv_tool_p2`) is ported.
+/// `InvalidInput` where upstream would read or write outside its arrays.
 pub fn curves_are_coincident(p: &mut Curve, q: &mut Curve, tol: f64) -> Result<bool> {
     // Make input curves compatible.
-    make_compatible(p, q)?;
+    let mut pair = [p.clone(), q.clone()];
+    let res = make_compatible(&mut pair);
+    let [cp, cq] = pair;
+    *p = cp;
+    *q = cq;
+    match res {
+        Ok(()) => {}
+        Err(SolidError::Nlib { .. }) => return Ok(false),
+        Err(e) => return Err(e),
+    }
 
     // Check coincidence.
     let n = q.n;
@@ -1365,9 +1366,9 @@ mod tests {
         let mut b = line2();
         assert!(curves_are_compatible(&[a.clone(), b.clone()]));
         assert!(!curves_are_compatible(&[a.clone(), arc()]));
-        assert!(matches!(
-            curves_are_coincident(&mut a, &mut b, 1e-6),
-            Err(SolidError::Unported { .. })
-        ));
+        assert!(curves_are_coincident(&mut a, &mut b, 1e-6).unwrap());
+        let mut c = arc();
+        let mut d = line2();
+        assert!(!curves_are_coincident(&mut c, &mut d, 1e-6).unwrap());
     }
 }

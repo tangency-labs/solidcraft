@@ -19,9 +19,8 @@
 //! A curve input is either inline (control point storage `[x, y, z, w]`, degree,
 //! knot storage, optional indices in use `[n, m]` below the storage) or an upstream
 //! `.smc` file (`{"smc": {"$upstream_file": "curve0.smc"}}`, read here by
-//! [`read_smc`]); surfaces likewise (`.sms`). `coincident` cases are deferred on the
-//! Rust side until `N_CrvsMakeCompatible` (unit `nlib.crv_tool_p2`) is ported. Every
-//! run has at least [`MIN_GENERATED`] generated cases.
+//! [`read_smc`]); surfaces likewise (`.sms`). Every run has at least
+//! [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

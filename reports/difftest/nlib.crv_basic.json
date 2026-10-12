@@ -1154,28 +1154,20 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "closed_trim1_coincident",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_basic/cases.json#144 (upstream upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc)",
-      "values_compared": 0
+      "values_compared": 145
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "closed_self_coincident",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_basic/cases.json#145 (upstream upstream/TestFiles/pt_TestFiles/closedCurve.smc)",
-      "values_compared": 0
+      "values_compared": 115
     },
     {
       "max_rel_err": 0.0,
@@ -1370,16 +1362,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect_10x6_coincident_self",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_basic/cases.json#170 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle))",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -1566,16 +1554,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect_far_1e-9_coincident_self",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_basic/cases.json#194 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle))",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -1842,16 +1826,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "hexagon_r5_coincident_self",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_basic/cases.json#228 (upstream tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon))",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -2078,16 +2058,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "pentagon_far_1.5e-6_coincident_self",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nlib.crv_basic/cases.json#257 (upstream tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon))",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -3458,16 +3434,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0012",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148930",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -3518,16 +3490,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0019",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148937",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -3554,28 +3522,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148941",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0024",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148942",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -3594,16 +3554,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148945",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -3734,16 +3690,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0044",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148962",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
       "max_rel_err": 0.0,
@@ -3770,16 +3722,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0048",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148966",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -3830,16 +3778,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0055",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040148973",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -4210,16 +4154,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0102",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149020",
-      "values_compared": 0
+      "values_compared": 113
     },
     {
       "max_rel_err": 0.0,
@@ -4326,16 +4266,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0116",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149034",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
       "max_rel_err": 0.0,
@@ -4538,16 +4474,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0142",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149060",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -4590,16 +4522,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0148",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149066",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -4634,16 +4562,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0153",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149071",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -4670,16 +4594,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0157",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149075",
-      "values_compared": 0
+      "values_compared": 215
     },
     {
       "max_rel_err": 0.0,
@@ -4706,16 +4626,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0161",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149079",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -4734,16 +4650,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0164",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149082",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -4874,16 +4786,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0181",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149099",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -5014,16 +4922,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0198",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149116",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -5034,16 +4938,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0200",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149118",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -5166,16 +5066,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0216",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149134",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -5410,28 +5306,20 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0246",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149164",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149165",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -5450,16 +5338,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0250",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149168",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -5534,16 +5418,12 @@
       "values_compared": 37
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0260",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149178",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -5578,16 +5458,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149183",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -5614,28 +5490,20 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0269",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149187",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0270",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149188",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -5686,16 +5554,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0277",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149195",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -5762,16 +5626,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0286",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149204",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -5790,16 +5650,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0289",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149207",
-      "values_compared": 0
+      "values_compared": 113
     },
     {
       "max_rel_err": 0.0,
@@ -5874,16 +5730,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0299",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149217",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
       "max_rel_err": 0.0,
@@ -5910,16 +5762,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0303",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149221",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -5930,16 +5778,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0305",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149223",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -5998,16 +5842,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0313",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149231",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -6114,16 +5954,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0327",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149245",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -6230,16 +6066,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149259",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -6298,16 +6130,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0349",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149267",
-      "values_compared": 0
+      "values_compared": 145
     },
     {
       "max_rel_err": 0.0,
@@ -6350,16 +6178,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0355",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149273",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -6474,16 +6298,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0370",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149288",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -6526,16 +6346,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0376",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149294",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
       "max_rel_err": 0.0,
@@ -6586,16 +6402,12 @@
       "values_compared": 80
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0383",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149301",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -6646,28 +6458,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0390",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149308",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0391",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149309",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -6742,16 +6546,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0401",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149319",
-      "values_compared": 0
+      "values_compared": 113
     },
     {
       "max_rel_err": 0.0,
@@ -6770,16 +6570,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0404",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149322",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -6830,16 +6626,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0411",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149329",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -6850,16 +6642,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149331",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -7078,16 +6866,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0441",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149359",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -7330,16 +7114,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0472",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149390",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -7382,16 +7162,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0478",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149396",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -7402,16 +7178,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0480",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149398",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -7494,16 +7266,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0491",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149409",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -7666,16 +7434,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0512",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149430",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -7766,16 +7530,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0524",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149442",
-      "values_compared": 0
+      "values_compared": 235
     },
     {
       "max_rel_err": 0.0,
@@ -8130,16 +7890,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0569",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149487",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -8382,16 +8138,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0600",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149518",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -8434,16 +8186,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0606",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149524",
-      "values_compared": 0
+      "values_compared": 105
     },
     {
       "max_rel_err": 0.0,
@@ -8494,28 +8242,20 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0613",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149531",
-      "values_compared": 0
+      "values_compared": 125
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0614",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149532",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -8614,16 +8354,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0627",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149545",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -8698,16 +8434,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0637",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149555",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -8958,28 +8690,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0669",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149587",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0670",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149588",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -9158,16 +8882,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0693",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149611",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -9274,16 +8994,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0707",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149625",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -9366,16 +9082,12 @@
       "values_compared": 145
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0718",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149636",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -9418,16 +9130,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0724",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149642",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -9726,16 +9434,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0762",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149680",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -9914,16 +9618,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0785",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149703",
-      "values_compared": 0
+      "values_compared": 113
     },
     {
       "max_rel_err": 0.0,
@@ -9958,16 +9658,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0790",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149708",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -10138,16 +9834,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0812",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149730",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -10198,16 +9890,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0819",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149737",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -10274,16 +9962,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0828",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149746",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -10582,28 +10266,20 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0866",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149784",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0867",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149785",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -10662,16 +10338,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0875",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149793",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -10746,16 +10418,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0885",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149803",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -10806,16 +10474,12 @@
       "values_compared": 26
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0892",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149810",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -10970,16 +10634,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0912",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149830",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -11006,16 +10666,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0916",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149834",
-      "values_compared": 0
+      "values_compared": 163
     },
     {
       "max_rel_err": 0.0,
@@ -11162,16 +10818,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0935",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149853",
-      "values_compared": 0
+      "values_compared": 125
     },
     {
       "max_rel_err": 0.0,
@@ -11198,16 +10850,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0939",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149857",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -11626,16 +11274,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149910",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -11678,16 +11322,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0998",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149916",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -11706,16 +11346,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149919",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -11726,16 +11362,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149921",
-      "values_compared": 0
+      "values_compared": 105
     },
     {
       "max_rel_err": 0.0,
@@ -11826,16 +11458,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149933",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -11854,16 +11482,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1018",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149936",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -11890,16 +11514,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1022",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149940",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -11998,16 +11618,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1035",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149953",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -12130,16 +11746,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1051",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149969",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -12238,16 +11850,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149982",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -12282,16 +11890,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1069",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149987",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -12366,16 +11970,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1079",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040149997",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -12602,16 +12202,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1108",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150026",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -12726,16 +12322,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1123",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150041",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -12802,16 +12394,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1132",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150050",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
       "max_rel_err": 0.0,
@@ -12982,16 +12570,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1154",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150072",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -13082,16 +12666,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1166",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150084",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -13182,28 +12762,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1178",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150096",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150097",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -13270,16 +12842,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150106",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -13362,16 +12930,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1199",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150117",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -13390,16 +12954,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1202",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150120",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -13474,16 +13034,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1212",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150130",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -13550,16 +13106,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1221",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150139",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -13730,16 +13282,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1243",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150161",
-      "values_compared": 0
+      "values_compared": 115
     },
     {
       "max_rel_err": 0.0,
@@ -13750,16 +13298,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1245",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150163",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -13826,16 +13370,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1254",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150172",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -13846,16 +13386,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150174",
-      "values_compared": 0
+      "values_compared": 115
     },
     {
       "max_rel_err": 0.0,
@@ -13866,16 +13402,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150176",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -13942,16 +13474,12 @@
       "values_compared": 76
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1267",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150185",
-      "values_compared": 0
+      "values_compared": 145
     },
     {
       "max_rel_err": 0.0,
@@ -13986,16 +13514,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1272",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150190",
-      "values_compared": 0
+      "values_compared": 235
     },
     {
       "max_rel_err": 0.0,
@@ -14054,16 +13578,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1280",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150198",
-      "values_compared": 0
+      "values_compared": 155
     },
     {
       "max_rel_err": 0.0,
@@ -14250,16 +13770,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150222",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14334,16 +13850,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1314",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150232",
-      "values_compared": 0
+      "values_compared": 215
     },
     {
       "max_rel_err": 0.0,
@@ -14370,16 +13882,12 @@
       "values_compared": 104
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1318",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150236",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -14574,28 +14082,20 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1343",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150261",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1344",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150262",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -14718,28 +14218,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150278",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1361",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150279",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -14814,16 +14306,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1371",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150289",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -14914,16 +14402,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1383",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150301",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -15022,16 +14506,12 @@
       "values_compared": 117
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1396",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150314",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -15082,16 +14562,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150321",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -15134,16 +14610,12 @@
       "values_compared": 45
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1409",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150327",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -15186,16 +14658,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1415",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150333",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -15270,16 +14738,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1425",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150343",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -15346,16 +14810,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150352",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -15374,16 +14834,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150355",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -15506,16 +14962,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1453",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150371",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -15542,16 +14994,12 @@
       "values_compared": 177
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1457",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150375",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -15578,16 +15026,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1461",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150379",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -15598,16 +15042,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1463",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150381",
-      "values_compared": 0
+      "values_compared": 133
     },
     {
       "max_rel_err": 0.0,
@@ -15666,16 +15106,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1471",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150389",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -15830,16 +15266,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1491",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150409",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -16258,16 +15690,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1544",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150462",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -16374,16 +15802,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1558",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150476",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -16578,16 +16002,12 @@
       "values_compared": 84
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1583",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150501",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -16662,16 +16082,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1593",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150511",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -16738,16 +16154,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1602",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150520",
-      "values_compared": 0
+      "values_compared": 123
     },
     {
       "max_rel_err": 0.0,
@@ -17030,16 +16442,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1638",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150556",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -17154,16 +16562,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1653",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150571",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -17174,16 +16578,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1655",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150573",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -17218,16 +16618,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1660",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150578",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -17494,28 +16890,20 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1694",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150612",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1695",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150613",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -17774,16 +17162,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1728",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150646",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -17882,16 +17266,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1741",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150659",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -17902,16 +17282,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1743",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150661",
-      "values_compared": 0
+      "values_compared": 163
     },
     {
       "max_rel_err": 0.0,
@@ -17978,28 +17354,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1752",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150670",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150671",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -18034,16 +17402,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1758",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150676",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -18062,16 +17426,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1761",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150679",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -18130,16 +17490,12 @@
       "values_compared": 45
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1769",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150687",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -18150,16 +17506,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1771",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150689",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -18178,16 +17530,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1774",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150692",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -18198,16 +17546,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1776",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150694",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -18274,16 +17618,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1785",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150703",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -18462,16 +17802,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1808",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150726",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -18514,16 +17850,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1814",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150732",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -18678,28 +18010,20 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1834",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150752",
-      "values_compared": 0
+      "values_compared": 133
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1835",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150753",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -18710,16 +18034,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1837",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150755",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -18738,16 +18058,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1840",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150758",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -18870,16 +18186,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1856",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150774",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -18914,28 +18226,20 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1861",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150779",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1862",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150780",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -19058,28 +18362,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1878",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150796",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1879",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150797",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -19234,16 +18530,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1899",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150817",
-      "values_compared": 0
+      "values_compared": 111
     },
     {
       "max_rel_err": 0.0,
@@ -19302,16 +18594,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1907",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150825",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -19362,16 +18650,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1914",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150832",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -19414,16 +18698,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1920",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150838",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -19738,16 +19018,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1960",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150878",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -19822,16 +19098,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1970",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150888",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -19850,16 +19122,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1973",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150891",
-      "values_compared": 0
+      "values_compared": 165
     },
     {
       "max_rel_err": 0.0,
@@ -19918,16 +19186,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1981",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150899",
-      "values_compared": 0
+      "values_compared": 115
     },
     {
       "max_rel_err": 0.0,
@@ -20194,16 +19458,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150933",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -20238,16 +19498,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2020",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150938",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -20282,16 +19538,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2025",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150943",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -20398,16 +19650,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2039",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150957",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -20602,16 +19850,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150982",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -20646,16 +19890,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2069",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150987",
-      "values_compared": 0
+      "values_compared": 205
     },
     {
       "max_rel_err": 0.0,
@@ -20666,16 +19906,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2071",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150989",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -20734,28 +19970,20 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2079",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150997",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2080",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040150998",
-      "values_compared": 0
+      "values_compared": 111
     },
     {
       "max_rel_err": 0.0,
@@ -20846,16 +20074,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2092",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151010",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -21098,16 +20322,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2123",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151041",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -21198,16 +20418,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2135",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151053",
-      "values_compared": 0
+      "values_compared": 105
     },
     {
       "max_rel_err": 0.0,
@@ -21282,28 +20498,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2145",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151063",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2146",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151064",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -21410,16 +20618,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2160",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151078",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -21438,16 +20642,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2163",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151081",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -21658,16 +20858,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2190",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151108",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -21846,16 +21042,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2213",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151131",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -21938,16 +21130,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2224",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151142",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -22022,16 +21210,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151152",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -22130,16 +21314,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151165",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
       "max_rel_err": 0.0,
@@ -22150,16 +21330,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2249",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151167",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -22250,16 +21426,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2261",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151179",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -22270,16 +21442,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2263",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151181",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -22290,16 +21458,12 @@
       "values_compared": 45
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151183",
-      "values_compared": 0
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -22342,16 +21506,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151189",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -22426,16 +21586,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151199",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -22518,16 +21674,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2292",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151210",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -22594,16 +21746,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151219",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -22630,16 +21778,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2305",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151223",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -22714,16 +21858,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2315",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151233",
-      "values_compared": 0
+      "values_compared": 115
     },
     {
       "max_rel_err": 0.0,
@@ -22774,16 +21914,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2322",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151240",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -22850,16 +21986,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2331",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151249",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -22902,16 +22034,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151255",
-      "values_compared": 0
+      "values_compared": 225
     },
     {
       "max_rel_err": 0.0,
@@ -23122,16 +22250,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2364",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151282",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -23214,16 +22338,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2375",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151293",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -23242,16 +22362,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2378",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151296",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -23326,16 +22442,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151306",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -23498,16 +22610,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2409",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151327",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -23622,16 +22730,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2424",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151342",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -23706,16 +22810,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2434",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151352",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -23734,16 +22834,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151355",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -23778,16 +22874,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2442",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151360",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -23838,16 +22930,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2449",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151367",
-      "values_compared": 0
+      "values_compared": 133
     },
     {
       "max_rel_err": 0.0,
@@ -24138,16 +23226,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2486",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151404",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -24318,16 +23402,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2508",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151426",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -24346,16 +23426,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2511",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151429",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -24374,28 +23450,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2514",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151432",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2515",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151433",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -24630,16 +23698,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2545",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151463",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -24722,16 +23786,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2556",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151474",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -24750,16 +23810,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2559",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151477",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -24786,16 +23842,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2563",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151481",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -24870,16 +23922,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2573",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151491",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -25018,16 +24066,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2591",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151509",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -25038,16 +24082,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2593",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151511",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -25106,28 +24146,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2601",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151519",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2602",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151520",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -25178,28 +24210,20 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2609",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151527",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2610",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151528",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -25282,16 +24306,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2621",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151539",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -25510,16 +24530,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2649",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151567",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -25538,16 +24554,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2652",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151570",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -25630,16 +24642,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2663",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151581",
-      "values_compared": 0
+      "values_compared": 113
     },
     {
       "max_rel_err": 0.0,
@@ -25962,16 +24970,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2704",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151622",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -25982,16 +24986,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2706",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151624",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -26098,16 +25098,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2720",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151638",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -26182,16 +25178,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2730",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151648",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -26322,16 +25314,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2747",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151665",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -26382,16 +25370,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2754",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151672",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -26498,16 +25482,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2768",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151686",
-      "values_compared": 0
+      "values_compared": 145
     },
     {
       "max_rel_err": 0.0,
@@ -26614,16 +25594,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2782",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151700",
-      "values_compared": 0
+      "values_compared": 143
     },
     {
       "max_rel_err": 0.0,
@@ -26650,16 +25626,12 @@
       "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2786",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151704",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -26742,16 +25714,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2797",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151715",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -26778,16 +25746,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2801",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151719",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
       "max_rel_err": 0.0,
@@ -26798,16 +25762,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2803",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151721",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -26818,16 +25778,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2805",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151723",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -26974,16 +25930,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2824",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151742",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -27122,16 +26074,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2842",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151760",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -27206,16 +26154,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2852",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151770",
-      "values_compared": 0
+      "values_compared": 83
     },
     {
       "max_rel_err": 0.0,
@@ -27314,16 +26258,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2865",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151783",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -27382,16 +26322,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2873",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151791",
-      "values_compared": 0
+      "values_compared": 153
     },
     {
       "max_rel_err": 0.0,
@@ -27466,16 +26402,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2883",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151801",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -27486,16 +26418,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2885",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151803",
-      "values_compared": 0
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -27554,16 +26482,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2893",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151811",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -27662,16 +26586,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2906",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151824",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -27906,16 +26826,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2936",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151854",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -27998,28 +26914,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2947",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151865",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2948",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151866",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -28070,16 +26978,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2955",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151873",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -28194,16 +27098,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2970",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151888",
-      "values_compared": 0
+      "values_compared": 105
     },
     {
       "max_rel_err": 0.0,
@@ -28318,16 +27218,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2985",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151903",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -28394,16 +27290,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2994",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151912",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -28414,16 +27306,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "N_CrvsMakeCompatible",
-        "unit": "nlib.crv_tool_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2996",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2038469518040151914",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
       "max_rel_err": 0.0,
@@ -28451,17 +27339,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 278,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3139,
+  "cases_passed": 3417,
   "cases_total": 3417,
-  "deferred_by_unit": {
-    "nlib.crv_tool_p2": 278
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "nlib.crv_basic"
 }
