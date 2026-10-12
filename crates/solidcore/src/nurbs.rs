@@ -5,6 +5,7 @@
 //! `NL_BasisAdv`, `NL_CrvBasic`, `NL_SrfBasic`, `NL_CrvFit`, ...) and the
 //! `SmNurbs*` / `SmBSpline*` wrappers. Units are listed in `plan/modules.toml`.
 
+pub mod b_spline_curve;
 pub mod basis_adv;
 pub mod basis_basic;
 pub mod bezier;
