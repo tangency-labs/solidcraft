@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **13** (11,063 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial` |
+| Green | **14** (12,151 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic` |
 | Partial | **4** (3,780 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.axis2_placement` |
-| Ported (green + partial) | 17 units, 14,843 upstream lines (3.8%); about 20,200 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 8 (7,677 lines): `nlib.basis_basic`, `nlib.srf_basic`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
+| Ported (green + partial) | 18 units, 15,931 upstream lines (4.1%); about 21,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 7 (6,589 lines): `nlib.basis_basic`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.object` |
 | Blocked | 0 |
 | Todo | 235 (365,383 lines) |
 
@@ -66,6 +66,7 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | `geom.matrix` | `geom::matrix` | 4044 cases (44 fixture + 4000 generated), max_rel_err 0 | bit-identical; a 100,044-case run was also clean; upstream quirks in findings.md |
 | `geom.extent1d` | `geom::extent1d` | 3091 cases (91 fixture + 3000 generated), max_rel_err 0 | bit-identical; wired extent3d intervals and tol MapTo1d / GetScaledZero(SmExtent1d) |
 | `geom.polynomial` | `geom::polynomial` | 6038 cases (38 fixture + 6000 generated), max_rel_err 0 | bit-identical; quartic UB with tol > 1 noted in findings.md |
+| `nlib.srf_basic` | `nurbs::srf_basic` | 3220 cases (220 fixture incl. Surface.sms / offset_nurb.sms / DropCurveSurface.sms + 3000 generated), max_rel_err 0 | bit-identical; a 100,220-case run was also clean; NL_SURFACE as `Surface` (storage/index split), quirks in findings.md |
 
 ## Partial units
 
