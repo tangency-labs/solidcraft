@@ -21,6 +21,7 @@
 //! | [`Transform::transform_point`]  | `SmTransform::TransformPoint`               |
 //! | [`Transform::transform_vector`] | `SmTransform::TransformVector`              |
 //! | [`EFF_ZERO`] etc.            | `SM_EFF_ZERO` etc.                             |
+//! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
 //!
 //! ## Why not `glam`/`nalgebra`
 //!
@@ -61,6 +62,24 @@ pub const EFF_ZERO_DEG: f64 = 1.0e-4;
 pub const EFF_ZERO_RAD: f64 = EFF_ZERO_DEG * PI / 180.0;
 /// `SM_UNDEF_DOUBLE`: upstream's sentinel for an unset double.
 pub const UNDEF_DOUBLE: f64 = 1.23456e-61;
+/// `SM_BIG_DOUBLE`: a value larger than any coordinate (used for "inside out" extents).
+pub const BIG_DOUBLE: f64 = 1.0e20;
+/// `SM_INFINITE_PARAMETER`: the value that marks an unbounded interval end.
+pub const INFINITE_PARAMETER: f64 = 1234567.0;
+/// `SM_INFINITE_PARAMETER_SQRT`: unbounded marker for representations that square it.
+pub const INFINITE_PARAMETER_SQRT: f64 = 1111.111;
+/// `SM_BOUNDED_INFINITE_PARAM`: half size used to approximate an unbounded interval.
+pub const BOUNDED_INFINITE_PARAM: f64 = 33.0;
+
+/// `SM_IS_INFINITE(a)`: true when `a` is `±INFINITE_PARAMETER` or
+/// `±INFINITE_PARAMETER_SQRT` (exact comparison, as upstream).
+#[must_use]
+pub fn is_infinite_param(a: f64) -> bool {
+    a == INFINITE_PARAMETER
+        || a == -INFINITE_PARAMETER
+        || a == INFINITE_PARAMETER_SQRT
+        || a == -INFINITE_PARAMETER_SQRT
+}
 
 /// A 3D vector (`SmVector3d`). Also used for points, see [`Point3`].
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
