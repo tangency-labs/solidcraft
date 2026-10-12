@@ -78,6 +78,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
 | `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
 | `geom.axis2_placement` | `geom::axis2_placement` | 4048 cases (48 fixture + 4000 generated), 3815 bit-identical | 233 (`geom.geom_utility_p1`: `AreCoaxial` -> `smgu_LinePointDistance`) |
+| `geom.geom_utility_p2` | `geom::geom_utility::p2` | 3270 cases (70 fixture + 3200 generated), 740 bit-identical | 2530 (`geom.geom_utility_p1`: segment/point, line, plane, determinant and best-fit-line helpers) |
 
 ## Ready set
 
