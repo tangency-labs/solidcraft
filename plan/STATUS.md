@@ -56,6 +56,15 @@ changes it; per-unit state lives in `plan/modules.toml`.
 | `topology.database_io` | `topology::database_io` | 2059 cases (59 fixture + 2000 generated), max_rel_err 0 | stream state and position match per step; a 200,059-case run was also clean |
 | `nlib.math` | `nurbs::math` | 3076 cases (76 fixture + 3000 generated), max_rel_err 0 | bit-identical; a 100,076-case run was also clean |
 
+## Partial units
+
+Every non-deferred difftest case passes; deferred cases wait on the listed unit (never reported as green).
+
+| Unit | Rust module | difftest | Deferred on |
+|---|---|---|---|
+| `geom.extent3d` | `geom::extent3d` | 3086 cases, 3080 bit-identical | 6 (`geom.extent1d`, `geom.pseudo_box`) |
+| `geom.tol` | `geom::tol` | 3430 cases (430 fixture + 3000 generated), 3209 bit-identical; a 60,430-case run was also clean | 221 (`geom.vector3d`) |
+
 ## Ready set for Wave 1 (todo units whose `depends_on` are all green)
 
 | Layer | Unit | Upstream lines | Rust module |
