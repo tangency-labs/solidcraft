@@ -702,3 +702,34 @@ upstream `.smc` / `.sms` test files as scalar curve / surface functions, plus ed
   is `-1`; Rust uses `Option<CurveFunction>` / `Option<SurfaceFunction>`, so partly NULL
   functions cannot be expressed. Storage upstream allocates with `malloc` is zero-filled.
 - No `UNPORTED(nlib.funcs_basic)` stubs existed to wire.
+
+## nlib.basis_adv (green; no disagreements)
+
+1744 default cases (244 fixture + 1500 generated) and a 100,244-case run (`--seeds 100000`)
+agree bit for bit with upstream (`max_rel_err = 0`). Fixtures use the 33 knot vectors of
+the `nlib.basis_basic` fixtures (every `.smc`/`.sms` in `pt_TestFiles`, `smTopoTest.cpp`,
+SM_API_test rectangle/polygon layouts, doc examples) plus edge cases. Upstream behaviour
+worth knowing:
+
+- **`N_BasisDerivsArray` span walk.** Only `u[0]` and `u[n]` go through `N_BasisFindSpan`;
+  the spans of `u[1..n]` are found by walking forward from the span of `u[0]` (the
+  `NL_LEFT` case falls through into the `NL_RIGHT` loop, which is then a no-op). The walk
+  has no bound: with `NL_LEFT` an inner parameter equal to the domain end `U[m-p]` of a
+  clamped vector walks past `U[m]` (out-of-bounds read), and any inner parameter past the
+  end does the same with either flag. Unsorted parameters are not rejected (spans only
+  move forward). Rust returns `InvalidInput` for out-of-range reads; the ffi wrapper
+  requires inner parameters `< U[m-p]` (left) / `<= U[m-p]` (right). Unlike
+  `N_BasisDerivs`, there is no `1e-24` zero-denominator guard: zero knot differences give
+  inf/NaN, as upstream. The `int` factor `p!/(p-k)!` overflows as in `N_BasisDerivs`
+  (Rust `InvalidInput`, ffi rejects).
+- **`N_BasisInsertKnots` reads `X[mx+1]`** after inserting the last new knot (the second
+  comparison in the merge step). The value never changes the output, so Rust skips the
+  comparison; the shim pads `X` by one slot. An empty `X` reads `X[-1]` (Rust
+  `InvalidInput`). NaN knots make the merge loop forever (Rust `InvalidInput`).
+- **`N_BasisIncreaseKnotMult`** fails with `NL_KNT_ERR` (4) when any inner knot would
+  exceed multiplicity `p`; new knots of earlier spans are dropped (index not set).
+- **`N_GetCompatibleKnotArrayMult`** has the same structure as `N_MakeKnotsCompatible`
+  (same degree for both vectors, multiplicities merged to the maximum) and the same
+  out-of-bounds reads past `U[m]` on unusual inputs and endless loop on NaN knots. The
+  shim pads with `+inf`; the generator keeps to clamped vectors of degree >= 1.
+- No `UNPORTED(nlib.basis_adv)` stubs existed to wire.
