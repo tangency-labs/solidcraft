@@ -642,52 +642,36 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmExtent3d::Circumscribe",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "circumscribe_axis_aligned",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.extent3d/cases.json#80 (upstream SmExtent3d(const SmPseudoBox&))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmExtent3d::Circumscribe",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "circumscribe_permuted_negated",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.extent3d/cases.json#81 (upstream SmExtent3d(const SmPseudoBox&))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmExtent3d::Circumscribe",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "circumscribe_rotated",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.extent3d/cases.json#82 (upstream SmExtent3d(const SmPseudoBox&))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmExtent3d::Circumscribe",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "circumscribe_rotated_unbounded",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.extent3d/cases.json#83 (upstream SmExtent3d(const SmPseudoBox&))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -24707,17 +24691,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 4,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3082,
+  "cases_passed": 3086,
   "cases_total": 3086,
-  "deferred_by_unit": {
-    "geom.pseudo_box": 4
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "geom.extent3d"
 }

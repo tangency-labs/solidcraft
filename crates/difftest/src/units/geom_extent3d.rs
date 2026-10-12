@@ -28,7 +28,7 @@
 //! | `intersect_line`        | `intersect_line`                                 | `IntersectLine` |
 //! | `set_unbounded`         | `set_unbounded`                                  | `SetUnbounded` |
 //! | `approximate_unbounded` | `approximate_unbounded_expanded`                 | `ApproximateUnbounded` |
-//! | `circumscribe`          | deferred (unit `geom.pseudo_box`)                | `SmExtent3d(SmPseudoBox)`, `Circumscribe` |
+//! | `circumscribe`          | `Extent3d::from_pseudo_box`                      | `SmExtent3d(SmPseudoBox)`, `Circumscribe` |
 //! | `intervals`             | `u/v/w_interval`, `set_u/v_interval`             | `GetU/V/WInterval`, `SetU/VInterval` |
 //!
 //! Upstream statuses are compared as the int `status` (0 = `SM_SUCCESS`, else the
@@ -40,6 +40,7 @@ use serde_json::Value;
 
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::{Extent3d, LineHit};
+use solidcore::geom::pseudo_box::PseudoBox;
 use solidcore::math::{Point3, Vec3, INFINITE_PARAMETER, INFINITE_PARAMETER_SQRT};
 use solidcore::SolidError;
 use solidcore_ffi::units::geom_extent3d::{self as ffi, Op};
@@ -505,12 +506,13 @@ fn rust_flat(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
             o.extend(ext6(&a));
             o.extend(ext6(&x.unwrap_or_default()));
         }
-        Inputs::Circumscribe { .. } => {
-            // UNPORTED(geom.pseudo_box): SmExtent3d::Circumscribe
-            return Ok(Err(Output::deferred(
-                "geom.pseudo_box",
-                "SmExtent3d::Circumscribe",
-            )));
+        Inputs::Circumscribe { basis, intervals } => {
+            let ivl = |i: [f64; 2]| Extent1d::from_min_max(i[0], i[1]);
+            let pb = PseudoBox::from_basis_intervals(
+                basis.map(pt),
+                intervals.map(ivl),
+            );
+            o.extend(ext6(&Extent3d::from_pseudo_box(&pb)));
         }
         Inputs::Intervals { e, u, v } => {
             let mut x = ext(*e);

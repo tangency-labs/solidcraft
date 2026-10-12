@@ -10,7 +10,7 @@
 //! text `data`. The result `r` is the operation's values with booleans as
 //! `1.0`/`0.0` and statuses as their upstream codes (`SM_ERR` = 1001,
 //! `SM_ERR_INVALID_INPUT` = 1007). Operations reaching the unported volume base or
-//! pseudo boxes are deferred on the Rust side.
+//! the unaligned pseudo-box branch of `EvaluateBoundingBoxSimple` are deferred on the Rust side.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use serde_json::Value;
 
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::geom::pseudo_box::PseudoBox;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject};
 use solidcore::geom::transform::Transform;
 use solidcore::geom::vector3d::Vec3;
@@ -387,10 +388,21 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         },
         Op::Bbox => {
             let bx = Extent3d::from_bounds(w0.x, w0.y, w0.z, w1.x, w1.y, w1.z);
-            match a.evaluate_bounding_box_simple(&bx, i.n == 1, i.n == 2) {
-                Ok(r) => {
+            // the shim passes a default param pseudo box whenever an output is requested
+            let param_pb = PseudoBox::new();
+            let mut proj_box = Extent3d::new();
+            let mut proj_pb = PseudoBox::new();
+            let r = a.evaluate_bounding_box_simple(
+                &bx,
+                (i.n != 0).then_some(&param_pb),
+                (i.n == 1).then_some(&mut proj_box),
+                (i.n == 2).then_some(&mut proj_pb),
+            );
+            match r {
+                Ok(()) => {
                     out.push(0.0);
-                    if let Some(b) = r {
+                    if i.n == 1 {
+                        let b = proj_box;
                         out.extend([b.u_min(), b.v_min(), b.w_min(), b.u_max(), b.v_max(), b.w_max()]);
                     }
                 }

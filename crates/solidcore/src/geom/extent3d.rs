@@ -54,11 +54,9 @@
 //! | [`Extent3d::u_interval`], [`Extent3d::v_interval`], [`Extent3d::w_interval`] | `GetUInterval`, `GetVInterval`, `GetWInterval` |
 //! | [`Extent3d::set_u_interval`], [`Extent3d::set_v_interval`] | `SetUInterval`, `SetVInterval` |
 //! | [`Extent3d::approximate_unbounded`], [`Extent3d::approximate_unbounded_expanded`] | `ApproximateUnbounded` |
+//! | [`Extent3d::from_pseudo_box`]          | `SmExtent3d(const SmPseudoBox&)`               |
+//! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
-//!
-//! Not here yet (they need types of later units; see the `UNPORTED` markers below):
-//! `Circumscribe` /
-//! `SmExtent3d(const SmPseudoBox&)` (`SmPseudoBox`, unit `geom.pseudo_box`).
 //!
 //! Deviations:
 //! - Out-params become return values ([`LineHit`], [`SphereBound`], tuples, arrays).
@@ -79,17 +77,19 @@
 //! - `SM_ASSERT*` debug checks are not ported (they do not change results).
 //! - Upstream bug kept: `ContainsLineSeg3d` returns true when *either* end point is
 //!   inside (it ORs the two tests). See `plan/findings.md`.
+//! - Upstream quirk kept: `Circumscribe` of an axis-aligned pseudo box reads the
+//!   `IsAxisAligned` map (basis -> axis) as if it were axis -> basis, so a basis that is
+//!   a non-involutive permutation of the axes (e.g. `y, z, x`) gets its intervals on the
+//!   wrong axes. See `plan/findings.md`.
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::vector3d::{asin, sqrt};
 use crate::math::{
     is_infinite_param, max2, max3, min2, min3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ,
     INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
 };
-
-// UNPORTED(geom.pseudo_box): SmExtent3d::Circumscribe and SmExtent3d(const SmPseudoBox&)
-// need `SmPseudoBox`; add them as `Extent3d` methods when `geom::pseudo_box` lands.
 
 /// Upstream status `SM_ERR`.
 const SM_ERR: i32 = 1001;
@@ -320,6 +320,78 @@ impl Extent3d {
         Self {
             min: Vec3::new(u_min, v_min, w_min),
             max: Vec3::new(u_max, v_max, w_max),
+        }
+    }
+
+    /// The box circumscribing `pb` (`SmExtent3d(const SmPseudoBox&)`); see
+    /// [`Extent3d::circumscribe`].
+    #[must_use]
+    pub fn from_pseudo_box(pb: &PseudoBox) -> Self {
+        let mut e = Self::new();
+        e.circumscribe(pb);
+        e
+    }
+
+    /// Becomes the box circumscribing `pb` (`Circumscribe`): the same size for an
+    /// axis-aligned pseudo box (copied from its intervals, so partially unbounded
+    /// pseudo boxes stay partially unbounded), fully unbounded for an unaligned
+    /// unbounded one, else the bounding box of its corners.
+    pub fn circumscribe(&mut self, pb: &PseudoBox) {
+        // low work - axis aligned PseudoBox
+        if let Some(axis_map) = pb.is_axis_aligned() {
+            for (ii, &m) in axis_map.iter().enumerate() {
+                // upstream indexes the basis with the axis map entry of axis `ii`
+                let lx = (m.unsigned_abs() as usize).wrapping_sub(1);
+                let ivl = pb.interval(lx).unwrap_or_default();
+                let (lo, hi) = if m > 0 {
+                    (ivl.min(), ivl.max())
+                } else {
+                    (-ivl.max(), -ivl.min())
+                };
+                if let Ok(c) = self.min.component_mut(ii) {
+                    *c = lo;
+                }
+                if let Ok(c) = self.max.component_mut(ii) {
+                    *c = hi;
+                }
+            }
+            return;
+        }
+
+        if pb.is_bounded() {
+            // circumscribe unaligned finite PseudoBox corners
+            let corners = pb.corners();
+            let [first, rest @ ..] = corners;
+            self.min = first;
+            self.max = first;
+            for c in rest {
+                if self.min.x > c.x {
+                    self.min.x = c.x;
+                }
+                if self.max.x < c.x {
+                    self.max.x = c.x;
+                }
+                if self.min.y > c.y {
+                    self.min.y = c.y;
+                }
+                if self.max.y < c.y {
+                    self.max.y = c.y;
+                }
+                if self.min.z > c.z {
+                    self.min.z = c.z;
+                }
+                if self.max.z < c.z {
+                    self.max.z = c.z;
+                }
+            }
+        } else {
+            // circumscribe unaligned unbounded PseudoBoxes with infinite extents
+            self.min = Vec3::new(
+                -INFINITE_PARAMETER,
+                -INFINITE_PARAMETER,
+                -INFINITE_PARAMETER,
+            );
+            self.max = Vec3::new(INFINITE_PARAMETER, INFINITE_PARAMETER, INFINITE_PARAMETER);
         }
     }
 

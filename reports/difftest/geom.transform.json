@@ -246,28 +246,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "bbox_proj_box_aligned_param_pb",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.transform/cases.json#29 (upstream edge)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "bbox_proj_pseudo_box",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.transform/cases.json#30 (upstream edge)",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -382,16 +374,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454000",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -602,16 +590,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454026",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -746,16 +730,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0044",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454043",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -854,16 +834,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0057",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454056",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -1118,16 +1094,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454086",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -1290,16 +1262,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0107",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454106",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2162,16 +2130,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0209",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454208",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2318,16 +2282,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0228",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454227",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2346,16 +2306,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0231",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454230",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2974,16 +2930,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0307",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454306",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2994,16 +2946,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0309",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454308",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3138,16 +3086,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0325",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454324",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3158,16 +3102,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0327",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454326",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -3338,16 +3278,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0348",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454347",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3530,16 +3466,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0370",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454369",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3714,16 +3646,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0392",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454391",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -3842,16 +3770,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0407",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454406",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4106,16 +4030,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0439",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454438",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4914,16 +4834,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0537",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454536",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5018,16 +4934,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0549",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454548",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5482,16 +5394,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0604",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454603",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -5630,16 +5538,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0620",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454619",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6442,28 +6346,20 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0714",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454713",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0715",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454714",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -6490,16 +6386,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0719",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454718",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -6518,16 +6410,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0722",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454721",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6942,16 +6830,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0773",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454772",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7130,16 +7014,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0794",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454793",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7210,16 +7090,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0803",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454802",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7478,16 +7354,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0836",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454835",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7654,16 +7526,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0857",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454856",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7750,16 +7618,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0867",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454866",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8182,16 +8046,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0919",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454918",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -8470,16 +8330,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0951",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454950",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -8490,16 +8346,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0953",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454952",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8798,16 +8650,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen0990",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423454989",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -9614,16 +9462,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1088",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455087",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10030,16 +9874,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1137",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455136",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -10822,16 +10662,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455231",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -11166,16 +11002,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1273",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455272",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11678,16 +11510,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1335",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455334",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11942,28 +11770,20 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1366",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455365",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1367",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455366",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -12846,16 +12666,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1475",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455474",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -12986,16 +12802,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1492",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455491",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -13122,16 +12934,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1508",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455507",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -13342,16 +13150,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1533",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455532",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -13378,16 +13182,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1537",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455536",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -13410,28 +13210,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1540",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455539",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1541",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455540",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -13478,16 +13270,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1547",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455546",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14350,16 +14138,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1651",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455650",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14690,16 +14474,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1692",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455691",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14970,28 +14750,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1725",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455724",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1726",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455725",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15786,16 +15558,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1821",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455820",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15814,16 +15582,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1824",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455823",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15834,16 +15598,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1826",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455825",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -15982,16 +15742,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1844",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455843",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16146,16 +15902,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1863",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455862",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16294,16 +16046,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1880",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455879",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16726,16 +16474,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1931",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455930",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16802,16 +16546,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1940",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455939",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -16958,16 +16698,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1959",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455958",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17166,16 +16902,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen1983",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423455982",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17350,16 +17082,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456004",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -17446,16 +17174,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456014",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17482,16 +17206,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2019",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456018",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17702,16 +17422,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2045",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456044",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17738,16 +17454,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2049",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456048",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17802,16 +17514,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2056",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456055",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17982,16 +17690,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2078",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456077",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18086,16 +17790,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456089",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18114,16 +17814,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2093",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456092",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -18226,16 +17922,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456105",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -18270,16 +17962,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456110",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -18322,16 +18010,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2117",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456116",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -18386,16 +18070,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2124",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456123",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -18910,16 +18590,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456187",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19214,16 +18890,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2225",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456224",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19398,16 +19070,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2246",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456245",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19518,16 +19186,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2260",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456259",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19614,16 +19278,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456270",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -20370,16 +20030,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456359",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -20470,16 +20126,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2371",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456370",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -20530,16 +20182,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2378",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456377",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -20662,16 +20310,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2393",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456392",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -20918,16 +20562,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2423",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456422",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -21042,16 +20682,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2438",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456437",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -21382,16 +21018,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456476",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -21766,16 +21398,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2523",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456522",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22174,16 +21802,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2572",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456571",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -22338,16 +21962,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2591",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456590",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22422,16 +22042,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2601",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456600",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -22650,16 +22266,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2627",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456626",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22830,16 +22442,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2648",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456647",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -23254,16 +22862,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2698",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456697",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -23350,28 +22954,20 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2709",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456708",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2710",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456709",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -23382,16 +22978,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2712",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456711",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -23846,16 +23438,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2767",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456766",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -23874,16 +23462,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2770",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456769",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -23918,16 +23502,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2775",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456774",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -24070,16 +23650,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2793",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456792",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -24202,16 +23778,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2809",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456808",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -24546,28 +24118,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2850",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456849",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2851",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456850",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -24758,16 +24322,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2874",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456873",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -25138,16 +24698,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2920",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456919",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -25438,16 +24994,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2956",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456955",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -25486,16 +25038,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmPseudoBox::GetBasis",
-        "unit": "geom.pseudo_box"
-      },
       "max_rel_err": 0.0,
       "name": "gen2961",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15474794617423456960",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -25815,12 +25363,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 369,
+  "cases_deferred": 256,
   "cases_failed": 0,
-  "cases_passed": 2673,
+  "cases_passed": 2786,
   "cases_total": 3042,
   "deferred_by_unit": {
-    "geom.pseudo_box": 113,
     "surface.volume_p1": 253,
     "surface.volume_p2": 3
   },

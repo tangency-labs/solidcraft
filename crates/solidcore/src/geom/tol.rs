@@ -39,7 +39,7 @@
 //! | [`xsect_tol_3d`]                       | `SmTol::GetXSectTol3d(SmSmallTopoType)`        |
 //! | [`context_xsect_tol_3d`]               | `SmTol::GetXSectTol3d(const SmContext*, SmSmallTopoType)` |
 //! | [`scaled_zero`], [`scaled_zero_sq`], [`scaled_zero_sqrt`] | `SmTol::GetScaledZero()`, `GetScaledZeroSq()`, `GetScaledZeroSqrt()` |
-//! | [`ScaledZero`] (`f64`, [`Vec2`], [`Vec3`], [`Extent1d`], `Extent2d`, [`Extent3d`]) | `SmTol::GetScaledZero(const double)`, `(const SmVector2d&)`, `(const SmVector3d&)`, `(const SmExtent1d&)`, `(const SmExtent2d&)` (impl in `geom::extent2d`), `(const SmExtent3d&)` |
+//! | [`ScaledZero`] (`f64`, [`Vec2`], [`Vec3`], [`Extent1d`], `Extent2d`, [`Extent3d`], `PseudoBox`) | `SmTol::GetScaledZero(const double)`, `(const SmVector2d&)`, `(const SmVector3d&)`, `(const SmExtent1d&)`, `(const SmExtent2d&)` (impl in `geom::extent2d`), `(const SmExtent3d&)`, `(const SmPseudoBox&)` (impl in `geom::pseudo_box`) |
 //! | [`scaled_zero_of_equations`]           | `SmTol::GetScaledZero(const SmEvalNFunctionsObject&)` |
 //! | [`map_to_1d`]                          | `SmTol::MapTo1d(SmTol3d&, SmVector3d&, const SmExtent1d&)` |
 //! | [`scaled_zero_sq_of`], [`scaled_zero_sqrt_of`] | unary `GetScaledZeroSq<cA>`, `GetScaledZeroSqrt<cA>` |
@@ -125,7 +125,6 @@ use crate::math::{
 // UNPORTED(surface.surface_p1): SmTol::MapTo2d(const SmTol3d&, const SmVector2d&, [const
 // SmVector2d&,] const SmSurface&) and SmTol::GetScaledZero(const SmSurface&) need
 // SmSurface::Evaluate1stDerivatives / GetNaturalUVDomain / ApproximateSize.
-// UNPORTED(geom.pseudo_box): SmTol::GetScaledZero(const SmPseudoBox&) needs SmPseudoBox.
 // UNPORTED(surface.volume_p1): SmTol::GetScaledZero(const SmVolume&) needs SmVolume.
 // UNPORTED(intersect.curve_class_p1): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of
 // SmCurveClassification / SmCurveInterval and SmTol::GetScaledZero(const
