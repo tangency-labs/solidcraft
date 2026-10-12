@@ -11,9 +11,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **41** (40,509 + crv_tool_p2, crv_basic lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic` |
-| Partial | **10** (10,689 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object` |
-| Ported (green + partial) | 50 units, 51,198 upstream lines (13.2%); about 55,200 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
+| Green | **41** (43,799 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic` |
+| Partial | **10** (9,147 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `curve.hermite_curve`, `geom.a_object` |
+| Ported (green + partial) | 51 units, 52,946 upstream lines; about 55,200 Rust lines in `geom/`, `nurbs/`, `topology/` and `curve/` |
 | Claimed | see plan/modules.toml |
 | Blocked | 0 |
 | Todo | 208 (332,757 lines) |
