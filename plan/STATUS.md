@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **12** (10,677 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d` |
-| Partial | **2** (2,381 lines): `geom.extent3d`, `geom.tree` |
-| Ported (green + partial) | 14 units, 13,058 upstream lines (3.4%); about 11,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 7 (5,641 lines): `geom.attribute`, `nlib.basis_basic`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve_nd`, `geom.polynomial` |
+| Partial | **3** (3,301 lines): `geom.extent3d`, `geom.tree`, `geom.attribute` |
+| Ported (green + partial) | 15 units, 13,978 upstream lines (3.6%); about 13,400 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 6 (4,721 lines): `nlib.basis_basic`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve_nd`, `geom.polynomial` |
 | Blocked | 0 |
 | Todo | 239 |
 
@@ -74,6 +74,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 |---|---|---|---|
 | `geom.extent3d` | `geom::extent3d` | 3086 cases, 3082 bit-identical | 4 (`geom.pseudo_box`) |
 | `geom.tree` | `geom::tree` | 618 cases (18 fixture + 600 generated), 611 bit-identical; a 20,018-case run was also clean | 7 (`nurbs.b_spline_surface_p1` 6, `surface.surface_cache_p1` 1) |
+| `geom.attribute` | `geom::attribute` | 2029 cases (29 fixture + 2000 generated), 1991 bit-identical; a 200,029-case run was also clean | 38 (`topology.shell`: merge-region Merge) |
 
 ## Ready set
 
