@@ -60,19 +60,6 @@ use crate::nurbs::geom::{dist_cpt_cpt_homo, dist_pt_pt};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{blend_pt, translate_sum2_pts, CPoint, MatrixType, RealMatrix};
 
-const OP_PARAMS: &str = "nurbs::crv_fit::p1::param_values";
-const OP_INTERP_KNOTS: &str = "nurbs::crv_fit::p1::interp_knot_vector";
-const OP_END_DERIVS: &str = "nurbs::crv_fit::p1::knot_vector_end_derivs";
-const OP_DERIV: &str = "nurbs::crv_fit::p1::knot_vector_deriv";
-const OP_APPROX_KNOTS: &str = "nurbs::crv_fit::p1::knot_vector_approx";
-const OP_INTERP: &str = "nurbs::crv_fit::p1::interp_given_params";
-const OP_DERIVS: &str = "nurbs::crv_fit::p1::interp_knots_and_derivs";
-const OP_ONE_DERIV: &str = "nurbs::crv_fit::p1::interp_knots_and_deriv";
-const OP_FIRST: &str = "nurbs::crv_fit::p1::interp_first_derivs_and_knots";
-const OP_APPROX: &str = "nurbs::crv_fit::p1::approx_knots";
-const OP_SRF_DATA: &str = "nurbs::crv_fit::p1::cpts_from_srf_data";
-const OP_MATRIX: &str = "nurbs::crv_fit::p1::derivs_matrix";
-
 mod sealed {
     pub trait Sealed {}
     impl Sealed for crate::math::Vec3 {}
@@ -377,7 +364,7 @@ fn basis(knt: &KnotVector<'_>, p: i64, u: f64, op: &'static str) -> Result<(i64,
 ///
 /// `InvalidInput` for empty `a`.
 pub fn param_values<P: FitPoint>(a: &[P], par: ParamMethod) -> Result<Vec<f64>> {
-    const OP: &str = OP_PARAMS;
+    const OP: &str = "nurbs::crv_fit::p1::param_values";
     let n = hi(a, OP, "no data points")?;
     let mut u = alloc(n, 0.0, OP)?;
 
@@ -420,7 +407,7 @@ pub fn param_values<P: FitPoint>(a: &[P], par: ParamMethod) -> Result<Vec<f64>> 
 ///
 /// `InvalidInput` for empty `u`.
 pub fn interp_knot_vector(u: &[f64], p: usize) -> Result<Vec<f64>> {
-    const OP: &str = OP_INTERP_KNOTS;
+    const OP: &str = "nurbs::crv_fit::p1::interp_knot_vector";
     let n = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
     let mut uk = alloc(n + p + 1, 0.0, OP)?;
@@ -449,7 +436,7 @@ pub fn interp_knot_vector(u: &[f64], p: usize) -> Result<Vec<f64>> {
 /// `InvalidInput` for empty `u`, or `p == 1` with a single parameter (upstream reads
 /// `u[1]`).
 pub fn knot_vector_end_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
-    const OP: &str = OP_END_DERIVS;
+    const OP: &str = "nurbs::crv_fit::p1::knot_vector_end_derivs";
     let k = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
     let n = k + 2;
@@ -492,7 +479,7 @@ pub fn knot_vector_end_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
 /// [`NlibCode::Input`] when `p > k + 1`; `InvalidInput` for empty `u`, or `p == 1`
 /// with a single parameter (upstream reads `u[1]` or `u[-1]`).
 pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>> {
-    const OP: &str = OP_DERIV;
+    const OP: &str = "nurbs::crv_fit::p1::knot_vector_deriv";
     let k = hi(u, OP, "no parameters")?;
     let p = sg(p, OP)?;
 
@@ -573,7 +560,7 @@ pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>>
 ///
 /// [`NlibCode::Input`] when `n > m`; `InvalidInput` for empty `u`.
 pub fn knot_vector_approx(u: &[f64], n: usize, p: usize) -> Result<Vec<f64>> {
-    const OP: &str = OP_APPROX_KNOTS;
+    const OP: &str = "nurbs::crv_fit::p1::knot_vector_approx";
     let m = hi(u, OP, "no parameters")?;
     let n = sg(n, OP)?;
     let p = sg(p, OP)?;
@@ -643,7 +630,7 @@ pub fn interp_given_params<P: FitPoint>(
     knt: &KnotVector<'_>,
     p: usize,
 ) -> Result<Curve> {
-    const OP: &str = OP_INTERP;
+    const OP: &str = "nurbs::crv_fit::p1::interp_given_params";
     let n = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
 
@@ -713,7 +700,7 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
     ds: P,
     de: P,
 ) -> Result<Curve> {
-    const OP: &str = OP_DERIVS;
+    const OP: &str = "nurbs::crv_fit::p1::interp_knots_and_derivs";
     let kk = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
 
@@ -792,7 +779,7 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
     t: P,
     whr: DerivEnd,
 ) -> Result<Curve> {
-    const OP: &str = OP_ONE_DERIV;
+    const OP: &str = "nurbs::crv_fit::p1::interp_knots_and_deriv";
     let kk = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
 
@@ -889,7 +876,7 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
     knt: &KnotVector<'_>,
     p: usize,
 ) -> Result<Curve> {
-    const OP: &str = OP_FIRST;
+    const OP: &str = "nurbs::crv_fit::p1::interp_first_derivs_and_knots";
     let kk = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
 
@@ -975,7 +962,7 @@ pub fn approx_knots<P: FitPoint>(
     n: usize,
     p: usize,
 ) -> Result<Curve> {
-    const OP: &str = OP_APPROX;
+    const OP: &str = "nurbs::crv_fit::p1::approx_knots";
     let m = hi(a, OP, "no data points")?;
     let n = sg(n, OP)?;
     let p = sg(p, OP)?;
@@ -1123,7 +1110,7 @@ pub fn cpts_from_srf_data<P: FitPoint>(
     dir: DataDir,
     cm: &RealMatrix,
 ) -> Result<Vec<CPoint>> {
-    const OP: &str = OP_SRF_DATA;
+    const OP: &str = "nurbs::crv_fit::p1::cpts_from_srf_data";
     let k = sg(k, OP)?;
     let r: Vec<P> = match dir {
         DataDir::U => a.iter().map(|row| at(row, k, OP)).collect::<Result<_>>()?,
@@ -1152,7 +1139,7 @@ pub fn derivs_matrix<P: FitPoint>(
     de: P,
     cm: &RealMatrix,
 ) -> Result<Vec<CPoint>> {
-    const OP: &str = OP_MATRIX;
+    const OP: &str = "nurbs::crv_fit::p1::derivs_matrix";
     let k = hi(a, OP, "no data points")?;
     let p = sg(p, OP)?;
     let uk = knt.knots();

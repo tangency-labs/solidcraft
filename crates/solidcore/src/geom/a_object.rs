@@ -34,6 +34,7 @@
 //! | [`sag_notify`]                         | `SmSAGObject::Notify`                                 |
 //! | [`sag_cache_make_or_validate`]         | `SmSAGObject::CacheMakeOrValidate`                    |
 //! | `Drop` (implicit)                      | `SmSAGObject::~SmSAGObject`, `SmCacheMgr::~SmCacheMgr` |
+//! | [`BooleanOperation`]                   | `SmBooleanOperationType`                              |
 //! | [`cpt_to_pt_euclid_specialized`]       | `NI_CPtToPtEuclid_specialized`                        |
 //! | [`vector_blend_cpt_specialized`]       | `NI_VectorBlendCPt_specialized`                       |
 //!
@@ -72,8 +73,8 @@
 //! - **Inline helpers.** The `NLI_Math.h` functions return their result instead of
 //!   writing an out-parameter.
 
-use crate::error::{Result, SolidError, SM_ERR};
-use crate::geom::attribute::{ids, AttributeHandle, AttributeStore, ObjectKey};
+use crate::error::{Result, SolidError};
+use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::context::Context;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
 use crate::math::Vec3;
@@ -106,22 +107,55 @@ pub const BREP_TYPE: i64 = 16011;
 /// `SmPolyBrep_TYPE` (`POLY_BASE_TYPE + 1`).
 pub const POLY_BREP_TYPE: i64 = 18001;
 
-/// `SmBooleanOperationType` values read by the region propagation of [`notify`].
-pub mod boolean_op {
+/// Boolean operation recorded on a merge-region attribute (`SmBooleanOperationType`),
+/// as read by the region propagation of [`notify`]. The discriminants are the
+/// upstream values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum BooleanOperation {
+    /// `SM_BO_UNKNOWN`.
+    Unknown = 0,
     /// `SM_BO_UNION`.
-    pub const UNION: i32 = 1;
+    Union = 1,
     /// `SM_BO_INTERSECTION`.
-    pub const INTERSECTION: i32 = 2;
+    Intersection = 2,
     /// `SM_BO_DIFFERENCE`.
-    pub const DIFFERENCE: i32 = 3;
+    Difference = 3,
     /// `SM_BO_EXCLUSIVE_OR`.
-    pub const EXCLUSIVE_OR: i32 = 4;
+    ExclusiveOr = 4,
     /// `SM_BO_MERGE`.
-    pub const MERGE: i32 = 5;
+    Merge = 5,
     /// `SM_BO_PARTIAL_MERGE`.
-    pub const PARTIAL_MERGE: i32 = 6;
+    PartialMerge = 6,
+    /// `SM_BO_IMPRINT`.
+    Imprint = 7,
+    /// `SM_BO_IMPRINT_CLASSIFY`.
+    ImprintClassify = 8,
+    /// `SM_BO_EXTRACT_SEPARATE`.
+    ExtractSeparate = 9,
     /// `SM_BO_SLICE`.
-    pub const SLICE: i32 = 10;
+    Slice = 10,
+}
+
+impl BooleanOperation {
+    /// The operation with upstream value `code`, if any.
+    #[must_use]
+    pub const fn from_code(code: i32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Unknown),
+            1 => Some(Self::Union),
+            2 => Some(Self::Intersection),
+            3 => Some(Self::Difference),
+            4 => Some(Self::ExclusiveOr),
+            5 => Some(Self::Merge),
+            6 => Some(Self::PartialMerge),
+            7 => Some(Self::Imprint),
+            8 => Some(Self::ImprintClassify),
+            9 => Some(Self::ExtractSeparate),
+            10 => Some(Self::Slice),
+            _ => None,
+        }
+    }
 }
 
 /// `SmAObject::IsKindOf`: [`TYPE`], then the `SmObject` chain.
@@ -150,11 +184,7 @@ pub const fn sag_is_kind_of(t: i64) -> bool {
 /// which always hold here (see the module docs).
 #[must_use]
 pub const fn assert_valid(level_given: bool) -> bool {
-    let mut ok = true;
-    if !level_given {
-        ok &= object::assert_valid();
-    }
-    ok
+    level_given || object::assert_valid()
 }
 
 /// The object an attribute handler needs, or the error upstream's null dereference
@@ -189,10 +219,8 @@ fn merge_handler(
     }
 }
 
-fn attribute_of(
-    attributes: &AttributeStore,
-    h: AttributeHandle,
-) -> Result<&crate::geom::attribute::Attribute> {
+/// The live attribute `h`, or the error upstream's dead-pointer read becomes.
+fn attribute_of(attributes: &AttributeStore, h: AttributeHandle) -> Result<&Attribute> {
     attributes.get(h).ok_or(SolidError::InvalidInput {
         operation: "geom::a_object::notify",
         reason: "attribute was deleted",
@@ -396,18 +424,16 @@ fn reg_propagation(
                 operation: OP,
                 reason: "SM_AI_OTHER_REGION_ID attribute is not a merge-region attribute",
             })?;
-    let operation = data.operation();
+    let operation = BooleanOperation::from_code(data.operation());
     let other_regions = data.other_regions().to_vec();
 
     // See if any Other or This Attribs are propagated through booleans
     let has_other_propagated = attributes.has_any_other_propagated_attribs(mr)?;
     let mut has_this_propagated = false;
     for &a in attrs1 {
-        if has_this_propagated {
-            break;
-        }
         if attribute_of(attributes, a)?.is_propagated_through_booleans() {
             has_this_propagated = true;
+            break;
         }
     }
 
@@ -464,7 +490,7 @@ fn reg_propagation(
             let oth = other_attrib.is_some();
 
             let action = match operation {
-                boolean_op::UNION => {
+                Some(BooleanOperation::Union) => {
                     if other_solid {
                         if tgt && oth {
                             Action::Merge
@@ -481,7 +507,7 @@ fn reg_propagation(
                         Action::None
                     }
                 }
-                boolean_op::MERGE | boolean_op::PARTIAL_MERGE => {
+                Some(BooleanOperation::Merge | BooleanOperation::PartialMerge) => {
                     if tgt {
                         if oth {
                             Action::Merge
@@ -494,8 +520,7 @@ fn reg_propagation(
                         Action::None
                     }
                 }
-                // SM_BO_DIFFERENCE, SM_BO_SLICE, SM_BO_EXTRACT_SEPARATE, SM_BO_UNKNOWN, ...
-                boolean_op::INTERSECTION => {
+                Some(BooleanOperation::Intersection) => {
                     if other_solid {
                         if tgt && oth {
                             Action::Merge
@@ -508,7 +533,7 @@ fn reg_propagation(
                         Action::None
                     }
                 }
-                boolean_op::EXCLUSIVE_OR => {
+                Some(BooleanOperation::ExclusiveOr) => {
                     if other_solid {
                         if tgt && oth {
                             Action::SetFromOther
@@ -521,6 +546,8 @@ fn reg_propagation(
                         Action::None
                     }
                 }
+                // SM_BO_DIFFERENCE, SM_BO_SLICE, SM_BO_EXTRACT_SEPARATE, SM_BO_UNKNOWN
+                // and any other value.
                 _ => Action::None,
             };
 
@@ -908,11 +935,9 @@ pub fn sag_cache_make_or_validate(
 ) -> Result<Option<CacheId>> {
     // check that object is an SmBrep or SmPolyBrep object
     if target_type != BREP_TYPE && target_type != POLY_BREP_TYPE {
-        return Err(SolidError::Upstream {
-            operation: "geom::a_object::sag_cache_make_or_validate",
-            code: SM_ERR,
-            entity: None,
-        });
+        return Err(SolidError::sm_err(
+            "geom::a_object::sag_cache_make_or_validate",
+        ));
     }
     // low work - use OldCache when its given
     if let Some(old) = old {
@@ -1042,7 +1067,8 @@ pub fn vector_blend_cpt_specialized(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::attribute::{Attribute, Behavior};
+    use crate::error::SM_ERR;
+    use crate::geom::attribute::Behavior;
 
     fn region(k: u64) -> ObjectRef {
         ObjectRef {

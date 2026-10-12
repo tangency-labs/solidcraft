@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::nurbs::crv_basic::Curve;
+use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::{Direction, Surface};
 use solidcore::nurbs::srf_tool::p1 as tool;
@@ -402,7 +403,7 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
         }
         Inputs::ExtractPatch { rect, .. } => {
             let [ul, ur, vl, vr] = *rect;
-            let r = tool::extract_patch(&s, ul, ur, vl, vr);
+            let r = tool::extract_patch(&s, Rectangle::new(ul, ur, vl, vr));
             o.push(status(&r));
             if let Ok(q) = r {
                 dump(&mut o, &q);

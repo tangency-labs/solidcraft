@@ -292,7 +292,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let rec = match i {
         Inputs::Crv126 { k, m, t, w, pts, v } => {
             let pts: Vec<Vec3> = pts.iter().map(vec3).collect();
-            record_curve(iges::iges_126_curve(*k, *m, t, w, &pts, *v))
+            record_curve(iges::iges_126_curve(&iges::Entity126 {
+                k: *k,
+                m: *m,
+                t,
+                w,
+                pts: &pts,
+                v: *v,
+            }))
         }
         Inputs::Validate { u, p, v } => {
             let m = u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
@@ -320,9 +327,18 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .chunks(cols)
                 .map(|r| r.iter().map(vec3).collect())
                 .collect();
-            record_surface(iges::iges_128_surface(
-                k[0], k[1], deg[0], deg[1], s, t, &w, &pts, *u, *v,
-            ))
+            record_surface(iges::iges_128_surface(&iges::Entity128 {
+                k1: k[0],
+                k2: k[1],
+                m1: deg[0],
+                m2: deg[1],
+                s,
+                t,
+                w: &w,
+                pts: &pts,
+                u: *u,
+                v: *v,
+            }))
         }
         Inputs::ClampCrv { p, cpts, knots, b } => {
             let r = Curve::new(cpoints(cpts), *p, knots.clone()).and_then(|mut c| {

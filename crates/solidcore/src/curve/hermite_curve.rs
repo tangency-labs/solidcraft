@@ -197,8 +197,7 @@ impl HermiteCurve {
         }
 
         // first check the base (SmCurve::operator==: same type, same dimension)
-        let base = self.dim == other.dim;
-        if !base {
+        if self.dim != other.dim {
             return false;
         }
 
@@ -237,7 +236,7 @@ impl HermiteCurve {
     pub fn calculate_bounding_box(
         &self,
         normal_box: Option<&mut Extent3d>,
-        pseudo_box: Option<&mut PseudoBox>,
+        mut pseudo_box: Option<&mut PseudoBox>,
         polar_box: Option<&mut PolarBox>,
     ) -> Result<()> {
         // Compute Bezier polygon for Hermite and use points to compute bounding
@@ -245,7 +244,6 @@ impl HermiteCurve {
         let pnts = self.bezier_points();
         let [p0, p1, p2, p3] = pnts;
 
-        let mut pseudo_box = pseudo_box;
         // Compute the basis vectors of the PseudoBox using the control polygon
         if let Some(pb) = pseudo_box.as_deref_mut() {
             let v1 = p3 - p0;

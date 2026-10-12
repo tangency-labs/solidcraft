@@ -20,6 +20,8 @@
 //!   counterpart and allocation cannot fail.
 //! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number
 //!   instead of a flag plus the global `NL_ERROR` record.
+//! - [`extract_patch`] takes the requested patch as a [`Rectangle`] instead of four
+//!   corner parameters.
 //! - `mt` of [`insert_knot`] is a `usize`, so upstream's `mt < 0` test cannot fail.
 //! - Every array access is bounds checked. Where upstream would index outside its
 //!   arrays (invalid knot vectors, degrees above `NL_MAXDEG` for the fixed-size scratch
@@ -36,16 +38,9 @@
 use crate::error::{NlibCode, Result, SolidError};
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::Rectangle;
-use crate::nurbs::knots::{Side, MAX_DEGREE};
+use crate::nurbs::knots::{KnotVector, Side, MAX_DEGREE};
 use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{Direction, Surface};
-
-const OP_INSERT_KNOT: &str = "nurbs::srf_tool::p1::insert_knot";
-const OP_SPLIT: &str = "nurbs::srf_tool::p1::split";
-const OP_DECOMPOSE: &str = "nurbs::srf_tool::p1::decompose_to_bez";
-const OP_ISO: &str = "nurbs::srf_tool::p1::extract_iso_crv";
-const OP_INSERT_KNOTS: &str = "nurbs::srf_tool::p1::insert_knots";
-const OP_PATCH: &str = "nurbs::srf_tool::p1::extract_patch";
 
 /// Snap tolerance of [`extract_patch`] (hard coded upstream).
 const PATCH_SNAP_TOL: f64 = 1.0e-08;
@@ -155,20 +150,20 @@ fn surface(
 
 /// `(span, multiplicity)` of `t` for degree `p` (`N_BasisFindSpanAndMult`, `NL_LEFT`).
 fn span_mult(knots: &[f64], p: isize, t: f64, op: &'static str) -> Result<(isize, isize)> {
-    let kv = crate::nurbs::knots::KnotVector::from_slice(knots)?;
+    let kv = KnotVector::from_slice(knots)?;
     let (sp, ml) = kv.find_span_and_mult(ix(p, op)?, t, Side::Left)?;
     Ok((sx(sp, op)?, sx(ml, op)?))
 }
 
 /// Span of `t` for degree `p` (`N_BasisFindSpan`, `NL_LEFT`).
 fn span(knots: &[f64], p: isize, t: f64, op: &'static str) -> Result<isize> {
-    let kv = crate::nurbs::knots::KnotVector::from_slice(knots)?;
+    let kv = KnotVector::from_slice(knots)?;
     sx(kv.find_span(ix(p, op)?, t, Side::Left)?, op)
 }
 
 /// `N_KnotVectorIsEndParam` as an error: `NL_PAR_ERR` when `t <= U[0]` or `t >= U[m]`.
 fn check_interior(knots: &[f64], t: f64, op: &'static str) -> Result<()> {
-    let kv = crate::nurbs::knots::KnotVector::from_slice(knots)?;
+    let kv = KnotVector::from_slice(knots)?;
     if kv.is_end_param(t) {
         return Err(nlib(op, NlibCode::Parameter));
     }
@@ -182,7 +177,7 @@ fn check_interior(knots: &[f64], t: f64, op: &'static str) -> Result<()> {
 /// Errors: [`NlibCode::Parameter`] for an end or outside parameter, or a total
 /// multiplicity above the degree; [`NlibCode::Call`] for [`Direction::UV`].
 pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<Surface> {
-    const OP: &str = OP_INSERT_KNOT;
+    const OP: &str = "nurbs::srf_tool::p1::insert_knot";
     let Local {
         n,
         m,
@@ -381,7 +376,7 @@ pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<S
 /// [`NlibCode::Call`] for [`Direction::UV`]; `InvalidInput` for a degree above
 /// [`MAX_DEGREE`] or a knot multiplicity above the degree.
 pub fn split(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surface)> {
-    const OP: &str = OP_SPLIT;
+    const OP: &str = "nurbs::srf_tool::p1::split";
     let Local {
         n,
         m,
@@ -606,14 +601,14 @@ fn patch_mut<'a>(
 /// `patches[iq][jq].net[k][j]`.
 fn pcpt(
     patches: &[Vec<Patch>],
-    at_: (isize, isize),
+    ij: (isize, isize),
     k: isize,
     j: isize,
     op: &'static str,
 ) -> Result<CPoint> {
     let pt = patches
-        .get(ix(at_.0, op)?)
-        .and_then(|row| row.get(ix(at_.1, op).ok()?))
+        .get(ix(ij.0, op)?)
+        .and_then(|row| row.get(ix(ij.1, op).ok()?))
         .ok_or_else(|| oob(op))?;
     at2(&pt.net, k, j, op)
 }
@@ -621,13 +616,13 @@ fn pcpt(
 /// `patches[iq][jq].net[k][j] = x`.
 fn pput(
     patches: &mut [Vec<Patch>],
-    at_: (isize, isize),
+    ij: (isize, isize),
     k: isize,
     j: isize,
     x: CPoint,
     op: &'static str,
 ) -> Result<()> {
-    let pt = patch_mut(patches, at_.0, at_.1, op)?;
+    let pt = patch_mut(patches, ij.0, ij.1, op)?;
     put2(&mut pt.net, k, j, x, op)
 }
 
@@ -639,7 +634,7 @@ fn pput(
 /// Errors with `InvalidInput` for knot vectors upstream cannot decompose (no
 /// non-zero span, or more breakpoints than spans).
 pub fn decompose_to_bez(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
-    const OP: &str = OP_DECOMPOSE;
+    const OP: &str = "nurbs::srf_tool::p1::decompose_to_bez";
     let Local {
         m,
         p,
@@ -856,7 +851,7 @@ pub fn decompose_to_bez(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
 /// Errors: [`NlibCode::Call`] for [`Direction::UV`]; `InvalidInput` for a degree
 /// above [`MAX_DEGREE`] or a knot multiplicity above the degree.
 pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
-    const OP: &str = OP_ISO;
+    const OP: &str = "nurbs::srf_tool::p1::extract_iso_crv";
     let Local {
         n,
         m,
@@ -1018,7 +1013,7 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
 /// `x[0]` or the last knot is an end or outside parameter; [`NlibCode::Call`] for
 /// [`Direction::UV`].
 pub fn insert_knots(sur: &Surface, x: &[f64], dir: Direction) -> Result<Surface> {
-    const OP: &str = OP_INSERT_KNOTS;
+    const OP: &str = "nurbs::srf_tool::p1::insert_knots";
     let Local {
         n,
         m,
@@ -1216,17 +1211,16 @@ fn snap(x: &mut f64, knots: &[f64], k: isize) -> bool {
     false
 }
 
-/// Extracts the patch `[ul, ur] x [vl, vr]` of `sur` by knot insertion
-/// (`N_SrfExtractPatch`). Corner parameters within `1e-8` of an existing knot are
+/// Extracts the patch `rect` (`[ul, ur] x [vb, vt]`) of `sur` by knot insertion
+/// (`N_SrfExtractPatch`, whose four corner parameters are the fields of `rect`). Corner parameters within `1e-8` of an existing knot are
 /// first snapped to it; the result is then reparametrised back to the requested
 /// rectangle.
 ///
 /// Errors with [`NlibCode::Input`] for an empty (or, after snapping, inverted)
 /// rectangle.
-pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Result<Surface> {
-    const OP: &str = OP_PATCH;
+pub fn extract_patch(sur: &Surface, rect: Rectangle) -> Result<Surface> {
+    const OP: &str = "nurbs::srf_tool::p1::extract_patch";
     let Local {
-        n: _,
         m,
         p,
         q,
@@ -1235,11 +1229,11 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         pw,
         u: up,
         v: vp,
+        ..
     } = Local::of(sur, OP)?;
 
-    // Remember the requested box.
-    let in_rect = Rectangle::new(ul, ur, vl, vr);
-    let (mut ul, mut ur, mut vl, mut vr) = (ul, ur, vl, vr);
+    // The requested box is `rect`; its corners may be snapped below.
+    let (mut ul, mut ur, mut vl, mut vr) = (rect.ul, rect.ur, rect.vb, rect.vt);
 
     // Snap to existing knots if within tolerance.
     let mut snapped = false;
@@ -1254,27 +1248,27 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
     }
 
     // Find knot spans and set new indexes.
-    let (sul, mul) = span_mult(up, p, ul, OP)?;
-    let (mut sur_, mut mur) = span_mult(up, p, ur, OP)?;
-    let (svl, mvl) = span_mult(vp, q, vl, OP)?;
-    let (mut svr, mut mvr) = span_mult(vp, q, vr, OP)?;
+    let (span_ul, mul) = span_mult(up, p, ul, OP)?;
+    let (mut span_ur, mut mur) = span_mult(up, p, ur, OP)?;
+    let (span_vl, mvl) = span_mult(vp, q, vl, OP)?;
+    let (mut span_vr, mut mvr) = span_mult(vp, q, vr, OP)?;
 
-    let is = sul - p;
+    let is = span_ul - p;
     if ur == at(up, r - p, OP)? {
-        sur_ = r;
+        span_ur = r;
         mur = p + 1;
     }
-    let ie = sur_ - mur;
+    let ie = span_ur - mur;
 
-    let js = svl - q;
+    let js = span_vl - q;
     if vr == at(vp, s - q, OP)? {
-        svr = s;
+        span_vr = s;
         mvr = q + 1;
     }
-    let je = svr - mvr;
+    let je = span_vr - mvr;
 
     let n = ie - is;
-    let r = sur_ - sul - mur + 2 * p + 1;
+    let r = span_ur - span_ul - mur + 2 * p + 1;
     if n < 0 {
         return Err(nlib(OP, NlibCode::Input));
     }
@@ -1290,11 +1284,11 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         }
 
         // Insert the left knot.
-        let ll = sul - p;
+        let ll = span_ul - p;
         for i in 1..=p - mul {
             for j in 0..=p - i - mul {
                 let left = at(up, ll + i + j, OP)?;
-                let alf = (ul - left) / (at(up, sul + j + 1, OP)? - left);
+                let alf = (ul - left) / (at(up, span_ul + j + 1, OP)? - left);
                 let oma = 1.0 - alf;
                 let c =
                     CPoint::combine2(alf, at2(&aw, j + 1, col, OP)?, oma, at2(&aw, j, col, OP)?);
@@ -1303,7 +1297,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         }
 
         // Insert the right knot.
-        let lr = sur_ - p;
+        let lr = span_ur - p;
         let lk = n - p + mur;
         for i in 1..=p - mur {
             let mut j = p - i - mur;
@@ -1313,7 +1307,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
                 if left < ul {
                     left = ul;
                 }
-                let alf = (ur - left) / (at(up, sur_ + j + 1, OP)? - left);
+                let alf = (ur - left) / (at(up, span_ur + j + 1, OP)? - left);
                 let oma = 1.0 - alf;
                 let c =
                     CPoint::combine2(alf, at2(&aw, k, col, OP)?, oma, at2(&aw, k - 1, col, OP)?);
@@ -1324,7 +1318,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
     }
 
     let m = je - js;
-    let s = svr - svl - mvr + 2 * q + 1;
+    let s = span_vr - span_vl - mvr + 2 * q + 1;
     if m < 0 {
         return Err(nlib(OP, NlibCode::Input));
     }
@@ -1341,11 +1335,11 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         }
 
         // Insert the left knot.
-        let ll = svl - q;
+        let ll = span_vl - q;
         for i in 1..=q - mvl {
             for j in 0..=q - i - mvl {
                 let left = at(vp, ll + i + j, OP)?;
-                let alf = (vl - left) / (at(vp, svl + j + 1, OP)? - left);
+                let alf = (vl - left) / (at(vp, span_vl + j + 1, OP)? - left);
                 let oma = 1.0 - alf;
                 let c =
                     CPoint::combine2(alf, at2(&qw, row, j + 1, OP)?, oma, at2(&qw, row, j, OP)?);
@@ -1354,7 +1348,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         }
 
         // Insert the right knot.
-        let lr = svr - q;
+        let lr = span_vr - q;
         let lk = m - q + mvr;
         for i in 1..=q - mvr {
             let mut j = q - i - mvr;
@@ -1364,7 +1358,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
                 if left < vl {
                     left = vl;
                 }
-                let alf = (vr - left) / (at(vp, svr + j + 1, OP)? - left);
+                let alf = (vr - left) / (at(vp, span_vr + j + 1, OP)? - left);
                 let oma = 1.0 - alf;
                 let c =
                     CPoint::combine2(alf, at2(&qw, row, k, OP)?, oma, at2(&qw, row, k - 1, OP)?);
@@ -1380,7 +1374,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         k += 1;
         put(&mut uq, k, ul, OP)?;
     }
-    for i in sul + 1..=sur_ - mur {
+    for i in span_ul + 1..=span_ur - mur {
         k += 1;
         put(&mut uq, k, at(up, i, OP)?, OP)?;
     }
@@ -1394,7 +1388,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
         k += 1;
         put(&mut vq, k, vl, OP)?;
     }
-    for j in svl + 1..=svr - mvr {
+    for j in span_vl + 1..=span_vr - mvr {
         k += 1;
         put(&mut vq, k, at(vp, j, OP)?, OP)?;
     }
@@ -1408,7 +1402,7 @@ pub fn extract_patch(sur: &Surface, ul: f64, ur: f64, vl: f64, vr: f64) -> Resul
     // When the final interval was snapped away from what was requested, scale the
     // output back to the requested interval.
     if snapped {
-        out.reparam_to_interval(in_rect, Direction::UV)?;
+        out.reparam_to_interval(rect, Direction::UV)?;
     }
     Ok(out)
 }
@@ -1539,14 +1533,14 @@ mod tests {
     #[test]
     fn extract_patch_whole_and_part() {
         let s = sample();
-        let whole = extract_patch(&s, 0.0, 1.0, 0.0, 1.0).unwrap();
+        let whole = extract_patch(&s, Rectangle::new(0.0, 1.0, 0.0, 1.0)).unwrap();
         assert_eq!(whole.u_knots(), s.u_knots());
         assert_eq!(whole.v_knots(), s.v_knots());
-        let part = extract_patch(&s, 0.2, 0.8, 0.1, 0.9).unwrap();
+        let part = extract_patch(&s, Rectangle::new(0.2, 0.8, 0.1, 0.9)).unwrap();
         assert_eq!(part.u_knots()[0], 0.2);
         assert_eq!(*part.v_knots().last().unwrap(), 0.9);
         assert!(matches!(
-            extract_patch(&s, 0.5, 0.5, 0.0, 1.0),
+            extract_patch(&s, Rectangle::new(0.5, 0.5, 0.0, 1.0)),
             Err(SolidError::Nlib {
                 code: NlibCode::Input,
                 ..

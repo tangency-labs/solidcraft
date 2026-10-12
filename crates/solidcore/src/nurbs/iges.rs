@@ -7,10 +7,12 @@
 //!
 //! | Rust                       | Upstream                 |
 //! |----------------------------|--------------------------|
+//! | [`Entity126`]              | the arguments of `N_Iges126Crv` |
 //! | [`iges_126_curve`]         | `N_Iges126Crv`           |
 //! | [`clamp_curve`]            | `N_IgesClampCrv`         |
 //! | [`correct_curve_knots`]    | `N_IgesCorrectCrvKnots`  |
 //! | [`validate`]               | `N_IgesValidate`         |
+//! | [`Entity128`]              | the arguments of `N_Iges128Srf` |
 //! | [`iges_128_surface`]       | `N_Iges128Srf`           |
 //! | [`clamp_surface`]          | `N_IgesClampSrf`         |
 //! | [`correct_surface_knots`]  | `N_IgesCorrectSrfKnots`  |
@@ -20,7 +22,8 @@
 //! Deviations:
 //! - `N_Iges126Crv` / `N_Iges128Srf` fill a caller-supplied `NL_CURVE` /
 //!   `NL_SURFACE` (always NULL-initialised by the SMLib callers); the ports return a
-//!   new [`Curve`] / [`Surface`]. The `NL_STACKS` arguments have no counterpart and
+//!   new [`Curve`] / [`Surface`], and take the entity data as one [`Entity126`] /
+//!   [`Entity128`] instead of six / ten positional arguments. The `NL_STACKS` arguments have no counterpart and
 //!   allocation cannot fail.
 //! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
@@ -504,10 +507,50 @@ pub fn correct_surface_knots(sur: &mut Surface) -> Result<()> {
 
 // ---- entities 126 and 128 -----------------------------------------------------------
 
-/// Builds a clamped NLib curve from IGES entity 126 data (`N_Iges126Crv`): upper
-/// index `k` (`k + 1` control points), degree `m`, knots `t[0..=k+m+1]`, weights
-/// `w[0..=k]`, Euclidean control points `pts[0..=k]` (`z == `[`NOZ`] marks a 2D
-/// point) and bounds `v`.
+/// IGES entity 126 (rational B-spline curve) data, the arguments of `N_Iges126Crv`.
+#[derive(Debug, Clone, Copy)]
+pub struct Entity126<'a> {
+    /// Upper index of the control points (`K`; `k + 1` points).
+    pub k: usize,
+    /// Degree (`M`).
+    pub m: usize,
+    /// Knots `t[0..=k+m+1]`.
+    pub t: &'a [f64],
+    /// Weights `w[0..=k]`.
+    pub w: &'a [f64],
+    /// Euclidean control points `pts[0..=k]`; `z == `[`NOZ`] marks a 2D point.
+    pub pts: &'a [Vec3],
+    /// Parameter bounds `[V(0), V(1)]`.
+    pub v: [f64; 2],
+}
+
+/// IGES entity 128 (rational B-spline surface) data, the arguments of
+/// `N_Iges128Srf`.
+#[derive(Debug, Clone, Copy)]
+pub struct Entity128<'a> {
+    /// Upper index of the control points in u (`K1`).
+    pub k1: usize,
+    /// Upper index of the control points in v (`K2`).
+    pub k2: usize,
+    /// Degree in u (`M1`).
+    pub m1: usize,
+    /// Degree in v (`M2`).
+    pub m2: usize,
+    /// u knots `s[0..=k1+m1+1]`.
+    pub s: &'a [f64],
+    /// v knots `t[0..=k2+m2+1]`.
+    pub t: &'a [f64],
+    /// Weights `w[i][j]`, `0 <= i <= k1`, `0 <= j <= k2`.
+    pub w: &'a [Vec<f64>],
+    /// Euclidean control points `pts[i][j]`, indexed as `w`.
+    pub pts: &'a [Vec<Vec3>],
+    /// u parameter bounds `[U(0), U(1)]`.
+    pub u: [f64; 2],
+    /// v parameter bounds `[V(0), V(1)]`.
+    pub v: [f64; 2],
+}
+
+/// Builds a clamped NLib curve from IGES entity 126 data (`N_Iges126Crv`).
 ///
 /// The curve is rational unless all weights equal `w[0]`; it is clamped to `v` with
 /// [`clamp_curve`] and its knots are corrected with [`correct_curve_knots`].
@@ -517,14 +560,8 @@ pub fn correct_surface_knots(sur: &mut Surface) -> Result<()> {
 /// [`NlibCode::Knot`] from [`validate`], and as [`clamp_curve`] /
 /// [`correct_curve_knots`]; with `InvalidInput` when an array is shorter than `k` and
 /// `m` say.
-pub fn iges_126_curve(
-    k: usize,
-    m: usize,
-    t: &[f64],
-    w: &[f64],
-    pts: &[Vec3],
-    v: [f64; 2],
-) -> Result<Curve> {
+pub fn iges_126_curve(entity: &Entity126<'_>) -> Result<Curve> {
+    let Entity126 { k, m, t, w, pts, v } = *entity;
     let pp = m;
     let nn = k;
     let mm = nn
@@ -579,10 +616,7 @@ pub fn iges_126_curve(
     Ok(cur)
 }
 
-/// Builds a clamped NLib surface from IGES entity 128 data (`N_Iges128Srf`): upper
-/// indices `k1`, `k2`, degrees `m1`, `m2`, knots `s[0..=k1+m1+1]`, `t[0..=k2+m2+1]`,
-/// weights `w[i][j]` and Euclidean control points `pts[i][j]` (`0 <= i <= k1`,
-/// `0 <= j <= k2`), bounds `u`, `v`.
+/// Builds a clamped NLib surface from IGES entity 128 data (`N_Iges128Srf`).
 ///
 /// The surface is rational unless all weights equal `w[0][0]` (as upstream, `z` is
 /// weighted even when it is [`NOZ`]); it is clamped with [`clamp_surface`] and its
@@ -593,18 +627,19 @@ pub fn iges_126_curve(
 /// [`NlibCode::Knot`] from [`validate`] (u first), and as [`clamp_surface`] /
 /// [`correct_surface_knots`]; with `InvalidInput` when an array is shorter than the
 /// indices and degrees say.
-pub fn iges_128_surface(
-    k1: usize,
-    k2: usize,
-    m1: usize,
-    m2: usize,
-    s: &[f64],
-    t: &[f64],
-    w: &[Vec<f64>],
-    pts: &[Vec<Vec3>],
-    u: [f64; 2],
-    v: [f64; 2],
-) -> Result<Surface> {
+pub fn iges_128_surface(entity: &Entity128<'_>) -> Result<Surface> {
+    let Entity128 {
+        k1,
+        k2,
+        m1,
+        m2,
+        s,
+        t,
+        w,
+        pts,
+        u,
+        v,
+    } = *entity;
     let (pp, qq, nn, mm) = (m1, m2, k1, k2);
     let size = |a: usize, b: usize| {
         a.checked_add(b)
@@ -679,6 +714,10 @@ pub fn iges_128_surface(
 mod tests {
     use super::*;
 
+    fn c126(k: usize, m: usize, t: &[f64], w: &[f64], pts: &[Vec3], v: [f64; 2]) -> Result<Curve> {
+        iges_126_curve(&Entity126 { k, m, t, w, pts, v })
+    }
+
     fn line_pts(k: usize) -> Vec<Vec3> {
         (0..k).map(|i| Vec3::new(i as f64, 0.0, 0.0)).collect()
     }
@@ -707,7 +746,7 @@ mod tests {
     #[test]
     fn curve_126_clean_is_unchanged() {
         let t = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
-        let c = iges_126_curve(3, 2, &t, &[1.0; 4], &line_pts(4), [0.0, 1.0]).unwrap();
+        let c = c126(3, 2, &t, &[1.0; 4], &line_pts(4), [0.0, 1.0]).unwrap();
         assert_eq!(c.knots(), &t);
         assert!(!c.is_rational());
         assert_eq!(c.cpts()[2], CPoint::new(2.0, 0.0, 0.0, NOW));
@@ -717,7 +756,7 @@ mod tests {
     fn curve_126_rational_and_2d() {
         let t = [0.0, 0.0, 1.0, 1.0];
         let pts = [Vec3::new(1.0, 2.0, NOZ), Vec3::new(3.0, 4.0, NOZ)];
-        let c = iges_126_curve(1, 1, &t, &[1.0, 2.0], &pts, [0.0, 1.0]).unwrap();
+        let c = c126(1, 1, &t, &[1.0, 2.0], &pts, [0.0, 1.0]).unwrap();
         assert_eq!(c.cpts()[1], CPoint::new(6.0, 8.0, NOZ, 2.0));
     }
 
@@ -730,26 +769,19 @@ mod tests {
             _ => None,
         };
         assert_eq!(
-            e(iges_126_curve(2, 0, &t, &[1.0; 3], &pts, [0.0, 1.0])),
+            e(c126(2, 0, &t, &[1.0; 3], &pts, [0.0, 1.0])),
             Some(NlibCode::Degree)
         );
         assert_eq!(
-            e(iges_126_curve(
-                2,
-                2,
-                &t,
-                &[1.0, 1e-4, 1.0],
-                &pts,
-                [0.0, 1.0]
-            )),
+            e(c126(2, 2, &t, &[1.0, 1e-4, 1.0], &pts, [0.0, 1.0])),
             Some(NlibCode::Weight)
         );
         assert_eq!(
-            e(iges_126_curve(2, 2, &t, &[1.0; 3], &pts, [1.0, 0.0])),
+            e(c126(2, 2, &t, &[1.0; 3], &pts, [1.0, 0.0])),
             Some(NlibCode::Knot)
         );
         assert!(matches!(
-            iges_126_curve(2, 2, &t[..5], &[1.0; 3], &pts, [0.0, 1.0]),
+            c126(2, 2, &t[..5], &[1.0; 3], &pts, [0.0, 1.0]),
             Err(SolidError::InvalidInput { .. })
         ));
     }
@@ -825,7 +857,19 @@ mod tests {
                     .collect()
             })
             .collect();
-        let sur = iges_128_surface(2, 1, 2, 1, &s, &t, &w, &pts, [2.0, 3.0], [0.0, 1.0]).unwrap();
+        let sur = iges_128_surface(&Entity128 {
+            k1: 2,
+            k2: 1,
+            m1: 2,
+            m2: 1,
+            s: &s,
+            t: &t,
+            w: &w,
+            pts: &pts,
+            u: [2.0, 3.0],
+            v: [0.0, 1.0],
+        })
+        .unwrap();
         assert_eq!(sur.u_knots(), &[2.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
         assert_eq!(sur.v_knots(), &t);
         assert_eq!(sur.indices().n, 2);
