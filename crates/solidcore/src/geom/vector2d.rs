@@ -49,16 +49,17 @@
 //!   dereferences `NULL` (non-const) after logging `SM_ERR`; Rust returns
 //!   `SolidError::Upstream { code: 1001 }` (`SM_ERR`) for both.
 //! - `SM_ASSERT_BREAK` checks are compiled out upstream (release build) and omitted.
-//! - Back-edges co-ported: `sm_sqrt`, `sm_acos`, `sm_asin` (unit `geom.vector3d`) and
-//!   `SM_IS_ZERO_SQUARED` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())` (unit
-//!   `geom.tol`) are tiny pure functions, inlined here as private helpers with the same
-//!   branches (their `ERR(SM_ERR)` logging is dropped). Sites carry
+//! - Back-edges co-ported: `sm_sqrt`, `sm_acos`, `sm_asin` (unit `geom.vector3d`) are
+//!   tiny pure functions, inlined here as private helpers with the same branches (their
+//!   `ERR(SM_ERR)` logging is dropped). `SM_IS_ZERO_SQUARED` =
+//!   `SmTol::InTol(a, SmTol::GetScaledZeroSq())` calls [`crate::geom::tol`]. Sites carry
 //!   `// CO-PORT(<unit>): <symbol>`; the owning units may replace them with shared
 //!   versions.
 
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::error::{Result, SolidError};
+use crate::geom::tol;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
 
 /// Upstream `SM_ERR` (generic error status).
@@ -113,10 +114,9 @@ fn sm_asin(x: f64) -> f64 {
     x.asin()
 }
 
-// CO-PORT(geom.tol): SmTol::InTol, SmTol::GetScaledZeroSq
 /// `SM_IS_ZERO_SQUARED(a)` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())`.
 fn is_zero_squared(a: f64) -> bool {
-    a.abs() <= EFF_ZERO_SQ
+    tol::in_tol(a, tol::scaled_zero_sq())
 }
 
 impl Vec2 {

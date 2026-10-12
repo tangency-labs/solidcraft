@@ -1,0 +1,230 @@
+//! FFI wrappers for unit `geom.tol`.
+//!
+//! Shim: `harness/cpp/shim/geom_tol.cpp`.
+//! Upstream: `source/SMLib/inc/SmTol.h`, `source/SMLib/src/SmTol.cpp` (`SmTol`, the
+//! `SmTol3d` classes) and `source/SMLib/inc/SmRelation.h` (`SmRelation`).
+//!
+//! | Rust         | shim                   | upstream                         |
+//! |--------------|------------------------|----------------------------------|
+//! | [`op`]       | `sc_geom_tol_op`       | one `SmTol` call per [`Op`]      |
+//! | [`relation`] | `sc_geom_tol_relation` | a script of `SmRelation<int, int>` calls |
+
+use crate::{call_with_buffer, check, FfiError};
+
+mod sys {
+    extern "C" {
+        pub fn sc_geom_tol_op(
+            op: i32,
+            model_size: f64,
+            ratio: f64,
+            a: *const f64,
+            flag: i32,
+            small: i32,
+            kinds: *const i32,
+            objs: *const f64,
+            out: *mut f64,
+            out_n: *mut i32,
+        ) -> i32;
+        pub fn sc_geom_tol_relation(
+            card: i32,
+            n1: i64,
+            n2: i64,
+            script: *const i64,
+            n_script: i64,
+            out: *mut i64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+    }
+}
+
+/// One `SmTol` operation (see the shim for the operand layout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum Op {
+    /// `SizeEstimateToZoneTol3d(a0)`.
+    SizeEstimate = 0,
+    /// `InTol(a0, SmScaledZero(a1))`.
+    InTol = 1,
+    /// `CalcFaceZoneTol3d()`.
+    CalcFaceZone = 2,
+    /// `CalcEdgeZoneTol3d(a0, a1, flag ? &SmZoneTol3d(a2) : NULL)`.
+    CalcEdgeZone = 3,
+    /// `CalcVertexZoneTol3d(a0, a1, flag ? &SmZoneTol3d(a2) : NULL)`.
+    CalcVertexZone = 4,
+    /// `GetEffZero`, `GetEffZeroSq`, `GetEffZeroParam`, `GetEffZeroAngRad`.
+    EffZeros = 5,
+    /// `GetXSectTol3d(SmZoneTol3d(a0), SmZoneTol3d(a1))`.
+    XSectFromZones = 6,
+    /// `GetAngTolRad()`.
+    AngTolRad = 7,
+    /// `GetModelSizeEstimate()`.
+    ModelSize = 8,
+    /// `AreParallel(&v(a0..3), &v(a3..6), flag ? &a6 : NULL)`.
+    AreParallel = 9,
+    /// `ArePerpendicular(&v(a0..3), &v(a3..6), flag ? &a6 : NULL)`.
+    ArePerpendicular = 10,
+    /// `IsZeroSpeed(a0, a1, flag ? &SmScaledZero(a2) : NULL)`.
+    IsZeroSpeed = 11,
+    /// `IsDegenerate(SmVector3d(a0..3), flag ? &SmXSectTol3d(a3) : NULL)`.
+    IsDegenerateVec3 = 12,
+    /// `GetGapGain()`.
+    GapGain = 13,
+    /// `GetZoneTol3d(small)`.
+    ZoneSys = 14,
+    /// `GetZoneTol3d((const SmContext*)NULL, small)`.
+    ZoneCtx = 15,
+    /// `GetApproxTol3d(small)`.
+    ApproxSys = 16,
+    /// `GetApproxTol3d((const SmContext*)NULL, small)`.
+    ApproxCtx = 17,
+    /// `GetXSectTol3d(small)`.
+    XSectSys = 18,
+    /// `GetXSectTol3d((const SmContext*)NULL, small)`.
+    XSectCtx = 19,
+    /// `GetScaledZero()`, `GetScaledZeroSq()`, `GetScaledZeroSqrt()`.
+    ScaledZeroSys = 20,
+    /// `GetScaledZero`, `GetScaledZeroSq`, `GetScaledZeroSqrt` of `small` (1..=4)
+    /// objects.
+    ScaledZeroN = 21,
+    /// Every tolerance constructor and `operator=` applied to `a0`.
+    TolCtors = 22,
+    /// `SmTol3d t(a0); t *= a1`.
+    TolMul = 23,
+}
+
+/// Object kind for [`Op::ScaledZeroN`]: `double`.
+pub const KIND_DOUBLE: i32 = 0;
+/// Object kind for [`Op::ScaledZeroN`]: `SmVector2d`.
+pub const KIND_VEC2: i32 = 1;
+/// Object kind for [`Op::ScaledZeroN`]: `SmVector3d`.
+pub const KIND_VEC3: i32 = 2;
+/// Object kind for [`Op::ScaledZeroN`]: `SmExtent3d`.
+pub const KIND_EXTENT3: i32 = 3;
+
+/// Operands of one [`op`] call.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OpArgs {
+    /// System model size estimate (`SmTol::SetModelSizeEstimate`) for the call.
+    pub model_size: f64,
+    /// System large/small size ratio (`SmTol::SetLargeSmallSizeRatio`) for the call.
+    pub ratio: f64,
+    /// Scalar operands.
+    pub a: [f64; 8],
+    /// Optional-argument switch.
+    pub flag: bool,
+    /// `SmSmallTopoType` (0..=4), or the object count of [`Op::ScaledZeroN`].
+    pub small: i32,
+    /// Object kinds of [`Op::ScaledZeroN`].
+    pub kinds: [i32; 4],
+    /// Object data of [`Op::ScaledZeroN`] (6 doubles each).
+    pub objs: [f64; 24],
+}
+
+/// Runs `op` in upstream C++ (with the system tolerances set from `args` and reset to
+/// the defaults afterwards) and returns its result values.
+pub fn op(op: Op, args: &OpArgs) -> Result<Vec<f64>, FfiError> {
+    if !(0..=4).contains(&args.small) {
+        return Err(FfiError::InvalidArgument(format!("small {}", args.small)));
+    }
+    if op == Op::ScaledZeroN && args.small == 0 {
+        return Err(FfiError::InvalidArgument("object count 0".into()));
+    }
+    if args.kinds.iter().any(|k| !(0..=3).contains(k)) {
+        return Err(FfiError::InvalidArgument("object kind".into()));
+    }
+    let mut out = [0.0f64; 16];
+    let mut n = 0i32;
+    // SAFETY: `a` (8), `kinds` (4) and `objs` (24) are valid for the reads the shim
+    // makes; `out` is valid for 16 writes (the shim writes at most 14); `n` is a valid
+    // i32. The shim retains nothing.
+    let st = unsafe {
+        sys::sc_geom_tol_op(
+            op as i32,
+            args.model_size,
+            args.ratio,
+            args.a.as_ptr(),
+            i32::from(args.flag),
+            args.small,
+            args.kinds.as_ptr(),
+            args.objs.as_ptr(),
+            out.as_mut_ptr(),
+            &raw mut n,
+        )
+    };
+    check(st)?;
+    let n = usize::try_from(n)
+        .ok()
+        .filter(|&n| n <= out.len())
+        .ok_or_else(|| FfiError::InvalidArgument(format!("shim returned {n} values")))?;
+    Ok(out.get(..n).unwrap_or_default().to_vec())
+}
+
+/// One step of a [`relation`] script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationStep {
+    /// `RelatePair(first, second)`.
+    Pair(i64, i64),
+    /// `RelateToMany(first, seconds)`.
+    Many(i64, Vec<i64>),
+    /// `RemoveAll()`.
+    RemoveAll,
+}
+
+/// Runs `steps` on an upstream `SmRelation<int, int>` with cardinality `card` over
+/// `n_first` first and `n_second` second objects. Returns the flat result of
+/// `sc_geom_tol_relation`: the status of each step, then per first object
+/// `GetSecond` (index or -1), `count`, sorted `GetSeconds`; then `count` + sorted
+/// `GetAllFirsts` and `count` + sorted `GetAllSeconds`.
+pub fn relation(
+    card: i32,
+    n_first: i64,
+    n_second: i64,
+    steps: &[RelationStep],
+) -> Result<Vec<i64>, FfiError> {
+    if !(0..=3).contains(&card) {
+        return Err(FfiError::InvalidArgument(format!("cardinality {card}")));
+    }
+    if !(0..=10_000).contains(&n_first) || !(0..=10_000).contains(&n_second) {
+        return Err(FfiError::InvalidArgument("object count".into()));
+    }
+    let f_ok = |f: i64| (0..n_first).contains(&f);
+    let s_ok = |s: i64| (0..n_second).contains(&s);
+    let mut script = Vec::new();
+    for step in steps {
+        match step {
+            RelationStep::Pair(f, s) => {
+                if !f_ok(*f) || !s_ok(*s) {
+                    return Err(FfiError::InvalidArgument("pair index".into()));
+                }
+                script.extend([0, *f, *s]);
+            }
+            RelationStep::Many(f, ss) => {
+                if !f_ok(*f) || !ss.iter().all(|s| s_ok(*s)) {
+                    return Err(FfiError::InvalidArgument("many index".into()));
+                }
+                script.extend([1, *f, ss.len() as i64]);
+                script.extend(ss.iter().copied());
+            }
+            RelationStep::RemoveAll => script.push(2),
+        }
+    }
+    let n_script = script.len() as i64;
+    call_with_buffer(64, |buf, len| {
+        // SAFETY: `script` is valid for `n_script` reads and every index in it was
+        // checked against `n_first` / `n_second` above; `buf` is valid for
+        // `buf.len()` writes and `len` for one write.
+        unsafe {
+            sys::sc_geom_tol_relation(
+                card,
+                n_first,
+                n_second,
+                script.as_ptr(),
+                n_script,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}

@@ -1,0 +1,560 @@
+{
+ "cases": [
+  {
+   "name": "relation_c0_basic",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 0,
+    "n1": 3,
+    "n2": 3,
+    "steps": [
+     {
+      "pair": [
+       0,
+       0
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       2,
+       2
+      ]
+     },
+     {
+      "pair": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c0_many",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 0,
+    "n1": 3,
+    "n2": 4,
+    "steps": [
+     {
+      "many": [
+       0,
+       [
+        3,
+        1,
+        2
+       ]
+      ]
+     },
+     {
+      "many": [
+       1,
+       [
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "pair": [
+       2,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c0_remove_all",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 0,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     "remove_all",
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c0_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 0,
+    "n1": 2,
+    "n2": 2,
+    "steps": []
+   }
+  },
+  {
+   "name": "relation_c0_many_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 0,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "many": [
+       1,
+       []
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c1_basic",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 1,
+    "n1": 3,
+    "n2": 3,
+    "steps": [
+     {
+      "pair": [
+       0,
+       0
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       2,
+       2
+      ]
+     },
+     {
+      "pair": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c1_many",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 1,
+    "n1": 3,
+    "n2": 4,
+    "steps": [
+     {
+      "many": [
+       0,
+       [
+        3,
+        1,
+        2
+       ]
+      ]
+     },
+     {
+      "many": [
+       1,
+       [
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "pair": [
+       2,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c1_remove_all",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 1,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     "remove_all",
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c1_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 1,
+    "n1": 2,
+    "n2": 2,
+    "steps": []
+   }
+  },
+  {
+   "name": "relation_c1_many_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 1,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "many": [
+       1,
+       []
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c2_basic",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 2,
+    "n1": 3,
+    "n2": 3,
+    "steps": [
+     {
+      "pair": [
+       0,
+       0
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       2,
+       2
+      ]
+     },
+     {
+      "pair": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c2_many",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 2,
+    "n1": 3,
+    "n2": 4,
+    "steps": [
+     {
+      "many": [
+       0,
+       [
+        3,
+        1,
+        2
+       ]
+      ]
+     },
+     {
+      "many": [
+       1,
+       [
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "pair": [
+       2,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c2_remove_all",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 2,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     "remove_all",
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c2_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 2,
+    "n1": 2,
+    "n2": 2,
+    "steps": []
+   }
+  },
+  {
+   "name": "relation_c2_many_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 2,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "many": [
+       1,
+       []
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c3_basic",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 3,
+    "n1": 3,
+    "n2": 3,
+    "steps": [
+     {
+      "pair": [
+       0,
+       0
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       2,
+       2
+      ]
+     },
+     {
+      "pair": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c3_many",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 3,
+    "n1": 3,
+    "n2": 4,
+    "steps": [
+     {
+      "many": [
+       0,
+       [
+        3,
+        1,
+        2
+       ]
+      ]
+     },
+     {
+      "many": [
+       1,
+       [
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "pair": [
+       2,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c3_remove_all",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 3,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "pair": [
+       0,
+       1
+      ]
+     },
+     "remove_all",
+     {
+      "pair": [
+       1,
+       1
+      ]
+     },
+     {
+      "pair": [
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "relation_c3_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 3,
+    "n1": 2,
+    "n2": 2,
+    "steps": []
+   }
+  },
+  {
+   "name": "relation_c3_many_empty",
+   "upstream_ref": "source/SMLib/inc/SmRelation.h:190",
+   "inputs": {
+    "op": "relation",
+    "card": 3,
+    "n1": 2,
+    "n2": 2,
+    "steps": [
+     {
+      "many": [
+       1,
+       []
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
