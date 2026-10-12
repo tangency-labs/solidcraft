@@ -53,6 +53,7 @@ changes it; per-unit state lives in `plan/modules.toml`.
 | `harness.selftest` | (harness only) | 28 cases, max_rel_err 0 | not a plan unit |
 | `nlib.knots` | `nurbs::knots` | 2953 cases (1753 fixture + 1200 generated), max_rel_err 0 | bit-identical; a 51,753-case run was also clean |
 | `geom.vector2d` | `geom::vector2d` | 4060 cases (60 fixture + 4000 generated), max_rel_err 0 | bit-identical; a 200,060-case run was also clean |
+| `topology.database_io` | `topology::database_io` | 2059 cases (59 fixture + 2000 generated), max_rel_err 0 | stream state and position match per step; a 200,059-case run was also clean |
 
 ## Ready set for Wave 1 (todo units whose `depends_on` are all green)
 
