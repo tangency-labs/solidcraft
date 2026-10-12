@@ -361,30 +361,23 @@ fn approx_axis(
 ) -> (f64, f64) {
     // Upstream: `(pUnboundedCenter == NULL || <cmp>) ? <near> : <centred>`; the same
     // comparisons are used so NaN inputs take the same branch.
-    let near_max = center.is_none_or(|pc| max < pc + h);
-    let new_min = match ty {
-        BoundaryType::UnboundedMin => match center {
-            Some(pc) if !near_max => pc - h,
-            _ => max - 2.0 * h,
-        },
-        BoundaryType::UnboundedMax => match center {
-            Some(pc) if !center.is_none_or(|pc| min > pc - h) => pc - h,
-            _ => min,
-        },
-        BoundaryType::Unbounded => c - h,
-        BoundaryType::Bounded | BoundaryType::Unknown => min,
+    let max_near_center = center.is_none_or(|pc| max < pc + h);
+    let min_near_center = center.is_none_or(|pc| min > pc - h);
+    let new_min = match (ty, center) {
+        (BoundaryType::UnboundedMin, Some(pc)) if !max_near_center => pc - h,
+        (BoundaryType::UnboundedMin, _) => max - 2.0 * h,
+        (BoundaryType::UnboundedMax, Some(pc)) if !min_near_center => pc - h,
+        (BoundaryType::Unbounded, _) => c - h,
+        (BoundaryType::UnboundedMax | BoundaryType::Bounded | BoundaryType::Unknown, _) => min,
     };
-    let new_max = match ty {
-        BoundaryType::UnboundedMin => match center {
-            Some(pc) if !near_max => pc + h,
-            _ => max,
-        },
-        BoundaryType::UnboundedMax => match center {
-            Some(pc) if !center.is_none_or(|pc| new_min > pc - h) => pc + h,
-            _ => new_min + 2.0 * h,
-        },
-        BoundaryType::Unbounded => c + h,
-        BoundaryType::Bounded | BoundaryType::Unknown => max,
+    // the max of an interval unbounded above is computed from the replaced min
+    let new_min_near_center = center.is_none_or(|pc| new_min > pc - h);
+    let new_max = match (ty, center) {
+        (BoundaryType::UnboundedMin, Some(pc)) if !max_near_center => pc + h,
+        (BoundaryType::UnboundedMax, Some(pc)) if !new_min_near_center => pc + h,
+        (BoundaryType::UnboundedMax, _) => new_min + 2.0 * h,
+        (BoundaryType::Unbounded, _) => c + h,
+        (BoundaryType::UnboundedMin | BoundaryType::Bounded | BoundaryType::Unknown, _) => max,
     };
     (new_min, new_max)
 }

@@ -386,8 +386,7 @@ pub fn zone_tol_3d(k: &Kernel, small: SmallTopoType) -> f64 {
 /// The context zone tolerance (`SmTol::GetZoneTol3d(const SmContext*,
 /// SmSmallTopoType)` with a null context); `small` is ignored, as upstream.
 #[must_use]
-pub fn context_zone_tol_3d(k: &Kernel, small: SmallTopoType) -> f64 {
-    let _ = small;
+pub fn context_zone_tol_3d(k: &Kernel, _small: SmallTopoType) -> f64 {
     let z = k.tolerances.zone_tol_3d;
     if z == UNINIT_TOL {
         zone_tol3d(k, UNINIT_TOL)

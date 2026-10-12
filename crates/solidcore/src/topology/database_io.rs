@@ -770,7 +770,9 @@ impl DatabaseReader {
 
     /// Reads a signed 8-byte integer (`ReadLong(long&)`).
     pub fn read_long(&mut self) -> Result<i64> {
-        let raw = u64::from_ne_bytes(self.read_raw::<8>("topology::database_io::read_long")?);
+        let raw = u64::from_ne_bytes(
+            self.read_raw::<8>("topology::database_io::DatabaseReader::read_long")?,
+        );
         Ok(if self.byte_swap {
             byte_swap_u64(raw) as i64
         } else {
@@ -780,7 +782,9 @@ impl DatabaseReader {
 
     /// Reads an unsigned 8-byte integer (`ReadLong(ULONG&)`).
     pub fn read_ulong(&mut self) -> Result<u64> {
-        let raw = u64::from_ne_bytes(self.read_raw::<8>("topology::database_io::read_ulong")?);
+        let raw = u64::from_ne_bytes(
+            self.read_raw::<8>("topology::database_io::DatabaseReader::read_ulong")?,
+        );
         Ok(if self.byte_swap {
             byte_swap_u64(raw)
         } else {
@@ -790,7 +794,8 @@ impl DatabaseReader {
 
     /// Reads `n` unsigned 8-byte integers (`ReadLongs`).
     pub fn read_longs(&mut self, n: usize) -> Result<Vec<u64>> {
-        let items = self.read_raw_items::<8>(n, "topology::database_io::read_longs")?;
+        let items =
+            self.read_raw_items::<8>(n, "topology::database_io::DatabaseReader::read_longs")?;
         let swap = self.byte_swap;
         Ok(items
             .into_iter()
@@ -807,7 +812,9 @@ impl DatabaseReader {
 
     /// Reads a double (`ReadDouble`).
     pub fn read_double(&mut self) -> Result<f64> {
-        let raw = f64::from_ne_bytes(self.read_raw::<8>("topology::database_io::read_double")?);
+        let raw = f64::from_ne_bytes(
+            self.read_raw::<8>("topology::database_io::DatabaseReader::read_double")?,
+        );
         Ok(if self.byte_swap {
             byte_swap_f64(raw)
         } else {
@@ -817,7 +824,8 @@ impl DatabaseReader {
 
     /// Reads `n` doubles (`ReadDoubles`).
     pub fn read_doubles(&mut self, n: usize) -> Result<Vec<f64>> {
-        let items = self.read_raw_items::<8>(n, "topology::database_io::read_doubles")?;
+        let items =
+            self.read_raw_items::<8>(n, "topology::database_io::DatabaseReader::read_doubles")?;
         let swap = self.byte_swap;
         Ok(items
             .into_iter()
@@ -835,14 +843,15 @@ impl DatabaseReader {
     /// Reads a 4-byte `SmBoolean` (`ReadBoolean`). Upstream never byte-swaps here
     /// (unlike [`Self::read_booleans`]); the port keeps that.
     pub fn read_boolean(&mut self) -> Result<i32> {
-        Ok(i32::from_ne_bytes(
-            self.read_raw::<4>("topology::database_io::read_boolean")?,
-        ))
+        Ok(i32::from_ne_bytes(self.read_raw::<4>(
+            "topology::database_io::DatabaseReader::read_boolean",
+        )?))
     }
 
     /// Reads `n` 4-byte `SmBoolean`s (`ReadBooleans`), byte-swapped when enabled.
     pub fn read_booleans(&mut self, n: usize) -> Result<Vec<i32>> {
-        let items = self.read_raw_items::<4>(n, "topology::database_io::read_booleans")?;
+        let items =
+            self.read_raw_items::<4>(n, "topology::database_io::DatabaseReader::read_booleans")?;
         let swap = self.byte_swap;
         Ok(items
             .into_iter()
@@ -859,7 +868,9 @@ impl DatabaseReader {
 
     /// Reads a 2-byte `short` (`ReadShort`).
     pub fn read_short(&mut self) -> Result<i16> {
-        let raw = u16::from_ne_bytes(self.read_raw::<2>("topology::database_io::read_short")?);
+        let raw = u16::from_ne_bytes(
+            self.read_raw::<2>("topology::database_io::DatabaseReader::read_short")?,
+        );
         Ok(if self.byte_swap {
             byte_swap_u16(raw) as i16
         } else {
@@ -869,7 +880,7 @@ impl DatabaseReader {
 
     /// Reads one byte (`ReadChar`; never swapped).
     pub fn read_char(&mut self) -> Result<u8> {
-        let [c] = self.read_raw::<1>("topology::database_io::read_char")?;
+        let [c] = self.read_raw::<1>("topology::database_io::DatabaseReader::read_char")?;
         Ok(c)
     }
 
@@ -877,7 +888,7 @@ impl DatabaseReader {
     /// `Object Type <code>` and, when `with_dim`, `Curve Dim <dim>`; in binary a
     /// long and optionally an unsigned long.
     pub fn read_type(&mut self, with_dim: bool) -> Result<TypeHeader> {
-        const OP: &str = "topology::database_io::read_type";
+        const OP: &str = "topology::database_io::DatabaseReader::read_type";
         if self.file_type == FileType::Ascii {
             let s = self.stream.as_mut().ok_or_else(|| no_stream(OP))?;
             // `char sBuff[SM_MAXSIZE]`: words longer than 255 bytes are split.
