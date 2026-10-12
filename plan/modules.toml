@@ -816,10 +816,10 @@ depends_on = ["nlib.basis_basic", "nlib.bezier", "nlib.geom", "nlib.knots", "nli
 est_lines = 1455
 layer = 11
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-nlib.srf_tool_p2-a1"
 claimed_at = "2026-10-12T22:44:17Z"
-notes = "3 fns; largest: N_SrfElevateDegree, N_SrfRemoveKnotConditional, N_SrfRemoveOneKnot; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "difftest green: 3102 cases (102 fixture + 3000 generated), 0 deferred, max_rel_err 0; 3 fns; largest: N_SrfElevateDegree, N_SrfRemoveKnotConditional, N_SrfRemoveOneKnot; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "nurbs.b_spline_curve_n_lib"
