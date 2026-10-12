@@ -4,3 +4,5 @@
 //! Upstream: `source/SMLib/{inc,src}/NL_*` (the "NLib" layer: `NL_BasisBasic`,
 //! `NL_BasisAdv`, `NL_CrvBasic`, `NL_SrfBasic`, `NL_CrvFit`, ...) and the
 //! `SmNurbs*` / `SmBSpline*` wrappers. Units are listed in `plan/modules.toml`.
+
+pub mod knots;

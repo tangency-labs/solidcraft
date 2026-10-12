@@ -47,7 +47,7 @@ pub mod query;
 pub mod surface;
 pub mod sweep;
 
-pub use error::{EntityRef, Result, SolidError};
+pub use error::{EntityRef, NlibCode, Result, SolidError};
 pub use kernel::{Caches, Kernel, KernelOptions, Rng, Tolerances};
 pub use math::{Point2, Point3, Transform, Vec2, Vec3};
 pub use topology::{Brep, BrepId, EdgeId, FaceId, LoopId, ShellId, VertexId};
