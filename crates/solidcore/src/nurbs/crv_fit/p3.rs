@@ -53,9 +53,12 @@ use crate::nurbs::crv_fit::p1::{
     knot_vector_deriv, knot_vector_end_derivs, param_values, DerivEnd, ParamMethod,
 };
 use crate::nurbs::crv_fit::p2::{interp, knots_derivs, knots_high_end_derivs};
+use crate::nurbs::fit_arrays::{
+    alloc, at, at2, at_mut, banded, basis, curve, hi, idx, invalid, mset, out_of_range, put, sg,
+};
 use crate::nurbs::geom::{dist_polygon, normalize};
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::{combine2_pts, CPoint, MatrixType, RealMatrix};
+use crate::nurbs::math::{combine2_pts, CPoint};
 
 const OP_DERIVS: &str = "nurbs::crv_fit::p3::interp_end_derivs";
 const OP_CUBIC: &str = "nurbs::crv_fit::p3::cubic_spline_interp";
@@ -125,104 +128,11 @@ pub enum EndTangents<'a> {
 
 // ---- helpers ----------------------------------------------------------------------
 
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-fn out_of_range(op: &'static str) -> SolidError {
-    invalid(op, "index outside the arrays upstream would access")
-}
-
-/// `usize` -> signed index (upstream `NL_INDEX` arithmetic).
-fn sg(x: usize, op: &'static str) -> Result<i64> {
-    i64::try_from(x).map_err(|_| invalid(op, "size overflow"))
-}
-
-/// Highest index of a slice (`len - 1`), `InvalidInput` when empty.
-fn hi<T>(a: &[T], op: &'static str, what: &'static str) -> Result<i64> {
-    match a.len().checked_sub(1) {
-        Some(n) => sg(n, op),
-        None => Err(invalid(op, what)),
-    }
-}
-
-fn idx(i: i64, op: &'static str) -> Result<usize> {
-    usize::try_from(i).map_err(|_| out_of_range(op))
-}
-
-fn at<T: Copy>(a: &[T], i: i64, op: &'static str) -> Result<T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get(i).copied())
-        .ok_or_else(|| out_of_range(op))
-}
-
-fn at_mut<'a, T>(a: &'a mut [T], i: i64, op: &'static str) -> Result<&'a mut T> {
-    usize::try_from(i)
-        .ok()
-        .and_then(|i| a.get_mut(i))
-        .ok_or_else(|| out_of_range(op))
-}
-
-fn put<T>(a: &mut [T], i: i64, v: T, op: &'static str) -> Result<()> {
-    *at_mut(a, i, op)? = v;
-    Ok(())
-}
-
-/// A vector of `n + 1` entries `v` (`n` an upstream highest index).
-fn alloc<T: Clone>(n: i64, v: T, op: &'static str) -> Result<Vec<T>> {
-    let len = n
-        .checked_add(1)
-        .and_then(|l| usize::try_from(l).ok())
-        .ok_or_else(|| out_of_range(op))?;
-    Ok(vec![v; len])
-}
-
 /// The slice `a[s..=e]` (upstream passes `&a[s]` with highest index `e - s`).
 fn sub<'a, T>(a: &'a [T], s: i64, e: i64, op: &'static str) -> Result<&'a [T]> {
     let s = idx(s, op)?;
     let e = idx(e, op)?.checked_add(1).ok_or_else(|| out_of_range(op))?;
     a.get(s..e).ok_or_else(|| out_of_range(op))
-}
-
-/// Element `(i, j)` of a matrix's storage block addressed as upstream's `RM[i][j]`
-/// (row pointers into one row-major block): `j` may leave row `i`.
-fn mat_slot(cm: &RealMatrix, i: i64, j: i64, op: &'static str) -> Result<(usize, usize)> {
-    let (_, cols) = cm.storage_shape().ok_or_else(|| out_of_range(op))?;
-    let cols = sg(cols, op)?;
-    let k = i
-        .checked_mul(cols)
-        .and_then(|r| r.checked_add(j))
-        .ok_or_else(|| out_of_range(op))?;
-    if k < 0 || cols == 0 {
-        return Err(out_of_range(op));
-    }
-    Ok((idx(k / cols, op)?, idx(k % cols, op)?))
-}
-
-fn mset(cm: &mut RealMatrix, i: i64, j: i64, v: f64, op: &'static str) -> Result<()> {
-    let (r, c) = mat_slot(cm, i, j, op)?;
-    cm.set(r, c, v).map_err(|_| out_of_range(op))
-}
-
-/// Banded `(n+1) x (n+1)` matrix with bandwidth `bw` (`N_SetRealMatrix`); the storage
-/// is zero-filled, which is what upstream's explicit zeroing loops produce.
-fn banded(n: i64, bw: i64, op: &'static str) -> Result<RealMatrix> {
-    RealMatrix::new(idx(n, op)?, idx(n, op)?, MatrixType::Banded, idx(bw, op)?)
-}
-
-fn curve(pw: Vec<CPoint>, p: i64, uc: Vec<f64>, op: &'static str) -> Result<Curve> {
-    Curve::new(pw, idx(p, op)?, uc)
-}
-
-/// `N[p]` of the basis functions at `u` and the span index (`N_BasisEval`, `NL_LEFT`).
-fn basis(knt: &KnotVector<'_>, p: i64, u: f64, op: &'static str) -> Result<(i64, Vec<f64>)> {
-    let b = knt.basis_eval(idx(p, op)?, u, Side::Left)?;
-    Ok((sg(b.span, op)?, b.values))
 }
 
 /// `ND[0..=der][0..=p]` and the span (`N_BasisDerivs`, `NL_LEFT`).
@@ -235,14 +145,6 @@ fn basis_d(
 ) -> Result<(i64, Vec<Vec<f64>>)> {
     let b = basis_derivs(knt, idx(p, op)?, u, Side::Left, idx(der, op)?)?;
     Ok((sg(b.span, op)?, b.derivs))
-}
-
-fn nd(rows: &[Vec<f64>], i: i64, j: i64, op: &'static str) -> Result<f64> {
-    let row = usize::try_from(i)
-        .ok()
-        .and_then(|i| rows.get(i))
-        .ok_or_else(|| out_of_range(op))?;
-    at(row, j, op)
 }
 
 /// `N_VectorScale(v, alpha, &v)`.
@@ -329,7 +231,7 @@ pub fn interp_end_derivs(
 
     // Check for curve memory.
     if p < 2 || p > kk + 2 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // If derivatives are missing we will estimate them.
@@ -423,7 +325,7 @@ pub fn cubic_spline_interp(a: &[Vec3], ds: Vec3, de: Vec3, par: ParamMethod) -> 
     let k = hi(a, OP, "no data points")?;
 
     if k <= 0 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // If derivatives are missing we will estimate them.
@@ -557,7 +459,7 @@ pub fn interp_first_derivs(
 
     // Check for curve memory.
     if !(2..=3).contains(&p) {
-        return Err(nlib(OP, NlibCode::Degree));
+        return Err(SolidError::nlib(OP, NlibCode::Degree));
     }
     let n = 2 * kk + 1;
 
@@ -586,8 +488,8 @@ pub fn interp_first_derivs(
         let ii = 2 * i;
         let l = j - ii - 1;
         for k in 0..=hp {
-            mset(&mut cm, ii, l + k, nd(&nd_, 0, k, OP)?, OP)?;
-            mset(&mut cm, ii + 1, l + k - 1, nd(&nd_, 1, k, OP)?, OP)?;
+            mset(&mut cm, ii, l + k, at2(&nd_, 0, k, OP)?, OP)?;
+            mset(&mut cm, ii + 1, l + k - 1, at2(&nd_, 1, k, OP)?, OP)?;
         }
     }
 
@@ -708,21 +610,21 @@ pub fn interp_knots_and_tangents(
             pt += 1;
         }
         if pt >= mt {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         KnotVector::from_slice(ut)?.validate(idx(pt, OP)?)?;
     }
 
     if p < 2 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if per < 0.0 || per > 1.0 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     if let (Some(u), Some(ut)) = (u, knt.as_deref()) {
         if at(u, 0, OP)? != at(ut, 0, OP)? || at(u, k, OP)? != at(ut, mt, OP)? {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
     }
 
@@ -841,7 +743,7 @@ pub fn interp_knots_and_tangents(
     // Now interpolate data points.
     if !ideal_ok {
         // N_FitCrvKnotsAndDeriv: p > k + 1 = n.
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let kni = KnotVector::from_slice(&ui)?;
     let cur = match &tangents {
@@ -1001,10 +903,10 @@ pub fn interp_high_derivs(
     // Check for curve memory.
     let n = nn + kk + ll;
     if p < 1 || p > n {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if kk >= p || ll >= p {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     // Get parameters and compute knot vector.
@@ -1022,7 +924,7 @@ pub fn interp_high_derivs(
     let (_, nds) = basis_d(&knt, p, at(&u, 0, OP)?, kk, OP)?;
     for i in 1..=kk {
         for j in 0..=i {
-            mset(&mut cm, row, sbw - i + j, nd(&nds, i, j, OP)?, OP)?;
+            mset(&mut cm, row, sbw - i + j, at2(&nds, i, j, OP)?, OP)?;
         }
         row += 1;
     }
@@ -1039,7 +941,7 @@ pub fn interp_high_derivs(
     let (_, nde) = basis_d(&knt, p, at(&u, nn, OP)?, ll, OP)?;
     for i in (1..=ll).rev() {
         for j in 0..=i {
-            mset(&mut cm, row, sbw + j, nd(&nde, i, p - i + j, OP)?, OP)?;
+            mset(&mut cm, row, sbw + j, at2(&nde, i, p - i + j, OP)?, OP)?;
         }
         row += 1;
     }
