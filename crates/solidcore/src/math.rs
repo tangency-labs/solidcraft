@@ -9,7 +9,7 @@
 //! |------------------------------|------------------------------------------------|
 //! | [`Vec3`]                     | `SmVector3d`                                   |
 //! | [`Point3`] (alias of `Vec3`) | `SmPoint3d` (`#define SmPoint3d SmVector3d`)   |
-//! | [`Vec2`] / [`Point2`]        | `SmVector2d` / `SmPoint2d`                     |
+//! | [`Vec2`] / [`Point2`]        | `SmVector2d` / `SmPoint2d` (re-exported from [`crate::geom::vector2d`]) |
 //! | [`Vec3::dot`]                | `SmVector3d::Dot`                              |
 //! | [`Vec3::cross`]              | `operator*(const SmVector3d&, const SmVector3d&)` |
 //! | [`Vec3::length_squared`]     | `SmVector3d::LengthSquared`                    |
@@ -34,6 +34,8 @@
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::error::{Result, SolidError};
+
+pub use crate::geom::vector2d::{Point2, Vec2};
 
 /// `SM_PI` (the upstream literal rounds to exactly this `f64`).
 pub const PI: f64 = core::f64::consts::PI;
@@ -226,75 +228,6 @@ impl Mul<Vec3> for f64 {
 impl MulAssign<f64> for Vec3 {
     fn mul_assign(&mut self, d: f64) {
         *self = *self * d;
-    }
-}
-
-/// A 2D vector (`SmVector2d`), typically a surface parameter `(u, v)`.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Vec2 {
-    /// X (or `u`) component.
-    pub x: f64,
-    /// Y (or `v`) component.
-    pub y: f64,
-}
-
-/// A 2D point (`SmPoint2d`, an alias of `SmVector2d` upstream).
-pub type Point2 = Vec2;
-
-impl Vec2 {
-    /// The zero vector.
-    pub const ZERO: Self = Self::new(0.0, 0.0);
-
-    /// Creates a vector from its components.
-    #[must_use]
-    pub const fn new(x: f64, y: f64) -> Self {
-        Self { x, y }
-    }
-
-    /// Dot product.
-    #[must_use]
-    pub fn dot(self, o: Self) -> f64 {
-        (self.x * o.x) + (self.y * o.y)
-    }
-
-    /// Squared Euclidean length.
-    #[must_use]
-    pub fn length_squared(self) -> f64 {
-        (self.x * self.x) + (self.y * self.y)
-    }
-
-    /// Euclidean length.
-    #[must_use]
-    pub fn length(self) -> f64 {
-        self.length_squared().sqrt()
-    }
-}
-
-impl Add for Vec2 {
-    type Output = Self;
-    fn add(self, o: Self) -> Self {
-        Self::new(self.x + o.x, self.y + o.y)
-    }
-}
-
-impl Sub for Vec2 {
-    type Output = Self;
-    fn sub(self, o: Self) -> Self {
-        Self::new(self.x - o.x, self.y - o.y)
-    }
-}
-
-impl Neg for Vec2 {
-    type Output = Self;
-    fn neg(self) -> Self {
-        Self::new(-self.x, -self.y)
-    }
-}
-
-impl Mul<f64> for Vec2 {
-    type Output = Self;
-    fn mul(self, d: f64) -> Self {
-        Self::new(self.x * d, self.y * d)
     }
 }
 
