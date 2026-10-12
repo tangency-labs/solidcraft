@@ -230,6 +230,16 @@ impl SolidError {
         }
     }
 
+    /// Maps the error of a failed NLib call inside an `Sm*` method to `SM_ERR` (upstream
+    /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] through.
+    /// Use as `.map_err(SolidError::nl_ser(OP))`.
+    pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
+        move |e| match e {
+            Self::Unported { .. } => e,
+            _ => Self::sm_err(operation),
+        }
+    }
+
     /// [`SolidError::Nlib`] with the upstream error number `code` (NLib's
     /// `N_ErrSet(.., code, ..)` followed by an error return).
     #[must_use]

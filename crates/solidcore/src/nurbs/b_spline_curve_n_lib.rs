@@ -224,20 +224,8 @@ pub struct HelixSpec {
     pub approx_tol: f64,
 }
 
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::sm_err(operation)
-}
-
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
-}
-
-/// `NL_SER` / `SER(SM_ERR)` of a failed call; `Unported` passes through.
-fn nl_err(operation: &'static str) -> impl Fn(SolidError) -> SolidError {
-    move |e| match e {
-        SolidError::Unported { .. } => e,
-        _ => sm_err(operation),
-    }
 }
 
 fn knot_at(u: &[f64], i: usize, operation: &'static str) -> Result<f64> {
@@ -300,9 +288,23 @@ fn make_unit_ortho_into(v: Vec3, y_ref: Option<Vec3>, x: &mut Vec3, y: &mut Vec3
     }
 }
 
+/// The NLib continuity flag of a curve extension (`SM_G1` -> `NL_G1`, `SM_G1G2` ->
+/// `NL_G2`, `SM_CINFINITY` -> `NL_CMAX`); `SM_ERR` for any other continuity.
+fn extension_continuity(continuity: ContinuityType, operation: &'static str) -> Result<Continuity> {
+    match continuity {
+        ContinuityType::G1 => Ok(Continuity::G1),
+        ContinuityType::G1G2 => Ok(Continuity::G2),
+        ContinuityType::CInfinity => Ok(Continuity::Cmax),
+        _ => Err(SolidError::sm_err(operation)),
+    }
+}
+
 /// The NURB of `curve` for read-only use (`GetOrCreateGwNurbPointer`).
 fn nurb_of<'a>(curve: &'a BSplineCurve, operation: &'static str) -> Result<&'a Curve> {
-    curve.nurb.as_ref().ok_or_else(|| sm_err(operation))
+    curve
+        .nurb
+        .as_ref()
+        .ok_or_else(|| SolidError::sm_err(operation))
 }
 
 /// A copy of the NURB of `curve` (`sm_CreateNlibCurve`: `N_AllocCrvAndArrays` +
@@ -499,7 +501,9 @@ impl BSplineCurve {
 
     /// The NURB, mutable (`GetOrCreateGwNurbPointer`).
     fn nurb_mut(&mut self, operation: &'static str) -> Result<&mut Curve> {
-        self.nurb.as_mut().ok_or_else(|| sm_err(operation))
+        self.nurb
+            .as_mut()
+            .ok_or_else(|| SolidError::sm_err(operation))
     }
 
     /// Cubic non-rational approximation of a circular arc of `radius` from
@@ -544,7 +548,7 @@ impl BSplineCurve {
             end: None,
         };
         let mut cur = approx_circ_arc(&spec, deg, tol, ToleranceKind::Relative, num_control_points)
-            .map_err(nl_err(OP_ARC))?;
+            .map_err(SolidError::nl_ser(OP_ARC))?;
 
         // preserve 2D curves
         if dim == 2 {
@@ -564,14 +568,14 @@ impl BSplineCurve {
     /// fails.
     pub fn approximate_rational_curve(&self, tol: f64) -> Result<Self> {
         // input check - only run on rational BSplineCurves
-        if !self.is_rational().map_err(nl_err(OP_RAT))? {
-            return Err(sm_err(OP_RAT));
+        if !self.is_rational().map_err(SolidError::nl_ser(OP_RAT))? {
+            return Err(SolidError::sm_err(OP_RAT));
         }
         let cur_this = nurb_of(self, OP_RAT)?;
         let deg = 3;
         let cur_new =
             approx_nurbs_with_non_rat_crv(cur_this, tol, deg, ParamSource::Inherited, true)
-                .map_err(nl_err(OP_RAT))?;
+                .map_err(SolidError::nl_ser(OP_RAT))?;
         Ok(Self::from_gw_nurb(3, &cur_new))
     }
 
@@ -606,7 +610,7 @@ impl BSplineCurve {
             num_points: 0,
             tol: spec.approx_tol,
         })
-        .map_err(nl_err(OP_HELIX))?;
+        .map_err(SolidError::nl_ser(OP_HELIX))?;
 
         // Build SMLib Curve from NLib Curve
         let mut new_curve = Self::from_gw_nurb(3, &res.curve);
@@ -651,18 +655,13 @@ impl BSplineCurve {
         let cur = nurb_of(self, OP_EXT)?;
         let t = parameter;
         let ndr = 0;
-        let gflg = match continuity {
-            ContinuityType::G1 => Continuity::G1,
-            ContinuityType::G1G2 => Continuity::G2,
-            ContinuityType::CInfinity => Continuity::Cmax,
-            _ => return Err(sm_err(OP_EXT)),
-        };
+        let gflg = extension_continuity(continuity, OP_EXT)?;
 
         // NLIB eval curve at t,
         // side effect: create extended curve in ecur when t is outside curve interval
         let mut state = UnboundedEval::default();
         cur.eval_unbounded_pts_and_derivs(t, ndr, gflg, &mut state)
-            .map_err(nl_err(OP_EXT))?;
+            .map_err(SolidError::nl_ser(OP_EXT))?;
 
         // build output: new SMBSplineCurve object from ecur
         Ok(state.ext.map(|ecur| Self::from_gw_nurb(self.dim, &ecur)))
@@ -683,16 +682,11 @@ impl BSplineCurve {
     ) -> Result<Option<Self>> {
         let cur = nurb_of(self, OP_EXT_DIST)?;
         let dist = distance;
-        let gflg = match continuity {
-            ContinuityType::G1 => Continuity::G1,
-            ContinuityType::G1G2 => Continuity::G2,
-            ContinuityType::CInfinity => Continuity::Cmax,
-            _ => return Err(sm_err(OP_EXT_DIST)),
-        };
+        let gflg = extension_continuity(continuity, OP_EXT_DIST)?;
 
         let ecur = cur
             .extend_by_dist(dist, ToleranceKind::Absolute, end, gflg)
-            .map_err(nl_err(OP_EXT_DIST))?;
+            .map_err(SolidError::nl_ser(OP_EXT_DIST))?;
 
         // build output: new SMBSplineCurve object from ecur
         Ok(Some(Self::from_gw_nurb(self.dim, &ecur)))
@@ -733,7 +727,7 @@ impl BSplineCurve {
         }
 
         if dim != 2 && dim != 3 {
-            return Err(sm_err(OP));
+            return Err(SolidError::sm_err(OP));
         }
 
         let more = more_vectors.unwrap_or(&[]);
@@ -741,7 +735,7 @@ impl BSplineCurve {
         // branch to construct new gw_CURVE
         let cur = if vectors.len() == points.len() && points.len() > 2 {
             if degree != 2 && degree != 3 {
-                return Err(sm_err(OP));
+                return Err(SolidError::sm_err(OP));
             }
             let mut d = vectors.to_vec();
             let vec = if ignore_vector_magnitude {
@@ -749,10 +743,10 @@ impl BSplineCurve {
             } else {
                 VectorKind::Derivative
             };
-            interp_first_derivs(points, &mut d, degree, vec, par).map_err(nl_err(OP))?
+            interp_first_derivs(points, &mut d, degree, vec, par).map_err(SolidError::nl_ser(OP))?
         } else if vectors.len() == 2 {
             if !(2..=MAX_DEGREE).contains(&degree) {
-                return Err(sm_err(OP));
+                return Err(SolidError::sm_err(OP));
             }
             let mut ds = vec![vec_at(vectors, 0, OP)?];
             let mut de = vec![vec_at(vectors, 1, OP)?];
@@ -770,18 +764,18 @@ impl BSplineCurve {
                     }
                 }
             }
-            interp_high_derivs(points, degree, &ds, &de, par).map_err(nl_err(OP))?
+            interp_high_derivs(points, degree, &ds, &de, par).map_err(SolidError::nl_ser(OP))?
         } else if vectors.len() == 1 {
             // Start Vector
             let mut ds = vec![vec_at(vectors, 0, OP)?];
             if more_vectors.is_some() && !more.is_empty() {
                 ds.push(vec_at(more, 0, OP)?);
             }
-            interp_high_derivs(points, degree, &ds, &[], par).map_err(nl_err(OP))?
+            interp_high_derivs(points, degree, &ds, &[], par).map_err(SolidError::nl_ser(OP))?
         } else if vectors.is_empty() {
-            interp_high_derivs(points, degree, &[], &[], par).map_err(nl_err(OP))?
+            interp_high_derivs(points, degree, &[], &[], par).map_err(SolidError::nl_ser(OP))?
         } else {
-            return Err(sm_err(OP));
+            return Err(SolidError::sm_err(OP));
         };
 
         // construct output from new gw_CURVE
@@ -803,7 +797,7 @@ impl BSplineCurve {
         multiplicity: usize,
     ) -> Result<()> {
         let mut new_knots: Vec<f64> = Vec::new();
-        let (mut knot_vector, _) = self.knots(None).map_err(nl_err(OP_DAMPEN))?;
+        let (mut knot_vector, _) = self.knots(None).map_err(SolidError::nl_ser(OP_DAMPEN))?;
         let mut splits = 0usize;
 
         let mut done = false;
@@ -877,13 +871,17 @@ impl BSplineCurve {
     pub fn degree_reduction(&mut self, tol: f64, max_reduce: bool) -> Result<()> {
         let cur_p = nurb_of(self, OP_DEG_RED)?;
         let cur_new = if max_reduce {
-            cur_p.reduce_degree(tol).map_err(nl_err(OP_DEG_RED))?
+            cur_p
+                .reduce_degree(tol)
+                .map_err(SolidError::nl_ser(OP_DEG_RED))?
         } else {
-            let red = cur_p.reduce_degree_once(tol).map_err(nl_err(OP_DEG_RED))?;
+            let red = cur_p
+                .reduce_degree_once(tol)
+                .map_err(SolidError::nl_ser(OP_DEG_RED))?;
             match red.curve {
                 Some(c) => c,
                 // MSG(_T("Degree reduction failure"))
-                None => return Err(sm_err(OP_DEG_RED)),
+                None => return Err(SolidError::sm_err(OP_DEG_RED)),
             }
         };
         self.swap_in_nurb(&cur_new);
@@ -899,7 +897,9 @@ impl BSplineCurve {
     /// ends, or a multiplicity above the degree).
     pub fn insert_one_knot(&mut self, knot: f64, times: usize) -> Result<()> {
         let cur_p = nurb_of(self, OP_INS_ONE)?;
-        let cur_new = cur_p.insert_knot(knot, times).map_err(nl_err(OP_INS_ONE))?;
+        let cur_new = cur_p
+            .insert_knot(knot, times)
+            .map_err(SolidError::nl_ser(OP_INS_ONE))?;
         self.swap_in_nurb(&cur_new);
         Ok(())
     }
@@ -932,7 +932,7 @@ impl BSplineCurve {
 
         // check state - Quit if the curve is not a piecewise C0, degree 3 curve
         if !is_intersector_approx(self)? {
-            return Err(sm_err(OP));
+            return Err(SolidError::sm_err(OP));
         }
 
         // locals
@@ -1150,7 +1150,7 @@ impl BSplineCurve {
                 pos_tang[4] = through;
                 new_tangent_index = 5;
             }
-            _ => return Err(sm_err(OP)),
+            _ => return Err(SolidError::sm_err(OP)),
         }
 
         // set the tangent value for the through point
@@ -1226,7 +1226,7 @@ impl BSplineCurve {
 
                     // check and store the Surface1 answer
                     if sol_value > 1e-8 {
-                        return Err(sm_err(OP));
+                        return Err(SolidError::sm_err(OP));
                     }
                     sol_params
                 };
@@ -1316,13 +1316,13 @@ impl BSplineCurve {
                 let crv = nurb_of(self, OP)?;
                 new_crv = Some(
                     crv.insert_knot(param_array[1], degree)
-                        .map_err(nl_err(OP))?,
+                        .map_err(SolidError::nl_ser(OP))?,
                 );
                 for uv_curve in uv_curves.iter() {
                     let uvc = nurb_of(uv_curve, OP)?;
                     new_uv_crv.push(
                         uvc.insert_knot(param_array[1], degree)
-                            .map_err(nl_err(OP))?,
+                            .map_err(SolidError::nl_ser(OP))?,
                     );
                 }
             }
@@ -1471,7 +1471,7 @@ impl BSplineCurve {
         let cur = nurb_of(self, OP_EVEN)?;
         let res = cur
             .eval_even_spaced_pts(t0, t1, n, tol)
-            .map_err(nl_err(OP_EVEN))?;
+            .map_err(SolidError::nl_ser(OP_EVEN))?;
         Ok((res.points, res.params))
     }
 
@@ -1487,7 +1487,7 @@ impl BSplineCurve {
             return Ok(());
         }
         let cur = nurb_of(self, OP_INS)?;
-        let newcur = cur.refine(new_knots).map_err(nl_err(OP_INS))?;
+        let newcur = cur.refine(new_knots).map_err(SolidError::nl_ser(OP_INS))?;
         self.set_from_gw_nurb(Some(&newcur))
     }
 
@@ -1534,7 +1534,7 @@ impl BSplineCurve {
             // k still has to be 1 regardless if pD is NULL or not
             let k = 1;
             approx_closed_conditions(points, p, d.as_ref().map(|d| &d[..]), k, par)
-                .map_err(nl_err(OP))?
+                .map_err(SolidError::nl_ser(OP))?
         } else if let Some(params) = params {
             // Open and Parameterization is given
             if params.len() != points.len() {
@@ -1556,7 +1556,7 @@ impl BSplineCurve {
                 1.0,
                 p,
             )
-            .map_err(nl_err(OP))?
+            .map_err(SolidError::nl_ser(OP))?
         } else if start_tangent.is_some() || end_tangent.is_some() {
             // Open, no given Parameterization, and end derivs.
             let ds: Vec<Vec3> = if start_tangent.is_some() {
@@ -1569,10 +1569,10 @@ impl BSplineCurve {
             } else {
                 Vec::new()
             };
-            interp_high_derivs(points, p, &ds, &de, par).map_err(nl_err(OP))?
+            interp_high_derivs(points, p, &ds, &de, par).map_err(SolidError::nl_ser(OP))?
         } else {
             // Open and no given Parameterization
-            interp(points, p, par).map_err(nl_err(OP))?
+            interp(points, p, par).map_err(SolidError::nl_ser(OP))?
         };
 
         Ok(Self::from_gw_nurb(3, &cur))
@@ -1595,7 +1595,7 @@ impl BSplineCurve {
         let mut nl_curves: Vec<Curve> = Vec::with_capacity(curves.len());
         for curve in curves.iter_mut() {
             if curve.nurb.is_none() {
-                curve.make_nurb().map_err(nl_err(OP_COMPAT))?;
+                curve.make_nurb().map_err(SolidError::nl_ser(OP_COMPAT))?;
             }
 
             // fix up knot vector before call to N_CrvsMakeCompatibleKnotTol
@@ -1604,7 +1604,8 @@ impl BSplineCurve {
         }
 
         // Invoke NLib to make compatible
-        make_compatible_knot_tol(&mut nl_curves, knot_tol).map_err(nl_err(OP_COMPAT))?;
+        make_compatible_knot_tol(&mut nl_curves, knot_tol)
+            .map_err(SolidError::nl_ser(OP_COMPAT))?;
 
         // Put the modified NLib curves back into our curves,
         // and do the (changed) knot vectors again.
@@ -1653,10 +1654,10 @@ impl BSplineCurve {
 
         // check input
         if !(start_tan_type != InValueType::Specified || start_tan.is_some()) {
-            return Err(sm_err(OP));
+            return Err(SolidError::sm_err(OP));
         }
         if !(end_tan_type != InValueType::Specified || end_tan.is_some()) {
-            return Err(sm_err(OP));
+            return Err(SolidError::sm_err(OP));
         }
 
         // increment CurrCrv degree when needed
@@ -1808,7 +1809,7 @@ impl BSplineCurve {
 
         // when asked to manage start tangent values
         if start_tan_type == InValueType::Specified {
-            let tgt = start_tan.ok_or_else(|| sm_err(OP))?;
+            let tgt = start_tan.ok_or_else(|| SolidError::sm_err(OP))?;
             let pt0 = cpt_at(curr_cpts, 0, OP)?.drop_w();
             let pt1 = cpt_at(curr_cpts, 1, OP)?.drop_w();
             let start_tan_cur = Vec3::new(pt1.x - pt0.x, pt1.y - pt0.y, pt1.z - pt0.z);
@@ -1844,7 +1845,7 @@ impl BSplineCurve {
 
         // when asked to manage end tangent values
         if end_tan_type == InValueType::Specified {
-            let tgt = end_tan.ok_or_else(|| sm_err(OP))?;
+            let tgt = end_tan.ok_or_else(|| SolidError::sm_err(OP))?;
             let pt_n = cpt_at(curr_cpts, curr_cpt_index, OP)?.drop_w();
             let pt_n1 = cpt_at(
                 curr_cpts,
@@ -1955,7 +1956,7 @@ impl BSplineCurve {
         let cur = nurb_of(self, OP_REPARAM)?;
         let cur_new = cur
             .reparam_mult_knots(relative_tol)
-            .map_err(nl_err(OP_REPARAM))?;
+            .map_err(SolidError::nl_ser(OP_REPARAM))?;
         self.swap_in_nurb(&cur_new);
         Ok(())
     }
@@ -1997,13 +1998,13 @@ impl BSplineCurve {
         let mut gw_curves: Vec<Curve> = Vec::with_capacity(curves.len());
         for curve in curves.iter_mut() {
             if curve.nurb.is_none() {
-                curve.make_nurb().map_err(nl_err(OP_SYNC))?;
+                curve.make_nurb().map_err(SolidError::nl_ser(OP_SYNC))?;
             }
             gw_curves.push(nlib_curve(curve, OP_SYNC)?);
         }
 
         // Syncronize the curves with knot vectors
-        make_compatible_adj_knots(&mut gw_curves, tol).map_err(nl_err(OP_SYNC))?;
+        make_compatible_adj_knots(&mut gw_curves, tol).map_err(SolidError::nl_ser(OP_SYNC))?;
 
         for (curve, nl) in curves.iter_mut().zip(gw_curves.iter()) {
             curve.set_from_gw_nurb(Some(nl))?;
@@ -2040,14 +2041,14 @@ impl BSplineCurve {
         let zone_tol_3d = zone_tol_3d(k, SmallTopoType::NormalSize);
         let zone_tol_1d_min = self.map_tol_to_1d(zone_tol_3d, d_min);
         let zone_tol_1d_max = self.map_tol_to_1d(zone_tol_3d, d_max);
-        let degree = self.degree().map_err(nl_err(OP))?;
+        let degree = self.degree().map_err(SolidError::nl_ser(OP))?;
 
         // when MinParam is not contained - snap within tight tolerance or quit
         if !nat_ivl.contains_value(d_min, 0.0) {
             if (nat_ivl.min() - d_min).abs() < scaled_zero_min {
                 d_min = nat_ivl.clamp_value(d_min);
             } else {
-                return Err(sm_err(OP));
+                return Err(SolidError::sm_err(OP));
             }
         }
 
@@ -2056,12 +2057,12 @@ impl BSplineCurve {
             if (nat_ivl.max() - d_max).abs() < scaled_zero_max {
                 d_max = nat_ivl.clamp_value(d_max);
             } else {
-                return Err(sm_err(OP));
+                return Err(SolidError::sm_err(OP));
             }
         }
 
         // for every knot - snap interval min/max values within tolerance to existing knots
-        let (knots, _) = self.knots(None).map_err(nl_err(OP))?;
+        let (knots, _) = self.knots(None).map_err(SolidError::nl_ser(OP))?;
         for &knot in &knots {
             // snap minParam to knots within tight tolerance
             if (knot - d_min).abs() < scaled_zero_min {
@@ -2112,7 +2113,7 @@ impl BSplineCurve {
                 // sm_CrvTrim's NL_INP_ERR flag is not NL_YES; upstream then uses its NULL result
                 return Err(invalid(OP, "sm_CrvTrim with ur <= ul"));
             }
-            let mut cur1 = crv_trim(this_cur, d_min, d_max).map_err(nl_err(OP))?;
+            let mut cur1 = crv_trim(this_cur, d_min, d_max).map_err(SolidError::nl_ser(OP))?;
 
             // watch out for new degenerate segments
             let p_knots = cur1.knots();
@@ -2129,7 +2130,9 @@ impl BSplineCurve {
             if (head < zone_tol_1d_min && knots.len() > 2)
                 || (tail < zone_tol_1d_max && knots.len() > 2)
             {
-                let removal = cur1.remove_degen_segs(zone_tol_3d).map_err(nl_err(OP))?;
+                let removal = cur1
+                    .remove_degen_segs(zone_tol_3d)
+                    .map_err(SolidError::nl_ser(OP))?;
 
                 // when segs removed - sCur2 is allocated and set, otherwise it's untouched
                 if let Some(r) = removal {

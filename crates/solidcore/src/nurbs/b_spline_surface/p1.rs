@@ -47,6 +47,7 @@
 //! | [`BSplineSurface::get_or_create_gw_nurb`]         | `GetOrCreateGwNurbPointer`                       |
 //! | [`BSplineSurface::rebuild_step_from_nurb_parameters`] | `RebuildSTEPFromNURBParameters`              |
 //! | [`BSplineSurface::set_b_spline_surface_form`]     | `SetBSplineSurfaceForm`                          |
+//! | [`BSplineSurface::knot_type`], [`BSplineSurface::is_nurb_borrowed`] | `m_eKnotType`, `m_bNurbIsBorrowed` (member reads) |
 //! | [`BSplineSurface::toggle_swap_uv_bit`]            | `ToggleSwapUVBit`                                |
 //! | [`BSplineSurfaceForm`], [`SurfParamType`], [`LocationType`] | `SmBSplineSurfaceForm`, `SmSurfParamType`, `SmLocationType` |
 //!
@@ -127,8 +128,8 @@ use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::{BSplineCurve, KnotType, NurbCircleParam};
 use crate::nurbs::crv_basic::ConicType;
 use crate::nurbs::iges::{iges_128_surface, Entity128};
-use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, NOW, NOZ};
-use crate::nurbs::nurbs_crv::{extract_frame, fixup_knot_vector, get_knots};
+use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, NOW};
+use crate::nurbs::nurbs_crv::{extract_frame, fixup_knot_vector, get_knots, to_euclid};
 use crate::nurbs::nurbs_srf::{allocate_nurb_surface, copy_nurb_surface};
 use crate::nurbs::srf_basic::{Direction, Surface};
 use crate::nurbs::srf_common::{corner_pts, cyl_cone, extrude_crv, CylCone};
@@ -390,10 +391,6 @@ impl Default for BSplineSurface {
     }
 }
 
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::sm_err(operation)
-}
-
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
@@ -404,26 +401,6 @@ fn check(ok: bool, operation: &'static str, reason: &'static str) -> Result<()> 
         Ok(())
     } else {
         Err(invalid(operation, reason))
-    }
-}
-
-/// An NLib failure as upstream's `SER(SM_ERR)`; `Unported` passes through.
-fn nl_err(operation: &'static str) -> impl Fn(SolidError) -> SolidError {
-    move |e| match e {
-        SolidError::Unported { .. } => e,
-        _ => sm_err(operation),
-    }
-}
-
-/// `TO_EUCLID` (`SmNurbsCrv.h`): homogeneous to Euclidean by division, a missing `z`
-/// becomes `0`.
-fn to_euclid(from: CPoint) -> Point3 {
-    if from.w == NOW {
-        let z = if from.z == NOZ { 0.0 } else { from.z };
-        Point3::new(from.x, from.y, z)
-    } else {
-        let z = if from.z == NOZ { 0.0 } else { from.z / from.w };
-        Point3::new(from.x / from.w, from.y / from.w, z)
     }
 }
 
@@ -737,7 +714,9 @@ impl BSplineSurface {
         if self.nurb.is_none() {
             self.make_nurb()?;
         }
-        self.nurb.as_mut().ok_or_else(|| sm_err(OP_NURB))
+        self.nurb
+            .as_mut()
+            .ok_or_else(|| SolidError::sm_err(OP_NURB))
     }
 
     /// Makes the NURB representation (`MakeNurb`): a plain B-spline only checks that it
@@ -748,7 +727,7 @@ impl BSplineSurface {
     /// `SM_ERR` without a NURB.
     pub fn make_nurb(&mut self) -> Result<()> {
         if self.nurb.is_none() {
-            return Err(sm_err(OP_NURB));
+            return Err(SolidError::sm_err(OP_NURB));
         }
         Ok(())
     }
@@ -762,7 +741,7 @@ impl BSplineSurface {
 
     /// [`BSplineSurface::nurb_ref`] for methods that dereference it upstream.
     fn nurb_or_err(&self, operation: &'static str) -> Result<&Surface> {
-        self.nurb_ref().ok_or_else(|| sm_err(operation))
+        self.nurb_ref().ok_or_else(|| SolidError::sm_err(operation))
     }
 
     /// Mutable access to the out-of-bounds evaluation flag (`GetOutOfBoundsEnabled`).
@@ -1414,7 +1393,7 @@ impl BSplineSurface {
         u1v1: Point3,
     ) -> Result<Self> {
         // create an NLib NonRational bilinear BSpline Surface interpolating the 4 corner points
-        let sur = corner_pts(u0v0, u1v0, u0v1, u1v1).map_err(nl_err(OP_BILINEAR))?;
+        let sur = corner_pts(u0v0, u1v0, u0v1, u1v1).map_err(SolidError::nl_ser(OP_BILINEAR))?;
         Ok(Self::from_gw_nurb(&sur))
     }
 
@@ -1552,7 +1531,7 @@ impl BSplineSurface {
             u,
             v,
         })
-        .map_err(nl_err(OP_CANON))?;
+        .map_err(SolidError::nl_ser(OP_CANON))?;
 
         // build NMTlib SmBSpline from Nlib Nurb
         let mut srf = Self::from_gw_nurb(&sur);
@@ -1611,7 +1590,7 @@ impl BSplineSurface {
             ctp,
             dir,
         )
-        .map_err(nl_err(OP_CONE))?;
+        .map_err(SolidError::nl_ser(OP_CONE))?;
 
         let mut srf = Self::from_gw_nurb(&sur);
         srf.set_b_spline_surface_form(BSplineSurfaceForm::ConicalSurf);
@@ -1676,9 +1655,9 @@ impl BSplineSurface {
         // pass the call along
         let cur = curve_to_sweep
             .get_or_create_gw_nurb()
-            .map_err(nl_err(OP_SWEEP))?;
+            .map_err(SolidError::nl_ser(OP_SWEEP))?;
         // extruded surface is linear in u direction
-        let sur = extrude_crv(cur, w, dist, Direction::U).map_err(nl_err(OP_SWEEP))?;
+        let sur = extrude_crv(cur, w, dist, Direction::U).map_err(SolidError::nl_ser(OP_SWEEP))?;
 
         // set output
         Ok(Self::from_gw_nurb(&sur))
@@ -1738,7 +1717,9 @@ impl BSplineSurface {
             }
         }
 
-        let sur = self.get_or_create_gw_nurb().map_err(|_| sm_err(OP_XFORM))?;
+        let sur = self
+            .get_or_create_gw_nurb()
+            .map_err(|_| SolidError::sm_err(OP_XFORM))?;
         // (N_SrfTransform status ignored)
         let _ = sur.transform(&rma);
         Ok(())
@@ -1789,7 +1770,7 @@ impl BSplineSurface {
 
         // Point not close enough to surface - error
         let Some(&uv) = solutions.first() else {
-            return Err(sm_err(OP_STEP_INV));
+            return Err(SolidError::sm_err(OP_STEP_INV));
         };
 
         // when point is on a singular boundary
@@ -1910,7 +1891,7 @@ impl BSplineSurface {
             0 => false,
             1 => true,
             // Wrong type
-            _ => return Err(sm_err(OP_READ)),
+            _ => return Err(SolidError::sm_err(OP_READ)),
         };
 
         // Bound the header against the bytes left before allocating (Rust aborts on a

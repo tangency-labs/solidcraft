@@ -12,6 +12,7 @@
 //! | [`create_skin_srf`]                           | `N_CreateSkinSrf`         |
 //! | [`create_trans_sweep_srf`]                    | `N_CreateTransSweepSrf`   |
 //! | [`KNOT_TOL`]                                  | `KN_TOL` (file-private)   |
+//! | [`MAX_EXTEND_DEPTH`]                          | no counterpart (recursion bound) |
 //!
 //! Deviations:
 //! - Out-params become return values: every routine returns a new surface (or the
@@ -85,10 +86,6 @@ const OP_SWEEP: &str = "nurbs::srf_adv::p3::create_trans_sweep_srf";
 /// A control net, `Pw[i][j]`.
 type Net = Vec<Vec<CPoint>>;
 
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
 /// `w[i][j]`.
 fn g2<T: Copy>(w: &[Vec<T>], i: isize, j: isize, op: &'static str) -> Result<T> {
     let row = w.get(ux(i, op)?).ok_or_else(|| oob(op))?;
@@ -151,13 +148,13 @@ pub fn grid_pts_normals(
 
     // Check parameters.
     let (Some(mu), Some(mv)) = (u.len().checked_sub(1), v.len().checked_sub(1)) else {
-        return Err(nlib(OP, NlibCode::Index));
+        return Err(SolidError::nlib(OP, NlibCode::Index));
     };
     if at(u, 0, OP)? < get(uk, 0, OP)? || at(u, mu, OP)? > get(uk, sx(idx.r, OP)?, OP)? {
-        return Err(nlib(OP, NlibCode::Parameter));
+        return Err(SolidError::nlib(OP, NlibCode::Parameter));
     }
     if at(v, 0, OP)? < get(vk, 0, OP)? || at(v, mv, OP)? > get(vk, sx(idx.s, OP)?, OP)? {
-        return Err(nlib(OP, NlibCode::Parameter));
+        return Err(SolidError::nlib(OP, NlibCode::Parameter));
     }
 
     let cross_tol = 0.001 * MODEL_TOL;
@@ -678,7 +675,8 @@ fn extend_rec(
             // Get reflection plane.
             let p1 = g2(&rw, ii, kby, OP)?.to_euclid();
             let p2 = g2(&rw, ii, kby + 1, OP)?.to_euclid();
-            let (v, _) = normalize(p1 - p2).map_err(|_| nlib(OP, NlibCode::Geometry))?;
+            let (v, _) =
+                normalize(p1 - p2).map_err(|_| SolidError::nlib(OP, NlibCode::Geometry))?;
             let pln = Plane::new(p1, v);
             let mut k = kby - 1;
             for jj in 1..=kby {
@@ -743,7 +741,8 @@ fn extend_rec(
             // Get reflection plane.
             let p1 = g2(&rw, ii, kby, OP)?.to_euclid();
             let p2 = g2(&rw, ii, kby - 1, OP)?.to_euclid();
-            let (v, _) = normalize(p1 - p2).map_err(|_| nlib(OP, NlibCode::Geometry))?;
+            let (v, _) =
+                normalize(p1 - p2).map_err(|_| SolidError::nlib(OP, NlibCode::Geometry))?;
             let pln = Plane::new(p1, v);
             let mut k = 2 * kby;
             for jj in 0..kby {
@@ -983,7 +982,7 @@ fn cmax_points(
                 for jj in 0..pq {
                     let w = g2(rw, ii, jj, OP)?.w;
                     if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                        return Err(nlib(OP, NlibCode::Weight));
+                        return Err(SolidError::nlib(OP, NlibCode::Weight));
                     }
                 }
             }
@@ -1024,7 +1023,7 @@ fn cmax_points(
                 for jj in 1..=pq {
                     let w = g2(rw, ii, kby + jj, OP)?.w;
                     if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                        return Err(nlib(OP, NlibCode::Weight));
+                        return Err(SolidError::nlib(OP, NlibCode::Weight));
                     }
                 }
             }
@@ -1179,7 +1178,7 @@ pub fn create_skin_srf(
     let udir = match dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
     };
 
     // Get indexes and control point data (the cross-section direction is "c": its

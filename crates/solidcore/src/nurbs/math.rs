@@ -134,7 +134,7 @@ pub const ZERO_COEFFICIENT_TOL: f64 = 1.0e-12;
 pub const MODEL_TOL: f64 = 1.0e-07;
 
 /// `NL_BIGD` (`DBL_MAX`).
-const BIGD: f64 = f64::MAX;
+pub(crate) const BIGD: f64 = f64::MAX;
 /// `NL_SMAD` (`DBL_MIN`, the smallest positive normal double).
 const SMAD: f64 = f64::MIN_POSITIVE;
 

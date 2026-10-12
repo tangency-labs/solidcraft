@@ -44,7 +44,7 @@ use crate::math::max2;
 use crate::nurbs::basis_basic::{compatible_knot_array, find_all_span_maxima};
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::knots::KnotVector;
-use crate::nurbs::math::{CPoint, NOW};
+use crate::nurbs::math::{CPoint, BIGD, NOW};
 use crate::nurbs::srf_basic::{make_rat_compatible, Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 
 use super::p1::{at, at2, insert_knots, ix, oob, put, put2, sx, zeros1, zeros2, Local};
@@ -54,9 +54,6 @@ use super::p2::{
 
 /// Upstream `NOREM`: the error bound marking a knot that cannot be removed.
 const NO_REMOVAL: f64 = 1.0e+25;
-
-/// Upstream `NL_BIGD`.
-const BIGD: f64 = f64::MAX;
 
 /// `0` for the u direction, `1` for v.
 fn slot(d: Direction) -> usize {

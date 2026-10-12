@@ -58,14 +58,11 @@ use crate::nurbs::crv_basic::{make_rat_compatible, Curve};
 use crate::nurbs::geom::{dist_cpt_cpt_homo, Interval};
 use crate::nurbs::index::{get, oob, set, storage, sx, ux};
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::CPoint;
+use crate::nurbs::math::{CPoint, BIGD};
 use crate::nurbs::srf_basic::{WEIGHT_MAX, WEIGHT_MIN};
 
 /// Upstream `NOREM`: removal error bound marking a knot that cannot be removed.
 pub const NOT_REMOVABLE: f64 = 1.0e+25;
-
-/// Upstream `NL_BIGD` (`DBL_MAX`).
-const BIGD: f64 = f64::MAX;
 
 /// Upstream `NL_SMAD` (`DBL_MIN`).
 const SMAD: f64 = f64::MIN_POSITIVE;

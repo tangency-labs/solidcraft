@@ -84,7 +84,7 @@ use crate::nurbs::basis_basic::SpanMaxima;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::dist_cpt_cpt_homo;
 use crate::nurbs::knots::{Basis, KnotVector, Side};
-use crate::nurbs::math::{pascal_triangle, CPoint, NOW, NOZ};
+use crate::nurbs::math::{pascal_triangle, CPoint, BIGD, NOW, NOZ};
 
 /// `GW_MAX_DEGREE`: size of the fixed scratch arrays; degrees must stay below it.
 pub const MAX_DEGREE: usize = 32;
@@ -97,8 +97,6 @@ const WMIN: f64 = 1.0e-03;
 const WMAX: f64 = 100.0;
 /// `cto`: relative tolerance of the basis-maximum searches of knot removal.
 const CTO: f64 = 1.0e-05;
-/// `NL_BIGD` (`DBL_MAX`).
-const BIGD: f64 = f64::MAX;
 /// `NL_SMAD` (`DBL_MIN`).
 const SMAD: f64 = f64::MIN_POSITIVE;
 /// `itl`: Newton iteration / restart limit of [`basis_find_global_max`].

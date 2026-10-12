@@ -310,14 +310,6 @@ fn check(ok: bool, operation: &'static str, reason: &'static str) -> Result<()> 
     }
 }
 
-/// An NLib failure as upstream's `SER(SM_ERR)`; `Unported` passes through.
-fn nl_err(operation: &'static str) -> impl Fn(SolidError) -> SolidError {
-    move |e| match e {
-        SolidError::Unported { .. } => e,
-        _ => SolidError::sm_err(operation),
-    }
-}
-
 /// `SM_CPOINT_AVE`: the midpoint of two control points; `z` / `w` stay missing when
 /// the first point's are.
 fn cpoint_ave(a1: CPoint, a2: CPoint) -> CPoint {
@@ -902,7 +894,7 @@ impl BSplineCurve {
         }
 
         // LEFT/RIGHT doesn't matter on C0 curves for point evals
-        crv_eval(cur, t, Side::Left).map_err(nl_err(OP_EVAL_PT))
+        crv_eval(cur, t, Side::Left).map_err(SolidError::nl_ser(OP_EVAL_PT))
     }
 
     /// The point and derivatives `0..=num_derivs` at `t` (`Evaluate`), from the left
@@ -940,7 +932,7 @@ impl BSplineCurve {
         }
 
         let side = if from_left { Side::Left } else { Side::Right };
-        let mut pv = crv_derivs(cur, t, side, num_derivs).map_err(nl_err(OP_EVAL))?;
+        let mut pv = crv_derivs(cur, t, side, num_derivs).map_err(SolidError::nl_ser(OP_EVAL))?;
         if pv.len() != num_derivs + 1 {
             return Err(SolidError::sm_err(OP_EVAL));
         }
@@ -1285,7 +1277,7 @@ impl BSplineCurve {
         let cur = self.nurb_ref()?;
         let projected = cur
             .project_onto_plane(plane_point, plane_normal, dir_or_center, nl_prj)
-            .map_err(nl_err(OP_PROJ))?;
+            .map_err(SolidError::nl_ser(OP_PROJ))?;
         Ok(Self::from_gw_nurb(3, &projected))
     }
 
@@ -1376,7 +1368,7 @@ impl BSplineCurve {
             pts: control_points,
             v,
         })
-        .map_err(nl_err(OP_CANON))?;
+        .map_err(SolidError::nl_ser(OP_CANON))?;
 
         // when asked - bump 2d curves up to 3d curves
         if dim == 3 && !cur.is_3d() {
@@ -1437,7 +1429,7 @@ impl BSplineCurve {
             start: start_deg,
             end: end_deg,
         };
-        let mut cur = circ_arc(&arc, ctp).map_err(nl_err(OP_CIRCLE))?;
+        let mut cur = circ_arc(&arc, ctp).map_err(SolidError::nl_ser(OP_CIRCLE))?;
         if dim == 2 {
             cur.to_2d();
         }
@@ -1560,7 +1552,8 @@ impl BSplineCurve {
         )?;
 
         let line_vec = end - start;
-        let mut new_cur = line_from_pt_and_vector(start, line_vec).map_err(nl_err(OP_LINE))?;
+        let mut new_cur =
+            line_from_pt_and_vector(start, line_vec).map_err(SolidError::nl_ser(OP_LINE))?;
         if dim == 2 {
             new_cur.to_2d();
         }

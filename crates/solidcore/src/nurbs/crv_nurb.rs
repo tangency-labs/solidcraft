@@ -77,11 +77,9 @@ use crate::nurbs::geom::{
 use crate::nurbs::index::{get, get2, oob, set, set2, sx};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{
-    combine2_pts, float_op_is_bad, CPoint, FloatOp, RealMatrix, MAX_DERIVATIVE, MODEL_TOL, NOW, NOZ,
+    combine2_pts, float_op_is_bad, CPoint, FloatOp, RealMatrix, BIGD, MAX_DERIVATIVE, MODEL_TOL,
+    NOW, NOZ,
 };
-
-/// `NL_BIGD` (`DBL_MAX`).
-const BIGD: f64 = f64::MAX;
 
 /// The Greville abscissa of control point `idx`: the average of the `degree` knots
 /// `U[idx+1..=idx+degree]` (`N_CrvGetGrevilleAbscissa`).

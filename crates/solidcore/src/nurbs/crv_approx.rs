@@ -36,7 +36,7 @@
 //!   index outside its arrays the port returns [`SolidError::InvalidInput`].
 
 use crate::error::{NlibCode, Result, SolidError};
-use crate::math::Vec3;
+use crate::math::{max2, Vec3};
 use crate::nurbs::crv_adv::p2::ConstrainedEnds;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_fit::p1::{
@@ -497,8 +497,7 @@ pub fn approx_nurbs_with_non_rat_crv(
         let muu = b.max_2nd_deriv()?;
         let num = 0.125 * muu;
         let sq = num.sqrt();
-        // NL_MAX(f2, sq).
-        let gro = if f2 > sq { f2 } else { sq };
+        let gro = max2(f2, sq);
         let del = f1 * gro;
         let del = del.ceil();
         let n = del as i64;
@@ -566,8 +565,8 @@ pub fn approx_nurbs_with_non_rat_crv(
             let del = cur.arc_length(u0, um, pct, ToleranceKind::Relative)?;
             ts = normalize(ts)?.0;
             te = normalize(te)?.0;
-            ts = scale(ts, del);
-            te = scale(te, del);
+            ts = del * ts;
+            te = del * te;
         }
         interp_knots_and_derivs(&pts, &u, &knt, deg, ts, te)?
     } else {
@@ -597,11 +596,6 @@ pub fn approx_nurbs_with_non_rat_crv(
         }
     }
     Ok(q)
-}
-
-/// `N_VectorScale(v, s, &v)`.
-fn scale(v: Vec3, s: f64) -> Vec3 {
-    Vec3::new(s * v.x, s * v.y, s * v.z)
 }
 
 #[cfg(test)]
