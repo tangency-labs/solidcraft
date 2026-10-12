@@ -361,9 +361,9 @@ depends_on = ["nlib.basis_basic", "nlib.knots"]
 est_lines = 538
 layer = 3
 tests = ["SM_API_test:TestSmCreateSurfaceFromPoints", "SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "prog_test:my_test_parallel_projection"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-nlib.funcs_basic-a1"
+claimed_at = "2026-10-12T20:17:09Z"
 notes = "32 fns; largest: N_SrfFuncEvalPt, N_CFuncDerivs, N_CFuncEval, N_CrvFuncCompact; 160 upstream test entry points reach this unit"
 
 [[unit]]
