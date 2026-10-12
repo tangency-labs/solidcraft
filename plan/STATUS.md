@@ -1,6 +1,6 @@
 # solidcore status
 
-Last updated: 2026-10-12, Wave 1 in progress (after style review batch #4). Update a
+Last updated: 2026-10-12, Wave 1 in progress (after style review batch #5). Update a
 summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
@@ -13,10 +13,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **26** (23,756 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2` |
 | Partial | **6** (6,169 lines): `geom.extent3d`, `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array` |
-| Ported (green + partial) | 32 units, 29,925 upstream lines (7.7%); about 37,800 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 1 (1,542 lines): `nlib.crv_basic` |
+| Ported (green + partial) | 32 units, 29,925 upstream lines (7.7%); about 37,700 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 5 (5,832 lines): `nlib.crv_basic`, `geom.pseudo_box`, `geom.global_solver`, `geom.transform`, `geom.tools` |
 | Blocked | 0 |
-| Todo | 227 (356,436 lines) |
+| Todo | 223 (352,146 lines) |
 
 ## What Wave 0 produced
 
@@ -95,26 +95,24 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 
 ## Ready set
 
-Ready: `geom.pseudo_box` (layer 5, 1508 upstream lines; unblocks `geom.extent3d`). Every
-other `todo` unit whose dependencies are green/partial except for claimed units waits on
-one of these:
+Nothing is ready to claim: every `todo` unit whose dependencies are otherwise
+green/partial waits on a claimed unit.
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 5 | `geom.global_solver` | 1775 | `geom.solution_array` |
-| 5 | `geom.tools` | 326 | `geom.solution_array` |
-| 5 | `geom.transform` | 681 | `geom.solution_array` |
 | 5 | `nlib.crv_fit_p1` | 1707 | `nlib.crv_basic` |
 | 5 | `nlib.crv_tool_p1` | 1371 | `nlib.crv_basic` |
 | 5 | `nlib.iges` | 1055 | `nlib.crv_basic` |
 | 5 | `nlib.srf_tool_p1` | 1678 | `nlib.crv_basic` |
+| 6 | `curve.hermite_curve` | 383 | `geom.pseudo_box` |
+| 6 | `geom.point_set` | 694 | `geom.pseudo_box` |
+| 6 | `geom.a_object` | 935 | `geom.transform` |
 
-`geom.geom_utility_p1` is green and made `geom.axis2_placement` and
-`geom.geom_utility_p2` green. `nlib.crv_basic` opens four NURBS units, `geom.solution_array` three.
+`geom.pseudo_box` also unblocks the 4 deferred `geom.extent3d` cases.
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 29 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 32 ported
   units is bit-identical (`max_rel_err = 0`).
 - `nlib.basis_adv`: `N_BasisDerivsArray` walks spans forward without a bound (reads past
   `U[m]` for an inner parameter at or past the domain end) and has no zero-denominator
@@ -255,25 +253,49 @@ without `cpp`), tests and the wasm32 check.
 - Outside the batch: `nurbs::geom`'s header used a redundant explicit intra-doc link
   that failed `cargo doc` with `-D warnings` (`nlib.geom` difftest re-run, unchanged).
 
-## Resume note (2026-10-12, after style review batch #4)
+## Style review batch #5 (2026-10-12)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Four units are claimed
-  (`geom.geom_utility_p1`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`) with
-  worktrees under `../solidcore-wt/`; check `git worktree list` before you claim.
-  Nothing is ready to claim until one of them lands (see Ready set).
-- `geom.geom_utility_p1` is merged and green; it wired the p2 stubs and reuses
-  `geom::tol`; `p2::PointSetType` is a re-export of `p1::PointSetType`.
+Reviewed `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`,
+`geom.grid` and `geom.geom_utility_p1` against AGENTS.md. Numerics and operation order
+were not changed; every unit re-ran difftest with unchanged counts and
+`max_rel_err = 0` (`geom.grid` still 613 pass + 2 deferred), plus fmt, clippy, tests
+and the wasm32 check. No public API changed.
+
+- **Shared status codes.** `error::{SM_ERR, SM_ERR_WARNING}` and
+  `SolidError::sm_err(operation)` replace the private copies in `polar_box`, `grid` and
+  `geom_utility/p1`. Twelve other files still carry `const SM_ERR: i32 = 1001` and/or
+  a private `fn sm_err` (`grep -rn "const SM_ERR\|fn sm_err" crates/solidcore/src`);
+  new code should import the shared ones, and a later pass can migrate the rest.
+- `nlib.bezier`: `N_BezGetDegreeElevationMatrix` and `N_BezFuncMultiplyBezCrvMatrix`
+  run identical loops; both call one private `band_matrix_into`. `given_or_local`
+  replaces the hand-rolled null-matrix fallbacks; `reduce_degree` shares its left/right
+  loops between odd and even degrees.
+- `geom.grid`: `Setup3DDDA`'s three per-axis blocks are one private `AxisStep::new`;
+  `GetVoxelAddress`'s outside test is one expression.
+- `geom.polar_box`: `PolarBoxState::is_unknown` (uninitialised or unbounded) serves
+  `Cross`'s early exits and `compute_polar_coord`; redundant resets dropped.
+- `geom.geom_utility_p1`: checks that return the same error are one `||` chain;
+  `PointSetType::code` reads the discriminant.
+- `nlib.funcs_basic`, `nlib.basis_adv`: removed `allow(clippy::too_many_arguments /
+  too_many_lines)` (allowed workspace-wide); `CurveFunction::compact` truncates in
+  place.
+
+## Resume note (2026-10-12, after style review batch #5)
+
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Five units are
+  claimed (`nlib.crv_basic`, `geom.pseudo_box`, `geom.global_solver`,
+  `geom.transform`, `geom.tools`); check `git worktree list` before you claim. Nothing
+  is ready until one of them lands (see Ready set).
 - Earlier API changes still apply to older worktrees: `Axis2Placement::from_to`,
-  `SurfaceIndices`, `nurbs::geom::Frame` (batches #2 and #3).
+  `SurfaceIndices`, `nurbs::geom::Frame` (batches #2 and #3), the `geom_utility_p2`
+  options structs (batch #4).
+- Use `SolidError::sm_err` / `error::SM_ERR` for upstream `SM_ERR` in new code.
 - Remaining partial waits: `geom.extent3d` on `geom.pseudo_box`, `geom.tree` on
   `nurbs.b_spline_surface_p1`/`surface.surface_cache_p1`, `geom.attribute` on
   `topology.shell`, `geom.object` on the topology units, `geom.grid` on the surface
-  caches, `geom.solution_array` on curve/surface/edge/face/vertex geometry (also
-  `query.poly`, `surface.volume_p1`, `topology.topology` stubs, not reached by its cases).
-- `RUSTDOCFLAGS="-D warnings" cargo doc -p solidcore --no-deps` is clean (batch #4
-  fixed a redundant explicit link in `nurbs/geom.rs`); keep it that way.
-- Style review batch #5: `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`,
-  `nlib.basis_adv` and the units that merge next.
+  caches, `geom.solution_array` on curve/surface/edge/face/vertex geometry.
+- Style review batch #6: `geom.solution_array`, `nlib.crv_basic` and the units that
+  merge next; optionally the `SM_ERR` migration of the remaining files.
 
 ## Known problems
 
