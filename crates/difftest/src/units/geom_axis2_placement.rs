@@ -10,8 +10,7 @@
 //! vectors `w` and scalars `s`, `t`. The result `r` is
 //! `[status_a, A origin, A x, A y, A z, (status_b, B ...,) op values...]` with
 //! booleans as `1.0`/`0.0` and setter statuses as their upstream codes
-//! (`SM_ERR_INVALID_INPUT` = 1007). `AreCoaxial` cases are deferred until
-//! `smgu_LinePointDistance` (unit `geom.geom_utility_p1`) is ported.
+//! (`SM_ERR_INVALID_INPUT` = 1007).
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
 use serde::{Deserialize, Serialize};
@@ -251,10 +250,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         Op::IsIdentity => out.push(flag(a.is_identity(i.s))),
         Op::Coaxial => {
             let b = build_b(&mut out)?;
-            match a.are_coaxial(&b, i.s, i.t) {
-                Ok(r) => out.push(flag(r)),
-                Err(e) => return Ok(Err(e)),
-            }
+            out.push(flag(a.are_coaxial(&b, i.s, i.t)));
         }
         Op::Chain => {
             a.rotate_about_axis(i.s, w0);

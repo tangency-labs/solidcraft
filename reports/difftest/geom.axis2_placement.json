@@ -370,28 +370,20 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "coaxial_same_axis",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.axis2_placement/cases.json#46 (upstream src/SmAxis2Placement.cpp:862)",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "coaxial_offset",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.axis2_placement/cases.json#47 (upstream src/SmAxis2Placement.cpp:862)",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -410,16 +402,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498156",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -470,16 +458,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498163",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -594,16 +578,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0024",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498178",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -750,16 +730,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0043",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498197",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -778,16 +754,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0046",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498200",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -822,16 +794,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0051",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498205",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -890,16 +858,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0059",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498213",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1118,16 +1082,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498241",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1210,16 +1170,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0098",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498252",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1246,16 +1202,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0102",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498256",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1842,16 +1794,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0176",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498330",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1862,16 +1810,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0178",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498332",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1890,16 +1834,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0181",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498335",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -1942,16 +1882,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0187",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498341",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -2082,16 +2018,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0204",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498358",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -2598,16 +2530,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0268",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498422",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -2658,16 +2586,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0275",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498429",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -2934,28 +2858,20 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0309",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498463",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0310",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498464",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -3342,16 +3258,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0359",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498513",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -3650,16 +3562,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0397",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498551",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -3702,16 +3610,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498557",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -3778,16 +3682,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0412",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498566",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -4126,16 +4026,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0455",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498609",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -4202,16 +4098,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0464",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498618",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -4294,16 +4186,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0475",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498629",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -4402,16 +4290,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0488",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498642",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -4526,16 +4410,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0503",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498657",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -4810,28 +4690,20 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0538",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498692",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0539",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498693",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -5258,16 +5130,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0593",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498747",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -5382,16 +5250,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0608",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498762",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -5474,16 +5338,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0619",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498773",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -5534,16 +5394,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0626",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498780",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -5802,16 +5658,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0659",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498813",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6246,16 +6098,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0714",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498868",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6362,16 +6210,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0728",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498882",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6382,16 +6226,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0730",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498884",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6426,16 +6266,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0735",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498889",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6526,16 +6362,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0747",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498901",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6578,16 +6410,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498907",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6790,16 +6618,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0779",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498933",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6834,16 +6658,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0784",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498938",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6878,16 +6698,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0789",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498943",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -6930,16 +6746,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0795",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498949",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7246,16 +7058,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0834",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498988",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7306,16 +7114,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0841",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946498995",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7422,16 +7226,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0855",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499009",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7522,16 +7322,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0867",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499021",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7598,16 +7394,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0876",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499030",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7898,16 +7690,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0913",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499067",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7934,16 +7722,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0917",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499071",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -7962,16 +7746,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0920",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499074",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8094,16 +7874,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0936",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499090",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8338,16 +8114,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0966",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499120",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8422,16 +8194,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0976",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499130",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8498,16 +8266,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0985",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499139",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8662,16 +8426,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499159",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8834,16 +8594,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499180",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -8966,16 +8722,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1042",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499196",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -9026,16 +8778,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1049",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499203",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -9518,16 +9266,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1110",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499264",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -9658,16 +9402,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1127",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499281",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -9686,16 +9426,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1130",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499284",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -9954,16 +9690,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1163",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499317",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -10062,16 +9794,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1176",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499330",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -10146,16 +9874,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499340",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -10398,28 +10122,20 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1217",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499371",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1218",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499372",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -10742,16 +10458,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1259",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499413",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -10938,16 +10650,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1283",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499437",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -11094,16 +10802,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1302",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499456",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -11250,16 +10954,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1321",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499475",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -11326,16 +11026,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1330",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499484",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -11434,16 +11130,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1343",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499497",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -11694,16 +11386,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1375",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499529",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -11890,16 +11578,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1399",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499553",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12062,16 +11746,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1420",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499574",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12458,28 +12138,20 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1469",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499623",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1470",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499624",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12498,28 +12170,20 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1473",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499627",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1474",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499628",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12538,16 +12202,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499631",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12574,16 +12234,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1481",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499635",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12778,16 +12434,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1506",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499660",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -12926,16 +12578,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1524",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499678",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13018,16 +12666,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1535",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499689",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13390,28 +13034,20 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1581",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499735",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1582",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499736",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13646,16 +13282,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1612",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499766",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13738,16 +13370,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1623",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499777",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13806,16 +13434,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1631",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499785",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13858,16 +13482,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1637",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499791",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -13942,16 +13562,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1647",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499801",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14098,16 +13714,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499820",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14310,16 +13922,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1692",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499846",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14562,16 +14170,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1723",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499877",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14630,16 +14234,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499885",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14770,16 +14370,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1748",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499902",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14790,16 +14386,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1750",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499904",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14834,16 +14426,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1755",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499909",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -14966,16 +14554,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1771",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499925",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -15002,16 +14586,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1775",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499929",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -15054,16 +14634,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1781",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499935",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -15202,16 +14778,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1799",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499953",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -15270,16 +14842,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1807",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946499961",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -15618,16 +15186,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1850",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500004",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -16110,16 +15674,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1911",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500065",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -16474,16 +16034,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1956",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500110",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -16606,16 +16162,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1972",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500126",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -17450,16 +17002,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2077",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500231",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -17478,16 +17026,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2080",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500234",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -17546,16 +17090,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2088",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500242",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -17766,16 +17306,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2115",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500269",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -17810,16 +17346,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2120",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500274",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -17870,16 +17402,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2127",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500281",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -18290,16 +17818,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500333",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -18406,16 +17930,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2193",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500347",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -18434,16 +17954,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2196",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500350",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -18486,16 +18002,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2202",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500356",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -18730,16 +18242,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500386",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -18910,16 +18418,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2254",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500408",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -19138,16 +18642,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2282",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500436",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -19398,16 +18898,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2314",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500468",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -19962,16 +19458,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2384",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500538",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -20430,16 +19922,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2442",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500596",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -20642,16 +20130,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2468",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500622",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -20686,16 +20170,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2473",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500627",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -20946,16 +20426,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2505",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500659",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21014,16 +20490,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2513",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500667",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21226,16 +20698,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2539",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500693",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21254,16 +20722,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2542",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500696",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21402,28 +20866,20 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2560",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500714",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2561",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500715",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21482,16 +20938,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2569",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500723",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21550,16 +21002,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2577",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500731",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21650,16 +21098,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2589",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500743",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -21814,16 +21258,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2609",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500763",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22042,16 +21482,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2637",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500791",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22070,16 +21506,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500794",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22122,16 +21554,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2646",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500800",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22214,16 +21642,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2657",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500811",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22690,16 +22114,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2716",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500870",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22862,16 +22282,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2737",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500891",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -22970,16 +22386,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2750",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500904",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23006,16 +22418,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2754",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500908",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23090,16 +22498,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2764",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500918",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23110,16 +22514,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2766",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500920",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23202,16 +22602,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2777",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500931",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23318,16 +22714,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2791",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500945",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23426,16 +22818,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2804",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500958",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23502,16 +22890,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2813",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946500967",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23826,16 +23210,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2853",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501007",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23846,16 +23226,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2855",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501009",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23874,16 +23250,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2858",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501012",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23910,16 +23282,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2862",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501016",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23946,16 +23314,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2866",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501020",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -23982,16 +23346,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2870",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501024",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24018,16 +23378,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2874",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501028",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24222,16 +23578,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2899",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501053",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24274,16 +23626,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2905",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501059",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24294,16 +23642,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2907",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501061",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24362,16 +23706,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2915",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501069",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24390,16 +23730,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2918",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501072",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24474,16 +23810,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2928",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501082",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24694,16 +24026,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2955",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501109",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24906,16 +24234,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2981",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501135",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -24998,28 +24322,20 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501146",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen2993",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501147",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25070,16 +24386,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501154",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25242,16 +24554,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3021",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501175",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25294,16 +24602,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501181",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25562,16 +24866,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3060",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501214",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25678,16 +24978,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501228",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25714,16 +25010,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3078",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501232",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -25998,16 +25290,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3113",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501267",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26122,16 +25410,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3128",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501282",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26190,16 +25474,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3136",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501290",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26282,16 +25562,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3147",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501301",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26318,16 +25594,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3151",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501305",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26458,16 +25730,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3168",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501322",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26798,16 +26066,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3210",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501364",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -26922,16 +26186,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3225",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501379",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -27174,16 +26434,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501410",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -27426,16 +26682,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3287",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501441",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -27518,16 +26770,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3298",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501452",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -27778,16 +27026,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3330",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501484",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -27870,16 +27114,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501495",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28026,16 +27266,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501514",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28078,16 +27314,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3366",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501520",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28202,28 +27434,20 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3381",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501535",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3382",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501536",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28314,16 +27538,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3394",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501548",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28750,16 +27970,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3448",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501602",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28906,16 +28122,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3467",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501621",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -28958,16 +28170,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3473",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501627",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -29082,16 +28290,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3488",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501642",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -29102,16 +28306,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3490",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501644",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -29226,16 +28426,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3505",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501659",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -29358,16 +28554,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3521",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501675",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -29434,16 +28626,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3530",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501684",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -29630,16 +28818,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3554",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501708",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -30058,16 +29242,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3607",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501761",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -30174,16 +29354,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3621",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501775",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -30386,16 +29562,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3647",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501801",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -30446,16 +29618,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3654",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501808",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -30594,16 +29762,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3672",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501826",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -30830,16 +29994,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3701",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501855",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31018,16 +30178,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3724",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501878",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31270,16 +30426,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3755",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501909",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31410,16 +30562,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3772",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501926",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31430,16 +30578,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3774",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501928",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31450,40 +30594,28 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3776",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501930",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3777",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501931",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3778",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501932",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31542,16 +30674,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3786",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501940",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31618,16 +30746,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3795",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501949",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31710,16 +30834,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3806",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501960",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31738,16 +30858,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3809",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501963",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31814,16 +30930,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3818",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501972",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -31970,16 +31082,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3837",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501991",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32014,16 +31122,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3842",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946501996",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32138,16 +31242,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3857",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502011",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32158,16 +31258,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3859",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502013",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32178,16 +31274,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3861",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502015",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32550,16 +31642,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3907",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502061",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32626,16 +31714,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3916",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502070",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32646,16 +31730,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3918",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502072",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -32674,16 +31754,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3921",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502075",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -33102,16 +32178,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3974",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502128",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -33250,16 +32322,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "smgu_LinePointDistance",
-        "unit": "geom.geom_utility_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen3992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15203952433946502146",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -33319,17 +32387,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 233,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3815,
+  "cases_passed": 4048,
   "cases_total": 4048,
-  "deferred_by_unit": {
-    "geom.geom_utility_p1": 233
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "geom.axis2_placement"
 }

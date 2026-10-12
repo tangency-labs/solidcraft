@@ -41,7 +41,7 @@
 //!   4x4 matrices are `[[f64; 4]; 4]` in upstream's `padMat[row][col]` layout.
 //! - `SetCanonical` / `SetSTEPCanonical` return `Result<()>` and, like upstream, leave
 //!   the partially updated state in `self` on error (the setters' `SER` returns early).
-//!   Unitize failures are [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`).
+//!   Unitize failures are `SolidError::InvalidInput` (`SM_ERR_INVALID_INPUT`).
 //! - The constructors ignore `SetCanonical`'s status, as upstream does. A zero plane
 //!   normal leaves both axes at [`Vec3::UNDEF`] (upstream's default-constructed
 //!   members, untouched when `MakeUnitOrthoVectors` fails).
@@ -49,14 +49,13 @@
 //!   (`PartialEq`) is exact component equality.
 //! - `SM_ASSERT`, `SE`, `SE_MSG` and `ERR` are no-ops in the release build and omitted;
 //!   the `SM_DEBUG_CODE` blocks are not compiled upstream either.
-//! - `AreCoaxial` needs `smgu_LinePointDistance` (unit `geom.geom_utility_p1`); until
-//!   that is ported it returns [`SolidError::Unported`].
 //! - The unused-upstream members (`MirrorPoint`, `MirrorVector`, `InvTransformPoint`,
 //!   `InvTransformVector`, `DecomposeToAngles`, `ComposeFromAngles`, `Load4x4`,
 //!   `SetFrom4x4`, the nine-double constructor, `Draw`, `Dump`, `AssertValid`) are not
 //!   part of this unit.
 
-use crate::error::{Result, SolidError};
+use crate::error::Result;
+use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::tol::are_same;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::EFF_ZERO;
@@ -184,7 +183,7 @@ impl Axis2Placement {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] when an axis has zero length. As upstream, `self`
+    /// `SolidError::InvalidInput` when an axis has zero length. As upstream, `self`
     /// then keeps the values stored so far (the failed axis is `(0,0,1)`).
     pub fn set_canonical(&mut self, origin: Point3, x_axis: Vec3, y_axis: Vec3) -> Result<()> {
         self.origin = origin;
@@ -219,7 +218,7 @@ impl Axis2Placement {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] when `z_axis` has zero length; `self` is then
+    /// `SolidError::InvalidInput` when `z_axis` has zero length; `self` is then
     /// unchanged.
     pub fn set_step_canonical(
         &mut self,
@@ -438,25 +437,36 @@ impl Axis2Placement {
 
     /// True when the Z axes of `self` and `other` are the same line within `tol3d`,
     /// checked at both origins and at `±size_scale` along each axis (`AreCoaxial`;
-    /// upstream passes `tol3d` as an `SmApproxTol3d`, which stores `|tol3d|`).
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] until `smgu_LinePointDistance` (unit
-    /// `geom.geom_utility_p1`) is ported.
-    pub fn are_coaxial(&self, other: &Self, tol3d: f64, size_scale: f64) -> Result<bool> {
-        let _ = (other, tol3d, size_scale);
-        // UNPORTED(geom.geom_utility_p1): smgu_LinePointDistance
-        Err(SolidError::Unported {
-            upstream: "smgu_LinePointDistance",
-            unit: "geom.geom_utility_p1",
-        })
+    /// upstream passes `tol3d` as an `SmApproxTol3d`, which stores `|tol3d|`; its
+    /// `SM_USE_DEFAULT` substitution is not applied, there is no kernel here).
+    #[must_use]
+    pub fn are_coaxial(&self, other: &Self, tol3d: f64, size_scale: f64) -> bool {
+        let tol = crate::geom::tol::tol3d(tol3d);
+        let this_pt = self.origin;
+        let this_vec = self.z_axis();
+        let othr_pt = other.origin;
+        let othr_vec = other.z_axis();
+
+        let far = |line_pnt: Point3, line_vec: Vec3, pt: Point3| {
+            line_point_distance(line_pnt, line_vec, pt).0 > tol
+        };
+
+        if far(this_pt, this_vec, othr_pt) || far(othr_pt, othr_vec, this_pt) {
+            return false;
+        }
+
+        // Get a point on the axis that is dSizeScale away from origin.
+        !(far(this_pt, this_vec, othr_pt + size_scale * othr_vec)
+            || far(this_pt, this_vec, othr_pt - size_scale * othr_vec)
+            || far(othr_pt, othr_vec, this_pt + size_scale * this_vec)
+            || far(othr_pt, othr_vec, this_pt - size_scale * this_vec))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SolidError;
 
     fn close(a: Vec3, b: Vec3) -> bool {
         (a - b).length() < 1e-12
@@ -596,9 +606,9 @@ mod tests {
         assert!(nan.approx_eq(&nan));
         let nan2 = nan;
         assert!(!nan.approx_eq(&nan2));
-        assert!(matches!(
-            p.are_coaxial(&q, 1e-6, 1.0),
-            Err(SolidError::Unported { .. })
-        ));
+        assert!(!p.are_coaxial(&q, 1e-7, 1.0));
+        assert!(p.are_coaxial(&q, 1e-5, 1.0));
+        let r = Axis2Placement::new(Vec3::new(1.0, 2.0, 9.0), Vec3::Y, Vec3::X);
+        assert!(p.are_coaxial(&r, 1e-9, 10.0));
     }
 }

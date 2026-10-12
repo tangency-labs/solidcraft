@@ -6,4 +6,5 @@
 //! The file is split over several plan units (`geom.geom_utility_p1`, `_p2`, ...);
 //! each lives in its own submodule.
 
+pub mod p1;
 pub mod p2;
