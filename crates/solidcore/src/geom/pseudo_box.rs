@@ -87,7 +87,7 @@
 //! - `SM_ASSERT*` checks and `SM_DEBUG_CODE` blocks are compiled out upstream (release
 //!   build) and omitted.
 
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent3d::{BoundaryType, Extent3d};
 use crate::geom::geom_utility::p1::{
@@ -97,9 +97,6 @@ use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, tol3d, ScaledZero};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::math::{max2, max3, min3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, INFINITE_PARAMETER};
-
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
 
 /// A projection onto a plane (`SmProjectionType` with its point and vector
 /// arguments).
@@ -436,18 +433,13 @@ impl PseudoBox {
     /// (`SM_IS_ZERO(det)`).
     pub fn invert_absolute(&self, p: Point3) -> Result<Point3> {
         const OP: &str = "geom::pseudo_box::PseudoBox::invert_absolute";
-        let err = || SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR,
-            entity: None,
-        };
         if !self.assert_defined() {
-            return Err(err());
+            return Err(SolidError::sm_err(OP));
         }
         let [b0, b1, b2] = self.basis;
         let det = determinant_3_vectors(b0, b1, b2);
         if is_zero(det) {
-            return Err(err());
+            return Err(SolidError::sm_err(OP));
         }
         Ok(Vec3::new(
             determinant_3_vectors(p, b1, b2) / det,

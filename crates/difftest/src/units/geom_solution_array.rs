@@ -333,7 +333,7 @@ fn apply(arr: &mut SolutionArray<Obj>, op: &Op, oi: &mut Vec<i64>, of: &mut Vec<
             oi.push(i64::from(arr.is_kind_of(OBJECT_TYPE)));
             oi.push(i64::from(arr.is_kind_of(CURVE_TYPE)));
         }
-        Op::Classify { start, a, b } => oi.push(to_sol(a)?.classify_solution_end(&to_sol(b)?, *start)?),
+        Op::Classify { start, a, b } => oi.push(i64::from(to_sol(a)?.classify_solution_end(&to_sol(b)?, *start)?.code())),
         Op::IsEqual { a, b } => oi.push(i64::from(to_sol(a)?.is_equal(&to_sol(b)?)?)),
         Op::GetIndex { obj: o, flag, s } => match to_sol(s)?.index_of(obj(*o), *flag)? {
             Some((i, p)) => oi.extend([0, i as i64, p as i64]),

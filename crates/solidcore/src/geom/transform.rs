@@ -87,19 +87,8 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::INFINITE_PARAMETER;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
-/// Upstream `SM_ERR`.
-const SM_ERR: i32 = 1001;
-
 /// `GW_MAX_DERIV`: the highest derivative `EvaluateSimple` accepts.
 pub const MAX_DERIV: usize = 5;
-
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
-}
 
 /// A general linear transform, the 4x4 matrix `T` of `SmTransform`, mapping a
 /// parameter-space point `[u v w 1]` to the projection-space point `[u v w 1] * T`.
@@ -119,16 +108,9 @@ impl Default for Transform {
     }
 }
 
-fn row(v: Vec3) -> [f64; 3] {
-    v.to_array()
-}
-
 impl Transform {
     /// `SmTransform_TYPE` (`VOL_BASE_TYPE + 8`).
     pub const TYPE: i64 = 22008;
-
-    /// `SmVolume_TYPE` (`VOL_BASE_TYPE + 1`).
-    const VOLUME_TYPE: i64 = 22001;
 
     /// The identity transform (`SmTransform()` / `Init`).
     pub const IDENTITY: Self = Self {
@@ -263,7 +245,7 @@ impl Transform {
         self.set_to_x_axis(Vec3::new(1.0, 0.0, 0.0));
         self.set_to_y_axis(Vec3::new(0.0, 1.0, 0.0));
         self.set_to_z_axis(Vec3::new(0.0, 0.0, 1.0));
-        self.set_to_disp(Vec3::new(0.0, 0.0, 0.0));
+        self.set_to_disp(Vec3::ZERO);
         self.init_ext();
     }
 
@@ -306,7 +288,7 @@ impl Transform {
     pub fn inv_transform_point(&self, p: Point3) -> Result<Point3> {
         let mid = p - self.to_disp();
         self.inv_transform_vector(mid)
-            .map_err(|_| sm_err("geom::transform::Transform::inv_transform_point"))
+            .map_err(|_| SolidError::sm_err("geom::transform::Transform::inv_transform_point"))
     }
 
     /// Maps a projection-space vector back to parameter space through the inverse
@@ -317,13 +299,13 @@ impl Transform {
     /// `SM_ERR` when the axes sub-matrix is singular (`smgu_3x3Inverse` fails).
     pub fn inv_transform_vector(&self, v: Vec3) -> Result<Vec3> {
         let inv = inverse_3x3(
-            &row(self.to_x_axis()),
-            &row(self.to_y_axis()),
-            &row(self.to_z_axis()),
+            &self.to_x_axis().to_array(),
+            &self.to_y_axis().to_array(),
+            &self.to_z_axis().to_array(),
         )
-        .map_err(|_| sm_err("geom::transform::Transform::inv_transform_vector"))?;
+        .map_err(|_| SolidError::sm_err("geom::transform::Transform::inv_transform_vector"))?;
         let [i0, i1, i2] = inv.map(Vec3::from_array);
-        let t_inv = Self::new(Vec3::new(0.0, 0.0, 0.0), i0, i1, Some(i2));
+        let t_inv = Self::new(Vec3::ZERO, i0, i1, Some(i2));
         Ok(t_inv.transform_vector(v))
     }
 
@@ -383,7 +365,7 @@ impl Transform {
     /// `SM_ERR` when the matrix is singular; the transform is then unchanged.
     pub fn invert_simple(&mut self) -> Result<()> {
         self.m = inverse_4x4(&self.m)
-            .map_err(|_| sm_err("geom::transform::Transform::invert_simple"))?;
+            .map_err(|_| SolidError::sm_err("geom::transform::Transform::invert_simple"))?;
         Ok(())
     }
 
@@ -413,7 +395,7 @@ impl Transform {
             });
         }
         let n1 = highest_deriv + 1;
-        let mut ders = vec![Vec3::new(0.0, 0.0, 0.0); n1 * n1 * n1];
+        let mut ders = vec![Vec3::ZERO; n1 * n1 * n1];
         let sv = |u: usize, v: usize, w: usize| (u * n1 + v) * n1 + w;
 
         let x = self.to_x_axis();
@@ -457,7 +439,7 @@ impl Transform {
         &self,
         param_box: &Extent3d,
         param_pseudo_box: Option<&PseudoBox>,
-        proj_box: Option<&mut Extent3d>,
+        mut proj_box: Option<&mut Extent3d>,
         proj_pseudo_box: Option<&mut PseudoBox>,
     ) -> Result<()> {
         // no work - no output
@@ -470,7 +452,6 @@ impl Transform {
                 reason: "an output needs a parameter-space pseudo box",
             });
         };
-        let mut proj_box = proj_box;
 
         // init output
         if let Some(b) = proj_box.as_deref_mut() {
@@ -588,7 +569,7 @@ impl Transform {
         solutions.set_size(1);
         let res = self.inv_transform_point(proj_point);
         let Some(sol) = solutions.get_mut(0) else {
-            return Err(sm_err(
+            return Err(SolidError::sm_err(
                 "geom::transform::Transform::global_point_solve_simple",
             ));
         };
@@ -624,10 +605,9 @@ impl Transform {
     ) -> Result<Solution<O>> {
         let mut solutions = SolutionArray::new();
         self.global_point_solve_simple(proj_point, &mut solutions, this)?;
-        solutions
-            .get(0)
-            .copied()
-            .ok_or_else(|| sm_err("geom::transform::Transform::local_point_solve_simple"))
+        solutions.get(0).copied().ok_or_else(|| {
+            SolidError::sm_err("geom::transform::Transform::local_point_solve_simple")
+        })
     }
 
     /// A transform is never bounded (`IsBoundedSimple`).
@@ -693,8 +673,8 @@ impl Transform {
                 }
             }
         }
+        // The matrix is read; the base-class read that follows is not ported yet.
         // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-        let _ = t;
         Err(SolidError::Unported {
             upstream: "SmVolume::ReadFromDB",
             unit: "surface.volume_p2",
@@ -729,7 +709,6 @@ impl Transform {
         if t == Self::TYPE {
             return Ok(true);
         }
-        let _ = Self::VOLUME_TYPE;
         // UNPORTED(surface.volume_p1): SmVolume::IsKindOf
         Err(SolidError::Unported {
             upstream: "SmVolume::IsKindOf",

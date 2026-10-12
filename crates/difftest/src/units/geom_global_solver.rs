@@ -24,6 +24,7 @@ use serde_json::Value;
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::global_solver::{
     GlobalSolve, GlobalSolver, OperationCategory, PreferredSolution, SolutionRequested,
+    SolveRequest,
     SolverOperation, MAX_SOLVER_TREES,
 };
 use solidcore::geom::solution_array::{
@@ -365,7 +366,15 @@ fn run_rust(ops: &[Op]) -> Result<(Vec<i64>, Vec<f64>), RunError> {
                 v,
             } => {
                 let mut arr = std::mem::take(&mut s.solutions);
-                let r = s.solve_it(operation(*sop)?, requested(*req)?, *tol, *best, &vecs(v), &mut arr);
+                let opt_vectors = vecs(v);
+                let request = SolveRequest {
+                    operation: operation(*sop)?,
+                    solution_requested: requested(*req)?,
+                    tolerance_3d: *tol,
+                    best_answer_so_far_sq: *best,
+                    opt_vectors: &opt_vectors,
+                };
+                let r = s.solve_it(&request, &mut arr);
                 s.solutions = arr;
                 oi.push(status(r)?);
             }

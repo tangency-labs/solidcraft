@@ -238,14 +238,13 @@ pub fn find_coincident_edge<C: ?Sized>(
 ) -> Result<Option<CoincidentEdge>> {
     let curve_ivl = query.interval;
     let guess = curve_ivl.mid();
+    let (v1, v2) = (query.start_vertex, query.end_vertex);
 
     for (ii, &e) in edges.iter().enumerate().skip(start) {
         if curve_owner(query.curve)? == Some(e) {
             continue;
         }
 
-        let v1 = query.start_vertex;
-        let v2 = query.end_vertex;
         let matches = (edge_vertex(brep, e)? == v1 && edge_other_vertex(brep, e, v1)? == v2)
             || (edge_vertex(brep, e)? == v2 && edge_other_vertex(brep, e, v2)? == v1);
         if !matches {
@@ -259,10 +258,7 @@ pub fn find_coincident_edge<C: ?Sized>(
         let mid_pt = edge_curve_point(brep, e, edge_mid_param)?;
 
         let drop = drop_point(query.curve, &curve_ivl, mid_pt, tol, guess)?;
-        if !drop.good {
-            continue;
-        }
-        if drop.distance > tol {
+        if !drop.good || drop.distance > tol {
             continue;
         }
 
@@ -270,17 +266,19 @@ pub fn find_coincident_edge<C: ?Sized>(
         let curve_tangent = curve_derivative(query.curve, drop.parameter)?;
         let same_orientation = curve_tangent.dot(edge_tangent) > 0.0;
 
-        let (mut other_t0, mut other_t1) = (edge_ivl.min(), edge_ivl.max());
-        if !same_orientation {
-            other_t0 = edge_ivl.max();
-            other_t1 = edge_ivl.min();
-        }
+        // the edge range in the curve's direction
+        let other_range = if same_orientation {
+            (edge_ivl.min(), edge_ivl.max())
+        } else {
+            (edge_ivl.max(), edge_ivl.min())
+        };
         let dist = match curve_max_distance_between(
             query.curve,
             &curve_ivl,
             brep,
             e,
-            (other_t0, other_t1),
+            other_range,
+            COINCIDENCE_SAMPLES,
             tol,
         ) {
             Ok(d) => d,
@@ -466,18 +464,18 @@ fn edge_drop_point(
     })
 }
 
-/// `pCurve->CurveMaxDistanceBetween(ivl, *pE->GetCurve(), t0, t1,
-/// COINCIDENCE_SAMPLES, &tol, dist, NULL, NULL)`.
+/// `pCurve->CurveMaxDistanceBetween(ivl, *pE->GetCurve(), t0, t1, samples, &tol,
+/// dist, NULL, NULL)`.
 fn curve_max_distance_between<C: ?Sized>(
     _curve: &C,
     _ivl: &Extent1d,
     brep: &Brep,
     e: EdgeId,
     _other_range: (f64, f64),
+    _samples: u32,
     _tol: f64,
 ) -> Result<f64> {
     brep.edge(e)?;
-    let _ = COINCIDENCE_SAMPLES;
     // UNPORTED(curve.curve_p6): SmCurve::CurveMaxDistanceBetween
     Err(SolidError::Unported {
         upstream: "SmCurve::CurveMaxDistanceBetween",

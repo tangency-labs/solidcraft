@@ -109,19 +109,6 @@ use crate::nurbs::knots::KnotVector;
 use crate::nurbs::math::{CPoint, MODEL_TOL, NOW, NOZ};
 use crate::nurbs::srf_basic::{Surface, WEIGHT_MAX, WEIGHT_MIN, WEIGHT_TOL};
 
-const OP_NEW: &str = "nurbs::crv_basic::Curve::new";
-const OP_WITH_INDICES: &str = "nurbs::crv_basic::Curve::with_indices";
-const OP_SET_CPTS: &str = "nurbs::crv_basic::Curve::set_cpts_and_knots";
-const OP_SET_SIZE: &str = "nurbs::crv_basic::Curve::set_size_indices";
-const OP_WEIGHTS: &str = "nurbs::crv_basic::Curve::weights_are_valid";
-const OP_SIZED: &str = "nurbs::crv_basic::Curve::is_sized";
-const OP_EPOLYGON: &str = "nurbs::crv_basic::Curve::epolygon";
-const OP_REPARAM: &str = "nurbs::crv_basic::Curve::reparam_to_interval";
-const OP_PLANAR: &str = "nurbs::crv_basic::Curve::is_planar";
-const OP_FROM_NUM: &str = "nurbs::crv_basic::curve_from_num_and_denom";
-const OP_CONIC: &str = "nurbs::crv_basic::conic_data";
-const OP_CROSS: &str = "nurbs::crv_basic::cross_bound_deriv_crv_non_rat_srf";
-
 /// Most turns of 360 degrees [`conic_data`] adds or removes while normalising the end
 /// angle before giving up.
 pub const CONIC_MAX_TURNS: usize = 1 << 20;
@@ -153,17 +140,19 @@ pub struct Curve {
 impl Curve {
     /// Curve over whole arrays (`n = pw.len() - 1`, `m = u.len() - 1`).
     ///
-    /// Errors with `InvalidInput` for an empty control point or knot array. Nothing
+    /// # Errors
+    ///
+    /// `InvalidInput` for an empty control point or knot array. Nothing
     /// else is checked.
     pub fn new(pw: Vec<CPoint>, p: usize, u: Vec<f64>) -> Result<Self> {
         let n = pw
             .len()
             .checked_sub(1)
-            .ok_or_else(|| invalid(OP_NEW, "empty control polygon"))?;
+            .ok_or_else(|| invalid("nurbs::crv_basic::Curve::new", "empty control polygon"))?;
         let m = u
             .len()
             .checked_sub(1)
-            .ok_or_else(|| invalid(OP_NEW, "empty knot vector"))?;
+            .ok_or_else(|| invalid("nurbs::crv_basic::Curve::new", "empty knot vector"))?;
         Ok(Self { pw, n, p, u, m })
     }
 
@@ -171,7 +160,9 @@ impl Curve {
     /// knots of `u` (upstream `N_CrvFromCPolygonAndKnotVector` with a polygon and
     /// knot vector whose indices may be below their storage).
     ///
-    /// Errors with `InvalidInput` when the storage does not hold the indices.
+    /// # Errors
+    ///
+    /// `InvalidInput` when the storage does not hold the indices.
     pub fn with_indices(
         pw: Vec<CPoint>,
         n: usize,
@@ -180,7 +171,10 @@ impl Curve {
         m: usize,
     ) -> Result<Self> {
         if pw.len() <= n || u.len() <= m {
-            return Err(invalid(OP_WITH_INDICES, "storage smaller than (n, m)"));
+            return Err(invalid(
+                "nurbs::crv_basic::Curve::with_indices",
+                "storage smaller than (n, m)",
+            ));
         }
         Ok(Self { pw, n, p, u, m })
     }
@@ -250,6 +244,11 @@ impl Curve {
     }
 
     /// The knot vector `U[0..=m]` over the knot storage (`N_CrvGetKnotVector`).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the knot storage does not hold `m + 1` knots (never
+    /// for a curve built by the constructors).
     pub fn knot_vector(&self) -> Result<KnotVector<'_>> {
         KnotVector::new(&self.u, self.m)
     }
@@ -257,11 +256,16 @@ impl Curve {
     /// Replaces the control point and knot storage, keeping the indices
     /// (`N_CrvSetCPtsAndKnots`).
     ///
-    /// Errors with `InvalidInput` (and changes nothing) when the new storage does not
+    /// # Errors
+    ///
+    /// `InvalidInput` (and changes nothing) when the new storage does not
     /// hold the current indices.
     pub fn set_cpts_and_knots(&mut self, pw: Vec<CPoint>, u: Vec<f64>) -> Result<()> {
         if pw.len() <= self.n || u.len() <= self.m {
-            return Err(invalid(OP_SET_CPTS, "storage smaller than the indices"));
+            return Err(invalid(
+                "nurbs::crv_basic::Curve::set_cpts_and_knots",
+                "storage smaller than the indices",
+            ));
         }
         self.pw = pw;
         self.u = u;
@@ -280,11 +284,16 @@ impl Curve {
 
     /// Sets the indices and the degree (`N_CrvSetSizeIndices`).
     ///
-    /// Errors with `InvalidInput` (and changes nothing) when the storage does not hold
+    /// # Errors
+    ///
+    /// `InvalidInput` (and changes nothing) when the storage does not hold
     /// the new indices (upstream would index past its arrays later).
     pub fn set_size_indices(&mut self, n: usize, p: usize, m: usize) -> Result<()> {
         if self.pw.len() <= n || self.u.len() <= m {
-            return Err(invalid(OP_SET_SIZE, "storage smaller than the indices"));
+            return Err(invalid(
+                "nurbs::crv_basic::Curve::set_size_indices",
+                "storage smaller than the indices",
+            ));
         }
         self.n = n;
         self.p = p;
@@ -304,7 +313,9 @@ impl Curve {
     /// allocated, an existing one is resized with [`size_arrays`], then the control
     /// points and knots in use are copied.
     ///
-    /// Errors with [`NlibCode::Storage`] (leaving `dst` unchanged) when an existing
+    /// # Errors
+    ///
+    /// [`NlibCode::Storage`] (leaving `dst` unchanged) when an existing
     /// destination is smaller than this curve.
     pub fn copy_into(&self, dst: &mut Option<Curve>) -> Result<()> {
         let cur = size_arrays(dst, self.n, self.p, self.m)?;
@@ -322,13 +333,18 @@ impl Curve {
     /// For a rational curve, checks that every weight is in
     /// `[WEIGHT_MIN, WEIGHT_MAX]` (`N_CrvWeightsAreValid`; NaN weights pass).
     ///
-    /// Errors with [`NlibCode::Weight`] (`NL_WEI_ERR`).
+    /// # Errors
+    ///
+    /// [`NlibCode::Weight`] (`NL_WEI_ERR`).
     pub fn weights_are_valid(&self) -> Result<()> {
         if self.is_rational() {
             for pw in self.cpts() {
                 let w = pw.w;
                 if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                    return Err(nlib(OP_WEIGHTS, NlibCode::Weight));
+                    return Err(nlib(
+                        "nurbs::crv_basic::Curve::weights_are_valid",
+                        NlibCode::Weight,
+                    ));
                 }
             }
         }
@@ -337,10 +353,12 @@ impl Curve {
 
     /// Checks that the indices in use are at least `np` and `mk` (`N_CrvIsSized`).
     ///
-    /// Errors with [`NlibCode::Storage`] (`NL_STO_ERR`).
+    /// # Errors
+    ///
+    /// [`NlibCode::Storage`] (`NL_STO_ERR`).
     pub fn is_sized(&self, np: usize, mk: usize) -> Result<()> {
         if self.n < np || self.m < mk {
-            return Err(nlib(OP_SIZED, NlibCode::Storage));
+            return Err(nlib("nurbs::crv_basic::Curve::is_sized", NlibCode::Storage));
         }
         Ok(())
     }
@@ -476,30 +494,20 @@ impl Curve {
     /// within `tol1d` (`N_CrvsAreEqual`).
     #[must_use]
     pub fn equals(&self, other: &Curve, tol3d: f64, tol1d: f64) -> bool {
-        // Check counts.
-        let mut b_rtn = self.p == other.p && self.n == other.n && self.m == other.m;
-
-        // Check control points.
-        if b_rtn {
-            for (pw, qw) in self.cpts().iter().zip(other.cpts()) {
-                let d = CPoint::diff(*pw, *qw).magnitude();
-                b_rtn &= d <= tol3d;
-                if !b_rtn {
-                    break;
-                }
-            }
-        }
-
-        // Check knots.
-        if b_rtn {
-            for (a, b) in self.knots().iter().zip(other.knots()) {
-                b_rtn &= (a - b).abs() <= tol1d;
-                if !b_rtn {
-                    break;
-                }
-            }
-        }
-        b_rtn
+        // Check counts, then control points, then knots.
+        self.p == other.p
+            && self.n == other.n
+            && self.m == other.m
+            && self
+                .cpts()
+                .iter()
+                .zip(other.cpts())
+                .all(|(pw, qw)| CPoint::diff(*pw, *qw).magnitude() <= tol3d)
+            && self
+                .knots()
+                .iter()
+                .zip(other.knots())
+                .all(|(a, b)| (a - b).abs() <= tol1d)
     }
 
     /// `true` when `|max w - min w| < WEIGHT_TOL` (`N_CrvAreWeightsEqual`).
@@ -551,7 +559,9 @@ impl Curve {
     /// (corners with an angle in `[1, 179]` degrees preferred); it is planar when
     /// every control point is within `tol` of that plane.
     ///
-    /// Errors with [`NlibCode::Geometry`] when the averaged normal (or the plane)
+    /// # Errors
+    ///
+    /// [`NlibCode::Geometry`] when the averaged normal (or the plane)
     /// cannot be normalised.
     pub fn is_planar(&self, tol: f64) -> Result<Planarity> {
         let not_planar = Planarity {
@@ -578,38 +588,34 @@ impl Curve {
             cg += *pi;
             if ii > 0 && ii < n {
                 let (Some(prev), Some(next)) = (p.get(ii - 1), p.get(ii + 1)) else {
-                    return Err(invalid(OP_PLANAR, "control point index out of range"));
+                    return Err(invalid(
+                        "nurbs::crv_basic::Curve::is_planar",
+                        "control point index out of range",
+                    ));
                 };
                 let v1 = *pi - *prev;
                 let v2 = *next - *pi;
                 if let Ok(a) = vectors_angle(v1, v2) {
                     ang = a;
                 }
-                let vn = v1.cross(v2);
-                let normalized = normalize(vn);
-                let ok = normalized.is_ok();
-                let mut vn = match normalized {
-                    Ok((unit, _)) => unit,
-                    Err(_) => Vec3::ZERO,
+                // A corner whose normal does not normalise adds nothing.
+                let Ok((mut vn, _)) = normalize(v1.cross(v2)) else {
+                    continue;
                 };
-                if ok {
-                    if count1 > 0 {
-                        let d = vn.dot(nn1);
-                        if d < 0.0 {
-                            vn = scale(vn, -1.0);
-                        }
-                    } else if count2 > 0 {
-                        let d = vn.dot(nn2);
-                        if d < 0.0 {
-                            vn = scale(vn, -1.0);
-                        }
-                    }
+                // Orient along the normals summed so far.
+                let reference = if count1 > 0 {
+                    Some(nn1)
+                } else if count2 > 0 {
+                    Some(nn2)
+                } else {
+                    None
+                };
+                if reference.is_some_and(|r| vn.dot(r) < 0.0) {
+                    vn = scale(vn, -1.0);
                 }
-                if !ok || ang < 1.0 || ang > 179. {
-                    if ok {
-                        nn2 += vn;
-                        count2 += 1;
-                    }
+                if ang < 1.0 || ang > 179. {
+                    nn2 += vn;
+                    count2 += 1;
                 } else {
                     nn1 += vn;
                     count1 += 1;
@@ -626,11 +632,12 @@ impl Curve {
         } else {
             scale(nn2, 1.0 / count2 as f64)
         };
-        let (nn, _) = normalize(nn).map_err(|_| nlib(OP_PLANAR, NlibCode::Geometry))?;
+        let (nn, _) = normalize(nn)
+            .map_err(|_| nlib("nurbs::crv_basic::Curve::is_planar", NlibCode::Geometry))?;
 
         // Check flatness.
-        let [a, b, c, d] =
-            plane_pt_normal_to_implicit(pp, nn).map_err(|_| nlib(OP_PLANAR, NlibCode::Geometry))?;
+        let [a, b, c, d] = plane_pt_normal_to_implicit(pp, nn)
+            .map_err(|_| nlib("nurbs::crv_basic::Curve::is_planar", NlibCode::Geometry))?;
         let plane = Some((pp, nn));
         for pi in &p {
             let fac = dist_signed_pt_plane(a, b, c, d, *pi);
@@ -649,7 +656,9 @@ impl Curve {
     /// sized with [`size_arrays`] / [`CurveFunction::size_arrays`]; `den` is left
     /// alone for a non-rational curve.
     ///
-    /// Errors with [`NlibCode::Storage`] when an existing `num` or `den` is too small
+    /// # Errors
+    ///
+    /// [`NlibCode::Storage`] when an existing `num` or `den` is too small
     /// (`num` is already resized when `den` fails, as upstream).
     pub fn num_and_denom(
         &self,
@@ -689,7 +698,9 @@ impl Curve {
     /// a non-rational curve gives [`NOW`] values. `cfn` is sized with
     /// [`CurveFunction::size_arrays`].
     ///
-    /// Errors with [`NlibCode::Storage`] when an existing `cfn` is too small.
+    /// # Errors
+    ///
+    /// [`NlibCode::Storage`] when an existing `cfn` is too small.
     pub fn denom_func(&self, cfn: &mut Option<CurveFunction>) -> Result<()> {
         let f = CurveFunction::size_arrays(cfn, self.n, self.p, self.m)?;
         for (fu, pw) in f.values_mut().iter_mut().zip(self.cpts()) {
@@ -703,15 +714,17 @@ impl Curve {
 
     /// Euclidean images of `Pw[k..=l]` (`N_CrvGetEPolygon`).
     ///
-    /// Errors with [`NlibCode::Index`] (`NL_IND_ERR`) when `k > l` or `l > n`.
+    /// # Errors
+    ///
+    /// [`NlibCode::Index`] (`NL_IND_ERR`) when `k > l` or `l > n`.
     pub fn epolygon(&self, k: usize, l: usize) -> Result<Vec<Vec3>> {
         if k > l || l > self.n {
-            return Err(nlib(OP_EPOLYGON, NlibCode::Index));
+            return Err(nlib("nurbs::crv_basic::Curve::epolygon", NlibCode::Index));
         }
         let part = self
             .cpts()
             .get(k..=l)
-            .ok_or_else(|| nlib(OP_EPOLYGON, NlibCode::Index))?;
+            .ok_or_else(|| nlib("nurbs::crv_basic::Curve::epolygon", NlibCode::Index))?;
         Ok(part.iter().map(|pw| pw.to_euclid()).collect())
     }
 
@@ -770,10 +783,17 @@ impl Curve {
     /// interior knots are mapped affinely. Nothing changes when the bounds already
     /// match.
     ///
-    /// Errors with `InvalidInput` (changing nothing) when `m < p` and the knots would
+    /// # Errors
+    ///
+    /// `InvalidInput` (changing nothing) when `m < p` and the knots would
     /// be rescaled, where upstream writes outside the array.
     pub fn reparam_to_interval(&mut self, interval: Interval) -> Result<()> {
-        let oob = || invalid(OP_REPARAM, "knot vector shorter than the degree");
+        let oob = || {
+            invalid(
+                "nurbs::crv_basic::Curve::reparam_to_interval",
+                "knot vector shorter than the degree",
+            )
+        };
         let (a, b) = (interval.ul, interval.ur);
         let (p, m) = (self.p, self.m);
         let u = self.knots_mut();
@@ -828,7 +848,9 @@ pub struct Planarity {
 /// and the indices and degree are reset to the requested values. Returns the sized
 /// curve.
 ///
-/// Errors with [`NlibCode::Storage`] (leaving the slot unchanged) when the existing
+/// # Errors
+///
+/// [`NlibCode::Storage`] (leaving the slot unchanged) when the existing
 /// curve is too small.
 pub fn size_arrays(slot: &mut Option<Curve>, n: usize, p: usize, m: usize) -> Result<&mut Curve> {
     match slot {
@@ -846,8 +868,10 @@ pub fn size_arrays(slot: &mut Option<Curve>, n: usize, p: usize, m: usize) -> Re
 /// fu[i])` (`w = NOW` without a denominator), knots from the numerator. `cur` is
 /// sized with [`size_arrays`].
 ///
-/// Errors with [`NlibCode::Input`] when the denominator's indices or degree differ
-/// from the numerator's, and with [`NlibCode::Storage`] when an existing `cur` is too
+/// # Errors
+///
+/// [`NlibCode::Input`] when the denominator's indices or degree differ
+/// from the numerator's, and [`NlibCode::Storage`] when an existing `cur` is too
 /// small.
 pub fn curve_from_num_and_denom(
     num: &Curve,
@@ -858,7 +882,10 @@ pub fn curve_from_num_and_denom(
     if let Some(d) = den {
         let (nd, md) = d.array_sizes();
         if nn != nd || mn != md || pn != d.degree() {
-            return Err(nlib(OP_FROM_NUM, NlibCode::Input));
+            return Err(nlib(
+                "nurbs::crv_basic::curve_from_num_and_denom",
+                NlibCode::Input,
+            ));
         }
     }
     let c = size_arrays(cur, nn, pn, mn)?;
@@ -955,7 +982,9 @@ fn make_compatible(_p: &mut Curve, _q: &mut Curve) -> Result<()> {
 /// have every pair of control points closer than `tol` in homogeneous space
 /// (`N_CrvsAreCoincident`). Both curves are modified as upstream.
 ///
-/// Errors with [`SolidError::Unported`] until `N_CrvsMakeCompatible` (unit
+/// # Errors
+///
+/// [`SolidError::Unported`] until `N_CrvsMakeCompatible` (unit
 /// `nlib.crv_tool_p2`) is ported.
 pub fn curves_are_coincident(p: &mut Curve, q: &mut Curve, tol: f64) -> Result<bool> {
     // Make input curves compatible.
@@ -1032,13 +1061,15 @@ pub struct ConicData {
 /// shorter than `1e-6` degrees becomes a full turn), then the number of segments
 /// follows from the sweep and the conic type.
 ///
-/// Errors with `InvalidInput` for non-finite angles, or when the end angle needs more
+/// # Errors
+///
+/// `InvalidInput` for non-finite angles, or when the end angle needs more
 /// than [`CONIC_MAX_TURNS`] turns (upstream loops forever when adding 360 no longer
 /// changes it).
 pub fn conic_data(ctp: ConicType, as_deg: f64, ae_deg: f64) -> Result<ConicData> {
     let angle_tol_deg = 1.0e-6; // Don't make this too small.
     if !as_deg.is_finite() || !ae_deg.is_finite() {
-        return Err(invalid(OP_CONIC, "non-finite angle"));
+        return Err(invalid("nurbs::crv_basic::conic_data", "non-finite angle"));
     }
     let mut ae = ae_deg;
 
@@ -1048,14 +1079,20 @@ pub fn conic_data(ctp: ConicType, as_deg: f64, ae_deg: f64) -> Result<ConicData>
         ae += 360.0;
         turns += 1;
         if turns > CONIC_MAX_TURNS {
-            return Err(invalid(OP_CONIC, "end angle too far from the start angle"));
+            return Err(invalid(
+                "nurbs::crv_basic::conic_data",
+                "end angle too far from the start angle",
+            ));
         }
     }
     while (ae - as_deg) > 360.0 - angle_tol_deg {
         ae -= 360.0;
         turns += 1;
         if turns > CONIC_MAX_TURNS {
-            return Err(invalid(OP_CONIC, "end angle too far from the start angle"));
+            return Err(invalid(
+                "nurbs::crv_basic::conic_data",
+                "end angle too far from the start angle",
+            ));
         }
     }
     if (ae - as_deg) < angle_tol_deg {
@@ -1141,7 +1178,9 @@ impl Boundary {
 /// it is `p / (U[p+1] - U[1]) * (Pw[1][j] - Pw[0][j])` over the v knots, and
 /// likewise for the other sides. `cur` is sized with [`size_arrays`].
 ///
-/// Errors with [`NlibCode::Storage`] when an existing `cur` is too small, and with
+/// # Errors
+///
+/// [`NlibCode::Storage`] when an existing `cur` is too small, and
 /// `InvalidInput` (before touching `cur`) when the surface has fewer than two rows
 /// (`Left` / `Right`) or columns (`Bottom` / `Top`), or its knots in use do not
 /// reach the indices read.
@@ -1150,7 +1189,12 @@ pub fn cross_bound_deriv_crv_non_rat_srf(
     side: Boundary,
     cur: &mut Option<Curve>,
 ) -> Result<()> {
-    let oob = || invalid(OP_CROSS, "surface too small for the boundary");
+    let oob = || {
+        invalid(
+            "nurbs::crv_basic::cross_bound_deriv_crv_non_rat_srf",
+            "surface too small for the boundary",
+        )
+    };
     let (n, m, r, s) = sur.array_sizes();
     let (p, q) = sur.degrees();
     let us = sur.u_knots();

@@ -19,7 +19,7 @@
 //! | `Clone`/`Copy` for [`Solution`]               | `SmSolution(const SmSolution&)`, `SmSolution::operator=`   |
 //! | `Drop` (implicit)                             | `~SmSolution`                                              |
 //! | [`Solution::reset`]                           | `SmSolution::ReSet`                                        |
-//! | [`Solution::classify_solution_end`]           | `SmSolution::ClassifySolutionEnd`                          |
+//! | [`Solution::classify_solution_end`], [`EndClass`] | `SmSolution::ClassifySolutionEnd` and its return values |
 //! | [`Solution::index_of`]                        | `SmSolution::GetIndex`                                     |
 //! | [`Solution::point`]                           | `SmSolution::GetPoint(ULONG, ...)`                         |
 //! | [`Solution::point_of`]                        | `SmSolution::GetPoint(const SmObject*, ...)`               |
@@ -181,6 +181,45 @@ impl SortKey {
     }
 }
 
+/// Where a solution end lies relative to a solution
+/// ([`Solution::classify_solution_end`]); the discriminants are the upstream
+/// return values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum EndClass {
+    /// `-2`: below the start of the range (or, for a single value, the first
+    /// differing parameter is smaller).
+    BelowStart = -2,
+    /// `-1`: matches the start of the range.
+    AtStart = -1,
+    /// `0`: matches the single value, or lies inside the range.
+    Within = 0,
+    /// `1`: matches the end of the range.
+    AtEnd = 1,
+    /// `2`: above the end of the range (or, for a single value, the first
+    /// differing parameter is larger).
+    AboveEnd = 2,
+    /// `3`: no consistent classification (different variable or object counts
+    /// or objects, unequal solution values at a matching point, or inconsistent
+    /// parameters).
+    Inconsistent = 3,
+}
+
+impl EndClass {
+    /// The upstream return value.
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        self as i32
+    }
+
+    /// True for [`EndClass::AtStart`], [`EndClass::Within`] and
+    /// [`EndClass::AtEnd`] (upstream `abs(class) <= 1`).
+    #[must_use]
+    pub const fn is_at_or_within(self) -> bool {
+        matches!(self, Self::AtStart | Self::Within | Self::AtEnd)
+    }
+}
+
 /// What a solution object is, as far as the `IsKindOf` tests of this module go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectKind {
@@ -259,6 +298,10 @@ impl SolutionEnd {
     }
 
     /// Parameter `index` (`operator[] const`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for `index >= MAX_PARAMS`.
     pub fn param(&self, index: usize) -> Result<f64> {
         self.parameters
             .get(index)
@@ -267,6 +310,10 @@ impl SolutionEnd {
     }
 
     /// Mutable parameter `index` (`operator[]`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for `index >= MAX_PARAMS`.
     pub fn param_mut(&mut self, index: usize) -> Result<&mut f64> {
         self.parameters
             .get_mut(index)
@@ -387,28 +434,27 @@ impl<O: SolutionObject> Solution<O> {
     }
 
     /// Classifies `other`'s start (`compare_start`, or when `other` is a single
-    /// value) or end against this solution (`ClassifySolutionEnd`):
+    /// value) or end against this solution (`ClassifySolutionEnd`); see
+    /// [`EndClass`].
     ///
-    /// * `0`: matches this single value, or lies inside this range;
-    /// * `-1` / `1`: matches the start / end of this range;
-    /// * `-2` / `2`: below the start / above the end;
-    /// * `3`: no consistent classification (different variable or object
-    ///   counts or objects, unequal solution values at a matching point, or
-    ///   inconsistent parameters).
-    pub fn classify_solution_end(&self, other: &Self, compare_start: bool) -> Result<i64> {
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays.
+    pub fn classify_solution_end(&self, other: &Self, compare_start: bool) -> Result<EndClass> {
         const OP: &str = "geom::solution_array::Solution::classify_solution_end";
         self.check(OP)?;
         other.check(OP)?;
 
         // can't compare different variable or object counts
         if self.num_variables != other.num_variables || self.num_objects != other.num_objects {
-            return Ok(3);
+            return Ok(EndClass::Inconsistent);
         }
 
         // can't compare different solution objects
         for (a, b) in self.used_objects().iter().zip(other.used_objects()) {
             if a != b {
-                return Ok(3);
+                return Ok(EndClass::Inconsistent);
             }
         }
 
@@ -421,7 +467,7 @@ impl<O: SolutionObject> Solution<O> {
 
         // When thisSolution is a point
         if self.solution_type == SolutionType::SingleValue {
-            let mut ret = 3;
+            let mut ret = EndClass::Inconsistent;
 
             // can't compare unequal solutionValues
             if EFF_ZERO_SQRT < (self.start.solution_value - e.solution_value).abs() {
@@ -436,25 +482,25 @@ impl<O: SolutionObject> Solution<O> {
 
                 // when parameters equal - continue to next param after setting classification as needed
                 if (s - o).abs() < scaled_zero {
-                    if ret != 3 && ret != 0 {
+                    if ret != EndClass::Inconsistent && ret != EndClass::Within {
                         continue;
                     }
-                    ret = 0; // Match values
+                    ret = EndClass::Within; // Match values
                     continue;
                 }
 
                 // else parameters are different
 
                 // had a match and lost it
-                if ret == 0 {
-                    return Ok(3);
+                if ret == EndClass::Within {
+                    return Ok(EndClass::Inconsistent);
                 }
 
                 // remember if this is lower or higher
                 if e.param(0)? < self.start.param(0)? {
-                    ret = -2; // Less than
+                    ret = EndClass::BelowStart; // Less than
                 } else {
-                    ret = 2; // Greater than
+                    ret = EndClass::AboveEnd; // Greater than
                 }
                 break;
             }
@@ -462,7 +508,7 @@ impl<O: SolutionObject> Solution<O> {
         }
 
         // else this Solution is an interval solution
-        let mut ret = 3;
+        let mut ret = EndClass::Inconsistent;
 
         // for every Variable
         for i in 0..self.num_variables {
@@ -480,72 +526,78 @@ impl<O: SolutionObject> Solution<O> {
             // ThisSolution->Start = OtherSolution->End
             if (s - o).abs() < scaled_zero {
                 // when current parameter classification conflicts with previous ones - return inconsitency
-                if ret == -2 || ret == 2 || ret == 1 {
-                    return Ok(3);
+                if ret == EndClass::BelowStart
+                    || ret == EndClass::AboveEnd
+                    || ret == EndClass::AtEnd
+                {
+                    return Ok(EndClass::Inconsistent);
                 }
 
                 // don't change unlabeled and nonMinumum classifications
-                if ret != 3 && ret != -1 {
+                if ret != EndClass::Inconsistent && ret != EndClass::AtStart {
                     continue;
                 }
 
                 // Solutions at same point must be the same
                 if (self.start.solution_value - e.solution_value).abs() > EFF_ZERO_SQRT {
-                    return Ok(3);
+                    return Ok(EndClass::Inconsistent);
                 }
-                ret = -1; // Match start
+                ret = EndClass::AtStart; // Match start
                 continue;
             }
 
             // ThisSolution->End = OtherSolution->End
             if (t - o).abs() < scaled_zero {
                 // when current parameter classification conflicts with previous ones - return inconsitency
-                if ret == -2 || ret == 2 || ret == -1 {
-                    return Ok(3);
+                if ret == EndClass::BelowStart
+                    || ret == EndClass::AboveEnd
+                    || ret == EndClass::AtStart
+                {
+                    return Ok(EndClass::Inconsistent);
                 }
 
                 // don't change unlabeled and nonMaximum classifications
-                if ret != 3 && ret != 1 {
+                if ret != EndClass::Inconsistent && ret != EndClass::AtEnd {
                     continue;
                 }
 
                 // Solutions at same point must be the same
                 if (self.end.solution_value - e.solution_value).abs() > EFF_ZERO_SQRT {
-                    return Ok(3);
+                    return Ok(EndClass::Inconsistent);
                 }
-                ret = 1; // Match end
+                ret = EndClass::AtEnd; // Match end
                 continue;
             }
 
             // Ascending [This->Start, Other->End, This->End] and matching solution values
             if are_sequential(s, o, t) {
-                if ret != 3 && ret != 0 {
-                    return Ok(3);
+                if ret != EndClass::Inconsistent && ret != EndClass::Within {
+                    return Ok(EndClass::Inconsistent);
                 }
-                ret = 0; // Between start and end
+                ret = EndClass::Within; // Between start and end
                 continue;
             }
 
             // Below Start, [Other->End, This->Start, This->End]
             if are_sequential(o, s, t) {
-                if ret != 3 && ret != -2 {
-                    return Ok(3);
+                if ret != EndClass::Inconsistent && ret != EndClass::BelowStart {
+                    return Ok(EndClass::Inconsistent);
                 }
-                ret = -2; // Below Start
+                ret = EndClass::BelowStart; // Below Start
                 continue;
             }
 
             // Above End, [This->Start, This->End, Other->End]
             if are_sequential(s, t, o) {
-                if ret != 3 && ret != 2 {
-                    return Ok(3);
+                if ret != EndClass::Inconsistent && ret != EndClass::AboveEnd {
+                    return Ok(EndClass::Inconsistent);
                 }
-                ret = 2; // Above End
+                ret = EndClass::AboveEnd; // Above End
                 continue;
             }
 
             // If we make it to here then we have some inconsistency
-            return Ok(3);
+            return Ok(EndClass::Inconsistent);
         }
 
         Ok(ret)
@@ -554,6 +606,12 @@ impl<O: SolutionObject> Solution<O> {
     /// The object index and the index of its first parameter for `target`
     /// (`object_flag`) or for the first object that is not `target`
     /// (`!object_flag`) (`GetIndex`). `None` when there is no such object.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays, or a null object before the
+    /// hit.
     pub fn index_of(&self, target: Option<O>, object_flag: bool) -> Result<Option<(usize, usize)>> {
         const OP: &str = "geom::solution_array::Solution::index_of";
         self.check(OP)?;
@@ -584,6 +642,12 @@ impl<O: SolutionObject> Solution<O> {
     /// range when `get_end`, else at the start (`GetPoint(ULONG, ...)`). `None`
     /// (upstream `SM_ERR`) for an index out of range or an object kind without
     /// a point.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays or a null object
+    /// is reached; [`SolidError::Unported`] for object geometry.
     pub fn point(&self, index: usize, get_end: bool) -> Result<Option<(Point3, Vec3)>> {
         const OP: &str = "geom::solution_array::Solution::point";
         self.check(OP)?;
@@ -672,6 +736,10 @@ impl<O: SolutionObject> Solution<O> {
     /// `None` when [`Solution::index_of`] finds no such object. When the object
     /// has no point the result is the uninitialised point and a zero parameter
     /// (upstream ignores the inner status).
+    ///
+    /// # Errors
+    ///
+    /// As [`Solution::point`].
     pub fn point_of(
         &self,
         target: Option<O>,
@@ -696,6 +764,11 @@ impl<O: SolutionObject> Solution<O> {
     ///
     /// As upstream, every pass of the search looks at the object at the
     /// current result index, which stays `0` until the search stops.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays.
     pub fn object_index_for_parameter_index(
         &self,
         param_index: usize,
@@ -767,6 +840,12 @@ impl<O: SolutionObject> Solution<O> {
     /// `param_index` (`GetParameterInterval`). `None` (upstream `SM_ERR`) when
     /// [`Solution::object_index_for_parameter_index`] fails or the object has no
     /// parameters.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays;
+    /// [`SolidError::Unported`] for the parameter domain of the object.
     pub fn parameter_interval(&self, param_index: usize) -> Result<Option<Extent1d>> {
         const OP: &str = "geom::solution_array::Solution::parameter_interval";
 
@@ -818,6 +897,12 @@ impl<O: SolutionObject> Solution<O> {
 
     /// The zone tolerance of object `index`, `0.0` for an index outside the
     /// objects or a null object (`GetObjectTolerance`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays;
+    /// [`SolidError::Unported`] for a non-null object (zone tolerances).
     pub fn object_tolerance(&self, index: usize) -> Result<f64> {
         const OP: &str = "geom::solution_array::Solution::object_tolerance";
         self.check(OP)?;
@@ -845,12 +930,15 @@ impl<O: SolutionObject> Solution<O> {
     /// `SM_EFF_ZERO_SQRT`, and every parameter (both ends of a range) within
     /// the larger of a scaled zero and `1e-4` of the parameter's interval
     /// length.
+    ///
+    /// # Errors
+    ///
+    /// As [`Solution::parameter_interval`].
     pub fn is_equal(&self, other: &Self) -> Result<bool> {
         const OP: &str = "geom::solution_array::Solution::is_equal";
         self.check(OP)?;
         other.check(OP)?;
-        let s1 = self;
-        let s2 = other;
+        let (s1, s2) = (self, other);
 
         // different ObjectCounts, VariableCounts, SolutionValues, SolutionTypes
         if s1.num_objects != s2.num_objects
@@ -1087,6 +1175,10 @@ impl<O: SolutionObject> SolutionArray<O> {
     }
 
     /// A copy of solution `index` (`GetAt`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an index past the size.
     pub fn get_at(&self, index: usize) -> Result<Solution<O>> {
         self.data
             .get(index)
@@ -1095,6 +1187,10 @@ impl<O: SolutionObject> SolutionArray<O> {
     }
 
     /// Replaces solution `index` (`SetAt`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an index past the size.
     pub fn set_at(&mut self, index: usize, solution: &Solution<O>) -> Result<()> {
         let slot = self
             .data
@@ -1163,11 +1259,14 @@ impl<O: SolutionObject> SolutionArray<O> {
         }
 
         // adjust the size
-        let new_size = size - if count <= size { count } else { size };
-        self.data.truncate(new_size);
+        self.data.truncate(size.saturating_sub(count));
     }
 
     /// Swaps solutions `index1` and `index2` (`Swap`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an index past the size.
     pub fn swap(&mut self, index1: usize, index2: usize) -> Result<()> {
         if index1 >= self.data.len() || index2 >= self.data.len() {
             return Err(bad_index("geom::solution_array::SolutionArray::swap"));
@@ -1185,6 +1284,10 @@ impl<O: SolutionObject> SolutionArray<O> {
     /// [`Solution::is_equal`] a solution already held, which `new` then
     /// replaces when its value is smaller in magnitude. Solutions are never
     /// merged.
+    ///
+    /// # Errors
+    ///
+    /// Errors of [`Solution::is_equal`] and of the parameter reads.
     pub fn add_sorted_solution(
         &mut self,
         new: &Solution<O>,
@@ -1371,66 +1474,79 @@ mod tests {
         let a = single(0.0, &[1.0, 2.0]);
         assert_eq!(
             a.classify_solution_end(&single(0.0, &[1.0, 2.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             0
         );
         assert_eq!(
             a.classify_solution_end(&single(0.0, &[0.5, 2.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             -2
         );
         assert_eq!(
             a.classify_solution_end(&single(0.0, &[1.5, 2.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             2
         );
         assert_eq!(
             a.classify_solution_end(&single(0.0, &[1.0, 3.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             3
         );
         assert_eq!(
             a.classify_solution_end(&single(1.0, &[1.0, 2.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             3
         );
         assert_eq!(
-            a.classify_solution_end(&single(0.0, &[1.0]), true).unwrap(),
+            a.classify_solution_end(&single(0.0, &[1.0]), true)
+                .unwrap()
+                .code(),
             3
         );
         let r = range(&[0.0, 0.0], &[1.0, 1.0]);
         assert_eq!(
             r.classify_solution_end(&single(0.0, &[0.5, 0.5]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             0
         );
         assert_eq!(
             r.classify_solution_end(&single(0.0, &[0.0, 0.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             -1
         );
         assert_eq!(
             r.classify_solution_end(&single(0.0, &[1.0, 1.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             1
         );
         assert_eq!(
             r.classify_solution_end(&single(0.0, &[-1.0, -1.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             -2
         );
         assert_eq!(
             r.classify_solution_end(&single(0.0, &[2.0, 2.0]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             2
         );
         assert_eq!(
             r.classify_solution_end(&single(0.0, &[2.0, 0.5]), true)
-                .unwrap(),
+                .unwrap()
+                .code(),
             3
         );
         let other = range(&[5.0, 5.0], &[0.5, 0.5]);
-        assert_eq!(r.classify_solution_end(&other, false).unwrap(), 0);
+        assert_eq!(r.classify_solution_end(&other, false).unwrap().code(), 0);
         let mut bad = single(0.0, &[]);
         bad.num_variables = 11;
         assert!(a.classify_solution_end(&bad, true).is_err());
