@@ -634,9 +634,9 @@ depends_on = ["nlib.basis_basic", "nlib.crv_basic", "nlib.crv_fit_p1", "nlib.crv
 est_lines = 1234
 layer = 7
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-nlib.crv_fit_p3-a1"
+claimed_at = "2026-10-12T12:00:00Z"
 notes = "6 fns; largest: N_FitCrvKnotsAndTangents, N_FitCubicSplineInterp, N_FitCrvDerivs, N_FitCrvHighDerivs; 317 upstream test entry points reach this unit"
 
 [[unit]]
