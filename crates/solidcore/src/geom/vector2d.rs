@@ -34,7 +34,6 @@
 //! | [`Vec2::component_mut`]                | `operator[](ULONG)`                              |
 //! | [`Vec2::angle_between`]                | `AngleBetween`                                   |
 //! | [`Vec2::ccw_angle_between`]            | `CCWAngleBetween`                                |
-//! | `sm_sqrt`, `sm_acos`, `sm_asin` (private) | `sm_sqrt`, `sm_acos`, `sm_asin` (`SmMath.cpp`, co-ported) |
 //!
 //! Deviations:
 //! - Out-params and `SmStatus` become return values: `unitize`, `angle_between` and
@@ -49,17 +48,15 @@
 //!   dereferences `NULL` (non-const) after logging `SM_ERR`; Rust returns
 //!   `SolidError::Upstream { code: 1001 }` (`SM_ERR`) for both.
 //! - `SM_ASSERT_BREAK` checks are compiled out upstream (release build) and omitted.
-//! - Back-edges co-ported: `sm_sqrt`, `sm_acos`, `sm_asin` (unit `geom.vector3d`) are
-//!   tiny pure functions, inlined here as private helpers with the same branches (their
-//!   `ERR(SM_ERR)` logging is dropped). `SM_IS_ZERO_SQUARED` =
-//!   `SmTol::InTol(a, SmTol::GetScaledZeroSq())` calls [`crate::geom::tol`]. Sites carry
-//!   `// CO-PORT(<unit>): <symbol>`; the owning units may replace them with shared
-//!   versions.
+//! - `sm_sqrt`, `sm_acos`, `sm_asin` (`SmMath.cpp`) come from [`crate::geom::vector3d`];
+//!   `SM_IS_ZERO_SQUARED` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())` calls
+//!   [`crate::geom::tol`].
 
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
+use crate::geom::vector3d::{acos as sm_acos, asin as sm_asin, sqrt as sm_sqrt};
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
 
 /// Upstream `SM_ERR` (generic error status).
@@ -76,43 +73,6 @@ pub struct Vec2 {
 
 /// A 2D point (`SmPoint2d`, an alias of `SmVector2d` upstream).
 pub type Point2 = Vec2;
-
-// CO-PORT(geom.vector3d): sm_sqrt
-/// `sm_sqrt`: square root that maps every non-positive input to `0.0`.
-fn sm_sqrt(x: f64) -> f64 {
-    if x < -EFF_ZERO_SQ {
-        // upstream: ERR(SM_ERR)
-        0.0
-    } else if x <= 0.0 {
-        0.0
-    } else {
-        x.sqrt()
-    }
-}
-
-// CO-PORT(geom.vector3d): sm_acos
-/// `sm_acos`: arc cosine clamped to `[0, PI]` for arguments outside `[-1, 1]`.
-fn sm_acos(x: f64) -> f64 {
-    if x >= 1.0 {
-        return 0.0;
-    }
-    if x <= -1.0 {
-        return PI;
-    }
-    x.acos()
-}
-
-// CO-PORT(geom.vector3d): sm_asin
-/// `sm_asin`: arc sine clamped to `[-PI/2, PI/2]` for arguments outside `[-1, 1]`.
-fn sm_asin(x: f64) -> f64 {
-    if x >= 1.0 {
-        return PI / 2.0;
-    }
-    if x <= -1.0 {
-        return -PI / 2.0;
-    }
-    x.asin()
-}
 
 /// `SM_IS_ZERO_SQUARED(a)` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())`.
 fn is_zero_squared(a: f64) -> bool {

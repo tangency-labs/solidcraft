@@ -18,7 +18,7 @@
 //! [`SolidError::Nlib`] carrying that number as an [`NlibCode`] instead.
 //!
 //! Every variant names the `operation` (a `&'static str`, by convention the Rust path
-//! of the failing function, e.g. `"math::Vec3::unitize"`) so that errors surfaced to
+//! of the failing function, e.g. `"geom::vector3d::Vec3::unitize"`) so that errors surfaced to
 //! callers stay actionable without a backtrace.
 
 use crate::topology::{BrepId, EdgeId, FaceId, LoopId, ShellId, VertexId};

@@ -7,15 +7,8 @@
 //!
 //! | Rust                         | Upstream                                       |
 //! |------------------------------|------------------------------------------------|
-//! | [`Vec3`]                     | `SmVector3d`                                   |
-//! | [`Point3`] (alias of `Vec3`) | `SmPoint3d` (`#define SmPoint3d SmVector3d`)   |
+//! | [`Vec3`] / [`Point3`]        | `SmVector3d` / `SmPoint3d` (re-exported from [`crate::geom::vector3d`]) |
 //! | [`Vec2`] / [`Point2`]        | `SmVector2d` / `SmPoint2d` (re-exported from [`crate::geom::vector2d`]) |
-//! | [`Vec3::dot`]                | `SmVector3d::Dot`                              |
-//! | [`Vec3::cross`]              | `operator*(const SmVector3d&, const SmVector3d&)` |
-//! | [`Vec3::length_squared`]     | `SmVector3d::LengthSquared`                    |
-//! | [`Vec3::length`]             | `SmVector3d::Length`                           |
-//! | [`Vec3::unitize`]            | `SmVector3d::Unitize`                          |
-//! | [`Vec3::distance`]           | `SmVector3d::DistanceBetween`                  |
 //! | [`Transform`]                | `SmTransform` (`m_adT[4][4]`)                  |
 //! | [`Transform::concat`]        | `SmTransform::ConcatTransform` / `smgu_4x4Mult`|
 //! | [`Transform::transform_point`]  | `SmTransform::TransformPoint`               |
@@ -32,11 +25,8 @@
 //! in upstream order, so results are bit-identical to the C++ (built with
 //! `-ffp-contract=off`).
 
-use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-
-use crate::error::{Result, SolidError};
-
 pub use crate::geom::vector2d::{Point2, Vec2};
+pub use crate::geom::vector3d::{Point3, Vec3};
 
 /// `SM_PI` (the upstream literal rounds to exactly this `f64`).
 pub const PI: f64 = core::f64::consts::PI;
@@ -79,175 +69,6 @@ pub fn is_infinite_param(a: f64) -> bool {
         || a == -INFINITE_PARAMETER
         || a == INFINITE_PARAMETER_SQRT
         || a == -INFINITE_PARAMETER_SQRT
-}
-
-/// A 3D vector (`SmVector3d`). Also used for points, see [`Point3`].
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Vec3 {
-    /// X component.
-    pub x: f64,
-    /// Y component.
-    pub y: f64,
-    /// Z component.
-    pub z: f64,
-}
-
-/// A 3D point. Upstream uses one type for points and vectors
-/// (`#define SmPoint3d SmVector3d`), and so does the port.
-pub type Point3 = Vec3;
-
-impl Vec3 {
-    /// The zero vector.
-    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
-    /// Unit X axis.
-    pub const X: Self = Self::new(1.0, 0.0, 0.0);
-    /// Unit Y axis.
-    pub const Y: Self = Self::new(0.0, 1.0, 0.0);
-    /// Unit Z axis.
-    pub const Z: Self = Self::new(0.0, 0.0, 1.0);
-
-    /// Creates a vector from its components.
-    #[must_use]
-    pub const fn new(x: f64, y: f64, z: f64) -> Self {
-        Self { x, y, z }
-    }
-
-    /// Components as an array `[x, y, z]`.
-    #[must_use]
-    pub const fn to_array(self) -> [f64; 3] {
-        [self.x, self.y, self.z]
-    }
-
-    /// Dot product, `(x*o.x) + (y*o.y) + (z*o.z)` (`SmVector3d::Dot`).
-    #[must_use]
-    pub fn dot(self, o: Self) -> f64 {
-        (self.x * o.x) + (self.y * o.y) + (self.z * o.z)
-    }
-
-    /// Cross product `self × o` (upstream `operator*` on two vectors).
-    #[must_use]
-    pub fn cross(self, o: Self) -> Self {
-        Self::new(
-            (self.y * o.z) - (self.z * o.y),
-            (self.z * o.x) - (self.x * o.z),
-            (self.x * o.y) - (self.y * o.x),
-        )
-    }
-
-    /// Squared Euclidean length (`SmVector3d::LengthSquared`).
-    #[must_use]
-    pub fn length_squared(self) -> f64 {
-        (self.x * self.x) + (self.y * self.y) + (self.z * self.z)
-    }
-
-    /// Euclidean length (`SmVector3d::Length`).
-    #[must_use]
-    pub fn length(self) -> f64 {
-        self.length_squared().sqrt()
-    }
-
-    /// Distance between two points (`SmVector3d::DistanceBetween`).
-    #[must_use]
-    pub fn distance(self, o: Self) -> f64 {
-        (self - o).length()
-    }
-
-    /// True when the length is below `tol` (`SmVector3d::IsZero`).
-    #[must_use]
-    pub fn is_zero(self, tol: f64) -> bool {
-        self.length_squared() < tol * tol
-    }
-
-    /// Unit vector in the same direction (`SmVector3d::Unitize`).
-    ///
-    /// Mirrors upstream exactly: a vector whose squared length is within
-    /// [`EFF_ZERO_SQ`] of 1 is returned unchanged; a vector with squared length below
-    /// [`EFF_ZERO_SQ`] is an error. Upstream additionally overwrites such a vector with
-    /// `(0, 0, 1)`; callers that rely on that use [`Vec3::unitize_or_z`].
-    pub fn unitize(self) -> Result<Self> {
-        let len_sq = self.length_squared();
-        if len_sq < EFF_ZERO_SQ {
-            return Err(SolidError::Degenerate {
-                operation: "math::Vec3::unitize",
-                entity: None,
-            });
-        }
-        Ok(self.unitize_nonzero(len_sq))
-    }
-
-    /// Like [`Vec3::unitize`], but returns upstream's fallback `(0, 0, 1)` for a zero
-    /// vector (`Unitize(FALSE)` with its status ignored).
-    #[must_use]
-    pub fn unitize_or_z(self) -> Self {
-        let len_sq = self.length_squared();
-        if len_sq < EFF_ZERO_SQ {
-            Self::Z
-        } else {
-            self.unitize_nonzero(len_sq)
-        }
-    }
-
-    fn unitize_nonzero(self, len_sq: f64) -> Self {
-        if (len_sq - 1.0).abs() > EFF_ZERO_SQ {
-            let len = len_sq.sqrt();
-            Self::new(self.x / len, self.y / len, self.z / len)
-        } else {
-            self
-        }
-    }
-}
-
-impl Add for Vec3 {
-    type Output = Self;
-    fn add(self, o: Self) -> Self {
-        Self::new(self.x + o.x, self.y + o.y, self.z + o.z)
-    }
-}
-
-impl AddAssign for Vec3 {
-    fn add_assign(&mut self, o: Self) {
-        *self = *self + o;
-    }
-}
-
-impl Sub for Vec3 {
-    type Output = Self;
-    fn sub(self, o: Self) -> Self {
-        Self::new(self.x - o.x, self.y - o.y, self.z - o.z)
-    }
-}
-
-impl SubAssign for Vec3 {
-    fn sub_assign(&mut self, o: Self) {
-        *self = *self - o;
-    }
-}
-
-impl Neg for Vec3 {
-    type Output = Self;
-    fn neg(self) -> Self {
-        Self::new(-self.x, -self.y, -self.z)
-    }
-}
-
-impl Mul<f64> for Vec3 {
-    type Output = Self;
-    fn mul(self, d: f64) -> Self {
-        Self::new(self.x * d, self.y * d, self.z * d)
-    }
-}
-
-impl Mul<Vec3> for f64 {
-    type Output = Vec3;
-    fn mul(self, v: Vec3) -> Vec3 {
-        Vec3::new(v.x * self, v.y * self, v.z * self)
-    }
-}
-
-impl MulAssign<f64> for Vec3 {
-    fn mul_assign(&mut self, d: f64) {
-        *self = *self * d;
-    }
 }
 
 /// An affine 3D transform stored as upstream's row-vector 4×4 matrix
@@ -394,21 +215,6 @@ mod tests {
         assert_eq!(Vec3::X.cross(Vec3::Y), Vec3::Z);
         assert_eq!(Vec3::new(3.0, 4.0, 12.0).length(), 13.0);
         assert_eq!(a.cross(b).dot(a), 0.0);
-    }
-
-    #[test]
-    fn unitize_matches_upstream_cases() {
-        let u = Vec3::new(3.0, 0.0, 4.0).unitize().unwrap();
-        assert_eq!(u, Vec3::new(0.6, 0.0, 0.8));
-        // Already-unit vectors are returned bit-for-bit.
-        let n = Vec3::new(0.6, 0.0, 0.8);
-        assert_eq!(n.unitize().unwrap(), n);
-        // Zero vector: error, or upstream's (0,0,1) fallback.
-        assert!(matches!(
-            Vec3::ZERO.unitize(),
-            Err(SolidError::Degenerate { .. })
-        ));
-        assert_eq!(Vec3::new(1e-13, 0.0, 0.0).unitize_or_z(), Vec3::Z);
     }
 
     #[test]

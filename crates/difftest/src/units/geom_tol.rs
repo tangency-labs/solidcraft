@@ -296,10 +296,14 @@ fn rust_values(op: Op, i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, Harnes
         Op::AngTolRad => v1(tol::ang_tol_rad()),
         Op::ModelSize => v1(tol::model_size_estimate(&k)),
         Op::AreParallel => {
-            tol::are_parallel(vec3(0), vec3(3), i.flag.then(|| a(6))).map(|b| vec![flag(b)])
+            Ok(vec![flag(tol::are_parallel(vec3(0), vec3(3), i.flag.then(|| a(6))))])
         }
         Op::ArePerpendicular => {
-            tol::are_perpendicular(vec3(0), vec3(3), i.flag.then(|| a(6))).map(|b| vec![flag(b)])
+            Ok(vec![flag(tol::are_perpendicular(
+                vec3(0),
+                vec3(3),
+                i.flag.then(|| a(6)),
+            ))])
         }
         Op::IsZeroSpeed => v1(flag(tol::is_zero_speed(
             a(0),
