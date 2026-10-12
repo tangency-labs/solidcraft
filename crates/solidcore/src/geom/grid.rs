@@ -16,6 +16,7 @@
 //! | [`Grid::add_hierarchy_element`]        | `SmGrid::AddHierarchyElement`                    |
 //! | [`Grid::expand_hierarchy`]             | `SmSurfaceHierarchyElement::ExpandHierarchy`     |
 //! | [`Grid::setup_3ddda`]                  | `SmGrid::Setup3DDDA`                             |
+//! | `AxisStep` (private)                   | one axis of `SmGrid::Setup3DDDA`                 |
 //! | [`Grid::step_3ddda`], [`StepHits`]     | `SmGrid::Step3DDDA`                              |
 //! | `insertion_sort` (private)             | `sm_InsertionSort`                               |
 //! | [`Dda`]                                | the 3DDDA scratch members of `SmGrid`            |
@@ -73,9 +74,6 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent3d::{Extent3d, LineHit};
 use crate::geom::tree::NodeId;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
-
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
 
 /// `SmGridElement_TYPE` (`CONT_BASE_TYPE + 155`).
 pub const GRID_ELEMENT_TYPE: i64 = 12155;
@@ -563,16 +561,7 @@ impl<O: Copy> Grid<O> {
         n.y /= s.y;
         n.z /= s.z;
 
-        let mut outside = false;
-        if n.x < 0.0 || n.x > 1.0 {
-            outside = true;
-        }
-        if n.y < 0.0 || n.y > 1.0 {
-            outside = true;
-        }
-        if n.z < 0.0 || n.z > 1.0 {
-            outside = true;
-        }
+        let outside = [n.x, n.y, n.z].iter().any(|&c| c < 0.0 || c > 1.0);
 
         n.x = n.x.clamp(0.0, 1.0);
         n.y = n.y.clamp(0.0, 1.0);
@@ -695,11 +684,7 @@ impl<O: Copy> Grid<O> {
         const OP: &str = "geom::grid::Grid::expand_hierarchy";
         let element = self.hierarchy.get(id.0).ok_or_else(|| bad_id(OP))?;
         if element.surface.is_none() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::sm_err(OP));
         }
         // UNPORTED(surface.surface_p2): smsurf_GetSurfaceCache
         // (then SmSurfaceCache::GetTree, SmTree::GetAllTreeNodes, and for every
@@ -720,11 +705,7 @@ impl<O: Copy> Grid<O> {
     pub fn setup_3ddda(&mut self, start: Point3, vector: Vec3) -> Result<bool> {
         const OP: &str = "geom::grid::Grid::setup_3ddda";
         if vector.length_squared() < EFF_ZERO {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::sm_err(OP));
         }
 
         self.dda.ray_point = start;
@@ -736,11 +717,7 @@ impl<O: Copy> Grid<O> {
         if self.bbox.contains_point(rp, 0.0) {
             let (a, outside) = self.voxel_address(rp);
             if outside {
-                return Err(SolidError::Upstream {
-                    operation: OP,
-                    code: SM_ERR,
-                    entity: None,
-                });
+                return Err(SolidError::sm_err(OP));
             }
             let voxel_box = self.voxel_bbox(signed(a).ok_or_else(|| bad_address(OP))?);
             let (_, t_enter, _) = line_hit(voxel_box.intersect_line(rp, rv)?);
@@ -768,52 +745,22 @@ impl<O: Copy> Grid<O> {
         let ray_t = self.dda.ray_t;
         let cur = self.dda.curr_pos;
         let vs = self.voxel_size;
-        let n = signed(self.size).ok_or_else(|| bad_address(OP))?;
+        let [nx, ny, nz] = signed(self.size).ok_or_else(|| bad_address(OP))?;
+        let axes = [
+            AxisStep::new(ray_t, rv.x, vmin.x, vmax.x, cur.x, vs.x, nx),
+            AxisStep::new(ray_t, rv.y, vmin.y, vmax.y, cur.y, vs.y, ny),
+            AxisStep::new(ray_t, rv.z, vmin.z, vmax.z, cur.z, vs.z, nz),
+        ];
         let d = &mut self.dda;
-
-        if rv.x.abs() < EFF_ZERO {
-            d.next_t.x = BIG_DOUBLE;
-            d.delta_t.x = 0.0;
-        } else if rv.x < 0.0 {
-            d.next_t.x = ray_t + (vmin.x - cur.x) / rv.x;
-            d.delta_t.x = vs.x / -rv.x;
-            d.step[0] = -1;
-            d.out[0] = -1;
-        } else {
-            d.next_t.x = ray_t + (vmax.x - cur.x) / rv.x;
-            d.delta_t.x = vs.x / rv.x;
-            d.step[0] = 1;
-            d.out[0] = n[0];
-        }
-
-        if rv.y.abs() < EFF_ZERO {
-            d.next_t.y = BIG_DOUBLE;
-            d.delta_t.y = 0.0;
-        } else if rv.y < 0.0 {
-            d.next_t.y = ray_t + (vmin.y - cur.y) / rv.y;
-            d.delta_t.y = vs.y / -rv.y;
-            d.step[1] = -1;
-            d.out[1] = -1;
-        } else {
-            d.next_t.y = ray_t + (vmax.y - cur.y) / rv.y;
-            d.delta_t.y = vs.y / rv.y;
-            d.step[1] = 1;
-            d.out[1] = n[1];
-        }
-
-        if rv.z.abs() < EFF_ZERO {
-            d.next_t.z = BIG_DOUBLE;
-            d.delta_t.z = 0.0;
-        } else if rv.z < 0.0 {
-            d.next_t.z = ray_t + (vmin.z - cur.z) / rv.z;
-            d.delta_t.z = vs.z / -rv.z;
-            d.step[2] = -1;
-            d.out[2] = -1;
-        } else {
-            d.next_t.z = ray_t + (vmax.z - cur.z) / rv.z;
-            d.delta_t.z = vs.z / rv.z;
-            d.step[2] = 1;
-            d.out[2] = n[2];
+        let [ax, ay, az] = axes;
+        d.next_t = Vec3::new(ax.next_t, ay.next_t, az.next_t);
+        d.delta_t = Vec3::new(ax.delta_t, ay.delta_t, az.delta_t);
+        for ((axis, step), out) in axes.iter().zip(&mut d.step).zip(&mut d.out) {
+            // an axis the ray does not move along keeps its step and exit index
+            if let Some((s, o)) = axis.step_out {
+                *step = s;
+                *out = o;
+            }
         }
 
         d.delta_x_vec = rv * d.delta_t.x;
@@ -927,6 +874,43 @@ impl<O: Copy> Grid<O> {
     }
 }
 
+/// One axis of the 3DDDA set-up in [`Grid::setup_3ddda`].
+#[derive(Clone, Copy)]
+struct AxisStep {
+    /// `m_dNextT` component: ray parameter of the next voxel plane on this axis.
+    next_t: f64,
+    /// `m_dDeltaT` component: ray parameter between consecutive planes.
+    delta_t: f64,
+    /// `(m_lStep, m_lOut)` for this axis; `None` when the ray does not move along it.
+    step_out: Option<(i64, i64)>,
+}
+
+impl AxisStep {
+    /// The set-up for ray component `rv` entering the voxel `[vmin, vmax]` at
+    /// `cur` (ray parameter `ray_t`), with voxel size `vs` and `n` voxels.
+    fn new(ray_t: f64, rv: f64, vmin: f64, vmax: f64, cur: f64, vs: f64, n: i64) -> Self {
+        if rv.abs() < EFF_ZERO {
+            Self {
+                next_t: BIG_DOUBLE,
+                delta_t: 0.0,
+                step_out: None,
+            }
+        } else if rv < 0.0 {
+            Self {
+                next_t: ray_t + (vmin - cur) / rv,
+                delta_t: vs / -rv,
+                step_out: Some((-1, -1)),
+            }
+        } else {
+            Self {
+                next_t: ray_t + (vmax - cur) / rv,
+                delta_t: vs / rv,
+                step_out: Some((1, n)),
+            }
+        }
+    }
+}
+
 /// A voxel address (or count triple) as upstream `long`s.
 fn signed(a: [usize; 3]) -> Option<[i64; 3]> {
     Some([
@@ -996,7 +980,10 @@ mod tests {
         assert_eq!(he.grid_element().bounding_box().min().x, 0.1 - 0.01);
         assert!(matches!(
             g.expand_hierarchy(h),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(SolidError::Upstream {
+                code: crate::error::SM_ERR,
+                ..
+            })
         ));
         let hs = g
             .add_hierarchy_element(HierarchyElement::new_surface(3, 0.0), &b)

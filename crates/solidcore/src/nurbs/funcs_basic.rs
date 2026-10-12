@@ -260,10 +260,10 @@ impl CurveFunction {
 
     /// Shrinks the storage to exactly the indices in use (`N_CrvFuncCompact`).
     pub fn compact(&mut self) {
-        let fv = self.values().to_vec();
-        let v = self.knots().to_vec();
-        self.fu = fv;
-        self.knots = v;
+        self.fu.truncate(self.n.saturating_add(1));
+        self.fu.shrink_to_fit();
+        self.knots.truncate(self.m.saturating_add(1));
+        self.knots.shrink_to_fit();
     }
 
     /// Replaces the value and knot storage, keeping the indices in use
@@ -406,7 +406,6 @@ impl SurfaceFunction {
     /// possibly larger storage.
     ///
     /// Errors with `InvalidInput` when the storage is smaller than the indices.
-    #[allow(clippy::too_many_arguments)] // the upstream object's fields, in order
     pub fn with_indices(
         fuv: Vec<Vec<f64>>,
         n: usize,
@@ -536,7 +535,6 @@ impl SurfaceFunction {
     ///
     /// Errors with [`NlibCode::Storage`] when the existing function is too small
     /// (the slot is left unchanged).
-    #[allow(clippy::too_many_arguments)] // upstream signature
     pub fn size_arrays(
         slot: &mut Option<Self>,
         n: usize,

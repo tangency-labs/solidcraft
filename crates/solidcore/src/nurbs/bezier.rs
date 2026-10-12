@@ -23,6 +23,7 @@
 //! | [`split`]                              | `N_BezSplit`                          |
 //! | [`calc_arc_length`], [`ArcLength`]     | `N_BezCalcArcLength`                  |
 //! | `arc_length_rec` (private)             | `ST_BezCalcArcLength`                 |
+//! | `band_matrix_into` (private)           | the shared loops of `N_BezGetDegreeElevationMatrix` / `N_BezFuncMultiplyBezCrvMatrix` |
 //! | [`calc_length`]                        | `N_BezCalcLength`                     |
 //! | [`crv_extend`], [`ExtendAt`]           | `N_BezCrvExtend` (`NL_START` / `NL_END`) |
 //! | [`srf_extend_4d`]                      | `N_BezSrfExtend4D`                    |
@@ -159,41 +160,48 @@ pub fn binomial(i: usize, j: usize) -> Result<f64> {
         .ok_or_else(|| out_of_range(OP_PASCAL))
 }
 
+/// Shared body of [`elevation_matrix_into`] and [`product_matrix_into`] (upstream
+/// spells the same loops twice): the `(p+q+1) x (p+1)` matrix with
+/// `[i][j] = C(p, j) C(q, i-j) / C(p+q, i)` on the band
+/// `max(0, i-q) <= j <= min(i, p)`, the lower half mirrored from the upper.
+fn band_matrix_into(p: usize, q: usize, a: &mut RealMatrix, op: &'static str) -> Result<()> {
+    let n = p.checked_add(q).ok_or_else(|| out_of_range(op))?;
+    a.ensure(n, p, MatrixType::Full, p).map_err(|e| match e {
+        SolidError::Nlib { code, .. } => nlib(op, code),
+        other => other,
+    })?;
+
+    let r = n / 2;
+    a.set(0, 0, 1.0).map_err(|_| out_of_range(op))?;
+    a.set(n, p, 1.0).map_err(|_| out_of_range(op))?;
+
+    for i in 1..=r {
+        let inv = 1.0 / binomial(n, i)?;
+        let jl = i.saturating_sub(q);
+        let jh = i.min(p);
+        for j in jl..=jh {
+            let v = inv * binomial(p, j)? * binomial(q, i - j)?;
+            a.set(i, j, v).map_err(|_| out_of_range(op))?;
+        }
+    }
+
+    for i in r + 1..n {
+        let jl = i.saturating_sub(q);
+        let jh = i.min(p);
+        for j in jl..=jh {
+            let v = mat(a, n - i, p - j, op)?;
+            a.set(i, j, v).map_err(|_| out_of_range(op))?;
+        }
+    }
+    Ok(())
+}
+
 /// Writes the matrix that elevates a degree-`p` Bezier entity by `t` into `dm`
 /// (`N_BezGetDegreeElevationMatrix`): `dm` is allocated `(p+t+1) x (p+1)` when null,
 /// else must be at least that large (`NL_STO_ERR`). Only the band
 /// `max(0, i-t) <= j <= min(i, p)` of each row `i` is written.
 pub fn elevation_matrix_into(p: usize, t: usize, dm: &mut RealMatrix) -> Result<()> {
-    let op = OP_ELEV_MATRIX;
-    let q = p.checked_add(t).ok_or_else(|| out_of_range(op))?;
-    dm.ensure(q, p, MatrixType::Full, p).map_err(|e| match e {
-        SolidError::Nlib { code, .. } => nlib(op, code),
-        other => other,
-    })?;
-
-    let r = q / 2;
-    dm.set(0, 0, 1.0).map_err(|_| out_of_range(op))?;
-    dm.set(q, p, 1.0).map_err(|_| out_of_range(op))?;
-
-    for i in 1..=r {
-        let inv = 1.0 / binomial(q, i)?;
-        let k = i.saturating_sub(t);
-        let l = i.min(p);
-        for j in k..=l {
-            let v = inv * binomial(p, j)? * binomial(t, i - j)?;
-            dm.set(i, j, v).map_err(|_| out_of_range(op))?;
-        }
-    }
-
-    for i in r + 1..q {
-        let k = i.saturating_sub(t);
-        let l = i.min(p);
-        for j in k..=l {
-            let v = mat(dm, q - i, p - j, op)?;
-            dm.set(i, j, v).map_err(|_| out_of_range(op))?;
-        }
-    }
-    Ok(())
+    band_matrix_into(p, t, dm, OP_ELEV_MATRIX)
 }
 
 /// The degree elevation matrix of [`elevation_matrix_into`] in a new matrix.
@@ -208,37 +216,7 @@ pub fn elevation_matrix(p: usize, t: usize) -> Result<RealMatrix> {
 /// null, else checked (`NL_STO_ERR`). Only the band `max(0, i-q) <= j <= min(p, i)`
 /// of each row `i` is written.
 pub fn product_matrix_into(p: usize, q: usize, pm: &mut RealMatrix) -> Result<()> {
-    let op = OP_PROD_MATRIX;
-    let n = p.checked_add(q).ok_or_else(|| out_of_range(op))?;
-    let m = p;
-    pm.ensure(n, m, MatrixType::Full, m).map_err(|e| match e {
-        SolidError::Nlib { code, .. } => nlib(op, code),
-        other => other,
-    })?;
-
-    let r = n / 2;
-    pm.set(0, 0, 1.0).map_err(|_| out_of_range(op))?;
-    pm.set(n, m, 1.0).map_err(|_| out_of_range(op))?;
-
-    for i in 1..=r {
-        let inv = 1.0 / binomial(n, i)?;
-        let jl = i.saturating_sub(q);
-        let jh = p.min(i);
-        for j in jl..=jh {
-            let v = inv * binomial(p, j)? * binomial(q, i - j)?;
-            pm.set(i, j, v).map_err(|_| out_of_range(op))?;
-        }
-    }
-
-    for i in r + 1..n {
-        let jl = i.saturating_sub(q);
-        let jh = p.min(i);
-        for j in jl..=jh {
-            let v = mat(pm, n - i, m - j, op)?;
-            pm.set(i, j, v).map_err(|_| out_of_range(op))?;
-        }
-    }
-    Ok(())
+    band_matrix_into(p, q, pm, OP_PROD_MATRIX)
 }
 
 /// The product matrix of [`product_matrix_into`] in a new matrix.
@@ -246,6 +224,19 @@ pub fn product_matrix(p: usize, q: usize) -> Result<RealMatrix> {
     let mut pm = RealMatrix::null();
     product_matrix_into(p, q, &mut pm)?;
     Ok(pm)
+}
+
+/// `given`, or when it is null a matrix from `build` stored in `local`.
+fn given_or_local<'a>(
+    given: &'a RealMatrix,
+    local: &'a mut Option<RealMatrix>,
+    build: impl FnOnce() -> Result<RealMatrix>,
+) -> Result<&'a RealMatrix> {
+    if given.is_null() {
+        Ok(local.insert(build()?))
+    } else {
+        Ok(given)
+    }
 }
 
 /// Control points `Qw[f..=l]` of the degree-`p` Bezier curve `Pw[0..=p]` elevated by
@@ -261,13 +252,8 @@ pub fn elevate_degree(
     qw: &mut [CPoint],
 ) -> Result<()> {
     let op = OP_ELEVATE;
-    let local;
-    let rm = if dm.is_null() {
-        local = elevation_matrix(p, t)?;
-        &local
-    } else {
-        dm
-    };
+    let mut local = None;
+    let rm = given_or_local(dm, &mut local, || elevation_matrix(p, t))?;
 
     for i in f..=l {
         let a = i.saturating_sub(t);
@@ -279,20 +265,6 @@ pub fn elevate_degree(
         *at_mut(qw, i, op)? = c;
     }
     Ok(())
-}
-
-/// Picks `given` or, when it is null, a product matrix built here.
-fn product_or_local<'a>(
-    given: &'a RealMatrix,
-    local: &'a mut Option<RealMatrix>,
-    p: usize,
-    q: usize,
-) -> Result<&'a RealMatrix> {
-    if given.is_null() {
-        Ok(local.insert(product_matrix(p, q)?))
-    } else {
-        Ok(given)
-    }
 }
 
 /// `true` when `s..=e` is a valid product index range (`0 <= s <= e <= p+q`).
@@ -318,7 +290,7 @@ pub fn func_multiply_func(
         return Err(nlib(op, NlibCode::Input));
     }
     let mut local = None;
-    let a = product_or_local(pm, &mut local, p, q)?;
+    let a = given_or_local(pm, &mut local, || product_matrix(p, q))?;
 
     for i in s..=e {
         let mut v = 0.0;
@@ -349,7 +321,7 @@ fn func_times_crv(
         return Err(nlib(op, NlibCode::Input));
     }
     let mut local = None;
-    let a = product_or_local(pm, &mut local, p, q)?;
+    let a = given_or_local(pm, &mut local, || product_matrix(p, q))?;
 
     for i in s..=e {
         let mut c = CPoint::ZERO;
@@ -413,13 +385,8 @@ pub fn srf_elevate_degree(
     qw: &mut [Vec<CPoint>],
 ) -> Result<()> {
     let op = OP_SRF_ELEVATE;
-    let local;
-    let rm = if dm.is_null() {
-        local = elevation_matrix(r, t)?;
-        &local
-    } else {
-        dm
-    };
+    let mut local = None;
+    let rm = given_or_local(dm, &mut local, || elevation_matrix(r, t))?;
 
     match dir {
         Direction::U => {
@@ -558,28 +525,32 @@ pub fn reduce_degree(pw: &[CPoint], p: usize, c: &ReduceCoefs) -> Result<Reduced
     *at_mut(&mut qw, p - 1, op)? = at(pw, p, op)?;
 
     let r = reduce_mid(p);
+    let odd = p % 2 == 1;
 
-    let err = if p % 2 == 1 {
-        // Odd degree: from the left, from the right, then the middle point.
-        for i in 1..r {
-            let v = CPoint::combine2(
-                at(&c.alf, i, op)?,
-                at(pw, i, op)?,
-                at(&c.oma, i, op)?,
-                at(&qw, i - 1, op)?,
-            );
-            *at_mut(&mut qw, i, op)? = v;
-        }
-        for i in (r + 1..=p - 2).rev() {
-            let v = CPoint::combine2(
-                at(&c.bet, i, op)?,
-                at(pw, i + 1, op)?,
-                at(&c.omb, i, op)?,
-                at(&qw, i + 1, op)?,
-            );
-            *at_mut(&mut qw, i, op)? = v;
-        }
+    // From the left (up to the middle point for odd degrees, which is set below),
+    // then from the right.
+    let left_end = if odd { r } else { r + 1 };
+    for i in 1..left_end {
+        let v = CPoint::combine2(
+            at(&c.alf, i, op)?,
+            at(pw, i, op)?,
+            at(&c.oma, i, op)?,
+            at(&qw, i - 1, op)?,
+        );
+        *at_mut(&mut qw, i, op)? = v;
+    }
+    for i in (r + 1..=p - 2).rev() {
+        let v = CPoint::combine2(
+            at(&c.bet, i, op)?,
+            at(pw, i + 1, op)?,
+            at(&c.omb, i, op)?,
+            at(&qw, i + 1, op)?,
+        );
+        *at_mut(&mut qw, i, op)? = v;
+    }
 
+    let err = if odd {
+        // The middle point averages the left and right formulas.
         let pl = CPoint::combine2(
             at(&c.alf, r, op)?,
             at(pw, r, op)?,
@@ -603,26 +574,6 @@ pub fn reduce_degree(pw: &[CPoint], p: usize, c: &ReduceCoefs) -> Result<Reduced
         let b = (bb - bb1).abs();
         a * b * dw
     } else {
-        // Even degree.
-        for i in 1..=r {
-            let v = CPoint::combine2(
-                at(&c.alf, i, op)?,
-                at(pw, i, op)?,
-                at(&c.oma, i, op)?,
-                at(&qw, i - 1, op)?,
-            );
-            *at_mut(&mut qw, i, op)? = v;
-        }
-        for i in (r + 1..=p - 2).rev() {
-            let v = CPoint::combine2(
-                at(&c.bet, i, op)?,
-                at(pw, i + 1, op)?,
-                at(&c.omb, i, op)?,
-                at(&qw, i + 1, op)?,
-            );
-            *at_mut(&mut qw, i, op)? = v;
-        }
-
         let u = (r as f64 + 1.0) / p as f64;
         let bb1 = eval_one_basis(p, r + 1, u)?;
         let pl = CPoint::combine2(0.5, at(&qw, r, op)?, 0.5, at(&qw, r + 1, op)?);

@@ -8,6 +8,7 @@
 //! | [`SolidError`]              | non-`SM_SUCCESS` `SmStatus` values               |
 //! | [`SolidError::InvalidInput`]| `SM_ERR_INVALID_INPUT`                           |
 //! | [`SolidError::Upstream`]    | any other `SM_ERR_*` code, carried numerically   |
+//! | [`SM_ERR`], [`SM_ERR_WARNING`], [`SolidError::sm_err`] | `SM_ERR`, `SM_ERR_WARNING`, `SE(SM_ERR)` |
 //! | [`SolidError::Nlib`]        | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`)    |
 //! | [`SolidError::Unported`]    | (none: call into a unit not ported yet)          |
 //! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
@@ -206,11 +207,29 @@ impl NlibCode {
     }
 }
 
+/// Upstream `SmStatus` value `SM_ERR` (generic failure), as carried by
+/// [`SolidError::Upstream`].
+pub const SM_ERR: i32 = 1001;
+
+/// Upstream `SmStatus` value `SM_ERR_WARNING`, as carried by [`SolidError::Upstream`].
+pub const SM_ERR_WARNING: i32 = 1023;
+
 fn fmt_entity(entity: Option<EntityRef>) -> String {
     entity.map_or_else(String::new, |e| format!(" at {e}"))
 }
 
 impl SolidError {
+    /// [`SolidError::Upstream`] with code [`SM_ERR`] and no entity (upstream
+    /// `return SE(SM_ERR)`).
+    #[must_use]
+    pub const fn sm_err(operation: &'static str) -> Self {
+        Self::Upstream {
+            operation,
+            code: SM_ERR,
+            entity: None,
+        }
+    }
+
     /// The operation that produced this error (for [`SolidError::Unported`], the
     /// upstream symbol that is not ported yet).
     #[must_use]

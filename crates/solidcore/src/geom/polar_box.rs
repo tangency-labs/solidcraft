@@ -65,9 +65,6 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos, Vec3};
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
-/// Upstream status `SM_ERR`.
-const SM_ERR: i32 = 1001;
-
 /// State of a [`PolarBox`] (`SmPolarBoxState`), ordered from most degenerate to most
 /// general (upstream relies on this order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -105,6 +102,11 @@ impl PolarBoxState {
 
     fn is_point(self) -> bool {
         matches!(self, Self::SinglePoint | Self::PointWithBasis)
+    }
+
+    /// Uninitialised or unbounded: no bound on the directions is known.
+    fn is_unknown(self) -> bool {
+        matches!(self, Self::Uninitialized | Self::Unbounded)
     }
 }
 
@@ -224,15 +226,8 @@ impl PolarBox {
     /// `SM_ERR` ([`SolidError::Upstream`]) for uninitialised and unbounded boxes
     /// (upstream returns `SmPoint2d()`).
     pub fn compute_polar_coord(&self, v: Vec3) -> Result<Point2> {
-        if matches!(
-            self.state,
-            PolarBoxState::Uninitialized | PolarBoxState::Unbounded
-        ) {
-            return Err(SolidError::Upstream {
-                operation: "geom::polar_box::compute_polar_coord",
-                code: SM_ERR,
-                entity: None,
-            });
+        if self.state.is_unknown() {
+            return Err(SolidError::sm_err("geom::polar_box::compute_polar_coord"));
         }
         Ok(self.polar_coord_raw(v))
     }
@@ -461,17 +456,11 @@ impl PolarBox {
     #[must_use]
     pub fn cross(&self, other: &Self) -> Self {
         let mut out = Self::new();
-        if self.state == PolarBoxState::Uninitialized || other.state == PolarBoxState::Uninitialized
-        {
+        // an uninitialised or unbounded input gives an unbounded result
+        if self.state.is_unknown() || other.state.is_unknown() {
             out.state = PolarBoxState::Unbounded;
             return out;
         }
-        if self.state == PolarBoxState::Unbounded || other.state == PolarBoxState::Unbounded {
-            out.state = PolarBoxState::Unbounded;
-            return out;
-        }
-
-        out.state = PolarBoxState::Uninitialized;
 
         // cross the centre vectors first so the result stays reasonably centred
         let cross_vec = self.basis[0].cross(other.basis[0]);
@@ -741,7 +730,6 @@ impl PolarBox {
     pub fn union(&self, other: &Self) -> Result<Self> {
         let mut out = Self::new();
         if let Some(mid) = Self::union_mid(self, other) {
-            out.reset();
             out.add_vector(mid, None);
             Self::union_finish(&mut out, self.state, &self.boundary_vectors()?, other)?;
         } else {

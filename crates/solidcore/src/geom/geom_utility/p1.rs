@@ -81,7 +81,7 @@
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_WARNING};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::matrix::Matrix;
@@ -91,20 +91,8 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
-/// Upstream `SM_ERR`.
-const SM_ERR: i32 = 1001;
-/// Upstream `SM_ERR_WARNING`.
-const SM_ERR_WARNING: i32 = 1023;
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
-
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -140,7 +128,7 @@ pub fn add_point(points: &mut Vec<Point3>, tol: f64, pnt: Point3) -> Result<()> 
         }
     }
     if points.len() > 1 {
-        return Err(sm_err("geom::geom_utility::p1::add_point"));
+        return Err(SolidError::sm_err("geom::geom_utility::p1::add_point"));
     }
     points.push(pnt);
     Ok(())
@@ -357,13 +345,13 @@ pub fn line_line_closest_point(
     const OP: &str = "geom::geom_utility::p1::line_line_closest_point";
     // err - zero length vectors
     if line_vec1.length_squared() < EFF_ZERO_SQ || line_vec2.length_squared() < EFF_ZERO_SQ {
-        return Err(sm_err(OP));
+        return Err(SolidError::sm_err(OP));
     }
 
     // error - parallel or coincident lines
     let cross = line_vec1.cross(line_vec2);
     if cross.length_squared() < EFF_ZERO_SQ {
-        return Err(sm_err(OP));
+        return Err(SolidError::sm_err(OP));
     }
 
     // get minimum distance vector direction
@@ -373,10 +361,10 @@ pub fn line_line_closest_point(
     let plane_v1 = cross.cross(line_vec1).unitize()?;
     let plane_v2 = cross.cross(line_vec2).unitize()?;
 
-    let t1 =
-        line_plane_intersect(line_pnt1, line_vec1, line_pnt2, plane_v2).map_err(|_| sm_err(OP))?;
-    let t2 =
-        line_plane_intersect(line_pnt2, line_vec2, line_pnt1, plane_v1).map_err(|_| sm_err(OP))?;
+    let t1 = line_plane_intersect(line_pnt1, line_vec1, line_pnt2, plane_v2)
+        .map_err(|_| SolidError::sm_err(OP))?;
+    let t2 = line_plane_intersect(line_pnt2, line_vec2, line_pnt1, plane_v1)
+        .map_err(|_| SolidError::sm_err(OP))?;
     Ok((t1, t2))
 }
 
@@ -400,7 +388,7 @@ pub fn line_plane_intersect(
     let denom = line_vec.dot(plane_norm);
 
     if denom.abs() < tol {
-        return Err(sm_err(OP)); // Parallel case
+        return Err(SolidError::sm_err(OP)); // Parallel case
     }
 
     Ok(-(plane_eq_d + line_pnt.dot(plane_norm)) / denom)
@@ -434,7 +422,7 @@ pub fn line_plane_intersect_uv(
     let denom = line_vec.dot(norm);
 
     if denom.abs() < tol {
-        return Err(sm_err(OP)); // Parallel case
+        return Err(SolidError::sm_err(OP)); // Parallel case
     }
 
     // Cramer's rule:
@@ -534,13 +522,8 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
         entity: None,
     };
     // Do some checks for coincident points and colinear points
-    if a.distance_squared(b) < tol2 {
-        return Err(not_ok());
-    }
-    if b.distance_squared(c) < tol2 {
-        return Err(not_ok());
-    }
-    if a.distance_squared(c) < tol2 {
+    if a.distance_squared(b) < tol2 || b.distance_squared(c) < tol2 || a.distance_squared(c) < tol2
+    {
         return Err(not_ok());
     }
     let vec = Vec3::from(c - a);
@@ -548,7 +531,7 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     // Upstream calls the 3d smgu_LinePointDistance (points converted with z = 0).
     let (dist_to_line, _) = line_point_distance(Vec3::from(a), vec, Vec3::from(b));
     if dist_to_line < 2.0 * EFF_ZERO * a.distance_squared(c) {
-        return Err(sm_err(OP)); // Radius would be bigger than 1 / SM_EFF_ZERO.
+        return Err(SolidError::sm_err(OP)); // Radius would be bigger than 1 / SM_EFF_ZERO.
     }
 
     // Set up the 2x2 as described.
@@ -564,11 +547,8 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     let numer0 = b0 * a11 - b1 * a01;
     let numer1 = a00 * b1 - a10 * b0;
 
-    if determ.abs() < numer0.abs() * EFF_ZERO {
-        return Err(sm_err(OP));
-    }
-    if determ.abs() < numer1.abs() * EFF_ZERO {
-        return Err(sm_err(OP));
+    if determ.abs() < numer0.abs() * EFF_ZERO || determ.abs() < numer1.abs() * EFF_ZERO {
+        return Err(SolidError::sm_err(OP));
     }
 
     Ok(Point2::new(numer0 / determ, numer1 / determ))
@@ -605,7 +585,7 @@ pub fn circle_from_3_points(
 ) -> Result<Circle3Points> {
     const OP: &str = "geom::geom_utility::p1::circle_from_3_points";
     if !(2..=3).contains(&dimension) {
-        return Err(sm_err(OP));
+        return Err(SolidError::sm_err(OP));
     }
 
     let mut sp = start;
@@ -762,7 +742,7 @@ pub fn line_coplanar_circle_intersect(
     // Unitize the line vector.
     let scale = line_vec.length();
     if scale < EFF_ZERO * circle_radius {
-        return Err(sm_err(
+        return Err(SolidError::sm_err(
             "geom::geom_utility::p1::line_coplanar_circle_intersect",
         ));
     }
@@ -982,7 +962,7 @@ pub fn line_intersect_sphere(
     // compute 1/2 distance between the point solutions
     let disc = sphere_radius * sphere_radius - b * b;
     if disc < EFF_ZERO {
-        return Err(sm_err(OP)); // can't really happen
+        return Err(SolidError::sm_err(OP)); // can't really happen
     }
     let d = sm_sqrt(disc);
 
@@ -1060,7 +1040,9 @@ pub fn plane_point_distance(
     test_point: Point3,
 ) -> Result<f64> {
     if plane_norm.length_squared() - 1.0 > EFF_ZERO {
-        return Err(sm_err("geom::geom_utility::p1::plane_point_distance"));
+        return Err(SolidError::sm_err(
+            "geom::geom_utility::p1::plane_point_distance",
+        ));
     }
 
     let proj_vec = test_point - plane_pnt;
@@ -1222,14 +1204,9 @@ pub fn vec_lin_comb_two_vectors(basis1: Vec3, basis2: Vec3, vector: Vec3) -> Res
     let numer0 = b0 * a11 - b1 * a01;
     let numer1 = a00 * b1 - a10 * b0;
 
-    if det == 0.0 {
-        return Err(sm_err(OP)); // In case dNumer0 or dNumer1 is 0 exactly.
-    }
-    if det.abs() < numer0.abs() * EFF_ZERO {
-        return Err(sm_err(OP));
-    }
-    if det.abs() < numer1.abs() * EFF_ZERO {
-        return Err(sm_err(OP));
+    // `det == 0.0` in case dNumer0 or dNumer1 is 0 exactly.
+    if det == 0.0 || det.abs() < numer0.abs() * EFF_ZERO || det.abs() < numer1.abs() * EFF_ZERO {
+        return Err(SolidError::sm_err(OP));
     }
 
     Ok(Point2::new(numer0 / det, numer1 / det))
@@ -1259,14 +1236,7 @@ impl PointSetType {
     /// Upstream enum value (`SM_PST_UNKNOWN` = 0 ... `SM_PST_SCATTERED` = 5).
     #[must_use]
     pub const fn code(self) -> i32 {
-        match self {
-            Self::Unknown => 0,
-            Self::Void => 1,
-            Self::PointSized => 2,
-            Self::Linear => 3,
-            Self::Planar => 4,
-            Self::Scattered => 5,
-        }
+        self as i32
     }
 }
 
@@ -1485,7 +1455,7 @@ pub fn inverse_3x3(a0: &[f64; 3], a1: &[f64; 3], a2: &[f64; 3]) -> Result<[[f64;
     let det = vec_triple_product(a0, a1, a2);
 
     if is_zero(det) {
-        return Err(sm_err("geom::geom_utility::p1::inverse_3x3"));
+        return Err(SolidError::sm_err("geom::geom_utility::p1::inverse_3x3"));
     }
 
     let [a00, a01, a02] = *a0;

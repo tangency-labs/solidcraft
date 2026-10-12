@@ -353,7 +353,6 @@ fn zeros3(rows: usize, cols: usize, cnt: usize, op: &'static str) -> Result<Vec<
 /// upstream would index out of bounds (an inner parameter at or past the domain end
 /// with [`Side::Left`], or past it with [`Side::Right`]), or overflow its `int`
 /// derivative factor.
-#[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
 pub fn basis_derivs_array(
     knt: &KnotVector<'_>,
     p: usize,
