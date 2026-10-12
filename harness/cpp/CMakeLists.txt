@@ -71,11 +71,41 @@ if(SC_BUILD_TESTS)
   # These two need upstream/Examples/*; replaced by stubs/sm_api_test_examples_stub.cpp.
   list(FILTER SMAPITEST_SRC EXCLUDE REGEX "TestSmBooleanBoundsExample\\.cpp$")
   list(FILTER SMAPITEST_SRC EXCLUDE REGEX "TestSmSTEPDerivativesExample\\.cpp$")
-  add_executable(SM_API_test_app ${SMAPITEST_SRC}
+  # SM_API_test.cpp holds main() under SM_API_TEST_STANDALONE; compile it per exe.
+  set(SMAPITEST_MAIN "${UP}/tests/SM_API_test/src/SM_API_test.cpp")
+  list(REMOVE_ITEM SMAPITEST_SRC "${SMAPITEST_MAIN}")
+  add_library(sm_api_tests OBJECT ${SMAPITEST_SRC}
     "${CMAKE_CURRENT_SOURCE_DIR}/stubs/sm_api_test_examples_stub.cpp")
+  target_include_directories(sm_api_tests BEFORE PRIVATE "${UP}/tests/SM_API_test/inc")
+  target_link_libraries(sm_api_tests PUBLIC SM_API)
+
+  add_executable(SM_API_test_app "${SMAPITEST_MAIN}")
   target_include_directories(SM_API_test_app BEFORE PRIVATE "${UP}/tests/SM_API_test/inc")
   target_compile_definitions(SM_API_test_app PRIVATE SM_API_TEST_STANDALONE)
-  target_link_libraries(SM_API_test_app PRIVATE SM_API)
+  target_link_libraries(SM_API_test_app PRIVATE sm_api_tests SM_API)
+
+  # -------------------------------------------------------------- sm_api_single
+  # Same test sources without SM_API_TEST_STANDALONE (so no upstream main), plus
+  # a generated driver that runs tests by name.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SMAPITEST_MAIN}")
+  file(STRINGS "${SMAPITEST_MAIN}" _calls
+       REGEX "^[ \t]*stat = Test[A-Za-z0-9_]+\\(\\);")
+  set(_names "")
+  foreach(_c IN LISTS _calls)
+    string(REGEX REPLACE "^[ \t]*stat = (Test[A-Za-z0-9_]+)\\(\\);.*$" "\\1" _n "${_c}")
+    list(APPEND _names "${_n}")
+  endforeach()
+  list(REMOVE_DUPLICATES _names)
+  set(SC_TEST_TABLE "")
+  foreach(_n IN LISTS _names)
+    string(APPEND SC_TEST_TABLE "    {\"${_n}\", &${_n}},\n")
+  endforeach()
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/stubs/sm_api_single_main.cpp.in"
+                 "${CMAKE_CURRENT_BINARY_DIR}/sm_api_single_main.cpp" @ONLY)
+  add_executable(sm_api_single "${SMAPITEST_MAIN}"
+    "${CMAKE_CURRENT_BINARY_DIR}/sm_api_single_main.cpp")
+  target_include_directories(sm_api_single BEFORE PRIVATE "${UP}/tests/SM_API_test/inc")
+  target_link_libraries(sm_api_single PRIVATE sm_api_tests SM_API)
 
   # -------------------------------------------------------------- prog_test_app
   file(GLOB PROGTEST_SRC CONFIGURE_DEPENDS "${UP}/tests/prog_test/src/*.cpp")
@@ -86,5 +116,5 @@ endif()
 
 install(TARGETS SMLib SM_API ARCHIVE DESTINATION lib)
 if(SC_BUILD_TESTS)
-  install(TARGETS SM_API_test_app prog_test_app RUNTIME DESTINATION tests)
+  install(TARGETS SM_API_test_app sm_api_single prog_test_app RUNTIME DESTINATION tests)
 endif()
