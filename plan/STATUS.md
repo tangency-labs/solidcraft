@@ -11,10 +11,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **30** (29,119 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1` |
+| Green | **31** (30,826 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1` |
 | Partial | **10** (10,742 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `nlib.crv_basic`, `geom.tools`, `geom.transform`, `geom.global_solver`, `nlib.crv_tool_p1` |
-| Ported (green + partial) | 40 units, 39,861 upstream lines (10.3%); about 47,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
-| Claimed | 6 (7,274 lines): `nlib.crv_fit_p1`, `geom.a_object`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_nurb`, `nlib.funcs_adv` |
+| Ported (green + partial) | 41 units, 41,568 upstream lines (10.7%); about 47,300 Rust lines in `geom/`, `nurbs/` and `topology/` |
+| Claimed | 5 (5,567 lines): `geom.a_object`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_nurb`, `nlib.funcs_adv` |
 | Blocked | 0 |
 | Todo | 214 (340,768 lines) |
 
@@ -98,12 +98,10 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 
 ## Ready set
 
-Ready (todo, every dependency green/partial): none. Waiting on a claimed unit:
+Ready (todo, every dependency green/partial): `nlib.crv_fit_p2` (layer 6, 1586 lines), `nlib.srf_fit` (layer 6, 1359 lines). Waiting on a claimed unit:
 
 | Layer | Unit | Upstream lines | Waiting on (claimed) |
 |---|---|---|---|
-| 6 | `nlib.crv_fit_p2` | 1586 | `nlib.crv_fit_p1` |
-| 6 | `nlib.srf_fit` | 1359 | `nlib.crv_fit_p1` |
 | 7 | `nlib.crv_geom` | 729 | `nlib.crv_nurb` |
 | 7 | `nlib.crv_tool_p2` | 1748 | `nlib.crv_nurb` |
 | 7 | `nurbs.nurbs_crv` | 2200 | `nlib.crv_nurb` |
