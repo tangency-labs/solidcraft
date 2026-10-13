@@ -36,6 +36,13 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 - Polymorphic readers that can nest (`Curve::read_from_db`, and the surface/topology
   dispatchers when ported) call `db.enter_nested(op)?` before dispatching and
   `db.leave_nested()` after, so crafted files cannot recurse without bound.
+- **Recursion.** wasm32 has no stack guard page: a stack overflow there silently
+  corrupts memory instead of aborting. Any recursion whose depth depends on input
+  (subdivision, refinement, tree/topology walks, nested geometry) carries an explicit
+  depth parameter or counter and returns `SolidError` past a documented bound that is
+  well above anything upstream fixtures reach. Converting to a loop with an explicit
+  stack is allowed only if it visits in exactly the same order. Note each bound in the
+  file header's Deviations line. `audit.recursion` (last unit) sweeps the whole crate.
 
 **Correctness gate.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within

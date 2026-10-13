@@ -55,6 +55,19 @@ cargo check -p solidcore --target wasm32-unknown-unknown   # wasm check
 
 Optional: `export RUSTC_WRAPPER=sccache` to share compilation caches.
 
+### WebAssembly stack size
+
+On `wasm32-unknown-unknown` the Rust stack lives in linear memory **without a guard
+page**, so an overflow corrupts memory instead of aborting. solidcore bounds
+input-driven recursion, but kernel algorithms (subdivision, intersection, filleting)
+still recurse legitimately. Link wasm consumers with a larger stack than the ~1 MB
+default, e.g. in the consumer's `.cargo/config.toml`:
+
+```toml
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]   # 8 MiB, as a native main thread
+```
+
 ## Difftest (Rust vs C++)
 
 ```sh
