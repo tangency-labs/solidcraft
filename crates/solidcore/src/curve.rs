@@ -7,6 +7,7 @@
 
 pub mod conic;
 pub mod crv_in_volume;
+pub mod crv_on_surf;
 #[allow(clippy::module_inception)]
 pub mod curve;
 pub mod curve_cache;

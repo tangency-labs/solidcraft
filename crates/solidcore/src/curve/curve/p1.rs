@@ -10,7 +10,7 @@
 //! |---------------------------------------------------|--------------------------------------------------|
 //! | [`refine_cc_solutions`]                           | `sm_RefineCCSolutions` (static)                  |
 //! | [`test_span_accuracy`], [`SpanAccuracy`]          | `sm_TestSpanAccuracy` (static)                   |
-//! | [`Curve::approximate_curve`], [`CurveApproximation`], [`ApproximateCurveOptions`] | `SmCurve::ApproximateCurve` |
+//! | [`Curve::approximate_curve`], [`Curve::approximate_curve_base`], [`CurveApproximation`], [`ApproximateCurveOptions`] | `ApproximateCurve` (virtual: the `SmCrvOnSurf` override), `SmCurve::ApproximateCurve` |
 //! | [`Curve::classify_intersecting_range_solution`], [`TangentPoint`] | `SmCurve::ClassifyIntersectingRangeSolution` |
 //! | `CpGlobalSolver::local_solve_branch` ([`GlobalSolve::local_solve`] of [`CpGlobalSolver`]) | `SmCPGlobalSolver::LocalSolve` |
 //! | [`Curve::global_point_solve`], [`GlobalPointSolveOptions`] | `SmCurve::GlobalPointSolve`             |
@@ -402,6 +402,33 @@ impl Curve {
     /// `SM_ERR` for fewer than 2 breaks; those of the evaluations, the degenerate
     /// curve, [`flush_crv`] and `Copy`; `InvalidInput` when nothing is built.
     pub fn approximate_curve(
+        &self,
+        breaks: &[f64],
+        approx_tol_3d: f64,
+        opts: &ApproximateCurveOptions,
+    ) -> Result<CurveApproximation> {
+        match self.kind() {
+            // the SmCrvOnSurf override (its cache update is lost on this copy)
+            CurveKind::CrvOnSurf(c) => {
+                let mut c = c.as_ref().clone();
+                let (curve, gap) =
+                    c.approximate_curve(breaks, approx_tol_3d, opts.match_parameterization)?;
+                Ok(CurveApproximation {
+                    curve: Curve::from(curve),
+                    achieved_tol: Some(gap),
+                })
+            }
+            _ => self.approximate_curve_base(breaks, approx_tol_3d, opts),
+        }
+    }
+
+    /// `SmCurve::ApproximateCurve` (the base-class body of
+    /// [`Curve::approximate_curve`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::approximate_curve`].
+    pub fn approximate_curve_base(
         &self,
         breaks: &[f64],
         approx_tol_3d: f64,
@@ -1917,7 +1944,8 @@ impl Curve {
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
-            | CurveKind::CrvInVolume(_) => {
+            | CurveKind::CrvInVolume(_)
+            | CurveKind::CrvOnSurf(_) => {
                 self.tessellate_base(interval, chord_height_tol, angle_tol_deg, min_segments)
             }
         }

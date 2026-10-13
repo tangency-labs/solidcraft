@@ -281,7 +281,8 @@ impl Curve {
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
-            | CurveKind::CrvInVolume(_) => curve_is_line_base(self, num_samples, tol),
+            | CurveKind::CrvInVolume(_)
+            | CurveKind::CrvOnSurf(_) => curve_is_line_base(self, num_samples, tol),
         }
     }
 }

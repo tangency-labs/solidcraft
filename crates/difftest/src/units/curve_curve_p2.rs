@@ -731,7 +731,11 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
             }
         }
         // the shim reports another type as -1
-        CurveKind::Projected(_) | CurveKind::Offset(_) | CurveKind::CrvInVolume(_) | CurveKind::Line(_) => o.push(-1.0),
+        CurveKind::Projected(_)
+        | CurveKind::Offset(_)
+        | CurveKind::CrvInVolume(_)
+        | CurveKind::CrvOnSurf(_)
+        | CurveKind::Line(_) => o.push(-1.0),
     }
 }
 

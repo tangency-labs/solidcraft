@@ -482,26 +482,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCrvOnSurf::ReadFromDB",
-        "unit": "curve.crv_on_surf"
-      },
       "max_rel_err": 0.0,
       "name": "read_binary_members",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.tangent_field/cases.json#53 (upstream source/SMLib/src/SmCurve.cpp:23731 (SmCurve::ReadFromDB -> SmTangentField::ReadFromDB))",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCrvOnSurf::ReadFromDB",
-        "unit": "curve.crv_on_surf"
-      },
       "max_rel_err": 0.0,
       "name": "read_ascii_members",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.tangent_field/cases.json#54 (upstream source/SMLib/src/SmCurve.cpp:23731 (SmCurve::ReadFromDB -> SmTangentField::ReadFromDB))",
       "values_compared": 0
     },
@@ -6307,12 +6299,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 266,
+  "cases_deferred": 264,
   "cases_failed": 0,
-  "cases_passed": 389,
+  "cases_passed": 391,
   "cases_total": 655,
   "deferred_by_unit": {
-    "curve.crv_on_surf": 2,
     "surface.surface_p1": 11,
     "surface.surface_p2": 143,
     "surface.surface_p7": 110

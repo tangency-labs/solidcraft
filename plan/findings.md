@@ -2173,8 +2173,8 @@ No Rust/C++ disagreements (3136 cases, 3048 bit-identical, 88 deferred on `curve
   returns `incorrect_dir: None` there.
 - **`DeformToEndPointTargets`** ignores the status of `ApproximateCurve` and then calls the
   B-spline deform through `*ppOptNewCurve` (a null dereference when the approximation
-  fails); the port returns the error. The `SmCrvOnSurf` branch is unreachable until
-  `curve.crv_on_surf` adds the curve kind (no `CurveKind` is a curve on surface yet).
+  fails); the port returns the error. The `SmCrvOnSurf` branch is taken only with the
+  `pOptSurfCrvOnSurf` argument the port drops (see `curve.crv_on_surf` below).
 - **`GlobalCoincidenceChecker`** recurses on closed and half closed curves without a
   depth bound; the port stops at `MAX_COINCIDENCE_DEPTH` (200) nested splits with
   `InvalidInput` (AGENTS.md recursion rule). Its recursive calls use the default
@@ -2249,3 +2249,57 @@ Upstream behaviour worth knowing (all kept by the port unless noted):
   classification the point must also be within `SM_EFF_ZERO * (1 + size)` of the curve.
 - `Trim`, `EditParameterization` and `ConvertTo2D` are the `SmBSplineCurve` ones: they edit
   the NURB and leave the analytic domain stale.
+## curve.crv_on_surf (SmCrvOnSurf)
+
+- **Partial, not blocked.** Every non-deferred difftest case is bit-identical
+  (max_rel_err 0, `--perturb` SENSITIVE). The deferred cases reach: the
+  `SmCurveClassification` of uncached breaks (`intersect.curve_class_p4/p8/p1`, behind
+  `GetKnots`, `GetNumberNaturalKnots`, `CalculateContinuities` and the approximation
+  without given breaks), `SmSurface::EvaluateNormal` (`surface.surface_p7`: the surface
+  normal and every sample of `SurfaceCurveMaxDistanceBetween`),
+  `SmSurface::Evaluate2ndDerivatives` (`surface.surface_p1`: `EvaluateSurface1stDerivDerivs`)
+  and `SmSurface::ReadFromDB` (`surface.surface_p2`: every complete `ReadFromDB`
+  record), plus a few `curve.curve_p5` solver callees.
+- **`GetKnots` with `pOptIvl`** on an uncached curve reads `rKnots[0]` after asking the UV
+  curve for its knots in the interval: an interval holding no UV knot reads an empty
+  array (a crash in the harness). It also reads `GetAt(lCnt - 1)` when the classification
+  has no interval. The port returns `InvalidInput`; the ffi only passes intervals holding
+  an end of the unedited UV curve. The cached path ignores `pOptIvl` and returns every
+  break (multiplicities `4, 2, ..., 2, 4`); the uncached path caches the interval's
+  breaks only.
+- **`SurfaceCurveMaxDistanceBetween`** sets `bDoPrecise = FALSE` unconditionally before its
+  precise refinement, so the `SmSurface::LocalCurveSolve` / `LocalCurveSolve` code after
+  it is dead (not ported). With `lNumSamples == 1` it divides `0.0 / 0.0` (the ffi rejects
+  one sample). `GetDegree` is not overridden (3), so the line/line special case never
+  applies.
+- **`EvaluateSurface1stDerivDerivs`'** zero fill (`for (ii = 2; ii > lNumDers; ii++)` inside
+  `if (lNumDers > 1)`) never runs; only the first two derivatives are written.
+- **Caches through `const_cast`.** `GetKnots`, `GetOrCreateBSApproxPointer` and the const
+  methods calling them update the caches; `Trim` drops the breaks but keeps the B-spline
+  approximation (a later `GetOrCreateBSApproxPointer` without breaks reuses the stale
+  approximation when its gap is small enough), `EditParameterization` rescales the
+  breaks only, `ReverseParameterization` touches neither. The port keeps all of this;
+  the `Curve` dispatch (`&self`) runs these methods on a copy.
+- **Binary records cut short.** A binary `ReadFromDB` record truncated inside the UV
+  curve's B-spline data gives `SM_ERR` upstream (after reading garbage counts) and
+  `InvalidInput` here (counts bounded by the bytes left, as "header-declared sizes"
+  above); the generator damages records by replacing the UV curve type instead.
+- **Stubs left.** Three `UNPORTED(curve.crv_on_surf)` sites cannot be wired yet:
+  `geom/global_solver.rs` (`SmCrvOnSurf::EvaluatePoint` on a tree node's owner object,
+  which is only an `ObjectRef` handle here; the solver would have to carry the curve, as
+  `CpGlobalSolver::curve` does), `nurbs/b_spline_surface_n_lib/p2.rs`
+  (`SmTangentField::ApproximateCurve`, inherited from `SmCrvOnSurf`: the tangent field is
+  not a `Curve` kind and `Curve::approximate_curve_base` is not generic; its evaluation
+  also needs `surface.surface_p7`) and the `SmTangentField` arm of `SmCurve::ReadFromDB`
+  in `curve/curve/p2.rs` (no tangent-field curve kind; unreachable for now: the
+  `SmCrvOnSurf` part of the record defers on `SmSurface::ReadFromDB` first). The
+  `DeformToEndPointTargets` branch for curves on surfaces is retagged
+  `UNPORTED(surface.surface_p5)`: it is taken only with the `pOptSurfCrvOnSurf` argument
+  the port drops, and needs `SmSurface::DropPoint`.
+- **Wired.** `SmCurve::ReadFromDB(SmCrvOnSurf_TYPE)` (curve.curve_p2) and the
+  `SmCrvOnSurf` part of `SmTangentField::ReadFromDB` (curve.tangent_field: its 2
+  `curve.crv_on_surf` deferrals now pass; that read's status is ignored upstream).
+  `ApproximateCurve`, `DropPoint` and `CalculateBoundingBox` now dispatch to the
+  `SmCrvOnSurf` overrides (`Curve::approximate_curve_base` / `Curve::drop_point_base` keep
+  the base bodies). `smsurf_LiftSecondDerivative` / `smsurf_LiftThirdDerivative`
+  (`surface.surface_p2`) are co-ported in `curve/crv_on_surf.rs`.

@@ -20,7 +20,7 @@
 //!
 //! Deviations:
 //! - **Base class.** `SmTangentField` derives from `SmCrvOnSurf` (unit
-//!   `curve.crv_on_surf`, not ported). The members it needs are kept here: the UV
+//!   `curve.crv_on_surf`, [`CrvOnSurf`]). The members it needs are kept here: the UV
 //!   curve, the surface and the UV domain. Like the constructor (owner flag `0`, no
 //!   context), the tangent field references both the UV curve and the surface without
 //!   owning them, so they are borrowed (`&'a`). The surface type is a parameter `S`:
@@ -36,7 +36,8 @@
 //!   Comparing two different surfaces needs `SmSurface::operator==`
 //!   (`surface.surface_p1`); evaluating inside the interval needs
 //!   `SmSurface::EvaluateNormal` (`surface.surface_p7`). Reading the `SmCrvOnSurf`
-//!   part of a database record needs `SmCrvOnSurf::ReadFromDB` (`curve.crv_on_surf`).
+//!   part of a database record ([`CrvOnSurf::read_from_db`]) needs
+//!   `SmSurface::ReadFromDB` (`surface.surface_p2`).
 //! - **Arguments.** Out-params become return values; the `SmContext` of `Create` and
 //!   `ReadFromDB`, `ReadFromDB`'s type and the `NotUsed` arguments of `Evaluate`
 //!   (`bFromLeft`, `bNonZeroTangents`) are dropped. `Create`'s base UV curve is typed
@@ -44,15 +45,16 @@
 //!   fields (upstream's `SmCurve::operator==` type and dimension check is always true
 //!   between them).
 //! - **`ReadFromDB`** returns the tangent-field members it read ([`TangentFieldRecord`])
-//!   instead of an object; the `SmCrvOnSurf` part is unported. Upstream ignores the
+//!   instead of an object; the `SmCrvOnSurf` part is read and dropped. Upstream ignores the
 //!   status of that base read; a read error of the members themselves is returned as
 //!   upstream (`SER`). The empty constructor (`SmTangentField()`, for I/O) has no
 //!   counterpart.
 
+use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{
     self as curve_base, at, Curve, CRV_ON_SURF_TYPE, TANGENT_FIELD_TYPE,
 };
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -475,13 +477,10 @@ pub fn read_from_db(db: &mut DatabaseReader, dim: u64, version: u64) -> Result<T
 
 // ---- unported callees -------------------------------------------------------------
 
-/// `SmCrvOnSurf::ReadFromDB` into the tangent field.
-fn read_crv_on_surf(_db: &mut DatabaseReader, _dim: u64, _version: u64) -> Result<()> {
-    // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::ReadFromDB
-    Err(SolidError::Unported {
-        upstream: "SmCrvOnSurf::ReadFromDB",
-        unit: "curve.crv_on_surf",
-    })
+/// `SmCrvOnSurf::ReadFromDB` into the tangent field (status ignored, as upstream; the
+/// object read is not kept: the tangent field is not a [`Curve`] kind).
+fn read_crv_on_surf(db: &mut DatabaseReader, _dim: u64, version: u64) -> Result<()> {
+    ignore_status(CrvOnSurf::read_from_db(db, version))
 }
 
 /// `m_pSurface->GetNaturalUVDomain()`.
@@ -663,18 +662,18 @@ mod tests {
     }
 
     #[test]
-    fn read_binary_members_then_unported() {
+    fn read_binary_members_then_base() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&1_u64.to_ne_bytes());
         for x in [1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0] {
             bytes.extend_from_slice(&x.to_ne_bytes());
         }
+        // the SmCrvOnSurf part runs out of data: its status is ignored
         let mut db = DatabaseReader::new();
         db.open_for_read(bytes.clone(), FileType::Binary);
-        assert!(matches!(
-            read_from_db(&mut db, 3, 30),
-            Err(SolidError::Unported { .. })
-        ));
+        let rec = read_from_db(&mut db, 3, 30).unwrap();
+        assert_eq!(rec.dir_type, 1);
+        assert_eq!(rec.end_tangent, Vec3::new(4.0, 5.0, 6.0));
         let mut db = DatabaseReader::new();
         db.open_for_read(bytes.get(..20).unwrap().to_vec(), FileType::Binary);
         assert!(matches!(
