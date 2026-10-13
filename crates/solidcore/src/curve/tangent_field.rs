@@ -49,7 +49,9 @@
 //!   upstream (`SER`). The empty constructor (`SmTangentField()`, for I/O) has no
 //!   counterpart.
 
-use crate::curve::curve::p2::{self as curve_base, Curve, CRV_ON_SURF_TYPE, TANGENT_FIELD_TYPE};
+use crate::curve::curve::p2::{
+    self as curve_base, at, Curve, CRV_ON_SURF_TYPE, TANGENT_FIELD_TYPE,
+};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -507,11 +509,6 @@ fn surface_evaluate_normal<S>(_surface: &S, _uv: Point2) -> Result<Vec3> {
         upstream: "SmSurface::EvaluateNormal",
         unit: "surface.surface_p7",
     })
-}
-
-/// Entry `i` of an evaluation, or `UNDEF` (an unwritten `SmVector3d`).
-fn at(v: &[Vec3], i: usize) -> Vec3 {
-    v.get(i).copied().unwrap_or(Vec3::UNDEF)
 }
 
 #[cfg(test)]

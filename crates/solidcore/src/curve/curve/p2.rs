@@ -468,7 +468,7 @@ impl CurveEvaluate for Curve {
 }
 
 /// Entry `i` of an evaluation, or `UNDEF` (an unwritten `SmVector3d`).
-fn at(v: &[Vec3], i: usize) -> Vec3 {
+pub(crate) fn at(v: &[Vec3], i: usize) -> Vec3 {
     v.get(i).copied().unwrap_or(Vec3::UNDEF)
 }
 

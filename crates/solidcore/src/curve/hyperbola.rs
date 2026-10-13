@@ -65,7 +65,7 @@
 //!   (`harness/callgraph/unused_functions.txt`); the field accessors
 //!   ([`Hyperbola::position`], ...) give the canonical data.
 
-use crate::curve::curve::p2::{self as curve_base, HYPERBOLA_TYPE};
+use crate::curve::curve::p2::{self as curve_base, at, HYPERBOLA_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
 use crate::geom::assert_array::labels::{SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
@@ -703,11 +703,6 @@ fn extract(s: &mut InputStream, slot: &mut f64) {
     if let Some(v) = s.extract_double() {
         *slot = v;
     }
-}
-
-/// Entry `i` of an evaluation, or `UNDEF` (an unwritten `SmVector3d`).
-fn at(v: &[Vec3], i: usize) -> Vec3 {
-    v.get(i).copied().unwrap_or(Vec3::UNDEF)
 }
 
 #[cfg(test)]

@@ -76,7 +76,7 @@
 //!   `GetBrep`, `GetBSplineCurve`, `GetMemoryUsed`, `SetComputeAuxTreeData`, `Dump`
 //!   and `Draw` belong to other units or are debug output.
 
-use crate::curve::curve::p2::{Curve, CurveKind, FindCurveDistanceExtrema};
+use crate::curve::curve::p2::{at, Curve, CurveKind, FindCurveDistanceExtrema};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -136,11 +136,6 @@ fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
         Err(e @ SolidError::Unported { .. }) => Err(e),
         Err(_) => Ok(None),
     }
-}
-
-/// Entry `i` of an evaluation, or `UNDEF` (an unwritten `SmVector3d`).
-fn at(v: &[Vec3], i: usize) -> Vec3 {
-    v.get(i).copied().unwrap_or(Vec3::UNDEF)
 }
 
 /// Evaluates `curve` at `t` into `pv` (position and first derivative), leaving

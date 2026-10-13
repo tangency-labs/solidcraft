@@ -54,6 +54,7 @@
 //!   `GetBSplineControlPolygon`, `AssertValid`, `WriteToDB`, `GetMemoryUsed`,
 //!   `GetRootCurve` and `Dump` are not part of this unit.
 
+use crate::curve::curve::p2::HERMITE_CURVE_TYPE;
 use crate::error::Result;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -66,9 +67,6 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::topology::database_io::{DatabaseReader, FileType};
-
-/// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
 
 /// A cubic Hermite curve on `[0, 1]` (`SmHermiteCurve`):
 ///
@@ -103,7 +101,7 @@ impl Default for HermiteCurve {
 
 impl HermiteCurve {
     /// `SmHermiteCurve_TYPE` (`CURV_BASE_TYPE + 34`).
-    pub const TYPE: i64 = CURV_BASE_TYPE + 34;
+    pub const TYPE: i64 = HERMITE_CURVE_TYPE;
 
     /// The curve from `p1` with derivative `d1` to `p2` with derivative `d2`, of
     /// image dimension `dim` (upstream default 3).
