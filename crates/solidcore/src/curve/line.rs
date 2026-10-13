@@ -109,8 +109,8 @@
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
-use crate::error::{Result, SolidError};
-use crate::geom::assert_array::labels;
+use crate::error::{ignore_status, Result, SolidError};
+use crate::geom::assert_array::labels::{self, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::assert_array::{AssertArray, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -122,7 +122,7 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
-use crate::geom::solution_array::{Solution, SolutionEnd, SolutionType, MAX_TREES};
+use crate::geom::solution_array::{Solution, SolutionType};
 use crate::geom::tol::{are_same, are_same_to_tol, is_zero, tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -135,11 +135,6 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::math::NOW;
 use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
-
-/// `SmSurfOfRevolution_TYPE` (`SURF_BASE_TYPE + 20`).
-const SURF_OF_REVOLUTION_TYPE: i64 = 15020;
-/// `SmSurfOfExtrusion_TYPE` (`SURF_BASE_TYPE + 30`).
-const SURF_OF_EXTRUSION_TYPE: i64 = 15030;
 
 const OP_SEGMENT: &str = "curve::line::Line::create_line_segment";
 const OP_OFFSET: &str = "curve::line::Line::create_simple_offset";
@@ -260,41 +255,17 @@ impl Default for Line {
     }
 }
 
-/// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
-fn ignore_status<T>(r: Result<T>) -> Result<()> {
-    match r {
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        _ => Ok(()),
-    }
-}
-
-/// A default-constructed `SmSolution` naming `this` as its single object.
-fn new_solution<O: Copy>() -> Solution<O> {
-    Solution {
-        solution_type: SolutionType::Unknown,
-        num_variables: 0,
-        start: SolutionEnd::new(),
-        end: SolutionEnd::new(),
-        num_objects: 0,
-        objects: [None; MAX_TREES],
-        nodes: [None; MAX_TREES],
-    }
-}
-
 /// `SmCurve::IsLine` answer of the other curve of [`Line::join_with`].
 fn other_is_line(other: &Curve, num_samples: u64, tol: f64) -> Result<bool> {
     match other.kind() {
-        CurveKind::Line(l) => {
-            let _ = l.is_line();
-            Ok(true)
-        }
+        CurveKind::Line(_) => Ok(true),
         CurveKind::BSpline(b) => Ok(b.is_line(num_samples, tol)?.is_some()),
         CurveKind::Hyperbola(h) => Ok(h.base().is_line(num_samples, tol)?.is_some()),
         // curves that are not an SmBSplineCurve
-        _ => Err(SolidError::InvalidInput {
-            operation: OP_JOIN,
-            reason: "the other curve is not an SmBSplineCurve",
-        }),
+        _ => Err(SolidError::invalid_input(
+            OP_JOIN,
+            "the other curve is not an SmBSplineCurve",
+        )),
     }
 }
 
@@ -305,10 +276,10 @@ fn other_ends(other: &Curve) -> Result<Ends> {
         CurveKind::BSpline(b) => b.ends(),
         CurveKind::Hyperbola(h) => h.base().ends(),
         // curves that are not an SmBSplineCurve
-        _ => Err(SolidError::InvalidInput {
-            operation: OP_JOIN,
-            reason: "the other curve is not an SmBSplineCurve",
-        }),
+        _ => Err(SolidError::invalid_input(
+            OP_JOIN,
+            "the other curve is not an SmBSplineCurve",
+        )),
     }
 }
 
@@ -1043,7 +1014,7 @@ impl Line {
         }
 
         // init output
-        let mut sol = new_solution();
+        let mut sol = Solution::new();
         sol.solution_type = SolutionType::SingleValue;
         sol.num_objects = 1;
         sol.objects[0] = this;
@@ -1104,7 +1075,7 @@ impl Line {
             .unwrap_or_else(|_| Extent1d::new());
         let anal_ivl = anal_ivl.union(step_interval);
 
-        let mut sol = new_solution();
+        let mut sol = Solution::new();
         let param;
         let distance_to_curve;
 
@@ -1305,7 +1276,7 @@ impl Line {
             Vec::new()
         };
 
-        let mut sol = new_solution();
+        let mut sol = Solution::new();
         sol.num_objects = 2;
         sol.objects[0] = this;
         sol.objects[1] = other_obj;

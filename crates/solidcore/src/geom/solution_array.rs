@@ -363,13 +363,13 @@ pub struct Solution<O> {
     pub nodes: [Option<NodeId>; MAX_TREES],
 }
 
-impl<O: SolutionObject> Default for Solution<O> {
+impl<O: Copy> Default for Solution<O> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<O: SolutionObject> Solution<O> {
+impl<O: Copy> Solution<O> {
     /// An empty solution of type [`SolutionType::Unknown`] (`SmSolution()`).
     #[must_use]
     pub const fn new() -> Self {
@@ -393,7 +393,9 @@ impl<O: SolutionObject> Solution<O> {
             ..Self::new()
         }
     }
+}
 
+impl<O: SolutionObject> Solution<O> {
     /// Clears the type, the counts, the objects and the nodes (`ReSet`). The
     /// solution ends keep their values, as upstream.
     pub fn reset(&mut self) {

@@ -89,7 +89,8 @@
 
 use crate::curve::curve::p2::{self as curve_base, ELLIPSE_TYPE};
 use crate::curve::line::{CurveLocationType, Line};
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
+use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{
@@ -98,7 +99,7 @@ use crate::geom::geom_utility::p1::{
 };
 use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::solution_array::{Solution, SolutionEnd, SolutionType, MAX_TREES};
+use crate::geom::solution_array::{Solution, SolutionType};
 use crate::geom::tol::{
     are_same, are_same_to_tol, context_zone_tol_3d, is_zero, is_zero_to_tol, SmallTopoType,
 };
@@ -121,39 +122,15 @@ const OP_EVAL_STEP: &str = "curve::ellipse::p2::Ellipse::evaluate_step";
 const OP_DROP: &str = "curve::ellipse::p2::Ellipse::drop_point_fast";
 const OP_TRANSFORM: &str = "curve::ellipse::p2::Ellipse::transform";
 
-/// `SmPolarConversion_TYPE` (`CONT_BASE_TYPE + 84`).
-const POLAR_CONVERSION_TYPE: i64 = 12084;
-
 /// `SM_SINE_10DEG`: the sine of 10 degrees (near-parallel checks).
 const SINE_10DEG: f64 = 0.173_648_177_666_930_35;
 
-/// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
-fn ignore_status<T>(r: Result<T>) -> Result<()> {
-    match r {
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        _ => Ok(()),
-    }
-}
-
-/// A default-constructed `SmSolution`.
-const fn new_solution<O: Copy>() -> Solution<O> {
-    Solution {
-        solution_type: SolutionType::Unknown,
-        num_variables: 0,
-        start: SolutionEnd::new(),
-        end: SolutionEnd::new(),
-        num_objects: 0,
-        objects: [None; MAX_TREES],
-        nodes: [None; MAX_TREES],
-    }
-}
-
 /// An index into a table that upstream reads unchecked.
 fn table(v: &[f64], i: usize, operation: &'static str) -> Result<f64> {
-    v.get(i).copied().ok_or(SolidError::InvalidInput {
+    v.get(i).copied().ok_or(SolidError::invalid_input(
         operation,
-        reason: "polar conversion table is shorter than its knot list",
-    })
+        "polar conversion table is shorter than its knot list",
+    ))
 }
 
 // ---- back-edges -----------------------------------------------------------------------
@@ -1414,7 +1391,7 @@ impl Ellipse {
         }
 
         // initialize solution object
-        let mut sol = new_solution();
+        let mut sol = Solution::new();
         sol.solution_type = SolutionType::SingleValue;
         sol.num_objects = 1;
         sol.objects[0] = this;
@@ -1627,7 +1604,7 @@ impl Ellipse {
         }
 
         // Drop point onto each curve to get the intersection point.
-        let mut sol = new_solution();
+        let mut sol = Solution::new();
         sol.num_objects = 2;
         sol.objects[0] = this_obj;
         sol.objects[1] = other_obj;
@@ -1798,7 +1775,7 @@ impl Ellipse {
         }
 
         // Drop point onto each curve to get the intersection point.
-        let mut sol = new_solution();
+        let mut sol = Solution::new();
         sol.num_objects = 2;
         sol.objects[0] = this_obj;
         sol.objects[1] = line_obj;

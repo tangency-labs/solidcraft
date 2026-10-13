@@ -49,8 +49,7 @@
 //!   notifications (`Notify`) are not modelled; `SetContext` and the `SmContext`
 //!   arguments (they only choose where upstream allocates) are dropped.
 //! - **Equality.** Upstream first compares the curve and volume pointers; held by
-//!   value, the parts are always compared by value (the volume through the unported
-//!   `SmVolume::operator==`), after the parameter-space flag and the curves, in
+//!   value, the parts are always compared by value ([`Volume::approx_eq`]), after the parameter-space flag and the curves, in
 //!   upstream's order. `m_bInParamSpace` is a `bool` (upstream any nonzero
 //!   `SmBoolean` is true in every test this unit makes).
 //! - **Break cache.** `GetKnots` caches the breaks through a `const_cast`: here
@@ -87,10 +86,9 @@
 use crate::curve::curve::p2::{
     evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate, CRV_IN_VOLUME_TYPE,
 };
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
-use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::is_zero_to_tol;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -115,81 +113,15 @@ const MAX_DERIVS: usize = 3;
 /// `SM_CONTINUITY_ANGLE` (degrees): the default G1 angle tolerance.
 pub const CONTINUITY_ANGLE: f64 = 0.5;
 
-const fn unported<T>(upstream: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::Unported { upstream, unit })
-}
-
-const fn is_unported(e: &SolidError) -> bool {
-    matches!(e, SolidError::Unported { .. })
-}
-
-const fn bad(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-// ---- the volume ---------------------------------------------------------------------
-
-/// `SmVolume::GetNaturalParamDomain`.
-fn volume_natural_param_domain(volume: &Volume) -> Result<Extent3d> {
-    volume.natural_param_domain()
-}
-
-/// `SmVolume::Evaluate` (parameter space to the final out-space): the
-/// `(n+1)^3` partial derivatives at `point`, from the left or right per direction.
-fn volume_evaluate(
-    volume: &Volume,
-    point: Point3,
-    num_derivs: usize,
-    from_left: [bool; 3],
-    non_zero_tangents: bool,
-) -> Result<Vec<Vec3>> {
-    let opts = EvalOptions {
-        from_left,
-        non_zero_tangents,
-        ..EvalOptions::default()
-    };
-    volume.evaluate(point, num_derivs, &opts)
-}
-
-/// `SmVolume::Map` (in-space to the final out-space), as [`volume_evaluate`].
-fn volume_map(
-    volume: &Volume,
-    point: Point3,
-    num_derivs: usize,
-    from_left: [bool; 3],
-    non_zero_tangents: bool,
-) -> Result<Vec<Vec3>> {
-    let opts = EvalOptions {
-        from_left,
-        non_zero_tangents,
-        ..EvalOptions::default()
-    };
-    volume.map(point, num_derivs, &opts)
-}
+// ---- back-edges ----------------------------------------------------------------------
 
 /// `SmVolume::EvaluatePoint`.
 fn volume_evaluate_point(_volume: &Volume, _point: Point3) -> Result<Point3> {
     // UNPORTED(surface.volume_p2): SmVolume::EvaluatePoint
-    unported("SmVolume::EvaluatePoint", "surface.volume_p2")
-}
-
-/// `SmVolume::MapPoint`.
-fn volume_map_point(volume: &Volume, point: Point3) -> Result<Point3> {
-    volume.map_point(point, true)
-}
-
-/// `SmVolume::Transform`.
-fn volume_transform(
-    volume: &mut Volume,
-    rotate_n_move: &Axis2Placement,
-    scale: Option<Vec3>,
-) -> Result<()> {
-    volume.transform(rotate_n_move, scale)
-}
-
-/// `SmVolume::operator==`.
-fn volume_eq(a: &Volume, b: &Volume) -> Result<bool> {
-    a.approx_eq(b)
+    Err(SolidError::unported(
+        "SmVolume::EvaluatePoint",
+        "surface.volume_p2",
+    ))
 }
 
 /// `SmVolume::ReadFromDB` of a volume of type `volume_type`.
@@ -199,7 +131,10 @@ fn volume_read_from_db(
     _version: u64,
 ) -> Result<Volume> {
     // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-    unported("SmVolume::ReadFromDB", "surface.volume_p2")
+    Err(SolidError::unported(
+        "SmVolume::ReadFromDB",
+        "surface.volume_p2",
+    ))
 }
 
 /// The parameter intervals of the `SmCurveClassification` of `curve` over `interval`
@@ -215,10 +150,10 @@ fn classify_against_volume(
     // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
     // UNPORTED(intersect.curve_class_p8): SmCurveClassification::Intersect3DDiscontinuities
     // UNPORTED(intersect.curve_class_p1): SmCurveClassification::GetSize, SmCurveClassification::GetAt
-    unported(
+    Err(SolidError::unported(
         "SmCurveClassification::SmCurveClassification",
         "intersect.curve_class_p4",
-    )
+    ))
 }
 
 // ---- continuity codes ---------------------------------------------------------------
@@ -462,8 +397,8 @@ impl CrvInVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the volume comparison (reached only when the
-    /// flags and curves agree).
+    /// [`SolidError::Unported`] from the curve comparison or from comparing an
+    /// unported volume kind (reached only when the flags and curves agree).
     pub fn approx_eq(&self, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
@@ -472,7 +407,7 @@ impl CrvInVolume {
         // check equivalence of these objects
         Ok(self.in_param_space == other.in_param_space
             && self.curve.approx_eq(&other.curve)?
-            && volume_eq(&self.volume, &other.volume)?)
+            && self.volume.approx_eq(&other.volume)?)
     }
 
     // ---- evaluation -----------------------------------------------------------------
@@ -494,12 +429,17 @@ impl CrvInVolume {
             if t.y > 0.0 { from_left } else { !from_left },
             if t.z > 0.0 { from_left } else { !from_left },
         ];
+        let opts = EvalOptions {
+            from_left: sides,
+            non_zero_tangents,
+            ..EvalOptions::default()
+        };
         if self.in_param_space {
             // Volume Evaluate - from Param to compounded last OutSpace
-            volume_evaluate(&self.volume, p, n, sides, non_zero_tangents)
+            self.volume.evaluate(p, n, &opts)
         } else {
             // Volume map - from InSpace to compounded last OutSpace
-            volume_map(&self.volume, p, n, sides, non_zero_tangents)
+            self.volume.map(p, n, &opts)
         }
     }
 
@@ -530,7 +470,7 @@ impl CrvInVolume {
         // Volume Evaluate / Map - with fewer derivatives while the volume can't
         let mut vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
         while let Err(e) = &vol {
-            if is_unported(e) || n_eval == 0 {
+            if e.is_unported() || n_eval == 0 {
                 break;
             }
             n_eval -= 1;
@@ -615,14 +555,14 @@ impl CrvInVolume {
         let p = self.curve.evaluate_point(t)?;
 
         // volume eval
-        volume_map_point(&self.volume, p)?;
+        self.volume.map_point(p, true)?;
 
         if self.in_param_space {
             // Volume Evaluate - from Param to compounded last OutSpace
             volume_evaluate_point(&self.volume, p)
         } else {
             // Volume map - from InSpace to compounded last OutSpace
-            volume_map_point(&self.volume, p)
+            self.volume.map_point(p, true)
         }
     }
 
@@ -657,7 +597,9 @@ impl CrvInVolume {
     /// tolerance.
     fn compute_breaks(&self) -> Result<(Vec<f64>, Vec<usize>, f64)> {
         // pick a UVWSpace tolerance
-        let volume_param_size = volume_natural_param_domain(&self.volume)?
+        let volume_param_size = self
+            .volume
+            .natural_param_domain()?
             .approximate_unbounded(None, BOUNDED_INFINITE_PARAM)
             .max_dimension();
         let curve_param_size = self
@@ -668,11 +610,7 @@ impl CrvInVolume {
         let tol_uvw = EFF_ZERO * (1.0 + max2(volume_param_size, curve_param_size));
 
         // get the Curve knots and multiplicities for the natural curve (status ignored)
-        let (mut knots, mut mults) = match self.curve.knots(None) {
-            Ok(km) => km,
-            Err(e) if is_unported(&e) => return Err(e),
-            Err(_) => (Vec::new(), Vec::new()),
-        };
+        let (mut knots, mut mults) = ignored(self.curve.knots(None))?.unwrap_or_default();
 
         // modify the multiplicity list to act as if Curve is a degree 3 BSpline
         let crv_degree = self.curve.degree()?;
@@ -697,7 +635,9 @@ impl CrvInVolume {
 
         // add the classification boundaries uniquely and in order to the knots and mults
         let cnt = classes.len();
-        let short = || bad(OP_KNOTS, "no base curve knots or classification intervals");
+        let short = || {
+            SolidError::invalid_input(OP_KNOTS, "no base curve knots or classification intervals")
+        };
         let mut uvw_knot = *knots.first().ok_or_else(short)?;
         let mut jj = 0usize;
         for ii in 0..=cnt {
@@ -773,7 +713,7 @@ impl CrvInVolume {
         let Some(ivl) = interval else {
             return Ok(());
         };
-        let short = || bad(OP_KNOTS, "no breaks to cull");
+        let short = || SolidError::invalid_input(OP_KNOTS, "no breaks to cull");
         let first = *knots.first().ok_or_else(short)?;
         let last = *knots.last().ok_or_else(short)?;
         if !(first < ivl.min() - tol || last > ivl.max() + tol) {
@@ -884,10 +824,9 @@ impl CrvInVolume {
             }
 
             // check cache currency (upstream indexes the continuities by the knot index)
-            let cont = *self
-                .conts
-                .get(ii)
-                .ok_or_else(|| bad(OP_MULTS, "more knots matched than continuities"))?;
+            let cont = *self.conts.get(ii).ok_or_else(|| {
+                SolidError::invalid_input(OP_MULTS, "more knots matched than continuities")
+            })?;
             if cont == ContinuityType::Undefined {
                 return Err(SolidError::sm_err(OP_MULTS));
             }
@@ -954,7 +893,7 @@ impl CrvInVolume {
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         let n = breaks.len();
         if n == 0 {
-            return Err(bad(OP_CONTS, "no breaks"));
+            return Err(SolidError::invalid_input(OP_CONTS, "no breaks"));
         }
         let mut min_cont = ContinuityType::CInfinity;
         let mut conts = vec![ContinuityType::Undefined; n];
@@ -965,7 +904,9 @@ impl CrvInVolume {
             *c = ContinuityType::Discontinuous;
         }
         for ii in 1..n - 1 {
-            let t = *breaks.get(ii).ok_or_else(|| bad(OP_CONTS, "no breaks"))?;
+            let t = *breaks
+                .get(ii)
+                .ok_or_else(|| SolidError::invalid_input(OP_CONTS, "no breaks"))?;
             // evaluate geometric continuities
             let c = evaluate_continuity(self, t, true, self, t, false, angle_tol)?.continuity;
             if let Some(d) = conts.get_mut(ii) {
@@ -1091,7 +1032,7 @@ impl CrvInVolume {
         }
 
         // compound the Transform onto the contained volume
-        volume_transform(&mut self.volume, rotate_n_move, scale)
+        self.volume.transform(rotate_n_move, scale)
     }
 
     // ---- persistence ----------------------------------------------------------------
@@ -1108,7 +1049,7 @@ impl CrvInVolume {
     /// header, a count larger than the input or an unknown continuity code.
     pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
         let ascii = db.file_type() == FileType::Ascii;
-        let no_stream = || bad(OP_READ, "no input stream");
+        let no_stream = || SolidError::invalid_input(OP_READ, "no input stream");
 
         // cache flag
         let need_knots = if ascii {
@@ -1116,7 +1057,7 @@ impl CrvInVolume {
                 .in_stream_mut()
                 .ok_or_else(no_stream)?
                 .extract_int()
-                .ok_or_else(|| bad(OP_READ, "cache flag not read"))?;
+                .ok_or_else(|| SolidError::invalid_input(OP_READ, "cache flag not read"))?;
             db.go_to_next_line();
             v != 0
         } else {
@@ -1130,10 +1071,10 @@ impl CrvInVolume {
         let header = db.read_type(true)?;
         let curve_type = header
             .type_code
-            .ok_or_else(|| bad(OP_READ, "curve type not read"))?;
+            .ok_or_else(|| SolidError::invalid_input(OP_READ, "curve type not read"))?;
         let curve_dim = header
             .dim
-            .ok_or_else(|| bad(OP_READ, "curve dimension not read"))?;
+            .ok_or_else(|| SolidError::invalid_input(OP_READ, "curve dimension not read"))?;
         let curve = Curve::read_from_db(curve_type, db, curve_dim, version)?;
 
         // bInParamSpace value (extracted as text in either file type; the empty
@@ -1152,7 +1093,7 @@ impl CrvInVolume {
         let volume_type = db
             .read_type(false)?
             .type_code
-            .ok_or_else(|| bad(OP_READ, "volume type not read"))?;
+            .ok_or_else(|| SolidError::invalid_input(OP_READ, "volume type not read"))?;
         let volume = volume_read_from_db(volume_type, db, version)?;
 
         // when appropriate - knots
@@ -1164,14 +1105,14 @@ impl CrvInVolume {
                     .in_stream_mut()
                     .ok_or_else(no_stream)?
                     .extract_ulong()
-                    .ok_or_else(|| bad(OP_READ, "break count not read"))?;
+                    .ok_or_else(|| SolidError::invalid_input(OP_READ, "break count not read"))?;
                 db.go_to_next_line();
                 n
             } else {
                 db.read_ulong()?
             };
-            let count =
-                usize::try_from(count).map_err(|_| bad(OP_READ, "break count too large"))?;
+            let count = usize::try_from(count)
+                .map_err(|_| SolidError::invalid_input(OP_READ, "break count too large"))?;
             db.ensure_available(count, if ascii { 1 } else { 8 }, OP_READ)?;
 
             // read every knot
@@ -1203,10 +1144,9 @@ impl CrvInVolume {
                 }
             }
             for c in codes {
-                conts.push(
-                    continuity_from_code(c)
-                        .ok_or_else(|| bad(OP_READ, "unknown continuity code"))?,
-                );
+                conts.push(continuity_from_code(c).ok_or_else(|| {
+                    SolidError::invalid_input(OP_READ, "unknown continuity code")
+                })?);
             }
         }
 

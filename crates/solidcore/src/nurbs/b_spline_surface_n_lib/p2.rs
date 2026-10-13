@@ -69,6 +69,7 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfPar
 use crate::nurbs::crv_basic::Boundary;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::Rectangle;
+use crate::nurbs::index::at;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{srf_power_basis_eval_derivs, MAX_DERIVATIVE};
 use crate::nurbs::srf_adv::p1::{create_skin_spine, SkinDerivs, SkinSpineOptions, SpineAlignment};
@@ -80,9 +81,6 @@ use crate::nurbs::srf_tool::p1::extract_patch;
 
 use super::p1::{create_nlib_curve, create_nlib_surface, create_non_rational_curve, make_knots};
 
-/// `SM_ERR_NULL_POINTER` (upstream `NER`).
-const SM_ERR_NULL_POINTER: i32 = 1006;
-
 /// `SM_ZONE_TOL_3D`.
 const ZONE_TOL_3D: f64 = 1.0e-5;
 
@@ -90,19 +88,6 @@ const OP_CORNER: &str = "nurbs::b_spline_surface_n_lib::p2::BSplineSurface::crea
 const OP_SKIN: &str = "nurbs::b_spline_surface_n_lib::p2::BSplineSurface::create_skinned_surface";
 const OP_TRIM: &str = "nurbs::b_spline_surface_n_lib::p2::BSplineSurface::trim_with_domain";
 const OP_EVAL: &str = "nurbs::b_spline_surface_n_lib::p2::BSplineSurface::evaluate";
-
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-/// `SM_ERR_NULL_POINTER` (upstream `NER`).
-fn ner(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR_NULL_POINTER,
-        entity: None,
-    }
-}
 
 // ---- types ----------------------------------------------------------------------------
 
@@ -334,13 +319,6 @@ fn derivative_limit(pos: Point3) -> f64 {
 
 // ---- helpers --------------------------------------------------------------------------
 
-/// `v[i]`, `InvalidInput` past the end.
-fn get<T: Copy>(v: &[T], i: usize, operation: &'static str) -> Result<T> {
-    v.get(i)
-        .copied()
-        .ok_or_else(|| invalid(operation, "index past the end of an input array"))
-}
-
 /// Runs `f` on the two curves `curves[a]` and `curves[b]` as one slice (upstream's
 /// array of pointers to them).
 fn with_pair<R>(
@@ -349,7 +327,7 @@ fn with_pair<R>(
     b: usize,
     f: impl FnOnce(&mut [BSplineCurve]) -> R,
 ) -> Result<R> {
-    let oob = || invalid(OP_CORNER, "curve index out of range");
+    let oob = || SolidError::invalid_input(OP_CORNER, "curve index out of range");
     let first = core::mem::take(curves.get_mut(a).ok_or_else(oob)?);
     let second = core::mem::take(curves.get_mut(b).ok_or_else(oob)?);
     let mut pair = [first, second];
@@ -411,7 +389,10 @@ impl BSplineSurface {
         }
         let curve_cnt = curves_3d.len();
         if uv_curves.len() < curve_cnt || surfaces.len() < curve_cnt {
-            return Err(invalid(OP, "fewer UV curves or surfaces than curves"));
+            return Err(SolidError::invalid_input(
+                OP,
+                "fewer UV curves or surfaces than curves",
+            ));
         }
 
         // check state - when bCreateBilinearPatch == FALSE, UVCurves and surfaces are
@@ -431,7 +412,7 @@ impl BSplineSurface {
                 if ((curve_cnt == 4 && null_count > 1) || (curve_cnt > 4 && null_count > 0))
                     && (uv.is_none() || srf.is_none())
                 {
-                    return Err(ner(OP));
+                    return Err(SolidError::null_pointer(OP));
                 }
             }
         }
@@ -514,10 +495,10 @@ impl BSplineSurface {
         // should be given
         if rail1_used_as_spine_curve {
             if rail1.is_none() {
-                return Err(ner(OP));
+                return Err(SolidError::null_pointer(OP));
             }
             if intersections_with_rails.is_none() {
-                return Err(ner(OP));
+                return Err(SolidError::null_pointer(OP));
             }
         }
 
@@ -525,7 +506,7 @@ impl BSplineSurface {
             return Err(SolidError::sm_err(OP));
         }
         if num_sections == 0 {
-            return Err(invalid(OP, "no cross sections"));
+            return Err(SolidError::invalid_input(OP, "no cross sections"));
         }
 
         // We'll need a local non-const copy of this:
@@ -561,7 +542,7 @@ impl BSplineSurface {
                     for (ii, sect_crv) in cross_sections.iter().enumerate() {
                         // Map the parameter from the old domain to the new one.
                         let fraction = domain1_before
-                            .inversion(get(params, ii, OP)?)
+                            .inversion(at(params, ii, OP)?)
                             .parameter
                             .unwrap_or(UNDEF_DOUBLE);
                         let new_param = domain1_after.evaluate(fraction);
@@ -577,9 +558,9 @@ impl BSplineSurface {
                             new_param,
                             cross_domain.min(),
                         )?;
-                        let slot = params
-                            .get_mut(ii)
-                            .ok_or_else(|| invalid(OP, "too few intersection parameters"))?;
+                        let slot = params.get_mut(ii).ok_or_else(|| {
+                            SolidError::invalid_input(OP, "too few intersection parameters")
+                        })?;
                         *slot = if found { t_rail } else { new_param };
                     }
                 }
@@ -591,7 +572,7 @@ impl BSplineSurface {
                     for (ii, sect_crv) in cross_sections.iter().enumerate() {
                         // Map the parameter from the old domain to the new one.
                         let fraction = domain2_before
-                            .inversion(get(params, num_sections + ii, OP)?)
+                            .inversion(at(params, num_sections + ii, OP)?)
                             .parameter
                             .unwrap_or(UNDEF_DOUBLE);
                         let new_param = domain2_after.evaluate(fraction);
@@ -606,9 +587,9 @@ impl BSplineSurface {
                             new_param,
                             cross_domain.max(),
                         )?;
-                        let slot = params
-                            .get_mut(num_sections + ii)
-                            .ok_or_else(|| invalid(OP, "too few intersection parameters"))?;
+                        let slot = params.get_mut(num_sections + ii).ok_or_else(|| {
+                            SolidError::invalid_input(OP, "too few intersection parameters")
+                        })?;
                         *slot = if found { t_rail } else { new_param };
                     }
                 }
@@ -713,13 +694,19 @@ impl BSplineSurface {
 
             // evaluate rail curve start and use the tangent to build a orthonormal
             // vector set
-            let r1 = rail1.as_deref().ok_or_else(|| ner(OP))?;
+            let r1 = rail1
+                .as_deref()
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
             let pv = r1.evaluate(r1.natural_interval().min(), 1, true, false)?;
             let tangent = pv.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
             let [_, _, z_axis] = tangent.make_unit_ortho_vectors(None)?;
 
-            let spine = rails[0].as_ref().ok_or_else(|| ner(OP))?;
-            let params = int_params.as_deref().ok_or_else(|| ner(OP))?;
+            let spine = rails[0]
+                .as_ref()
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let params = int_params
+                .as_deref()
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
             create_skin_spine(
                 &mut curves,
                 spine,
@@ -849,7 +836,7 @@ impl BSplineSurface {
                         // current knot
                         ul = knot - 10.0 * tol_min;
                         idx_min = Some(i);
-                        let prev = get(&knots, i - 1, OP)?;
+                        let prev = at(&knots, i - 1, OP)?;
                         if ul < prev {
                             ul = prev;
                             idx_min = Some(i - 1);
@@ -864,7 +851,7 @@ impl BSplineSurface {
                         idx_max = Some(i);
                     } else {
                         ur = knot + 10.0 * tol_max;
-                        let next = get(&knots, i + 1, OP)?;
+                        let next = at(&knots, i + 1, OP)?;
                         if ur > next {
                             ur = next;
                             idx_max = Some(i + 1);
@@ -887,7 +874,10 @@ impl BSplineSurface {
             // no work - snapped trim boundaries are within tolerance of one another
             if (ur - ul).abs() < tol_min + tol_max {
                 // Error here because trim points are too close together
-                return Err(invalid(OP, "trim boundaries too close together"));
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "trim boundaries too close together",
+                ));
             }
         }
 
@@ -914,7 +904,7 @@ impl BSplineSurface {
                     } else {
                         vl = knot - 10.0 * tol_min;
                         idx_min = Some(i);
-                        let prev = get(&knots, i - 1, OP)?;
+                        let prev = at(&knots, i - 1, OP)?;
                         if vl < prev {
                             vl = prev;
                         }
@@ -929,7 +919,7 @@ impl BSplineSurface {
                     } else {
                         vr = knot + 10.0 * tol_max;
                         idx_min = Some(i);
-                        let next = get(&knots, i + 1, OP)?;
+                        let next = at(&knots, i + 1, OP)?;
                         if vr > next {
                             vr = next;
                             idx_min = Some(i + 1);
@@ -954,7 +944,10 @@ impl BSplineSurface {
         let _ = trim_domain.set_min_max(Point2::new(ul, vl), Point2::new(ur, vr));
 
         // local surface pointer
-        let sur_p = self.nurb.as_ref().ok_or_else(|| ner(OP))?;
+        let sur_p = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
 
         // extract patch defined by trim boundaries from surP into sur1
         let sur1 =
@@ -1012,10 +1005,16 @@ impl BSplineSurface {
 
         // check input - bOnlyUpperHalf can be TRUE only if deriv requests are equal.
         if only_upper_half && highest_u_deriv != highest_v_deriv {
-            return Err(invalid(OP, "only upper half with different orders"));
+            return Err(SolidError::invalid_input(
+                OP,
+                "only upper half with different orders",
+            ));
         }
         if highest_u_deriv > MAX_DERIVATIVE || highest_v_deriv > MAX_DERIVATIVE {
-            return Err(invalid(OP, "derivative order above NL_MAXDER"));
+            return Err(SolidError::invalid_input(
+                OP,
+                "derivative order above NL_MAXDER",
+            ));
         }
 
         // When appropriate, clamp input parameters to surface domain
@@ -1274,12 +1273,12 @@ fn corner_blend_4(
     create_bilinear_patch: bool,
 ) -> Result<Vec<BSplineSurface>> {
     const OP: &str = OP_CORNER;
-    let oob = || invalid(OP, "curve index out of range");
+    let oob = || SolidError::invalid_input(OP, "curve index out of range");
 
     // for every boundary - set orientations
     for ii in 0..4 {
         // make bot & right orientation = Same, top & left orientation = Opposite
-        let orient = get(curve_orients, ii, OP)?;
+        let orient = at(curve_orients, ii, OP)?;
         if ((ii == TOP || ii == LEFT) && orient == OrientType::Same)
             || ((ii == BOT || ii == RIGHT) && orient != OrientType::Same)
         {
@@ -1338,13 +1337,13 @@ fn corner_blend_4(
 
             let boundary_curve = boundaries.get(ii).ok_or_else(oob)?;
 
-            let tan_curve = if let Some(srf) = get(surfaces, ii, OP)? {
+            let tan_curve = if let Some(srf) = at(surfaces, ii, OP)? {
                 // build temporary crossTangent curve function and an approximate
                 // piecewise hermite curve to it
                 let uv = uv_crvs
                     .get(ii)
                     .and_then(Option::as_ref)
-                    .ok_or_else(|| invalid(OP, "missing UV curve"))?;
+                    .ok_or_else(|| SolidError::invalid_input(OP, "missing UV curve"))?;
                 tangent_field_curve(
                     2.0 * approx_tol,
                     boundary_curve,
@@ -1364,8 +1363,8 @@ fn corner_blend_4(
                 // non-zero tangents)
                 let pv1 = start_curve.evaluate(start_param, 1, true, true)?;
                 let pv2 = end_curve.evaluate(end_param, 1, true, true)?;
-                let t1 = get(&pv1, 1, OP)?;
-                let t2 = get(&pv2, 1, OP)?;
+                let t1 = at(&pv1, 1, OP)?;
+                let t2 = at(&pv2, 1, OP)?;
 
                 // Create degree 3 crossTangent Vector linear interpolation of
                 // crossTangent values
@@ -1441,8 +1440,8 @@ fn corner_blend_n(
     tangency_tol_radians: f64,
 ) -> Result<Vec<BSplineSurface>> {
     const OP: &str = OP_CORNER;
-    let missing = || invalid(OP, "missing UV curve or surface");
-    let oob = || invalid(OP, "curve index out of range");
+    let missing = || SolidError::invalid_input(OP, "missing UV curve or surface");
+    let oob = || SolidError::invalid_input(OP, "curve index out of range");
     let mut negate_curr_normal = false;
     let mut negate_tan_curves: Option<bool> = None; // UNSURE
 
@@ -1473,7 +1472,7 @@ fn corner_blend_n(
 
         let uv_of = |i: usize| uv_crvs.get(i).and_then(Option::as_ref).ok_or_else(missing);
         let srf_of =
-            |i: usize| -> Result<&BSplineSurface> { get(surfaces, i, OP)?.ok_or_else(missing) };
+            |i: usize| -> Result<&BSplineSurface> { at(surfaces, i, OP)?.ok_or_else(missing) };
         let curr_uv = uv_of(ii)?;
         let prev_uv = uv_of(prev_i)?;
         let next_uv = uv_of(next_i)?;

@@ -95,7 +95,7 @@
 use crate::curve::crv_in_volume::CrvInVolume;
 use crate::curve::curve::p2::Curve;
 use crate::curve::line::Line;
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::attribute::AttributeStore;
 use crate::geom::axis2_placement::Axis2Placement;
@@ -117,18 +117,10 @@ const OP_ORIENT: &str = "surface::volume::p1::Volume::orient";
 const OP_CONCAT: &str = "surface::volume::p1::concat_evals";
 const OP_PV: &str = "surface::volume::p1::FindPvIntersect::evaluate";
 
-/// `SmVolume_TYPE` (`VOL_BASE_TYPE + 1`).
-pub const VOLUME_TYPE: i64 = 22001;
-/// `SmBSplineVolume_TYPE` (`VOL_BASE_TYPE + 4`).
-pub const B_SPLINE_VOLUME_TYPE: i64 = 22004;
-/// `SmBendVolume_TYPE` (`VOL_BASE_TYPE + 6`).
-pub const BEND_VOLUME_TYPE: i64 = 22006;
-/// `SmTransform_TYPE` (`VOL_BASE_TYPE + 8`).
-pub const TRANSFORM_TYPE: i64 = Transform::TYPE;
-/// `SmUnbendVolume_TYPE` (`VOL_BASE_TYPE + 10`).
-pub const UNBEND_VOLUME_TYPE: i64 = 22010;
-/// `SmTwistVolume_TYPE` (`VOL_BASE_TYPE + 11`).
-pub const TWIST_VOLUME_TYPE: i64 = 22011;
+pub use crate::geom::assert_array::labels::{
+    BEND_VOLUME_TYPE, B_SPLINE_VOLUME_TYPE, TRANSFORM_TYPE, TWIST_VOLUME_TYPE, UNBEND_VOLUME_TYPE,
+    VOLUME_TYPE,
+};
 
 /// The highest derivative `Evaluate`, `Map` and `OrientDirectionalDerivs` support.
 pub const MAX_DERIV: usize = 3;
@@ -136,51 +128,26 @@ pub const MAX_DERIV: usize = 3;
 /// Largest evaluation array an ignored orient-map failure hands back (`Orient`).
 const MAX_UNDEF_ARRAY: usize = 1 << 20;
 
-const fn unported<T>(upstream: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::Unported { upstream, unit })
-}
-
-const fn is_unported(e: &SolidError) -> bool {
-    matches!(e, SolidError::Unported { .. })
-}
-
-const fn bad(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-/// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
-fn ignore_status<T>(r: Result<T>) -> Result<()> {
-    match r {
-        Err(e) if is_unported(&e) => Err(e),
-        _ => Ok(()),
-    }
-}
-
-/// The value of an evaluation whose status upstream ignores: `fallback` (the
-/// caller's untouched output) on failure; [`SolidError::Unported`] propagates.
-fn or_ignored<T>(r: Result<T>, fallback: T) -> Result<T> {
-    match r {
-        Ok(v) => Ok(v),
-        Err(e) if is_unported(&e) => Err(e),
-        Err(_) => Ok(fallback),
-    }
-}
-
 /// `(n+1)^3`, the size of an evaluation array of highest derivative `n`.
 fn eval_size(n: usize, operation: &'static str) -> Result<usize> {
-    let n1 = n
-        .checked_add(1)
-        .ok_or(bad(operation, "derivative order overflows"))?;
+    let n1 = n.checked_add(1).ok_or(SolidError::invalid_input(
+        operation,
+        "derivative order overflows",
+    ))?;
     n1.checked_mul(n1)
         .and_then(|s| s.checked_mul(n1))
-        .ok_or(bad(operation, "derivative order overflows"))
+        .ok_or(SolidError::invalid_input(
+            operation,
+            "derivative order overflows",
+        ))
 }
 
 /// Element `i` of an evaluation array.
 fn at(a: &[Vec3], i: usize, operation: &'static str) -> Result<Vec3> {
-    a.get(i)
-        .copied()
-        .ok_or(bad(operation, "evaluation array too short"))
+    a.get(i).copied().ok_or(SolidError::invalid_input(
+        operation,
+        "evaluation array too short",
+    ))
 }
 
 /// The position of a simple map's evaluation (`EvaluatePointSimple` of a
@@ -218,14 +185,16 @@ impl VolumeKind {
         let [b_spline, bend, unbend, twist] = names;
         match self {
             // UNPORTED(surface.b_spline_volume): SmBSplineVolume virtual overrides
-            Self::BSpline => unported(b_spline, "surface.b_spline_volume"),
+            Self::BSpline => Err(SolidError::unported(b_spline, "surface.b_spline_volume")),
             // UNPORTED(surface.bend_volume): SmBendVolume virtual overrides
-            Self::Bend => unported(bend, "surface.bend_volume"),
+            Self::Bend => Err(SolidError::unported(bend, "surface.bend_volume")),
             // UNPORTED(surface.unbend_volume): SmUnbendVolume virtual overrides
-            Self::Unbend => unported(unbend, "surface.unbend_volume"),
+            Self::Unbend => Err(SolidError::unported(unbend, "surface.unbend_volume")),
             // UNPORTED(surface.twist_volume): SmTwistVolume virtual overrides
-            Self::Twist => unported(twist, "surface.twist_volume"),
-            Self::Base | Self::Transform(_) => Err(bad(OP, "kind has no override")),
+            Self::Twist => Err(SolidError::unported(twist, "surface.twist_volume")),
+            Self::Base | Self::Transform(_) => {
+                Err(SolidError::invalid_input(OP, "kind has no override"))
+            }
         }
     }
 }
@@ -416,11 +385,7 @@ impl Volume {
             // when asked omit any NextMap making the copy a 'simple' map
             _ if simple_map_only => None,
             // copy an independently owned NextMap keeping the copy a 'compound' map
-            Some(next) if source.next_owner_flag >= 1 => match next.copy(false) {
-                Ok(c) => Some(Box::new(c)),
-                Err(e) if is_unported(&e) => return Err(e),
-                Err(_) => None,
-            },
+            Some(next) if source.next_owner_flag >= 1 => ignored(next.copy(false))?.map(Box::new),
             shared => shared.clone(),
         };
         Ok(Self {
@@ -695,7 +660,7 @@ impl Volume {
         // clear existing InvOrientMap
         self.inv_orient_map = None;
         let Some(orient) = self.orient_map else {
-            return Err(bad(
+            return Err(SolidError::invalid_input(
                 "surface::volume::p1::Volume::refresh_inv_orient_map",
                 "no orient map (upstream dereferences a null pointer)",
             ));
@@ -767,7 +732,7 @@ impl Volume {
         let _ = with_compounding;
         // everything can map through the OrientMap
         let param_point = match &self.inv_orient_map {
-            Some(inv) => or_ignored(transform_point(inv, in_point), Vec3::UNDEF)?,
+            Some(inv) => ignored(transform_point(inv, in_point))?.unwrap_or(Vec3::UNDEF),
             None => in_point,
         };
         // pass the check along
@@ -796,8 +761,8 @@ impl Volume {
             // map Param points to InSpace
             let (start_in, end_in) = if self.orient_map.is_some() {
                 (
-                    or_ignored(self.orient_point(start), Vec3::UNDEF)?,
-                    or_ignored(self.orient_point(end), Vec3::UNDEF)?,
+                    ignored(self.orient_point(start))?.unwrap_or(Vec3::UNDEF),
+                    ignored(self.orient_point(end))?.unwrap_or(Vec3::UNDEF),
                 )
             } else {
                 (start, end)
@@ -834,9 +799,9 @@ impl Volume {
             // Copy this Volume omitting any compounding volumes
             let simple = match self.copy(true) {
                 Ok(v) => v,
-                Err(e) if is_unported(&e) => return Err(e),
+                Err(e) if e.is_unported() => return Err(e),
                 Err(_) => {
-                    return Err(bad(
+                    return Err(SolidError::invalid_input(
                         "surface::volume::p1::Volume::is_curve_in_param_domain",
                         "simple map copy failed (upstream dereferences a null volume)",
                     ))
@@ -960,7 +925,10 @@ impl Volume {
             let inv = self
                 .inv_orient_map
                 .as_ref()
-                .ok_or(bad(OP_MAP, "orient map without its inverse"))?;
+                .ok_or(SolidError::invalid_input(
+                    OP_MAP,
+                    "orient map without its inverse",
+                ))?;
             // map crInSpacePoint to ParamSpace
             let inv_oriented = inv.evaluate_simple(in_point, n)?;
             // Map ParamPoint to ProjSpace
@@ -1022,11 +990,14 @@ impl Volume {
             // return OrientMap's simple evaluation (status ignored)
             return match orient.evaluate_simple(param_point, n) {
                 Ok(d) => Ok(d),
-                Err(e) if is_unported(&e) => Err(e),
+                Err(e) if e.is_unported() => Err(e),
                 Err(_) => {
                     let size = eval_size(n, OP_ORIENT)?;
                     if size > MAX_UNDEF_ARRAY {
-                        return Err(bad(OP_ORIENT, "derivative order too large"));
+                        return Err(SolidError::invalid_input(
+                            OP_ORIENT,
+                            "derivative order too large",
+                        ));
                     }
                     Ok(vec![Vec3::UNDEF; size])
                 }
@@ -1034,7 +1005,10 @@ impl Volume {
         }
         // without OrientMap, ParamSpace == InSpace, evaluate unity mapping
         if n > GW_MAX_DERIV {
-            return Err(bad(OP_ORIENT, "highest derivative exceeds GW_MAX_DERIV"));
+            return Err(SolidError::invalid_input(
+                OP_ORIENT,
+                "highest derivative exceeds GW_MAX_DERIV",
+            ));
         }
         let n1 = n + 1;
         let sv = |u: usize, v: usize, w: usize| (u * n1 + v) * n1 + w;
@@ -1482,7 +1456,8 @@ impl EvalNFunctions for FindPvIntersect<'_> {
         f: &mut [f64],
         jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
-        let short = || bad(OP_PV, "parameter or function array shorter than 3");
+        let short =
+            || SolidError::invalid_input(OP_PV, "parameter or function array shorter than 3");
         let (Some(&u), Some(&v), Some(&w)) = (x.first(), x.get(1), x.get(2)) else {
             return Err(short());
         };
@@ -2087,7 +2062,10 @@ pub fn lift_third_derivative_vol(
 pub fn concat_evals(n: usize, first: &[Vec3], second: &[Vec3]) -> Result<Vec<Vec3>> {
     let size = eval_size(n, OP_CONCAT)?;
     if first.len() < size || second.len() < size {
-        return Err(bad(OP_CONCAT, "evaluation array shorter than (n+1)^3"));
+        return Err(SolidError::invalid_input(
+            OP_CONCAT,
+            "evaluation array shorter than (n+1)^3",
+        ));
     }
     let n1 = n + 1;
     let sv = |u: usize, v: usize, w: usize| (u * n1 + v) * n1 + w;

@@ -68,9 +68,10 @@
 //!   (`surface.surface_p1`); `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and
 //!   `IsClosed` (`surface.surface_p7`). Those calls return [`SolidError::Unported`].
 
+use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -91,11 +92,6 @@ use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch};
 use super::p1::{
     BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, CanonicalSurfaceData, SurfParamType,
 };
-
-/// `CURV_BASE_TYPE` (`SmTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
-/// `SmCrvOnSurf_TYPE`.
-const CRV_ON_SURF_TYPE: i64 = CURV_BASE_TYPE + 48;
 
 const OP_ISO: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_iso_parametric_curve";
 const OP_SPHERE: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_sphere_from_arcs";
@@ -177,19 +173,6 @@ struct ArcData {
     radius: f64,
     start_deg: f64,
     end_deg: f64,
-}
-
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-/// Lets [`SolidError::Unported`] through an ignored upstream status.
-fn keep_unported<T>(r: Result<T>) -> Result<Option<T>> {
-    match r {
-        Ok(v) => Ok(Some(v)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        Err(_) => Ok(None),
-    }
 }
 
 /// `SmTArray<T>::Transpose(lNumRows)`: `a` read as `num_rows` columns of
@@ -392,7 +375,7 @@ impl BSplineSurface {
             // define the isoParameter Curve as an object
             let iso = IsoCurve::new(self.copy(), surf_param, iso_parameter, true, true);
             // build OptUVIsoCurve (status ignored)
-            keep_unported(iso.create_uv_iso_line())?
+            ignored(iso.create_uv_iso_line())?
         } else {
             None
         };
@@ -420,7 +403,7 @@ impl BSplineSurface {
                 uv_domain.u_interval()
             };
             // may snap the interval by tol to existing knots (status ignored)
-            keep_unported(new_iso_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            ignored(new_iso_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
         }
 
         Ok(IsoParametricCurve {
@@ -703,14 +686,13 @@ impl BSplineSurface {
 
             // Calculate this sweep circles new controlPoint weights
             for ii in 0..num_cir_ctrl_pts {
-                let mut weight = *cir_weights
-                    .get(ii)
-                    .ok_or_else(|| invalid(OP_REV, "sweep circle without weights"))?;
+                let mut weight = *cir_weights.get(ii).ok_or_else(|| {
+                    SolidError::invalid_input(OP_REV, "sweep circle without weights")
+                })?;
                 if is_gen_crv_rational {
-                    weight *= *gen
-                        .weights
-                        .get(j)
-                        .ok_or_else(|| invalid(OP_REV, "generator weight missing"))?;
+                    weight *= *gen.weights.get(j).ok_or_else(|| {
+                        SolidError::invalid_input(OP_REV, "generator weight missing")
+                    })?;
                 }
                 weights.push(weight);
             }
@@ -747,9 +729,9 @@ impl BSplineSurface {
 
             // Add sweep circle controlPoint to newSurface ControlPoint array
             let cir_ctrl_pts = cir.polygon(&cir.natural_interval())?;
-            let take = cir_ctrl_pts
-                .get(..num_cir_ctrl_pts)
-                .ok_or_else(|| invalid(OP_REV, "sweep circle polygon too short"))?;
+            let take = cir_ctrl_pts.get(..num_cir_ctrl_pts).ok_or_else(|| {
+                SolidError::invalid_input(OP_REV, "sweep circle polygon too short")
+            })?;
             ctrl_pts.extend_from_slice(take);
         }
 
@@ -1021,7 +1003,10 @@ impl BSplineSurface {
 
             // check inputs - consistent indexing and strides
             if empty || outside || !ok_u_stride || !ok_v_stride {
-                return Err(invalid(OP_EXPERT, "inconsistent input args"));
+                return Err(SolidError::invalid_input(
+                    OP_EXPERT,
+                    "inconsistent input args",
+                ));
             }
         }
         // nothing to copy (upstream's loops do not run)
@@ -1030,7 +1015,10 @@ impl BSplineSurface {
         }
         if outside {
             // upstream reads outside the net
-            return Err(invalid(OP_EXPERT, "control point index outside the net"));
+            return Err(SolidError::invalid_input(
+                OP_EXPERT,
+                "control point index outside the net",
+            ));
         }
 
         let nu = end_u - start_u;
@@ -1039,7 +1027,7 @@ impl BSplineSurface {
             .checked_mul(nu)
             .and_then(|a| v_stride.checked_mul(nv).and_then(|b| a.checked_add(b)))
             .and_then(|a| a.checked_add(pt_size))
-            .ok_or_else(|| invalid(OP_EXPERT, "output too large"))?;
+            .ok_or_else(|| SolidError::invalid_input(OP_EXPERT, "output too large"))?;
         let mut out = vec![0.0; len];
 
         // copy the requested array of control points into the requested output array
@@ -1064,9 +1052,9 @@ impl BSplineSurface {
                 let base = u_cnt * u_stride + v_cnt * v_stride;
                 for (k, v) in vals.iter().enumerate() {
                     if let Some(v) = v {
-                        let slot = out
-                            .get_mut(base + k)
-                            .ok_or_else(|| invalid(OP_EXPERT, "output slot out of range"))?;
+                        let slot = out.get_mut(base + k).ok_or_else(|| {
+                            SolidError::invalid_input(OP_EXPERT, "output slot out of range")
+                        })?;
                         *slot = *v;
                     }
                 }
