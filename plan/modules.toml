@@ -1388,9 +1388,9 @@ depends_on = ["curve.composite_curve_p1", "curve.curve_p1", "curve.curve_p2", "c
 est_lines = 1345
 layer = 22
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.composite_curve_p2-a1"
+claimed_at = "2026-10-13T06:41:55Z"
 notes = "10 fns; largest: SmCompositeCurve::CreateOffsetsOfManyCurves, SmCompositeCurve::IntersectAndTrimOffsets, sm_CheckBowTies, SmCompositeCurveSegment::ReadFromDB; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
