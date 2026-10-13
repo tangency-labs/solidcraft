@@ -102,10 +102,10 @@
 //! - **`CreateLinearSweep`** extrudes the curve's own NURB, which NLib makes 3D in
 //!   place for a 2D curve (upstream casts away `const`); the port takes the curve
 //!   mutably for that reason.
-//! - **Back-edges.** `IsKindOf` answers for `SmBSplineSurface_TYPE` and returns
-//!   [`SolidError::Unported`] (`SmSurface::IsKindOf`, unit `surface.surface_p2`)
-//!   otherwise, so `CalculateBoundingBox` and `IsParallelToVector` (which test for the
-//!   analytic types first) are unported for now. `CalculateBoundingBox` also calls
+//! - **Back-edges.** `IsKindOf` answers for `SmBSplineSurface_TYPE` and passes other
+//!   types to `SmSurface::IsKindOf` ([`crate::surface::surface::p2::is_kind_of`]);
+//!   a plain B-spline is never one of the analytic types `CalculateBoundingBox` and
+//!   `IsParallelToVector` test for first. `CalculateBoundingBox` also calls
 //!   `SmSurface::EvaluateNormal` (`surface.surface_p7`) and `SmSurface::GetFace`
 //!   (`surface.surface_p1`); `CreateOffsetSurface` and `IsDegenerateCurve` pass the
 //!   call to `SmSurface` (`surface.surface_p1`); `STEPInversion` calls
@@ -470,15 +470,6 @@ fn nl_dir(param: SurfParamType) -> Direction {
 
 // ---- unported SmSurface methods ------------------------------------------------------
 
-/// `SmSurface::IsKindOf`.
-fn surface_is_kind_of(_t: i64) -> Result<bool> {
-    // UNPORTED(surface.surface_p2): SmSurface::IsKindOf
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsKindOf",
-        unit: "surface.surface_p2",
-    })
-}
-
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
 fn evaluate_normal(_srf: &BSplineSurface, _uv: Point2) -> Result<Vec3> {
     // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
@@ -831,13 +822,12 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for any other type: the base `SmSurface::IsKindOf` is
-    /// not ported yet.
+    /// None (the `Result` is kept for the derived analytic surfaces).
     pub fn is_kind_of(&self, t: i64) -> Result<bool> {
         if t == Self::TYPE {
             return Ok(true);
         }
-        surface_is_kind_of(t)
+        Ok(crate::surface::surface::p2::is_kind_of(t))
     }
 
     // ---- simple queries ---------------------------------------------------------------
@@ -1046,7 +1036,7 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the analytic plane test calls `SmSurface::IsKindOf`.
+    /// [`SolidError::Unported`] for an analytic plane (`SmPlane::GetPosition`).
     pub fn is_parallel_to_vector(&self, vector: Vec3) -> Result<bool> {
         let Ok(test_vec) = vector.unitize() else {
             // SER(sTestVec.Unitize()): SM_ERR_INVALID_INPUT returned as the boolean
@@ -1134,8 +1124,8 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the analytic type test calls `SmSurface::IsKindOf`,
-    /// the polar box `SmSurface::EvaluateNormal` and the zone tolerance
+    /// [`SolidError::Unported`]: the polar box calls `SmSurface::EvaluateNormal` and
+    /// the zone tolerance
     /// `SmSurface::GetFace`. `SM_ERR` without NURB (upstream crashes).
     pub fn calculate_bounding_box(
         &self,
@@ -2198,12 +2188,17 @@ mod tests {
     fn back_edges_are_unported() {
         let s = bilinear();
         assert!(s.is_kind_of(BSplineSurface::TYPE).unwrap());
-        assert!(matches!(
-            s.is_kind_of(PLANE_TYPE),
-            Err(SolidError::Unported { .. })
-        ));
+        assert!(!s.is_kind_of(PLANE_TYPE).unwrap());
         let req = BoundingBoxRequest {
             normal: true,
+            ..BoundingBoxRequest::default()
+        };
+        assert!(s
+            .calculate_bounding_box(&s.natural_uv_domain(), &req)
+            .is_ok());
+        // the polar box needs SmSurface::EvaluateNormal (surface.surface_p7)
+        let req = BoundingBoxRequest {
+            polar: true,
             ..BoundingBoxRequest::default()
         };
         assert!(matches!(

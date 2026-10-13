@@ -1718,52 +1718,36 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_read_db_ascii_30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#209 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_read_db_ascii_33",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#210 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_read_db_bin_30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#211 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_read_db_bin_33",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#212 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -3482,52 +3466,36 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_read_db_ascii_30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#422 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_read_db_ascii_33",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#423 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_read_db_bin_30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#424 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_read_db_bin_33",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#425 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -5090,52 +5058,36 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_read_db_ascii_30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#616 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_read_db_ascii_33",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#617 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_read_db_bin_30",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#618 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_read_db_bin_33",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#619 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7146,40 +7098,28 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_bad_surface_type_ascii",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#871 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_bad_surface_type_bin",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#872 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_unknown_sp",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#873 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7218,16 +7158,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063783",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7254,16 +7190,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0008",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063787",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7554,16 +7486,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0045",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063824",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7654,16 +7582,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0057",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063836",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7742,16 +7666,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063846",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7786,16 +7706,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0072",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063851",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -7874,16 +7790,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0082",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063861",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8030,16 +7942,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0101",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063880",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -8106,16 +8014,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0110",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063889",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -8378,16 +8282,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0143",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063922",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -8438,16 +8338,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0150",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063929",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -8518,16 +8414,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0159",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063938",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -8666,16 +8558,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0177",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063956",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -8846,16 +8734,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0199",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063978",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9074,16 +8958,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0225",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064004",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9118,16 +8998,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0230",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064009",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9350,16 +9226,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064037",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9538,16 +9410,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064060",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10202,16 +10070,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0362",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064141",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -10414,16 +10278,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064167",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -10898,16 +10758,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0446",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064225",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11078,16 +10934,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0467",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064246",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11114,16 +10966,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0471",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064250",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11478,16 +11326,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0515",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064294",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11722,16 +11566,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0544",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064323",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11858,16 +11698,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0560",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064339",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -11998,16 +11834,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0577",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064356",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -12194,16 +12026,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0600",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064379",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -12610,16 +12438,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0651",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064430",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -12782,16 +12606,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0671",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064450",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -12882,16 +12702,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0683",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064462",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -13030,16 +12846,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0701",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064480",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -13106,16 +12918,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0710",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064489",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -13314,16 +13122,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0735",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064514",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -13714,16 +13518,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0783",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064562",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -13774,16 +13574,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0790",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064569",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -13850,16 +13646,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0799",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064578",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -14010,16 +13802,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0818",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064597",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -14078,16 +13866,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0826",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064605",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14178,16 +13962,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0838",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064617",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -14310,16 +14090,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0854",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064633",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -14426,16 +14202,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0868",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064647",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15366,16 +15138,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0982",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064761",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -15462,16 +15230,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0993",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064772",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -15554,16 +15318,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064783",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -15654,16 +15414,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1016",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064795",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -15830,28 +15586,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1037",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064816",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064817",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16058,16 +15806,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064843",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16086,16 +15830,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064846",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16178,16 +15918,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1078",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064857",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16246,16 +15982,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1086",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064865",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16466,16 +16198,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1112",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064891",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16526,16 +16254,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1119",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064898",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -16610,16 +16334,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1129",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064908",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -16658,16 +16378,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1134",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064913",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -17362,16 +17078,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1220",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064999",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17674,16 +17386,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065037",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -17758,16 +17466,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1268",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065047",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -17786,16 +17490,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065050",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -17986,16 +17686,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065074",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18062,16 +17758,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065083",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18174,16 +17866,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1317",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065096",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18274,16 +17962,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1329",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065108",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18394,16 +18078,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1343",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065122",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18422,16 +18102,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1346",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065125",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18474,16 +18150,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1352",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065131",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -18606,16 +18278,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1368",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065147",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -19118,16 +18786,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1430",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065209",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -19290,16 +18954,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1451",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065230",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -19366,16 +19026,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1460",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065239",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -19734,16 +19390,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1504",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065283",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -20134,16 +19786,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1553",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065332",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -20286,16 +19934,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1570",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065349",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -20338,16 +19982,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1576",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065355",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -20434,16 +20074,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1587",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065366",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -20514,16 +20150,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1596",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065375",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -20914,16 +20546,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1644",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065423",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -21970,16 +21598,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1772",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065551",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -22254,16 +21878,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1807",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065586",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -22706,16 +22326,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1862",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065641",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -23010,16 +22626,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1899",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065678",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -23214,16 +22826,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1922",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065701",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -23538,16 +23146,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1961",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065740",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -23634,16 +23238,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1972",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065751",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -23662,16 +23262,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::ReadFromDB",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1975",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065754",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -23879,12 +23475,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 221,
+  "cases_deferred": 120,
   "cases_failed": 0,
-  "cases_passed": 2653,
+  "cases_passed": 2754,
   "cases_total": 2874,
   "deferred_by_unit": {
-    "surface.surface_p2": 101,
     "surface.surface_p6": 120
   },
   "max_rel_err": 0.0,

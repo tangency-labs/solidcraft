@@ -8,5 +8,7 @@
 //! and `SM_API/SmApiSurfaces`.
 
 pub mod b_spline_volume;
+#[allow(clippy::module_inception)]
+pub mod surface;
 pub mod twist_volume;
 pub mod volume;

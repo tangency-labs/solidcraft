@@ -1,0 +1,1577 @@
+{
+ "cases": [
+  {
+   "name": "principal_direction_pairing",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:926 TestSmPrincipalDirectionPairing",
+   "inputs": {
+    "op": "geom",
+    "e": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.28994082840236685
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      -0.20710059171597633
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.14792899408284024
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_queries",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "queries"
+   }
+  },
+  {
+   "name": "Surface_eval_mid",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "eval",
+    "uv": [
+     0.37,
+     0.61
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": false,
+    "nzt": true
+   }
+  },
+  {
+   "name": "Surface_eval_upper",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "eval",
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": false
+   }
+  },
+  {
+   "name": "Surface_knots_u",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "dir": 0,
+    "ivl": null
+   }
+  },
+  {
+   "name": "Surface_knots_v",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "dir": 1,
+    "ivl": null
+   }
+  },
+  {
+   "name": "Surface_copy",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "Surface_copy_anal",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "copy_anal"
+   }
+  },
+  {
+   "name": "Surface_max_anal",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "max_anal"
+   }
+  },
+  {
+   "name": "Surface_swap",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "Surface_reverse_u",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "reverse",
+    "dir": 0
+   }
+  },
+  {
+   "name": "Surface_extend",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "extend",
+    "dist": 0.1,
+    "cont": 3
+   }
+  },
+  {
+   "name": "Surface_seval",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "s_eval",
+    "ctor": 1,
+    "uv": [
+     0.25,
+     0.75
+    ],
+    "dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "steps": [
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0.25,
+      0.75,
+      0
+     ],
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.5,
+      0.5,
+      0
+     ],
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      1,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_read_db",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point); the .sms text is the SmBSplineSurface WriteToDB ASCII layout",
+   "inputs": {
+    "op": "read_db",
+    "ty": 15002,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_drop_fast",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "p": [
+     0.1,
+     0.2,
+     0.3
+    ]
+   }
+  },
+  {
+   "name": "Surface_parallel_z",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_queries",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "queries"
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_mid",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "eval",
+    "uv": [
+     0.37,
+     0.61
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": false,
+    "nzt": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_upper",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "eval",
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_knots_u",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "dir": 0,
+    "ivl": null
+   }
+  },
+  {
+   "name": "DropCurveSurface_knots_v",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "dir": 1,
+    "ivl": null
+   }
+  },
+  {
+   "name": "DropCurveSurface_copy",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "DropCurveSurface_copy_anal",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "copy_anal"
+   }
+  },
+  {
+   "name": "DropCurveSurface_max_anal",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "max_anal"
+   }
+  },
+  {
+   "name": "DropCurveSurface_swap",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_u",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "reverse",
+    "dir": 0
+   }
+  },
+  {
+   "name": "DropCurveSurface_extend",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "extend",
+    "dist": 0.1,
+    "cont": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_seval",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "s_eval",
+    "ctor": 1,
+    "uv": [
+     0.25,
+     0.75
+    ],
+    "dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "steps": [
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0.25,
+      0.75,
+      0
+     ],
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.5,
+      0.5,
+      0
+     ],
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      1,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_read_db",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input); the .sms text is the SmBSplineSurface WriteToDB ASCII layout",
+   "inputs": {
+    "op": "read_db",
+    "ty": 15002,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_drop_fast",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "p": [
+     0.1,
+     0.2,
+     0.3
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_parallel_z",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_queries",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "queries"
+   }
+  },
+  {
+   "name": "offset_nurb_eval_mid",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "eval",
+    "uv": [
+     0.37,
+     0.61
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": false,
+    "nzt": true
+   }
+  },
+  {
+   "name": "offset_nurb_eval_upper",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "eval",
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": false
+   }
+  },
+  {
+   "name": "offset_nurb_knots_u",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "dir": 0,
+    "ivl": null
+   }
+  },
+  {
+   "name": "offset_nurb_knots_v",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "knots",
+    "dir": 1,
+    "ivl": null
+   }
+  },
+  {
+   "name": "offset_nurb_copy",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "offset_nurb_copy_anal",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "copy_anal"
+   }
+  },
+  {
+   "name": "offset_nurb_max_anal",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "max_anal"
+   }
+  },
+  {
+   "name": "offset_nurb_swap",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_u",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "reverse",
+    "dir": 0
+   }
+  },
+  {
+   "name": "offset_nurb_extend",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "extend",
+    "dist": 0.1,
+    "cont": 3
+   }
+  },
+  {
+   "name": "offset_nurb_seval",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "s_eval",
+    "ctor": 1,
+    "uv": [
+     0.25,
+     0.75
+    ],
+    "dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "steps": [
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0.25,
+      0.75,
+      0
+     ],
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.5,
+      0.5,
+      0
+     ],
+     [
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      1,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_read_db",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms); the .sms text is the SmBSplineSurface WriteToDB ASCII layout",
+   "inputs": {
+    "op": "read_db",
+    "ty": 15002,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_drop_fast",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "p": [
+     0.1,
+     0.2,
+     0.3
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_parallel_z",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "op": "parallel",
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "read_db_not_a_surface",
+   "upstream_ref": "SmSurface::ReadFromDB default branch",
+   "inputs": {
+    "op": "read_db",
+    "ty": 14001,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "text": "1 1\n1 1\n0\n"
+    }
+   }
+  },
+  {
+   "name": "base_queries",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "queries"
+   }
+  },
+  {
+   "name": "base_eval",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "eval",
+    "uv": [
+     0.5,
+     0.5
+    ],
+    "hu": 1,
+    "hv": 1,
+    "u_left": true,
+    "v_left": true,
+    "upper": false,
+    "nzt": true
+   }
+  },
+  {
+   "name": "base_eval_pt",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "eval_pt",
+    "uv": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "base_knots",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "knots",
+    "dir": 0,
+    "ivl": null
+   }
+  },
+  {
+   "name": "base_parallel",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "parallel",
+    "v": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "base_reverse",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "reverse",
+    "dir": 1
+   }
+  },
+  {
+   "name": "base_swap",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "swap"
+   }
+  },
+  {
+   "name": "base_split",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "split",
+    "t": 0.5,
+    "dir": 0
+   }
+  },
+  {
+   "name": "base_copy",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "base_copy_anal",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "copy_anal"
+   }
+  },
+  {
+   "name": "base_max_anal",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "max_anal"
+   }
+  },
+  {
+   "name": "base_extend",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "extend",
+    "dist": 0.1,
+    "cont": 3
+   }
+  },
+  {
+   "name": "base_extend_dir",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "extend_dir",
+    "dir": 0,
+    "dist": 0.1,
+    "cont": 3
+   }
+  },
+  {
+   "name": "base_adjust_step",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "adjust_step",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "base_step_inv",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "guess": null
+   }
+  },
+  {
+   "name": "base_convert_uv",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "convert_uv",
+    "uv": [
+     0.3,
+     0.4
+    ]
+   }
+  },
+  {
+   "name": "base_drop_fast",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "base_trim",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "trim",
+    "dom": [
+     0.1,
+     0.1,
+     0.9,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "base_reparam",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "reparam",
+    "dom": [
+     0,
+     0,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "base_transform",
+   "upstream_ref": "SmSurface.h inline base-class defaults",
+   "inputs": {
+    "this": {
+     "base": true
+    },
+    "op": "transform",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": null
+   }
+  },
+  {
+   "name": "gssi_crossing_planes",
+   "upstream_ref": "SmSurface::GlobalSurfaceIntersect (my_test_ssi inputs: two crossing bilinear patches)",
+   "inputs": {
+    "this": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         -0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         -0.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "gssi",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "other": {
+     "oob": false,
+     "form": 11,
+     "srf": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         -0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         -0.5,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "other_dom": [
+     0,
+     0,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "plane_with_3d_curves_square",
+   "upstream_ref": "SmSurface::CreatePlaneWith3DCurves (SM_API SmApiCreatePlanarFace inputs)",
+   "inputs": {
+    "op": "plane3d",
+    "curves": [
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    ],
+    "tol": 1e-06
+   }
+  }
+ ]
+}

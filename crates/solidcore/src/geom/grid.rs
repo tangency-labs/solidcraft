@@ -686,13 +686,15 @@ impl<O: Copy> Grid<O> {
         if element.surface.is_none() {
             return Err(SolidError::sm_err(OP));
         }
-        // UNPORTED(surface.surface_p2): smsurf_GetSurfaceCache
+        // smsurf_GetSurfaceCache (surface::surface::p2::surface_cache) needs the
+        // surface caches:
+        // UNPORTED(surface.surface_cache_p1): SmCacheMgr::GetOrCreateObjectCache
         // (then SmSurfaceCache::GetTree, SmTree::GetAllTreeNodes, and for every
         // lowest SM_AD_BEZIER_SURFACE node not classified outside:
         // AddElement(node, SM_GE_SURFACE, node box grown by the expansion tolerance))
         Err(SolidError::Unported {
-            upstream: "smsurf_GetSurfaceCache",
-            unit: "surface.surface_p2",
+            upstream: "SmCacheMgr::GetOrCreateObjectCache",
+            unit: "surface.surface_cache_p1",
         })
     }
 

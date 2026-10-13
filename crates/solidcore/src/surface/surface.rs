@@ -1,0 +1,12 @@
+//! The surface base class `SmSurface`: the [`Surface`] object (a concrete surface
+//! kind plus the owner pointer), its virtual interface dispatched over the surface
+//! kinds, and the numerical methods implemented once on the base class.
+//!
+//! Upstream: `source/SMLib/src/SmSurface.cpp`, `source/SMLib/inc/SmSurface.h`.
+//! The file is split over several plan units (`surface.surface_p1`, `_p2`, ...);
+//! each lives in its own submodule and adds methods to [`Surface`] (or free
+//! functions).
+
+pub mod p2;
+
+pub use p2::{Surface, SurfaceKind};

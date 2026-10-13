@@ -23,21 +23,18 @@
 //!   `curve.crv_on_surf`, [`CrvOnSurf`]). The members it needs are kept here: the UV
 //!   curve, the surface and the UV domain. Like the constructor (owner flag `0`, no
 //!   context), the tangent field references both the UV curve and the surface without
-//!   owning them, so they are borrowed (`&'a`). The surface type is a parameter `S`:
-//!   `SmSurface` is not ported, and every surface call is
-//!   [`SolidError::Unported`]. Three trivial members of the base are co-ported
+//!   owning them, so they are borrowed (`&'a`). The surface type is a parameter `S`
+//!   (a [`crate::surface::surface::p2::SurfaceEvaluate`] where the constructors need
+//!   the natural UV domain). Three trivial members of the base are co-ported
 //!   (`// CO-PORT(curve.crv_on_surf)`): `SetAll` for a given UV domain (it only stores
 //!   the references; the context and owner bookkeeping is not modelled),
 //!   `GetNaturalInterval` (the UV curve's interval), `IsKindOf`, and `operator==`
 //!   (same UV curve, same surface, same UV domain).
-//! - **Unported callees.** Without a UV domain the constructor asks
-//!   `SmSurface::GetNaturalUVDomain` (`surface.surface_p2`), so [`TangentField::create`]
-//!   (which passes none) always ends in [`SolidError::Unported`] after its checks.
-//!   Comparing two different surfaces needs `SmSurface::operator==`
+//! - **Unported callees.** Comparing two different surfaces needs `SmSurface::operator==`
 //!   (`surface.surface_p1`); evaluating inside the interval needs
 //!   `SmSurface::EvaluateNormal` (`surface.surface_p7`). Reading the `SmCrvOnSurf`
-//!   part of a database record ([`CrvOnSurf::read_from_db`]) needs
-//!   `SmSurface::ReadFromDB` (`surface.surface_p2`).
+//!   part of a database record ([`CrvOnSurf::read_from_db`]) reads its surface with
+//!   `SmSurface::ReadFromDB`, whose non-B-spline types are unported.
 //! - **Arguments.** Out-params become return values; the `SmContext` of `Create` and
 //!   `ReadFromDB`, `ReadFromDB`'s type and the `NotUsed` arguments of `Evaluate`
 //!   (`bFromLeft`, `bNonZeroTangents`) are dropped. `Create`'s base UV curve is typed
@@ -61,6 +58,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, PI};
+use crate::surface::surface::p2::SurfaceEvaluate;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 /// `SmTangentField_TYPE` (`GetType`).
@@ -151,8 +149,7 @@ impl<'a, S> TangentField<'a, S> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] when `uv_domain` is `None`
-    /// (`SmSurface::GetNaturalUVDomain`).
+    /// None (the `Result` is kept for upstream's constructor statuses).
     pub fn new(
         uv_curve: &'a Curve,
         surface: &'a S,
@@ -160,12 +157,15 @@ impl<'a, S> TangentField<'a, S> {
         start_tangent: Vec3,
         end_tangent: Vec3,
         uv_domain: Option<Extent2d>,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        S: SurfaceEvaluate,
+    {
         // CO-PORT(curve.crv_on_surf): SmCrvOnSurf::SetAll (owner flag 0, no context)
         // set m_vUVDomain
         let uv_domain = match uv_domain {
             Some(d) => d,
-            None => surface_natural_uv_domain(surface)?,
+            None => surface.natural_uv_domain(),
         };
         Ok(Self {
             uv_curve,
@@ -185,7 +185,7 @@ impl<'a, S> TangentField<'a, S> {
     /// # Errors
     ///
     /// `SM_ERR` when an end point does not match; those of the curve evaluations;
-    /// [`SolidError::Unported`] from the constructor (no UV domain is given).
+    /// None from the constructor (it takes the surface's natural UV domain).
     pub fn create(
         approx_tol_3d: f64,
         base_3d_curve: &Curve,
@@ -193,7 +193,10 @@ impl<'a, S> TangentField<'a, S> {
         surface: &'a S,
         start: CurveEnd<'_>,
         end: CurveEnd<'_>,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        S: SurfaceEvaluate,
+    {
         // StartCurve position and tangent
         let pv = start.curve.evaluate(start.param, 1, true, true)?;
         let mut start_tangent = at(&pv, 1);
@@ -489,15 +492,6 @@ fn read_crv_on_surf(k: &Kernel, db: &mut DatabaseReader, _dim: u64, version: u64
     ignore_status(CrvOnSurf::read_from_db(k, db, version))
 }
 
-/// `m_pSurface->GetNaturalUVDomain()`.
-fn surface_natural_uv_domain<S>(_surface: &S) -> Result<Extent2d> {
-    // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain
-    Err(SolidError::Unported {
-        upstream: "SmSurface::GetNaturalUVDomain",
-        unit: "surface.surface_p2",
-    })
-}
-
 /// `*m_pSurface == *rOther.m_pSurface`.
 fn surface_eq<S>(_a: &S, _b: &S) -> Result<bool> {
     // UNPORTED(surface.surface_p1): SmSurface::operator==
@@ -549,6 +543,16 @@ mod tests {
         assert_eq!(TangentDirType::Interpolate.code(), 1);
     }
 
+    fn unit_square() -> crate::nurbs::b_spline_surface::BSplineSurface {
+        crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn ends_return_stored_tangents() {
         let uv = hermite(
@@ -558,7 +562,7 @@ mod tests {
             [1.0, 0.0, 0.0],
             2,
         );
-        let srf = ();
+        let srf = unit_square();
         let s = Vec3::new(0.0, 1.0, 0.0);
         let e = Vec3::new(0.0, 0.0, 1.0);
         let tf = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, Some(domain()))
@@ -572,10 +576,9 @@ mod tests {
             tf.evaluate_point(0.5),
             Err(SolidError::Unported { .. })
         ));
-        assert!(matches!(
-            TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, None),
-            Err(SolidError::Unported { .. })
-        ));
+        // without a domain: the surface's natural UV domain
+        let n = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, None).unwrap();
+        assert_eq!(n.evaluate_point(0.0).unwrap(), s);
     }
 
     #[test]
@@ -587,7 +590,7 @@ mod tests {
             [1.0, 0.0, 0.0],
             2,
         );
-        let srf = 0_u8;
+        let srf = unit_square();
         let s = Vec3::new(0.0, 1.0, 0.0);
         let e = Vec3::new(0.0, 0.0, 1.0);
         let a = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, Some(domain()))
@@ -596,7 +599,7 @@ mod tests {
             TangentField::new(&uv, &srf, TangentDirType::Constant, s, e, Some(domain())).unwrap();
         assert!(a.approx_eq(&a).unwrap());
         assert!(!a.approx_eq(&b).unwrap());
-        let srf2 = 0_u8;
+        let srf2 = unit_square();
         let c = TangentField::new(
             &uv,
             &srf2,
@@ -639,7 +642,7 @@ mod tests {
             [0.0, 1.0, 0.0],
             3,
         );
-        let srf = ();
+        let srf = unit_square();
         let start = CurveEnd {
             curve: &sc,
             param: 0.0,
@@ -650,11 +653,8 @@ mod tests {
             param: 0.0,
             opposite: true,
         };
-        // matching ends reach the unported constructor
-        assert!(matches!(
-            TangentField::create(1e-6, &base, &uv, &srf, start, end),
-            Err(SolidError::Unported { .. })
-        ));
+        // matching ends build the field over the surface's natural UV domain
+        assert!(TangentField::create(1e-6, &base, &uv, &srf, start, end).is_ok());
         // a mismatched end is SM_ERR
         let bad = CurveEnd {
             curve: &ec,

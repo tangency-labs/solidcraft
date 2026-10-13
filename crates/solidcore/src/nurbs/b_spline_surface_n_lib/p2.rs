@@ -9,7 +9,6 @@
 //! | [`BSplineSurface::create_skinned_surface`], [`SkinnedSurfaceOptions`] | `CreateSkinnedSurface` |
 //! | [`BSplineSurface::trim_with_domain`]          | `TrimWithDomain`                          |
 //! | [`BSplineSurface::evaluate`], [`EvaluateFlags`] | `Evaluate`                              |
-//! | `derivative_limit` (private, co-ported)       | `SmSurface::GetDerivativeLimit`           |
 //!
 //! The other functions of the file belong to `nurbs.b_spline_surface_n_lib_p1` and
 //! later units.
@@ -37,11 +36,8 @@
 //!   derivatives) instead of writing the caller's array; entries upstream leaves
 //!   untouched (the lower half with `bOnlyUpperHalf`) are zero. Its flags are an
 //!   [`EvaluateFlags`] value; the internal `bDoZeroSampling` argument is private.
-//! - **`SmSurface::GetDerivativeLimit`** (a one-line static of `surface.surface_p2`)
-//!   is co-ported as `derivative_limit` (`// CO-PORT(surface.surface_p2)`).
 //! - **Tangent fields** are [`TangentField`]s of `SmCurve` views of the B-spline
-//!   curves (the same data, not a copy-constructed curve); its constructor still needs
-//!   `SmSurface::GetNaturalUVDomain` (`surface.surface_p2`).
+//!   curves (the same data, not a copy-constructed curve).
 //! - **Unported callees** return [`SolidError::Unported`]:
 //!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`),
 //!   `SmSurface::EvaluateNormal` (`surface.surface_p7`),
@@ -61,7 +57,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::vector2d::Point2;
-use crate::geom::vector3d::{Point3, Vec3};
+use crate::geom::vector3d::Vec3;
 use crate::math::{min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::{
     BSplineCurve, BSplineCurveForm, BoundingBoxRequest, CanonicalData, KnotType,
@@ -317,14 +313,6 @@ fn local_curve_intersect(
         Some(i) => (true, i.my_param),
         None => (false, UNDEF_DOUBLE),
     })
-}
-
-/// The smallest valid first derivative magnitude at `pos`
-/// (`SmSurface::GetDerivativeLimit`).
-fn derivative_limit(pos: Point3) -> f64 {
-    // CO-PORT(surface.surface_p2): SmSurface::GetDerivativeLimit
-    // Have to multiply by 10.0.  [my_ssi_analytic_demo case 9; B163.]
-    10.0 * EFF_ZERO * (1.0 + pos.max_dimension())
 }
 
 // ---- helpers --------------------------------------------------------------------------
@@ -1107,7 +1095,7 @@ impl BSplineSurface {
         let orig_du_len = orig_du.length();
         let orig_dv_len = orig_dv.length();
 
-        let deriv_lim = derivative_limit(orig_pnt);
+        let deriv_lim = crate::surface::surface::p2::derivative_limit(orig_pnt);
 
         // test
         let zero_du = orig_du_len < deriv_lim;

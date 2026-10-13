@@ -1066,17 +1066,23 @@ fn face_uv_domain<O>(_face: &O) -> Result<crate::geom::extent2d::Extent2d> {
 }
 
 /// `SmSurface::EvaluatePoint` at `(u, v)` (its status is ignored upstream: `SE`).
+/// The surface is ported (`surface::surface::p2::Surface::evaluate_point`), but a
+/// solution object is an opaque handle `O` with no way to reach it yet.
 fn evaluate_surface<O>(_surface: &O, _u: f64, _v: f64) -> Result<Point3> {
-    // UNPORTED(surface.surface_p2): SmSurface::EvaluatePoint
+    // UNPORTED(surface.surface_p2): SmSurface::EvaluatePoint (needs a handle-to-surface
+    // lookup on SolutionObject)
     Err(SolidError::Unported {
         upstream: "SmSurface::EvaluatePoint",
         unit: "surface.surface_p2",
     })
 }
 
-/// `SmSurface::GetNaturalUVDomain`.
+/// `SmSurface::GetNaturalUVDomain`. The surface is ported
+/// (`surface::surface::p2::Surface::natural_uv_domain`), but a solution object is an
+/// opaque handle `O` with no way to reach it yet.
 fn surface_natural_uv_domain<O>(_surface: &O) -> Result<crate::geom::extent2d::Extent2d> {
-    // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain
+    // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain (needs a
+    // handle-to-surface lookup on SolutionObject)
     Err(SolidError::Unported {
         upstream: "SmSurface::GetNaturalUVDomain",
         unit: "surface.surface_p2",

@@ -80,10 +80,10 @@
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
 //!   `SmCurve::ApproximateLength` ([`crate::curve::curve::p2`]), `SmSurface::LocalPointSolve`
 //!   (`surface.surface_p5`), `SmSurface::GetNaturalUVDomain`, `SmSurface::Evaluate` and
-//!   `smsurf_DropVectors` (`surface.surface_p2`); `DeformToEndPointTargets` calls
+//!   `smsurf_DropVectors` ([`crate::surface::surface::p2`]); `DeformToEndPointTargets` calls
 //!   [`BSplineCurve::degree_elevate`] for curves of degree below 3 or of even degree.
 //!   The calls into unported units return [`SolidError::Unported`] until they land.
-//!   Surfaces are opaque handles `S` until a surface type exists.
+//!   Surfaces are any [`crate::surface::surface::p2::SurfaceEvaluate`] `S`.
 //!   `DeformToEndPointTargets` forwards derived curve types to
 //!   `SmCurve::DeformToEndPointTargets` (`curve.curve_p6`); a [`BSplineCurve`] is never
 //!   a derived type, so that branch does not exist here.
@@ -104,6 +104,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{min2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
+use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::crv_adv::p1::{Continuity, CurveEnd, BARE_FLAG_REASON};
 use crate::nurbs::crv_adv::p2::UnboundedEval;
 use crate::nurbs::crv_approx::{
@@ -124,6 +125,7 @@ use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{translate_sum2_pts, CPoint, NOW};
 use crate::nurbs::nurbs_crv::{copy_nurb_curve, crv_trim};
 use crate::nurbs::spiral::{approx_spiral, Hand, SpiralSpec};
+use crate::surface::surface::p2::{drop_vectors, SurfaceEvaluate};
 
 /// `lVecCount` of `SetIntersectionCurveThroughPoint`: UV values per UV curve.
 const UV_VEC_COUNT: usize = 6;
@@ -330,15 +332,6 @@ fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize)
     Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
 }
 
-/// `SmSurface::GetNaturalUVDomain`.
-fn surface_natural_uv_domain<S>(_surface: &S) -> Result<Extent2d> {
-    // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain
-    Err(SolidError::Unported {
-        upstream: "SmSurface::GetNaturalUVDomain",
-        unit: "surface.surface_p2",
-    })
-}
-
 /// `SmSurface::LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, found, sol)`:
 /// whether an answer was found, the solution value and the parameters of
 /// `sol.m_vStart`.
@@ -357,22 +350,33 @@ fn surface_local_point_solve<S>(
 
 /// `SmSurface::Evaluate(uv, 1, 1, TRUE, TRUE, TRUE, vals)`: `vals[i][j]` is the
 /// derivative `i` times in `u` and `j` times in `v`.
-fn surface_evaluate<S>(_surface: &S, _uv: Vec2) -> Result<[[Vec3; 2]; 2]> {
-    // UNPORTED(surface.surface_p2): SmSurface::Evaluate
-    Err(SolidError::Unported {
-        upstream: "SmSurface::Evaluate",
-        unit: "surface.surface_p2",
-    })
+fn surface_evaluate<S: SurfaceEvaluate>(surface: &S, uv: Vec2) -> Result<[[Vec3; 2]; 2]> {
+    let d = surface.evaluate(
+        uv,
+        1,
+        1,
+        EvaluateFlags {
+            only_upper_half: true,
+            ..EvaluateFlags::default()
+        },
+    )?;
+    let at = |i: usize, j: usize| -> Result<Vec3> {
+        d.get(i)
+            .and_then(|r| r.get(j))
+            .copied()
+            .ok_or_else(|| invalid(OP_THROUGH, "short surface evaluation"))
+    };
+    // [1][1] is not computed (upper half only): upstream leaves it untouched
+    Ok([[at(0, 0)?, at(0, 1)?], [at(1, 0)?, Vec3::UNDEF]])
 }
 
 /// `smsurf_DropVectors(su, sv, 1, &vec, &uv_vec)`: `vec` in the tangent plane's
 /// `(su, sv)` coordinates.
-fn surface_drop_vector(_su: Vec3, _sv: Vec3, _vec: Vec3) -> Result<Vec2> {
-    // UNPORTED(surface.surface_p2): smsurf_DropVectors
-    Err(SolidError::Unported {
-        upstream: "smsurf_DropVectors",
-        unit: "surface.surface_p2",
-    })
+fn surface_drop_vector(su: Vec3, sv: Vec3, vec: Vec3) -> Result<Vec2> {
+    drop_vectors(su, sv, &[vec])?
+        .first()
+        .copied()
+        .ok_or_else(|| invalid(OP_THROUGH, "no dropped vector"))
 }
 
 // ---- free functions -----------------------------------------------------------------
@@ -906,7 +910,7 @@ impl BSplineCurve {
     /// projection or knot insertion, or an unknown case; `InvalidInput` for array
     /// lengths that do not match the curves; [`SolidError::Unported`] (see the module
     /// deviations).
-    pub fn set_intersection_curve_through_point<S>(
+    pub fn set_intersection_curve_through_point<S: SurfaceEvaluate>(
         &mut self,
         new_knot: &mut f64,
         through: Point3,
@@ -1208,7 +1212,7 @@ impl BSplineCurve {
 
                     // project 3dPoint (sPosTang[2*jj]) to Surface1 near sUVGuessPoint
                     let guess = Vec2::new(guess_3d.x, guess_3d.y);
-                    let domain = surface_natural_uv_domain(surface)?;
+                    let domain = surface.natural_uv_domain();
                     let (_found, sol_value, sol_params) =
                         surface_local_point_solve(surface, &domain, pos_jj, guess)?;
 
@@ -2330,15 +2334,16 @@ mod tests {
         let s = q.ends().unwrap().start;
         assert!((s - Vec3::new(0.0, 0.5, 0.0)).length() < 1e-12);
         let mut knot = 0.5;
-        let r = cubic().set_intersection_curve_through_point::<()>(
-            &mut knot,
-            Vec3::new(4.0, 2.0, 0.0),
-            None,
-            &mut [],
-            &[],
-            &[],
-            0.1,
-        );
+        let r = cubic()
+            .set_intersection_curve_through_point::<crate::nurbs::b_spline_surface::BSplineSurface>(
+                &mut knot,
+                Vec3::new(4.0, 2.0, 0.0),
+                None,
+                &mut [],
+                &[],
+                &[],
+                0.1,
+            );
         // not an intersector-form curve
         assert!(matches!(r, Err(SolidError::Upstream { .. })));
     }

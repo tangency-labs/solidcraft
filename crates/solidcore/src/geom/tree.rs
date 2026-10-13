@@ -1138,7 +1138,7 @@ impl<O: Copy + PartialEq> Tree<O> {
                 return Ok(None);
             }
             let owner_surface = self.owner_object()?;
-            // (SM_ASSERT on SmSurface::IsKindOf, unit surface.surface_p2, not ported: debug only)
+            // (SM_ASSERT on SmSurface::IsKindOf: debug only)
             let aux = self.surface_aux(cur, OP)?;
             if aux.surface.is_some() && (n.parent.is_none() || owner_surface != aux.surface) {
                 // SmBSplineSurface::GetGwNurbPointer is ported (nurbs.b_spline_surface_p1),

@@ -37,7 +37,6 @@
 //! | [`CrvOnSurf::TYPE`], [`CrvOnSurf::type_code`], [`CrvOnSurf::type_string`], [`CrvOnSurf::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`CrvOnSurf::is_kind_of`]                       | `IsKindOf`                                     |
 //! | `SetContext` (dropped)                          | `SetContext`                                   |
-//! | `lift_second_derivative`, `lift_third_derivative` (private, co-ported) | `smsurf_LiftSecondDerivative`, `smsurf_LiftThirdDerivative` (unit `surface.surface_p2`) |
 //!
 //! Deviations:
 //! - **Surface.** `m_pSurface` is an `SmSurface*`; the only ported surface class is
@@ -45,9 +44,10 @@
 //!   to its overrides (`GetNaturalUVDomain`, `Evaluate`, `EvaluatePoint`,
 //!   `operator==`, `Copy`, `Transform`); the base-class `SmSurface` methods it needs
 //!   return [`SolidError::Unported`]: `EvaluateNormal` (unit `surface.surface_p7`),
-//!   `Evaluate2ndDerivatives` (`surface.surface_p1`) and `ReadFromDB`
-//!   (`surface.surface_p2`). The two derivative lifts of `surface.surface_p2` are
-//!   plain arithmetic and are co-ported here (`// CO-PORT(surface.surface_p2)`).
+//!   and `Evaluate2ndDerivatives` (`surface.surface_p1`); `ReadFromDB` reads the
+//!   surface through `SmSurface::ReadFromDB` ([`Surface::read_from_db`]), whose other
+//!   surface types are unported. The derivative lifts are those of
+//!   [`crate::surface::surface::p2`].
 //! - **Ownership.** The UV curve and the surface are held by value. Upstream shares or
 //!   owns (and maybe copies) them as the owner flag says; the flag is kept as data and
 //!   decides what upstream observes: the copies made for flags 1 and 2 (`Copy`, which
@@ -124,6 +124,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::surface::surface::p2::{Surface, SurfaceKind};
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 const OP: &str = "curve::crv_on_surf::CrvOnSurf";
@@ -168,17 +169,17 @@ fn surface_evaluate_2nd_derivatives(
     ))
 }
 
-/// `SmSurface::ReadFromDB(type, db, ctx, surface, version)`.
+/// `SmSurface::ReadFromDB(type, db, .., version)`: the surface of the record (the
+/// only ported surface kind is the B-spline; the other types are unported in the
+/// reader).
 fn surface_read_from_db(
-    _surface_type: i64,
-    _db: &mut DatabaseReader,
-    _version: u64,
+    surface_type: i64,
+    db: &mut DatabaseReader,
+    version: u64,
 ) -> Result<BSplineSurface> {
-    // UNPORTED(surface.surface_p2): SmSurface::ReadFromDB
-    Err(SolidError::unported(
-        "SmSurface::ReadFromDB",
-        "surface.surface_p2",
-    ))
+    match Surface::read_from_db(surface_type, db, version)?.into_kind() {
+        SurfaceKind::BSpline(s) => Ok(s),
+    }
 }
 
 /// The parameter intervals of the `SmCurveClassification` of `curve` over `interval`
@@ -201,29 +202,21 @@ fn classify_against_surface(
 
 /// `smsurf_LiftSecondDerivative(Cs, Css, DU, DV, DUU, DUV, DVV)`: the second
 /// derivative of `S(C(s))`.
-// CO-PORT(surface.surface_p2): smsurf_LiftSecondDerivative
 fn lift_second_derivative(cs: Vec3, css: Vec3, du: Vec3, dv: Vec3, d2: [Vec3; 3]) -> Vec3 {
     let [duu, duv, dvv] = d2;
-    css.x * du + css.y * dv + cs.x * cs.x * duu + 2.0 * cs.x * cs.y * duv + cs.y * cs.y * dvv
+    crate::surface::surface::p2::lift_second_derivative(cs, css, du, dv, duu, duv, dvv)
 }
 
 /// `smsurf_LiftThirdDerivative(Cs, Css, Csss, Su, Sv, Suu, Suv, Svv, Suuu, Suuv, Suvv,
 /// Svvv)`: the third derivative of `S(C(s))`.
-// CO-PORT(surface.surface_p2): smsurf_LiftThirdDerivative
 fn lift_third_derivative(c: [Vec3; 3], d1: [Vec3; 2], d2: [Vec3; 3], d3: [Vec3; 4]) -> Vec3 {
     let [cs, css, csss] = c;
     let [su, sv] = d1;
     let [suu, suv, svv] = d2;
     let [suuu, suuv, suvv, svvv] = d3;
-    csss.x * su
-        + csss.y * sv
-        + 3.0 * cs.x * css.x * suu
-        + 3.0 * (css.x * cs.y + css.y * cs.x) * suv
-        + 3.0 * cs.y * css.y * svv
-        + cs.x * cs.x * cs.x * suuu
-        + 3.0 * cs.x * cs.x * cs.y * suuv
-        + 3.0 * cs.x * cs.y * cs.y * suvv
-        + cs.y * cs.y * cs.y * svvv
+    crate::surface::surface::p2::lift_third_derivative(
+        cs, css, csss, su, sv, suu, suv, svv, suuu, suuv, suvv, svvv,
+    )
 }
 
 /// The span side of a `bFromLeft` flag.

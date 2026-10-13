@@ -27,8 +27,8 @@
     },
     {
       "deferred": {
-        "symbol": "smsurf_GetSurfaceCache",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCacheMgr::GetOrCreateObjectCache",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "raytracer_surface_hierarchy_expand",
@@ -4936,8 +4936,7 @@
   "cases_passed": 613,
   "cases_total": 615,
   "deferred_by_unit": {
-    "surface.surface_cache_p1": 1,
-    "surface.surface_p2": 1
+    "surface.surface_cache_p1": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

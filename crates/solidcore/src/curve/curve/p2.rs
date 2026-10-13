@@ -141,9 +141,9 @@
 //!   destructors are implicit `Drop`). `SmLengthIFEO` is a plain struct: the
 //!   integrator interface it implements (`SmIntegFuncEvalObj`) is unit
 //!   `mass.integrator`.
-//! - **Unported callees.** `SurfaceMaxDistanceBetween` needs `SmSurface`
-//!   (`IsKindOf`, `GetKnots`, `EvaluatePoint`: `surface.surface_p2`; `DropPoint`:
-//!   `surface.surface_p5`; `LocalCurveSolve`: `surface.surface_p7`) and
+//! - **Unported callees.** `SurfaceMaxDistanceBetween` (over any
+//!   [`crate::surface::surface::p2::SurfaceEvaluate`]) needs `SmSurface::DropPoint`
+//!   (`surface.surface_p5`) and `LocalCurveSolve` (`surface.surface_p7`), and
 //!   `ReadFromDB` of the analytic and generated curve types needs their units;
 //!   those calls return [`SolidError::Unported`].
 
@@ -188,6 +188,8 @@ use crate::nurbs::b_spline_curve::{
     ProjectionType,
 };
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::surface::surface::p2::SurfaceEvaluate;
 use crate::topology::database_io::DatabaseReader;
 
 // ---- type codes ---------------------------------------------------------------------
@@ -1555,8 +1557,9 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the `SmSurface` queries, which are not ported yet.
-    pub fn surface_max_distance_between<S>(
+    /// Those of the surface queries; [`SolidError::Unported`] from
+    /// `SmSurface::DropPoint` and `LocalCurveSolve`.
+    pub fn surface_max_distance_between<S: SurfaceEvaluate>(
         &self,
         interval: &Extent1d,
         surface: &S,
@@ -1640,7 +1643,7 @@ impl Curve {
                 surface_local_curve_solve(surface, domain, interval, max_uv, max_param)?
             {
                 let crv_pt = self.evaluate_point(param)?;
-                let srf_pt = surface_evaluate_point(surface, uv)?;
+                let srf_pt = surface.evaluate_point(uv)?;
                 let dist = crv_pt.distance(srf_pt);
 
                 // save largest gap seen
@@ -2070,21 +2073,18 @@ pub struct SurfaceGap {
 }
 
 /// `SM_CAST_NONNULL_PTR(SmPlane, &crSurface) != NULL`.
-fn surface_is_plane<S>(_surface: &S) -> Result<bool> {
-    // UNPORTED(surface.surface_p2): SmSurface::IsKindOf
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsKindOf",
-        unit: "surface.surface_p2",
-    })
+fn surface_is_plane<S: SurfaceEvaluate>(surface: &S) -> Result<bool> {
+    surface.is_kind_of(crate::surface::surface::p2::PLANE_TYPE)
 }
 
 /// The number of unique `v` (or `u`) knots of `surface` (`SmSurface::GetKnots`).
-fn surface_knot_count<S>(_surface: &S, _v: bool) -> Result<usize> {
-    // UNPORTED(surface.surface_p2): SmSurface::GetKnots
-    Err(SolidError::Unported {
-        upstream: "SmSurface::GetKnots",
-        unit: "surface.surface_p2",
-    })
+fn surface_knot_count<S: SurfaceEvaluate>(surface: &S, v: bool) -> Result<usize> {
+    let param = if v {
+        SurfParamType::V
+    } else {
+        SurfParamType::U
+    };
+    Ok(surface.knots(param, None)?.0.len())
 }
 
 /// `SmSurface::DropPoint`: the surface parameters and distance of the drop, `None`
@@ -2115,15 +2115,6 @@ fn surface_local_curve_solve<S>(
     Err(SolidError::Unported {
         upstream: "SmSurface::LocalCurveSolve",
         unit: "surface.surface_p7",
-    })
-}
-
-/// `SmSurface::EvaluatePoint`.
-fn surface_evaluate_point<S>(_surface: &S, _uv: Point2) -> Result<Point3> {
-    // UNPORTED(surface.surface_p2): SmSurface::EvaluatePoint
-    Err(SolidError::Unported {
-        upstream: "SmSurface::EvaluatePoint",
-        unit: "surface.surface_p2",
     })
 }
 
@@ -3766,9 +3757,16 @@ mod tests {
         let mut h = hermite();
         assert!(h.create_by_split_curve(&k, 0.5).is_err());
         assert!(h.create_by_split_curve(&k, 1.0).is_err());
+        let srf = crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        )
+        .unwrap();
         let s = b.surface_max_distance_between(
             &Extent1d::from_min_max(0.0, 0.5),
-            &(),
+            &srf,
             &Extent2d::new(),
             0,
             None,

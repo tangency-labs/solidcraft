@@ -1,0 +1,3735 @@
+//! `SmSurface`, part 2: the surface object ([`Surface`]: a concrete surface kind plus
+//! the owner pointer) with its type queries and owner, the virtual interface of
+//! `SmSurface` dispatched over the surface kinds (evaluation, domains, degrees,
+//! knots, parameterisation edits, trimming, splitting, extension, copying, reading
+//! from a database stream), the lazy evaluator [`SurfaceEval`], the derivative
+//! surface definition [`DerivSurfDefinition`], the drop-curve failure record
+//! [`DropCurveFail`], the standalone surface numerics (`smsurf_*`: chain-rule lifts,
+//! geometric properties, point classification, vector drops) and the file-static
+//! helpers of `SmSurface.cpp` owned by this unit.
+//!
+//! Upstream: `source/SMLib/src/SmSurface.cpp`, `source/SMLib/inc/SmSurface.h`.
+//!
+//! | Rust                                              | Upstream                                         |
+//! |---------------------------------------------------|--------------------------------------------------|
+//! | [`Surface`], [`SurfaceKind`]                      | `SmSurface` (and its derived classes)            |
+//! | [`SurfaceEvaluate`]                               | the evaluation virtuals generic callers use      |
+//! | `Drop` (implicit), `Clone`                        | `~SmSurface`, copy constructor (owner reset)     |
+//! | [`TYPE`], [`TYPE_STRING`], [`CLASS_STRING`], [`Surface::type_code`], [`Surface::type_string`], [`Surface::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
+//! | [`is_kind_of`], [`Surface::is_kind_of`]           | `SmSurface::IsKindOf`                            |
+//! | [`Surface::owner`]                                | `GetOwner`                                       |
+//! | [`Surface::copy`], [`Surface::copy_and_add_analytics`] | `Copy`, `CopyAndAddAnalytics`               |
+//! | [`Surface::adjust_step_uv_domain`]                | `AdjustSTEPUVDomain`                             |
+//! | [`Surface::create_extended_surface`], [`Surface::create_extended_surface_dir`] | `CreateExtendedSurface` (both) |
+//! | [`Surface::drop_point_fast`]                      | `DropPointFast`                                  |
+//! | [`Surface::evaluate`], [`Surface::evaluate_point`] | `Evaluate`, `EvaluatePoint`                     |
+//! | [`Surface::natural_uv_domain`], [`Surface::step_uv_domain`] | `GetNaturalUVDomain`, `GetSTEPUVDomain` |
+//! | [`Surface::degree`], [`Surface::number_control_points`] | `GetDegree`, `GetNumberControlPoints`       |
+//! | [`Surface::max_analytic_domain`]                  | `GetMaxAnalyticDomain`                           |
+//! | [`Surface::is_bilinear`], [`Surface::is_parallel_to_vector`] | `IsBilinear`, `IsParallelToVector`    |
+//! | [`Surface::intersect_with_plane`]                 | `IntersectWithPlane`                             |
+//! | [`Surface::reverse`], [`Surface::reparameterize`] | `Reverse`, `Reparameterize`                      |
+//! | [`Surface::split_at`], [`Surface::step_inversion`] | `SplitAt`, `STEPInversion`                      |
+//! | [`Surface::swap_uv`], [`Surface::transform`], [`Surface::trim_with_domain`] | `SwapUV`, `Transform`, `TrimWithDomain` |
+//! | [`Surface::knots`]                                | `GetKnots`                                       |
+//! | [`Surface::convert_uv_from_step_to_nurbs`], [`Surface::convert_uv_from_nurbs_to_step`] | `ConvertUVFromSTEPToNURBS`, `ConvertUVFromNURBSToSTEP` |
+//! | [`Surface::curve_on_classify`]                    | `CurveOnClassify`                                |
+//! | [`Surface::global_surface_intersect`], [`SurfaceIntersection`] | `GlobalSurfaceIntersect`            |
+//! | [`Surface::point_based_surface_intersect`], [`PointIntersection`] | `PointBasedSurfaceIntersect` (UV point version) |
+//! | [`Surface::read_from_db`]                         | `SmSurface::ReadFromDB`                          |
+//! | [`Surface::create_plane_with_3d_curves`], [`PlaneWith3dCurves`] | `CreatePlaneWith3DCurves`          |
+//! | [`derivative_limit`], [`normal_limit`]            | `GetDerivativeLimit`, `GetNormalLimit` (static)  |
+//! | [`notify`]                                        | `SmSurface::Notify`                              |
+//! | `base_*` functions                                | the `SmSurface.h` inline defaults of the virtuals |
+//! | [`SurfaceEval`]                                   | `SmSurfaceEval` (constructors, `operator=`, `SetUV`, `SetSectDir`, `GetUV`, `Eval`) |
+//! | [`DerivSurfDefinition`], [`TangencyType`], [`CurvatureType`], [`BlendEndType`] | `SmDerivSurfDefinition` (constructor, `AssertValid`, `IsFromSurfaceBoundaryCurve`, `GetNumDerivs`, `CreateCrossSectionCurves`, `SkinDerivSurface`, `GetClassString`, `GetClassType`), `SmTangencyType`, `SmCurvatureType`, `SmBlendEndType` |
+//! | [`DropCurveFail`], [`DropCurveFailArgs`], [`CreateUvTrimCurvePathType`] | `SmDropCurveFail` (`operator=`, `UnInit`, `Set`), `SmCreateUVTrimCurvePathType` |
+//! | [`lift_second_derivative`], [`lift_third_derivative`] | `smsurf_LiftSecondDerivative`, `smsurf_LiftThirdDerivative` |
+//! | [`scale_step_angular_derivatives`]                | `smsurf_ScaleSTEPAngularDerivatives`             |
+//! | [`evaluate_geometric`], [`GeometricProperties`]   | `smsurf_EvaluateGeometric`                       |
+//! | [`compute_surface_point_type`], [`LocalSurfaceType`], [`SurfaceSideType`] | `smsurf_ComputeSurfacePointType`, `SmLocalSurfaceType`, `SmSurfaceSideType` |
+//! | [`drop_vectors`]                                  | `smsurf_DropVectors`                             |
+//! | [`surface_cache`]                                 | `smsurf_GetSurfaceCache`                         |
+//! | [`original_surface`]                              | `sm_GetOriginalSurface` (static)                 |
+//! | [`cc_local_solve`]                                | `sm_CCLocalSolve` (static)                       |
+//! | [`merge_double_arrays`]                           | `sm_MergeDoubleArrays` (static)                  |
+//! | [`convert_to_parameter_delta`]                    | `sm_ConvertToParameterDelta` (static)            |
+//! | [`cs_are_perpen_disjoint`]                        | `sm_CsArePerpenDisjoint` (static)                |
+//! | [`intersect_and_split`], [`intersect_curve_and_split`] | `sm_IntersectAndSplit`, `sm_IntersectCurveAndSplit` (static) |
+//! | [`set_up_breaks`]                                 | `sm_SetUpBreaks` (static)                        |
+//! | [`map_uv`], [`is_even`]                           | `s_MapUV`, `s_IsEven` (static)                   |
+//! | [`LsiGlobalSolver`]                               | `SmLSIGlobalSolver` (`BranchMayContainAnswers`)  |
+//! | [`IsoCurveLengthIntegrand`]                       | `SmIsoCurveLengthIFEO` (constructor)             |
+//!
+//! Deviations:
+//! - **Object model.** `SmSurface` is not abstract upstream, but every ported surface
+//!   is a derived class: the [`SurfaceKind`] variants. The only ported kind is
+//!   [`BSplineSurface`]; the analytic and generated surfaces (`SmPlane`, `SmCone`,
+//!   ...) join the enum in their own units. Each virtual method is one `match`: a
+//!   kind that overrides it calls its own method, the others run the base-class body
+//!   ported here. The base bodies are also public as `base_*` functions (they are
+//!   what a kind without an override runs, and what difftest compares with an
+//!   upstream `SmSurface()`).
+//! - **Owner.** `m_pOwner` is an [`ObjectRef`] instead of a pointer; `Clone` resets
+//!   it, as the copy constructor. `SetOwner` belongs to unit `surface.surface_p1`.
+//!   The constructor and destructor notifications and the debug cache counters are
+//!   not modelled; [`notify`] is the `Notify` override for callers that keep the
+//!   surface's [`AObject`] state. `m_bUseNewPointSolvers` is always `TRUE`
+//!   (`sbUseNewPointSolvers`) and is not stored.
+//! - **Arguments.** Out-params become return values; `SmContext` arguments only
+//!   choose where upstream allocates and are dropped. `Evaluate`'s internal
+//!   `bDoZeroSampling` argument is not exposed (always `TRUE`). `SmSurfaceEval::Eval`'s
+//!   `bSignalFails` only controls a debug assertion and is dropped. Upstream's
+//!   error-reporting macros (`ERR`, `SE`) only log; where the base default returns a
+//!   value after them (`GetNaturalUVDomain`, `GetDegree`, ...) the port returns the
+//!   same value.
+//! - **Unported callees.** The intersection drivers (`GlobalSurfaceIntersect`,
+//!   `PointBasedSurfaceIntersect`) need `SmAdvSurfaceIntersector`
+//!   (`intersect.adv_surface_intersector`) and `SmTsectPnt`
+//!   (`intersect.surface_intersector_p1`); `CurveOnClassify` needs
+//!   `SmCurveClassification` (`intersect.curve_class_p*`); `CreatePlaneWith3DCurves`
+//!   needs `SmTrimmingTools` (`topology.trimming_tools`); `smsurf_GetSurfaceCache`
+//!   and `sm_GetOriginalSurface` need the surface caches (`surface.surface_cache_p1`,
+//!   `geom.a_object`'s cache manager has no surface caches yet); the polar box test of
+//!   `sm_CsArePerpenDisjoint` needs `SmBezierPatch` (`surface.surface_cache_p1`);
+//!   `ReadFromDB` of the analytic and generated surfaces needs their units. Those
+//!   calls return [`SolidError::Unported`]. The `IntersectWithPlane` default takes
+//!   the plane as an opaque argument until `SmPlane` is ported.
+//! - **`SmDerivSurfDefinition`.** The reference curves are borrowed
+//!   ([`Option<&Curve>`]). `AssertValid` runs every test (all are `SM_LEVEL_0` and the
+//!   release build ignores the test level and the test requests), so it takes only
+//!   the report list and the object key. `SkinDerivSurface` takes the rails mutably:
+//!   upstream skins with two rails synchronise them in place through a const cast.
+//! - **`SmDropCurveFail`.** The pointers it stores (context, surface, curve, UV curve
+//!   array, B-rep) are never dereferenced except to copy UV curves when a context is
+//!   given; they are caller handles here ([`Option<O>`]) and the context is a flag.
+//!   `operator=` is [`DropCurveFail::assign`] (the copy constructor, unit
+//!   `surface.surface_p1`, is `Clone`).
+//! - **`smsurf_ComputeSurfacePointType`** keeps upstream's bug: the `v` side is
+//!   written to the `u` side's output, and the `v` output is never written. So the
+//!   `u` output stays an optional `&mut` argument and the `v` output is a flag.
+//! - **`sm_MergeDoubleArrays`** keeps upstream's early exit: values left in one array
+//!   after the other is exhausted are dropped.
+//! - **`sm_CreateCrossSectionCurves`** keeps upstream's use of the start second
+//!   derivatives for the Taylor series' third-derivative term.
+//! - **`SmLSIGlobalSolver`.** The constructor is unit `surface.surface_p1`; the
+//!   struct's fields are public. `LocalSolve` (`surface.surface_p10`) and
+//!   `IdenticalSolutions` (`surface.surface_p5`) return [`SolidError::Unported`]. A
+//!   failing `SmExtent3d::IntersectLine` (zero line vector, undefined box) leaves
+//!   upstream's hit count uninitialised; the port returns its error.
+//! - **Not ported here.** The destructors of the file-local evaluator classes
+//!   (`SmFindSingularParamWithGivenTangentDirEFO`, `SmCSIntersectENFO`,
+//!   `SmCSNormalizeENFO`, `SmFindPSNormalENFO`, `SmSSPIntersectENFO`,
+//!   `SmSSINormalizeENFO`, `SmSSNormalizeENFO`, `SmSSSIntersectENFO`) and of
+//!   `SmSurfaceEval`, `SmDerivSurfDefinition`, `SmDropCurveFail` and
+//!   `SmLSIGlobalSolver` are implicit `Drop`; the classes themselves belong to other
+//!   units.
+
+use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p7::PropertyAnalysisOptions;
+use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve::{Curve, CurvePropertyType};
+use crate::curve::line::Line;
+use crate::error::{Result, SolidError, SM_ERR};
+use crate::geom::a_object::{self, AObject, CacheStore};
+use crate::geom::assert_array::labels::DERIV_SURF_DEFINITION_TYPE;
+use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
+use crate::geom::attribute::AttributeStore;
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::context::Context;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::{
+    line_closest_point, plane_drop_point, vec_lin_comb_two_vectors,
+};
+use crate::geom::geom_utility::p2::ContinuityType;
+use crate::geom::global_solver::{
+    Branch, GlobalSolve, GlobalSolver, PreferredSolution, SolutionPairType, SolutionRequested,
+    SolverOperation,
+};
+use crate::geom::object::{NotifyOperation, ObjectRef};
+use crate::geom::polynomial::solve_quadratic;
+use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject};
+use crate::geom::tol::{are_same, eff_zero_param, scaled_zero2, tol3d};
+use crate::geom::tree::{AuxDataType, Tree, TreeNode};
+use crate::geom::vector2d::{Point2, Vec2};
+use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::kernel::Kernel;
+use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::{BSplineSurface, LocationType, SurfParamType};
+use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType, SkinnedSurfaceOptions};
+use crate::nurbs::crv_fit::p1::ParamMethod;
+use crate::nurbs::knots::Side;
+use crate::topology::database_io::DatabaseReader;
+
+// ---- type codes ---------------------------------------------------------------------
+
+/// `SURF_BASE_TYPE` (`SmSurfTypes.h`).
+const SURF_BASE_TYPE: i64 = 15000;
+
+/// `SmSurface_TYPE` (`SURF_BASE_TYPE + 1`).
+pub const TYPE: i64 = SURF_BASE_TYPE + 1;
+/// `SmBSplineSurface_TYPE`.
+pub const B_SPLINE_SURFACE_TYPE: i64 = SURF_BASE_TYPE + 2;
+/// `SmPlane_TYPE`.
+pub const PLANE_TYPE: i64 = SURF_BASE_TYPE + 11;
+/// `SmCone_TYPE`.
+pub const CONE_TYPE: i64 = SURF_BASE_TYPE + 12;
+/// `SmCylinder_TYPE`.
+pub const CYLINDER_TYPE: i64 = SURF_BASE_TYPE + 13;
+/// `SmSphere_TYPE`.
+pub const SPHERE_TYPE: i64 = SURF_BASE_TYPE + 14;
+/// `SmTorus_TYPE`.
+pub const TORUS_TYPE: i64 = SURF_BASE_TYPE + 15;
+/// `SmSurfOfRevolution_TYPE`.
+pub const SURF_OF_REVOLUTION_TYPE: i64 = SURF_BASE_TYPE + 20;
+/// `SmSurfOfExtrusion_TYPE`.
+pub const SURF_OF_EXTRUSION_TYPE: i64 = SURF_BASE_TYPE + 30;
+/// `SmCurveBoundedSurface_TYPE`.
+pub const CURVE_BOUNDED_SURFACE_TYPE: i64 = SURF_BASE_TYPE + 45;
+/// `SmSrfInVolume_TYPE`.
+pub const SRF_IN_VOLUME_TYPE: i64 = SURF_BASE_TYPE + 218;
+/// `SmOffsetSurface_TYPE`.
+pub const OFFSET_SURFACE_TYPE: i64 = SURF_BASE_TYPE + 400;
+/// `SmSTEPSurface_TYPE`.
+pub const STEP_SURFACE_TYPE: i64 = SURF_BASE_TYPE + 410;
+
+/// `GetTypeString()` of `SmSurface`.
+pub const TYPE_STRING: &str = "SmSurface_TYPE";
+/// `GetClassString()` of `SmSurface`.
+pub const CLASS_STRING: &str = "SmSurface";
+
+/// `SmSurface::IsKindOf`: `SmSurface_TYPE` or a base type of `SmSurface`.
+#[must_use]
+pub const fn is_kind_of(t: i64) -> bool {
+    t == TYPE || a_object::is_kind_of(t)
+}
+
+const OP_BASE: &str = "surface::surface::p2::Surface";
+const OP_READ: &str = "surface::surface::p2::Surface::read_from_db";
+const OP_EVAL: &str = "surface::surface::p2::SurfaceEval::eval";
+const OP_DERIV: &str = "surface::surface::p2::DerivSurfDefinition";
+const OP_GEOM: &str = "surface::surface::p2::evaluate_geometric";
+const OP_DROP: &str = "surface::surface::p2::drop_vectors";
+const OP_BREAKS: &str = "surface::surface::p2::set_up_breaks";
+
+/// `SM_ERR` of a base-class default.
+const fn base_err() -> SolidError {
+    SolidError::sm_err(OP_BASE)
+}
+
+// ---- the surface object ---------------------------------------------------------------
+
+/// The concrete kind of a [`Surface`] (the derived classes of `SmSurface`).
+#[derive(Debug, Clone)]
+pub enum SurfaceKind {
+    /// `SmBSplineSurface`.
+    BSpline(BSplineSurface),
+}
+
+/// A surface (`SmSurface`): its concrete kind and the object owning it (`m_pOwner`:
+/// a face, another surface or a curve).
+#[derive(Debug)]
+pub struct Surface {
+    kind: SurfaceKind,
+    owner: Option<ObjectRef>,
+}
+
+/// The copy constructor: copies the geometry, resets the owner.
+impl Clone for Surface {
+    fn clone(&self) -> Self {
+        Self {
+            kind: self.kind.clone(),
+            owner: None,
+        }
+    }
+}
+
+impl From<BSplineSurface> for Surface {
+    fn from(s: BSplineSurface) -> Self {
+        Self::new(SurfaceKind::BSpline(s))
+    }
+}
+
+/// The curves of a surface/surface intersection (`GlobalSurfaceIntersect`'s
+/// outputs): one entry per intersection curve in each array.
+#[derive(Debug, Clone, Default)]
+pub struct SurfaceIntersection {
+    /// `pOpt3DCurves`: the 3D intersection curves.
+    pub curves_3d: Vec<Curve>,
+    /// `pOptSurface1UVCurves`: their UV curves on this surface.
+    pub surface1_uv_curves: Vec<Curve>,
+    /// `pOptSurface2UVCurves`: their UV curves on the other surface.
+    pub surface2_uv_curves: Vec<Curve>,
+    /// `pOptCurveTypes`: the kind of each intersection.
+    pub curve_types: Vec<TsectCurveType>,
+    /// `pOptDeviations`: the maximum distance of each curve from the surfaces.
+    pub deviations: Vec<f64>,
+}
+
+/// The curve of a point-based surface/surface intersection
+/// (`PointBasedSurfaceIntersect`'s outputs).
+#[derive(Debug, Clone)]
+pub struct PointIntersection {
+    /// `rp3DCurve`: the 3D curve (`None` when no curve passes through all points).
+    pub curve_3d: Option<BSplineCurve>,
+    /// `rpSurface1UVCurve`: its UV curve on this surface.
+    pub surface1_uv_curve: Option<BSplineCurve>,
+    /// `rpSurface2UVCurve`: its UV curve on the other surface.
+    pub surface2_uv_curve: Option<BSplineCurve>,
+    /// `reCurveType`: the kind of intersection.
+    pub curve_type: TsectCurveType,
+    /// `rdDeviation`: the maximum distance between the curve and the surfaces.
+    pub deviation: f64,
+}
+
+/// The kind of an intersection curve (`SmTsectCurveType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TsectCurveType {
+    /// `SM_TC_UNKNOWN`.
+    #[default]
+    Unknown = 0,
+    /// `SM_TC_TOUCHING`: a single point where the surfaces touch.
+    Touching = 1,
+    /// `SM_TC_CROSSING`: the surface normals are not parallel.
+    Crossing = 2,
+    /// `SM_TC_TANGENT`: the surfaces touch along a curve.
+    Tangent = 3,
+    /// `SM_TC_COINCIDENT`: the surfaces butt up against one another.
+    Coincident = 4,
+    /// `SM_TC_NEAR_TANGENT`: a small angle of intersection.
+    NearTangent = 5,
+    /// `SM_TC_REGION_BOUNDARY`: bounds a region of coincidence.
+    RegionBoundary = 6,
+}
+
+/// The plane through a set of coplanar curves (`CreatePlaneWith3DCurves`' outputs).
+#[derive(Debug, Clone)]
+pub struct PlaneWith3dCurves {
+    /// `rpNewPlanarSurface`: the plane (a bilinear B-spline, copied with analytics).
+    pub plane: Surface,
+    /// `sLoopCounts`: the number of curves in each loop.
+    pub loop_counts: Vec<usize>,
+    /// `sOrderedCurves`: indices into the input curves, ordered into loops (outer
+    /// loop counter-clockwise followed by its inner loops clockwise).
+    pub ordered_curves: Vec<usize>,
+    /// `sOrients`: the orientation of each ordered curve in its loop.
+    pub orients: Vec<OrientType>,
+    /// `*pOuterLoopCounts`: the number of loops in each outer loop.
+    pub outer_loop_counts: Vec<usize>,
+}
+
+/// The curves of [`Surface::create_plane_with_3d_curves`] ordered into loops
+/// (`SmTrimmingTools::OrderCurvesIntoLoops`' outputs).
+#[derive(Debug, Clone)]
+struct OrderedLoops {
+    ordered: Vec<usize>,
+    loop_counts: Vec<usize>,
+    orients: Vec<OrientType>,
+    plane_base_pt: Point3,
+    plane_normal: Vec3,
+    face_extent: Extent3d,
+}
+
+/// `SmTrimmingTools::OrderCurvesIntoLoops(curves, tol, ...)`.
+fn order_curves_into_loops(_curves: &[Curve], _tol: f64) -> Result<OrderedLoops> {
+    // UNPORTED(topology.trimming_tools): SmTrimmingTools::OrderCurvesIntoLoops
+    Err(SolidError::unported(
+        "SmTrimmingTools::OrderCurvesIntoLoops",
+        "topology.trimming_tools",
+    ))
+}
+
+/// `SmTrimmingTools::FindOuterLoops(ordered, loop_counts, orients, normal, tol, ..)`:
+/// reorders the loops and returns the outer loop counts.
+fn find_outer_loops(
+    _ordered: &mut Vec<usize>,
+    _loop_counts: &mut Vec<usize>,
+    _orients: &mut Vec<OrientType>,
+    _normal: Vec3,
+    _tol: f64,
+) -> Result<Vec<usize>> {
+    // UNPORTED(topology.trimming_tools): SmTrimmingTools::FindOuterLoops
+    Err(SolidError::unported(
+        "SmTrimmingTools::FindOuterLoops",
+        "topology.trimming_tools",
+    ))
+}
+
+impl Surface {
+    /// A surface of the given kind without owner.
+    #[must_use]
+    pub const fn new(kind: SurfaceKind) -> Self {
+        Self { kind, owner: None }
+    }
+
+    /// The concrete kind.
+    #[must_use]
+    pub const fn kind(&self) -> &SurfaceKind {
+        &self.kind
+    }
+
+    /// The concrete kind, mutable.
+    pub fn kind_mut(&mut self) -> &mut SurfaceKind {
+        &mut self.kind
+    }
+
+    /// The concrete kind, by value.
+    #[must_use]
+    pub fn into_kind(self) -> SurfaceKind {
+        self.kind
+    }
+
+    /// The owner (`GetOwner`).
+    #[must_use]
+    pub const fn owner(&self) -> Option<ObjectRef> {
+        self.owner
+    }
+
+    // ---- type queries ---------------------------------------------------------------
+
+    /// The type code (`GetType`).
+    #[must_use]
+    pub const fn type_code(&self) -> i64 {
+        match &self.kind {
+            SurfaceKind::BSpline(_) => BSplineSurface::TYPE,
+        }
+    }
+
+    /// The type name (`GetTypeString`).
+    #[must_use]
+    pub const fn type_string(&self) -> &'static str {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.type_string(),
+        }
+    }
+
+    /// The class name (`GetClassString`).
+    #[must_use]
+    pub const fn class_string(&self) -> &'static str {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.class_string(),
+        }
+    }
+
+    /// `IsKindOf`: the concrete type or one of its base types.
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's `IsKindOf`.
+    pub fn is_kind_of(&self, t: i64) -> Result<bool> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.is_kind_of(t),
+        }
+    }
+
+    // ---- copies ---------------------------------------------------------------------
+
+    /// An exact copy (`Copy`); the owner is not copied.
+    ///
+    /// # Errors
+    ///
+    /// None for the ported kinds (the base default is `SM_ERR`).
+    pub fn copy(&self) -> Result<Self> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => Ok(Self::from(s.copy())),
+        }
+    }
+
+    /// A copy with analytic information where possible (`CopyAndAddAnalytics`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is [`Surface::copy`]).
+    pub fn copy_and_add_analytics(&self) -> Result<Self> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => Ok(Self::from(s.copy_and_add_analytics()?)),
+        }
+    }
+
+    // ---- evaluation -----------------------------------------------------------------
+
+    /// The point and partial derivatives at `uv` (`Evaluate`): `D[i][j]` is the
+    /// derivative `i` times in `u` and `j` times in `v`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn evaluate(
+        &self,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+    ) -> Result<Vec<Vec<Vec3>>> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.evaluate(uv, highest_u_deriv, highest_v_deriv, flags),
+        }
+    }
+
+    /// The point at `uv` (`EvaluatePoint`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn evaluate_point(&self, uv: Point2) -> Result<Point3> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.evaluate_point(uv),
+        }
+    }
+
+    // ---- simple queries -------------------------------------------------------------
+
+    /// The natural parameter domain (`GetNaturalUVDomain`).
+    #[must_use]
+    pub fn natural_uv_domain(&self) -> Extent2d {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.natural_uv_domain(),
+        }
+    }
+
+    /// The STEP parameter domain (`GetSTEPUVDomain`; the base default, the natural
+    /// domain, for every ported kind).
+    #[must_use]
+    pub fn step_uv_domain(&self) -> Extent2d {
+        base_step_uv_domain(self)
+    }
+
+    /// The degree in `param`'s direction (`GetDegree`).
+    #[must_use]
+    pub fn degree(&self, param: SurfParamType) -> usize {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.degree(param),
+        }
+    }
+
+    /// The number of control points in `param`'s direction
+    /// (`GetNumberControlPoints`).
+    #[must_use]
+    pub fn number_control_points(&self, param: SurfParamType) -> usize {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.number_control_points(param),
+        }
+    }
+
+    /// The largest domain the analytic form allows (`GetMaxAnalyticDomain`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override.
+    pub fn max_analytic_domain(&self) -> Result<Extent2d> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.max_analytic_domain(),
+        }
+    }
+
+    /// Whether the surface is bilinear (`IsBilinear`).
+    #[must_use]
+    pub fn is_bilinear(&self) -> bool {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.is_bilinear(),
+        }
+    }
+
+    /// Whether the surface is a sweep parallel to `vector` (`IsParallelToVector`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override.
+    pub fn is_parallel_to_vector(&self, vector: Vec3) -> Result<bool> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.is_parallel_to_vector(vector),
+        }
+    }
+
+    /// The unique knots in `param`'s direction and their multiplicities, optionally
+    /// limited to `ivl` (`GetKnots`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn knots(
+        &self,
+        param: SurfParamType,
+        ivl: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => s.knots(param, ivl),
+        }
+    }
+
+    /// `uv` of the STEP parameterisation in the NURBS parameterisation
+    /// (`ConvertUVFromSTEPToNURBS`; the base default, the identity, for every
+    /// ported kind).
+    #[must_use]
+    pub const fn convert_uv_from_step_to_nurbs(&self, step_uv: Point2) -> Point2 {
+        base_convert_uv(step_uv)
+    }
+
+    /// `uv` of the NURBS parameterisation in the STEP parameterisation
+    /// (`ConvertUVFromNURBSToSTEP`; the base default, the identity, for every
+    /// ported kind).
+    #[must_use]
+    pub const fn convert_uv_from_nurbs_to_step(&self, nurbs_uv: Point2) -> Point2 {
+        base_convert_uv(nurbs_uv)
+    }
+
+    /// The parameter of `point_on_surf` in `anal_domain` and its location
+    /// (`STEPInversion`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn step_inversion(
+        &self,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+    ) -> Result<(Point2, LocationType)> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => {
+                s.step_inversion(anal_domain, point_on_surf, tol_3d, uv_guess)
+            }
+        }
+    }
+
+    /// `DropPointFast`: no ported kind overrides it; the base default fails.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` (the base default).
+    pub fn drop_point_fast<O: SolutionObject>(
+        &self,
+        _uv_domain: &Extent2d,
+        _operation: SolverOperation,
+        _test_point: Point3,
+        _in_pointing_vector: Option<Vec3>,
+        _distance_tolerance: f64,
+        _target_distance: Option<f64>,
+        _requested: SolutionRequested,
+    ) -> Result<SolutionArray<O>> {
+        base_drop_point_fast()
+    }
+
+    /// `IntersectWithPlane`: no ported kind overrides it; the base default fails.
+    /// `plane` stands for the `SmPlane` argument until that type is ported.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` (the base default).
+    pub fn intersect_with_plane<P: ?Sized>(
+        &self,
+        _uv_domain: &Extent2d,
+        _plane: &P,
+        _other_uv_domain: &Extent2d,
+        _use_surface_edges: [bool; 2],
+        _approx_tol_3d: Option<f64>,
+        _ang_tol_rad: Option<f64>,
+    ) -> Result<(bool, SurfaceIntersection)> {
+        base_intersect_with_plane()
+    }
+
+    // ---- edits ----------------------------------------------------------------------
+
+    /// Sets the domain from a STEP domain and rebuilds the NURB
+    /// (`AdjustSTEPUVDomain`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn adjust_step_uv_domain(&mut self, new_step_uv_domain: &Extent2d) -> Result<()> {
+        match &mut self.kind {
+            SurfaceKind::BSpline(s) => s.adjust_step_uv_domain(new_step_uv_domain),
+        }
+    }
+
+    /// Reverses the parameterisation in `param`'s direction (`Reverse`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn reverse(&mut self, param: SurfParamType) -> Result<()> {
+        match &mut self.kind {
+            SurfaceKind::BSpline(s) => s.reverse(param),
+        }
+    }
+
+    /// Maps the domain onto `new_domain` (`Reparameterize`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn reparameterize(&mut self, new_domain: &Extent2d) -> Result<()> {
+        match &mut self.kind {
+            SurfaceKind::BSpline(s) => s.reparameterize(new_domain),
+        }
+    }
+
+    /// Swaps the `u` and `v` directions (`SwapUV`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn swap_uv(&mut self) -> Result<()> {
+        match &mut self.kind {
+            SurfaceKind::BSpline(s) => s.swap_uv(),
+        }
+    }
+
+    /// Scales about the origin (optional) then rotates and moves (`Transform`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        match &mut self.kind {
+            SurfaceKind::BSpline(s) => s.transform(rotate_n_move, scale),
+        }
+    }
+
+    /// Trims to `trim_domain`, which may be snapped to knots (`TrimWithDomain`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn trim_with_domain(&mut self, trim_domain: &mut Extent2d) -> Result<()> {
+        match &mut self.kind {
+            SurfaceKind::BSpline(s) => s.trim_with_domain(trim_domain),
+        }
+    }
+
+    // ---- new surfaces ---------------------------------------------------------------
+
+    /// The two halves of the surface split at `param` in `surf_param`'s direction
+    /// (`SplitAt`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn split_at(&self, param: f64, surf_param: SurfParamType) -> Result<(Self, Self)> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => {
+                let (l, r) = s.split_at(param, surf_param)?;
+                Ok((Self::from(l), Self::from(r)))
+            }
+        }
+    }
+
+    /// The surface extended by `dist` on every side (`CreateExtendedSurface`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn create_extended_surface(
+        &self,
+        dist: f64,
+        extension_continuity: ContinuityType,
+    ) -> Result<Self> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => Ok(Self::from(
+                s.create_extended_surface(dist, extension_continuity)?,
+            )),
+        }
+    }
+
+    /// The surface extended by `dist` in `ext_direction` (`CreateExtendedSurface`
+    /// with a direction).
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's override (the base default is `SM_ERR`).
+    pub fn create_extended_surface_dir(
+        &self,
+        ext_direction: SurfParamType,
+        dist: f64,
+        extension_continuity: ContinuityType,
+    ) -> Result<Self> {
+        match &self.kind {
+            SurfaceKind::BSpline(s) => Ok(Self::from(s.create_extended_surface_dir(
+                ext_direction,
+                dist,
+                extension_continuity,
+            )?)),
+        }
+    }
+
+    // ---- database -------------------------------------------------------------------
+
+    /// Reads a surface of type `surface_type` (`ReadFromDB`, a virtual static
+    /// dispatching on the type).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a type that is not a surface; [`SolidError::Unported`] for the
+    /// surface types not ported yet; those of the type's reader.
+    pub fn read_from_db(surface_type: i64, db: &mut DatabaseReader, version: u64) -> Result<Self> {
+        // pass the call along to the appropriate derived type
+        match surface_type {
+            B_SPLINE_SURFACE_TYPE => Ok(Self::from(BSplineSurface::read_from_db(db, version)?)),
+            // UNPORTED(surface.plane_p2): SmPlane::ReadFromDB
+            PLANE_TYPE => Err(SolidError::unported(
+                "SmPlane::ReadFromDB",
+                "surface.plane_p2",
+            )),
+            // UNPORTED(surface.surf_of_extrusion_p2): SmSurfOfExtrusion::ReadFromDB
+            SURF_OF_EXTRUSION_TYPE => Err(SolidError::unported(
+                "SmSurfOfExtrusion::ReadFromDB",
+                "surface.surf_of_extrusion_p2",
+            )),
+            // UNPORTED(surface.surf_of_revolution_p3): SmSurfOfRevolution::ReadFromDB
+            SURF_OF_REVOLUTION_TYPE => Err(SolidError::unported(
+                "SmSurfOfRevolution::ReadFromDB",
+                "surface.surf_of_revolution_p3",
+            )),
+            // UNPORTED(surface.cone_p1): SmCone::ReadFromDB
+            CONE_TYPE => Err(SolidError::unported(
+                "SmCone::ReadFromDB",
+                "surface.cone_p1",
+            )),
+            // UNPORTED(surface.cone_p1): SmCylinder::ReadFromDB
+            CYLINDER_TYPE => Err(SolidError::unported(
+                "SmCylinder::ReadFromDB",
+                "surface.cone_p1",
+            )),
+            // UNPORTED(surface.sphere): SmSphere::ReadFromDB
+            SPHERE_TYPE => Err(SolidError::unported(
+                "SmSphere::ReadFromDB",
+                "surface.sphere",
+            )),
+            // UNPORTED(surface.torus): SmTorus::ReadFromDB
+            TORUS_TYPE => Err(SolidError::unported("SmTorus::ReadFromDB", "surface.torus")),
+            // UNPORTED(surface.curve_bounded_surface): SmCurveBoundedSurface::ReadFromDB
+            CURVE_BOUNDED_SURFACE_TYPE => Err(SolidError::unported(
+                "SmCurveBoundedSurface::ReadFromDB",
+                "surface.curve_bounded_surface",
+            )),
+            // UNPORTED(surface.offset_surface): SmOffsetSurface::ReadFromDB
+            OFFSET_SURFACE_TYPE => Err(SolidError::unported(
+                "SmOffsetSurface::ReadFromDB",
+                "surface.offset_surface",
+            )),
+            // UNPORTED(surface.srf_in_volume): SmSrfInVolume::ReadFromDB
+            SRF_IN_VOLUME_TYPE => Err(SolidError::unported(
+                "SmSrfInVolume::ReadFromDB",
+                "surface.srf_in_volume",
+            )),
+            // UNPORTED(surface.surface_p1): SmSTEPSurface::ReadFromDB
+            STEP_SURFACE_TYPE => Err(SolidError::unported(
+                "SmSTEPSurface::ReadFromDB",
+                "surface.surface_p1",
+            )),
+            _ => Err(SolidError::sm_err(OP_READ)),
+        }
+    }
+
+    // ---- intersections and classification -------------------------------------------
+
+    /// Splits the curve of `classification` at this surface's natural boundaries and
+    /// classifies the pieces (`CurveOnClassify`). `C` stands for
+    /// `SmCurveClassification` until that type is ported.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmCurveClassification` (units
+    /// `intersect.curve_class_*`).
+    pub fn curve_on_classify<C: ?Sized>(&self, _classification: &mut C) -> Result<()> {
+        // UNPORTED(intersect.curve_class_p1): SmCurveClassification::ReSet
+        // (then SetFace, SetSurface1, SetSurface2, IntersectNaturalBounds
+        // (intersect.curve_class_p8) and the end interval classifications)
+        Err(SolidError::unported(
+            "SmCurveClassification::ReSet",
+            "intersect.curve_class_p1",
+        ))
+    }
+
+    /// The intersection curves of this surface over `uv_domain` with `other` over
+    /// `other_uv_domain` (`GlobalSurfaceIntersect`, through
+    /// `SmAdvSurfaceIntersector`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmAdvSurfaceIntersector`
+    /// (`intersect.adv_surface_intersector`).
+    pub fn global_surface_intersect(
+        &self,
+        _uv_domain: &Extent2d,
+        _other: &Self,
+        _other_uv_domain: &Extent2d,
+        _use_surface_edges: [bool; 2],
+        _approx_tol_3d: Option<f64>,
+        _ang_tol_rad: Option<f64>,
+    ) -> Result<SurfaceIntersection> {
+        // UNPORTED(intersect.adv_surface_intersector): SmAdvSurfaceIntersector::SmAdvSurfaceIntersector
+        Err(SolidError::unported(
+            "SmAdvSurfaceIntersector::SmAdvSurfaceIntersector",
+            "intersect.adv_surface_intersector",
+        ))
+    }
+
+    /// The intersection curve of this surface with `other` through the given pairs
+    /// of UV points (`PointBasedSurfaceIntersect`, UV point version, through
+    /// `SmAdvSurfaceIntersector::DoPointIntersection`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmTsectPnt` (`intersect.surface_intersector_p1`).
+    pub fn point_based_surface_intersect(
+        &self,
+        _uv_domain: &Extent2d,
+        _other: &Self,
+        _other_uv_domain: &Extent2d,
+        _surface1_points: &[Point2],
+        _surface2_points: &[Point2],
+        _extend: [bool; 2],
+        _directions: [Option<Vec3>; 2],
+        _approx_tol_3d: Option<f64>,
+        _ang_tol_rad: Option<f64>,
+    ) -> Result<PointIntersection> {
+        // UNPORTED(intersect.surface_intersector_p1): SmTsectPnt::SmTsectPnt
+        // (then SmAdvSurfaceIntersector::DoPointIntersection,
+        // intersect.adv_surface_intersector)
+        Err(SolidError::unported(
+            "SmTsectPnt::SmTsectPnt",
+            "intersect.surface_intersector_p1",
+        ))
+    }
+
+    /// A plane containing a set of coplanar 3D curves, with the curves ordered into
+    /// loops (`CreatePlaneWith3DCurves`): the plane is a bilinear surface over the
+    /// curves' bounding sphere grown by 10%, centred on the projection of the sphere
+    /// centre, copied with analytics.
+    ///
+    /// # Errors
+    ///
+    /// Those of the loop ordering ([`SolidError::Unported`]:
+    /// `SmTrimmingTools::OrderCurvesIntoLoops`, `topology.trimming_tools`), of the
+    /// plane frame and of the bilinear surface.
+    pub fn create_plane_with_3d_curves(curves: &[Curve], tol_3d: f64) -> Result<PlaneWith3dCurves> {
+        // order curves into loops - clean up curves, build plane, check planarity
+        let OrderedLoops {
+            mut ordered,
+            mut loop_counts,
+            mut orients,
+            plane_base_pt,
+            plane_normal,
+            face_extent,
+        } = order_curves_into_loops(curves, tol_3d)?;
+
+        let outer_loop_counts = find_outer_loops(
+            &mut ordered,
+            &mut loop_counts,
+            &mut orients,
+            plane_normal,
+            tol_3d,
+        )?;
+
+        // make ortho-normal vector set from PlaneNormal vector
+        let [_, plane_x_vect, mut plane_y_vect] = plane_normal.make_unit_ortho_vectors(None)?;
+
+        // make planeNormal lie in +z direction
+        if plane_normal.dot(plane_x_vect.cross(plane_y_vect)) < 0.0 {
+            plane_y_vect = -plane_y_vect;
+        }
+
+        // Make plane X and Y vectors longer than the plane's bounding box
+        let sphere = face_extent.sphere_bound();
+        let face_center = sphere.center;
+        let face_radius = sphere.radius;
+
+        let box_expansion = 1.1;
+        let plane_x_vect = box_expansion * face_radius * plane_x_vect;
+        let plane_y_vect = box_expansion * face_radius * plane_y_vect;
+
+        // get the center point of the limited plane.
+        let v = face_center - plane_base_pt;
+        let center_pt = face_center - (v.dot(plane_normal)) * plane_normal;
+
+        // get points at the plane's four corners
+        let pt00 = center_pt - plane_x_vect - plane_y_vect;
+        let pt10 = center_pt + plane_x_vect - plane_y_vect;
+        let pt11 = center_pt + plane_x_vect + plane_y_vect;
+        let pt01 = center_pt - plane_x_vect + plane_y_vect;
+
+        // make a bilinear BSpline planar surface from the 4 plane corner points
+        let bs = BSplineSurface::create_bilinear_surface(pt00, pt10, pt01, pt11)?;
+
+        // Copy pBS, when possible as an analytic surface
+        let plane = Self::from(bs).copy_and_add_analytics()?;
+
+        Ok(PlaneWith3dCurves {
+            plane,
+            loop_counts,
+            ordered_curves: ordered,
+            orients,
+            outer_loop_counts,
+        })
+    }
+}
+
+// ---- generic evaluation interface --------------------------------------------------------
+
+/// The `SmSurface` virtuals that code generic over a surface type calls (implemented
+/// by [`Surface`] and by the ported kinds, so a [`BSplineSurface`] can be used
+/// without wrapping it).
+pub trait SurfaceEvaluate {
+    /// `GetNaturalUVDomain`.
+    fn natural_uv_domain(&self) -> Extent2d;
+
+    /// `Evaluate` (see [`Surface::evaluate`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn evaluate(
+        &self,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+    ) -> Result<Vec<Vec<Vec3>>>;
+
+    /// `EvaluatePoint`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn evaluate_point(&self, uv: Point2) -> Result<Point3>;
+
+    /// `GetKnots`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the knot query.
+    fn knots(&self, param: SurfParamType, ivl: Option<&Extent1d>)
+        -> Result<(Vec<f64>, Vec<usize>)>;
+
+    /// `IsKindOf`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the type query.
+    fn is_kind_of(&self, t: i64) -> Result<bool>;
+}
+
+impl SurfaceEvaluate for Surface {
+    fn natural_uv_domain(&self) -> Extent2d {
+        Self::natural_uv_domain(self)
+    }
+
+    fn evaluate(
+        &self,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+    ) -> Result<Vec<Vec<Vec3>>> {
+        Self::evaluate(self, uv, highest_u_deriv, highest_v_deriv, flags)
+    }
+
+    fn evaluate_point(&self, uv: Point2) -> Result<Point3> {
+        Self::evaluate_point(self, uv)
+    }
+
+    fn knots(
+        &self,
+        param: SurfParamType,
+        ivl: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        Self::knots(self, param, ivl)
+    }
+
+    fn is_kind_of(&self, t: i64) -> Result<bool> {
+        Self::is_kind_of(self, t)
+    }
+}
+
+impl SurfaceEvaluate for BSplineSurface {
+    fn natural_uv_domain(&self) -> Extent2d {
+        Self::natural_uv_domain(self)
+    }
+
+    fn evaluate(
+        &self,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+    ) -> Result<Vec<Vec<Vec3>>> {
+        Self::evaluate(self, uv, highest_u_deriv, highest_v_deriv, flags)
+    }
+
+    fn evaluate_point(&self, uv: Point2) -> Result<Point3> {
+        Self::evaluate_point(self, uv)
+    }
+
+    fn knots(
+        &self,
+        param: SurfParamType,
+        ivl: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        Self::knots(self, param, ivl)
+    }
+
+    fn is_kind_of(&self, t: i64) -> Result<bool> {
+        Self::is_kind_of(self, t)
+    }
+}
+
+// ---- base-class defaults ----------------------------------------------------------------
+
+/// `SmSurface::Copy`: `SM_ERR`.
+pub const fn base_copy() -> Result<Surface> {
+    Err(base_err())
+}
+
+/// `SmSurface::CopyAndAddAnalytics`: `Copy`, which fails for the base class.
+pub const fn base_copy_and_add_analytics() -> Result<Surface> {
+    base_copy()
+}
+
+/// `SmSurface::AdjustSTEPUVDomain`: `SM_ERR`.
+pub const fn base_adjust_step_uv_domain() -> Result<()> {
+    Err(base_err())
+}
+
+/// `SmSurface::CreateExtendedSurface` (both overloads): `SM_ERR`.
+pub const fn base_create_extended_surface() -> Result<Surface> {
+    Err(base_err())
+}
+
+/// `SmSurface::DropPointFast`: `SM_ERR`.
+pub const fn base_drop_point_fast<O>() -> Result<SolutionArray<O>> {
+    Err(base_err())
+}
+
+/// `SmSurface::Evaluate`: `SM_ERR`.
+pub const fn base_evaluate() -> Result<Vec<Vec<Vec3>>> {
+    Err(base_err())
+}
+
+/// `SmSurface::EvaluatePoint`: `SM_ERR`.
+pub const fn base_evaluate_point() -> Result<Point3> {
+    Err(base_err())
+}
+
+/// `SmSurface::GetNaturalUVDomain`: reports `SM_ERR` and returns the degenerate
+/// domain `(0,0)-(0,0)`.
+#[must_use]
+pub const fn base_natural_uv_domain() -> Extent2d {
+    Extent2d::from_bounds(0.0, 0.0, 0.0, 0.0)
+}
+
+/// `SmSurface::GetSTEPUVDomain`: the natural domain of `surface`.
+#[must_use]
+pub fn base_step_uv_domain(surface: &Surface) -> Extent2d {
+    surface.natural_uv_domain()
+}
+
+/// `SmSurface::GetDegree`: reports `SM_ERR` and returns `SM_ERR` (1001) as the
+/// degree.
+#[must_use]
+pub const fn base_degree() -> usize {
+    SM_ERR as usize
+}
+
+/// `SmSurface::GetNumberControlPoints`: `0`.
+#[must_use]
+pub const fn base_number_control_points() -> usize {
+    0
+}
+
+/// `SmSurface::GetMaxAnalyticDomain`: reports `SM_ERR` and returns an initialised
+/// (empty) domain.
+#[must_use]
+pub const fn base_max_analytic_domain() -> Extent2d {
+    Extent2d::new()
+}
+
+/// `SmSurface::IsBilinear`: `FALSE`.
+#[must_use]
+pub const fn base_is_bilinear() -> bool {
+    false
+}
+
+/// `SmSurface::IsParallelToVector`: `FALSE`.
+#[must_use]
+pub const fn base_is_parallel_to_vector() -> bool {
+    false
+}
+
+/// `SmSurface::IntersectWithPlane`: `SM_ERR` (no output is set).
+pub const fn base_intersect_with_plane() -> Result<(bool, SurfaceIntersection)> {
+    Err(base_err())
+}
+
+/// `SmSurface::Reverse`, `Reparameterize`, `SwapUV`, `Transform` and
+/// `TrimWithDomain`: `SM_ERR`.
+pub const fn base_edit() -> Result<()> {
+    Err(base_err())
+}
+
+/// `SmSurface::SplitAt`: `SM_ERR`.
+pub const fn base_split_at() -> Result<(Surface, Surface)> {
+    Err(base_err())
+}
+
+/// `SmSurface::STEPInversion`: `SM_ERR`.
+pub const fn base_step_inversion() -> Result<(Point2, LocationType)> {
+    Err(base_err())
+}
+
+/// `SmSurface::GetKnots`: clears the outputs and fails with `SM_ERR`.
+pub const fn base_knots() -> Result<(Vec<f64>, Vec<usize>)> {
+    Err(base_err())
+}
+
+/// `SmSurface::ConvertUVFromSTEPToNURBS` and `ConvertUVFromNURBSToSTEP`: the
+/// identity.
+#[must_use]
+pub const fn base_convert_uv(uv: Point2) -> Point2 {
+    uv
+}
+
+/// `SmSurface::GetDerivativeLimit`: the smallest first derivative magnitude that is
+/// not numerical noise at `pos`, `10 * SM_EFF_ZERO * (1 + max|pos|)`.
+#[must_use]
+pub fn derivative_limit(pos: Point3) -> f64 {
+    // Have to multiply by 10.0.  [my_ssi_analytic_demo case 9; B163.]
+    10.0 * EFF_ZERO * (1.0 + pos.max_dimension())
+}
+
+/// `SmSurface::GetNormalLimit`: the smallest believable cross product of unit
+/// vectors, `1e-8`.
+#[must_use]
+pub const fn normal_limit() -> f64 {
+    1.0e-8
+}
+
+/// `SmSurface::Notify`: drops the surface's trimmed-surface cache before an edit and
+/// on destruction, then passes the notification to `SmAObject::Notify`.
+///
+/// # Errors
+///
+/// Those of `SmCacheMgr::DeleteObjectsCache` and `SmAObject::Notify`.
+pub fn notify<T>(
+    caches: &mut CacheStore<T>,
+    object: &mut AObject,
+    attributes: &mut AttributeStore,
+    context: Option<&mut Context>,
+    operation: NotifyOperation,
+    this: ObjectRef,
+    data1: Option<ObjectRef>,
+    data2: Option<ObjectRef>,
+    data3: Option<ObjectRef>,
+) -> Result<()> {
+    match operation {
+        NotifyOperation::PreEdit | NotifyOperation::Destruction => {
+            a_object::delete_objects_cache(caches, object)?;
+        }
+        // SM_NO_UNKNOWN only prints a message; every other event has nothing to do here
+        _ => {}
+    }
+
+    // Propagate notification up hierarchy
+    a_object::notify(attributes, context, operation, this, data1, data2, data3)
+}
+
+/// `smsurf_GetSurfaceCache`: the surface's trimmed-surface cache, else its surface
+/// cache, made if needed.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`]: the surface caches (`surface.surface_cache_p1`).
+pub fn surface_cache(_surface: &Surface) -> Result<a_object::CacheId> {
+    // UNPORTED(surface.surface_cache_p1): SmCacheMgr::GetOrCreateObjectCache(SM_OC_TRIMSRF / SM_OC_SURFACE)
+    Err(SolidError::unported(
+        "SmCacheMgr::GetOrCreateObjectCache",
+        "surface.surface_cache_p1",
+    ))
+}
+
+/// `sm_GetOriginalSurface`: the surface of the surface cache owning the tree of
+/// `node`.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`]: `SmSurfaceCache::GetSurface`
+/// (`surface.surface_cache_p1`).
+pub fn original_surface<O>(_tree: &Tree<O>, _node: &TreeNode<O>) -> Result<O> {
+    // UNPORTED(surface.surface_cache_p1): SmSurfaceCache::GetSurface
+    Err(SolidError::unported(
+        "SmSurfaceCache::GetSurface",
+        "surface.surface_cache_p1",
+    ))
+}
+
+// ---- SmSurfaceEval ----------------------------------------------------------------------
+
+/// A lazily evaluated surface point (`SmSurfaceEval`): position and derivatives up
+/// to second order at a UV point, computed on first use.
+///
+/// `values()[i][j]` is the derivative `i` times in `u` and `j` times in `v` for
+/// `i + j <= 2` (`[2][2]` holds the normal once `EvalNormal`, unit
+/// `surface.surface_p3`, has run).
+#[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean members
+pub struct SurfaceEval<'s> {
+    /// `m_bNonZeroTangents`.
+    non_zero_tangents: bool,
+    /// `m_sUV`.
+    uv: Point2,
+    /// `m_bUFromLeft`.
+    u_from_left: bool,
+    /// `m_bVFromLeft`.
+    v_from_left: bool,
+    /// `m_sSectDir`.
+    sect_dir: Vec3,
+    /// `m_sPVV`.
+    pvv: [[Vec3; 3]; 3],
+    /// `m_sSectTangent`.
+    sect_tangent: Vec3,
+    /// `m_dSectCurvature`.
+    sect_curvature: f64,
+    /// `m_pSrf` (not owned).
+    surface: Option<&'s Surface>,
+    /// `m_bUVSet`.
+    uv_set: bool,
+    /// `m_bNormalSet`.
+    normal_set: bool,
+    /// `m_bSectDirSet`.
+    sect_dir_set: bool,
+    /// `m_bFailsEval`.
+    fails_eval: bool,
+}
+
+impl<'s> SurfaceEval<'s> {
+    /// An evaluator of `surface` with nothing set (`SmSurfaceEval(pSurf)`).
+    #[must_use]
+    pub const fn new(surface: Option<&'s Surface>) -> Self {
+        Self {
+            non_zero_tangents: true,
+            uv: Point2::UNDEF,
+            u_from_left: true,
+            v_from_left: true,
+            sect_dir: Vec3::UNDEF,
+            pvv: [[Vec3::UNDEF; 3]; 3],
+            sect_tangent: Vec3::UNDEF,
+            sect_curvature: UNDEF_DOUBLE,
+            surface,
+            uv_set: false,
+            normal_set: false,
+            sect_dir_set: false,
+            fails_eval: false,
+        }
+    }
+
+    /// An evaluator of `surface` at `(u, v)` (`SmSurfaceEval(pSurf, dU, dV)`).
+    #[must_use]
+    pub fn with_uv(surface: Option<&'s Surface>, u: f64, v: f64) -> Self {
+        let mut s = Self::new(surface);
+        s.set_uv_coords(u, v);
+        s
+    }
+
+    /// An evaluator of `surface` at `(u, v)` with cross-section direction
+    /// `sect_dir` (`SmSurfaceEval(pSurf, dU, dV, rSectDir)`).
+    #[must_use]
+    pub fn with_uv_and_sect_dir(
+        surface: Option<&'s Surface>,
+        u: f64,
+        v: f64,
+        sect_dir: Vec3,
+    ) -> Self {
+        let mut s = Self::with_uv(surface, u, v);
+        s.set_sect_dir(sect_dir);
+        s
+    }
+
+    /// Moves to `uv`; a different point drops every evaluated value (`SetUV`).
+    pub fn set_uv(&mut self, uv: Point2) {
+        if self.uv.x != uv.x || self.uv.y != uv.y {
+            self.uv = uv;
+            self.uv_set = false;
+            self.normal_set = false;
+            self.sect_dir_set = false;
+            self.fails_eval = false;
+        }
+    }
+
+    /// Moves to `(u, v)`; a different point drops every evaluated value
+    /// (`SetUV(dU, dV)`).
+    pub fn set_uv_coords(&mut self, u: f64, v: f64) {
+        if self.uv.x != u || self.uv.y != v {
+            self.uv = Point2::new(u, v);
+            self.uv_set = false;
+            self.normal_set = false;
+            self.sect_dir_set = false;
+            self.fails_eval = false;
+        }
+    }
+
+    /// Sets the cross-section direction; drops the cross-section values
+    /// (`SetSectDir`).
+    pub fn set_sect_dir(&mut self, sect_dir: Vec3) {
+        self.sect_dir = sect_dir;
+        self.sect_dir_set = false;
+    }
+
+    /// The UV point (`GetUV`).
+    #[must_use]
+    pub const fn uv(&self) -> Point2 {
+        self.uv
+    }
+
+    /// The surface (`GetSurface`).
+    #[must_use]
+    pub const fn surface(&self) -> Option<&'s Surface> {
+        self.surface
+    }
+
+    /// The cross-section direction (`m_sSectDir`).
+    #[must_use]
+    pub const fn sect_dir(&self) -> Vec3 {
+        self.sect_dir
+    }
+
+    /// The evaluation matrix as stored (`m_sPVV`; entries not evaluated yet keep
+    /// their previous values).
+    #[must_use]
+    pub const fn values(&self) -> &[[Vec3; 3]; 3] {
+        &self.pvv
+    }
+
+    /// The stored cross-section values `(m_sSectTangent, m_dSectCurvature)` (set by
+    /// `EvalNormalSection`, unit `surface.surface_p4`).
+    #[must_use]
+    pub const fn stored_section(&self) -> (Vec3, f64) {
+        (self.sect_tangent, self.sect_curvature)
+    }
+
+    /// The state flags `[m_bUVSet, m_bNormalSet, m_bSectDirSet, m_bFailsEval]`.
+    #[must_use]
+    pub const fn flags(&self) -> [bool; 4] {
+        [
+            self.uv_set,
+            self.normal_set,
+            self.sect_dir_set,
+            self.fails_eval,
+        ]
+    }
+
+    /// Evaluates position and derivatives up to second order unless done already
+    /// (`Eval`): the upper half of the `2 x 2` matrix of `SmSurface::Evaluate`.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the evaluation failed (now or before, until the point moves);
+    /// `SM_ERR_NULL_POINTER` without surface (upstream dereferences `NULL`);
+    /// [`SolidError::Unported`] from the evaluation.
+    pub fn eval(&mut self) -> Result<()> {
+        if self.uv_set {
+            return Ok(());
+        }
+        if self.fails_eval {
+            return Err(SolidError::sm_err(OP_EVAL));
+        }
+
+        let surface = self.surface.ok_or(SolidError::null_pointer(OP_EVAL))?;
+        let flags = EvaluateFlags {
+            u_side: if self.u_from_left {
+                Side::Left
+            } else {
+                Side::Right
+            },
+            v_side: if self.v_from_left {
+                Side::Left
+            } else {
+                Side::Right
+            },
+            only_upper_half: true,
+            non_zero_tangents: self.non_zero_tangents,
+        };
+        let derivs = match surface.evaluate(self.uv, 2, 2, flags) {
+            Ok(d) => d,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => {
+                self.fails_eval = true;
+                return Err(SolidError::sm_err(OP_EVAL));
+            }
+        };
+        for (i, row) in self.pvv.iter_mut().enumerate() {
+            for (j, slot) in row.iter_mut().enumerate() {
+                if i + j <= 2 {
+                    *slot = derivs
+                        .get(i)
+                        .and_then(|r| r.get(j))
+                        .copied()
+                        .ok_or(SolidError::invalid_input(OP_EVAL, "short evaluation"))?;
+                }
+            }
+        }
+
+        self.uv_set = true;
+        Ok(())
+    }
+}
+
+// ---- SmDerivSurfDefinition ----------------------------------------------------------------
+
+/// How the take-off direction of a derivative surface is chosen
+/// (`SmTangencyType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TangencyType {
+    /// `SM_TT_NO_TANGENCY` (surface boundary).
+    NoTangency = 0,
+    /// `SM_TT_TAN_TO_EDGES` (surface boundary).
+    TanToEdges = 1,
+    /// `SM_TT_MATCH_NEIGHBORS` (surface boundary).
+    MatchNeighbors = 2,
+    /// `SM_TT_DIR_TO_REFERENCE_CURVE` (surface boundary).
+    DirToReferenceCurve = 3,
+    /// `SM_TT_G1_FROM_CURVE` (base curve).
+    G1FromCurve = 4,
+    /// `SM_TT_ALONG_VECTOR` (base curve).
+    AlongVector = 5,
+    /// `SM_TT_PERPENDICULAR_TO_VECTOR` (base curve).
+    PerpendicularToVector = 6,
+    /// `SM_TT_PARALLEL_TO_CURVATURE` (base curve).
+    ParallelToCurvature = 7,
+    /// `SM_TT_PERPENDICULAR_TO_CURVATURE` (base curve).
+    PerpendicularToCurvature = 8,
+}
+
+impl TangencyType {
+    /// The enumerator of an upstream value, `None` outside the enum.
+    #[must_use]
+    pub const fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::NoTangency,
+            1 => Self::TanToEdges,
+            2 => Self::MatchNeighbors,
+            3 => Self::DirToReferenceCurve,
+            4 => Self::G1FromCurve,
+            5 => Self::AlongVector,
+            6 => Self::PerpendicularToVector,
+            7 => Self::ParallelToCurvature,
+            8 => Self::PerpendicularToCurvature,
+            _ => return None,
+        })
+    }
+}
+
+/// The continuity a derivative or blend surface is built for (`SmCurvatureType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurvatureType {
+    /// `SM_CT_NO_CURVATURE`: ruled surface.
+    NoCurvature = 0,
+    /// `SM_CT_G2_FROM_SURFACE`.
+    G2FromSurface = 1,
+    /// `SM_CT_G3_FROM_SURFACE`.
+    G3FromSurface = 2,
+    /// `SM_CT_G2_FROM_CURVE`.
+    G2FromCurve = 3,
+    /// `SM_CT_FROM_PARAMETERS`.
+    FromParameters = 4,
+}
+
+impl CurvatureType {
+    /// The enumerator of an upstream value, `None` outside the enum.
+    #[must_use]
+    pub const fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::NoCurvature,
+            1 => Self::G2FromSurface,
+            2 => Self::G3FromSurface,
+            3 => Self::G2FromCurve,
+            4 => Self::FromParameters,
+            _ => return None,
+        })
+    }
+}
+
+/// The connection of a blend surface to the surfaces it blends
+/// (`SmBlendEndType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendEndType {
+    /// `SM_BE_NO_CUSP`: smooth at both edges.
+    NoCusp = 0,
+    /// `SM_BE_1ST_CUSP`: cusped at the first edge.
+    FirstCusp = 1,
+    /// `SM_BE_2ND_CUSP`: cusped at the second edge.
+    SecondCusp = 2,
+    /// `SM_BE_BOTH_CUSP`: cusped at both edges.
+    BothCusp = 3,
+}
+
+impl BlendEndType {
+    /// The enumerator of an upstream value, `None` outside the enum.
+    #[must_use]
+    pub const fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::NoCusp,
+            1 => Self::FirstCusp,
+            2 => Self::SecondCusp,
+            3 => Self::BothCusp,
+            _ => return None,
+        })
+    }
+}
+
+/// The options controlling how derivative surfaces are built
+/// (`SmDerivSurfDefinition`; see `SmSurface.h` for their meaning).
+#[derive(Debug, Clone, Copy)]
+pub struct DerivSurfDefinition<'c> {
+    /// `m_lNumSamples`.
+    pub num_samples: u64,
+    /// `m_eTangencyType`.
+    pub tangency_type: TangencyType,
+    /// `m_dStartDerivDirAngleDeg`.
+    pub start_deriv_dir_angle_deg: f64,
+    /// `m_dEndDerivDirAngleDeg`.
+    pub end_deriv_dir_angle_deg: f64,
+    /// `m_pTangentReference` (not owned).
+    pub tangent_reference: Option<&'c Curve>,
+    /// `m_dStartTanLength`.
+    pub start_tan_length: f64,
+    /// `m_dEndTanScale`.
+    pub end_tan_scale: f64,
+    /// `m_dStartAngleDeg`.
+    pub start_angle_deg: f64,
+    /// `m_dEndAngleDeg`.
+    pub end_angle_deg: f64,
+    /// `m_vVector`.
+    pub vector: Vec3,
+    /// `m_eCurvatureType`.
+    pub curvature_type: CurvatureType,
+    /// `m_eBlendEndType`.
+    pub blend_end_type: BlendEndType,
+    /// `m_dStartRadius`.
+    pub start_radius: f64,
+    /// `m_dEndRadScale`.
+    pub end_rad_scale: f64,
+    /// `m_pCurvatureReference` (not owned).
+    pub curvature_reference: Option<&'c Curve>,
+    /// `m_bFlipCurvature`.
+    pub flip_curvature: bool,
+}
+
+impl Default for DerivSurfDefinition<'_> {
+    /// `SmDerivSurfDefinition()`: 100 samples, matching neighbours, G2 from the
+    /// surface, no cusps, unit start tangent length and end tangent scale, zero
+    /// angles, radii and vector, no reference curves.
+    fn default() -> Self {
+        Self {
+            num_samples: 100,
+            tangency_type: TangencyType::MatchNeighbors, // preserve previous behavior
+            start_deriv_dir_angle_deg: 0.0,
+            end_deriv_dir_angle_deg: 0.0,
+            tangent_reference: None,
+            start_tan_length: 1.0,
+            end_tan_scale: 1.0,
+            start_angle_deg: 0.0,
+            end_angle_deg: 0.0,
+            vector: Vec3::new(0.0, 0.0, 0.0),
+            curvature_type: CurvatureType::G2FromSurface,
+            blend_end_type: BlendEndType::NoCusp,
+            start_radius: 0.0,
+            end_rad_scale: 0.0,
+            curvature_reference: None,
+            flip_curvature: false,
+        }
+    }
+}
+
+/// The sample values the cross sections of [`DerivSurfDefinition::create_cross_section_curves`]
+/// interpolate: start (and optionally end) positions and derivatives, one entry per
+/// cross section.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CrossSectionValues<'a> {
+    /// `rStartPos`.
+    pub start_pos: &'a [Vec3],
+    /// `rStart1stDerivs`.
+    pub start_1st_derivs: &'a [Vec3],
+    /// `pOptStart2ndDerivs`.
+    pub start_2nd_derivs: Option<&'a [Vec3]>,
+    /// `pOptStart3rdDerivs`.
+    pub start_3rd_derivs: Option<&'a [Vec3]>,
+    /// `pOptEndPos`.
+    pub end_pos: Option<&'a [Vec3]>,
+    /// `pOptEnd1stDerivs`.
+    pub end_1st_derivs: Option<&'a [Vec3]>,
+    /// `pOptEnd2ndDerivs`.
+    pub end_2nd_derivs: Option<&'a [Vec3]>,
+    /// `pOptEnd3rdDerivs`.
+    pub end_3rd_derivs: Option<&'a [Vec3]>,
+}
+
+/// `SM_IS_CONTAINED(c, a, b)`: `c` inside the closed interval between `a` and `b`
+/// grown by their scaled zero.
+fn is_contained(c: f64, a: f64, b: f64) -> bool {
+    let z = scaled_zero2(&a, &b);
+    (a <= (c + z) && (c - z) <= b) || (b <= (c + z) && (c - z) <= a)
+}
+
+/// `smos_Max` of two doubles.
+fn smos_max(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// The `SM_ASSERT_BOOLEAN_REPORT` / `SM_ASSERT_VALUE_REPORT` macros of
+/// `SmDerivSurfDefinition::AssertValid` (release build: the predicate always runs):
+/// `true` when `passed`; otherwise, with a list, a report for test `test_index`
+/// (tolerance `tol`, value `val`) is added unless an equal one is there.
+fn deriv_report(
+    list: &mut Option<&mut AssertArray>,
+    key: ObjectKey,
+    test_index: u64,
+    passed: bool,
+    tol: f64,
+    val: f64,
+) -> Result<bool> {
+    if passed {
+        if let Some(l) = list.as_deref_mut() {
+            l.set_last_add(false);
+        }
+        return Ok(true);
+    }
+    if let Some(l) = list.as_deref_mut() {
+        let r = AssertReport::new(ReportSpec {
+            reporter: Some(key),
+            test_index,
+            test_class: DERIV_SURF_DEFINITION_TYPE,
+            owner: Some(key),
+            owner_type: DERIV_SURF_DEFINITION_TYPE,
+            owner_type_string: Some(DerivSurfDefinition::CLASS_STRING),
+            other: None,
+            other_type: 0,
+            other_type_string: Some("NULL"),
+            tol3d: tol3d(tol),
+            value: val,
+            list_index: 0,
+            message: None,
+        })?;
+        l.add_unique_delete_duplicate(r);
+    }
+    Ok(false)
+}
+
+impl DerivSurfDefinition<'_> {
+    /// `GetClassString()`.
+    pub const CLASS_STRING: &'static str = "SmDerivSurfDefinition";
+    /// `GetTypeString()`.
+    pub const TYPE_STRING: &'static str = "SmDerivSurfDefinition_TYPE";
+    /// `SmDerivSurfDefinition_TYPE`.
+    pub const TYPE: i64 = DERIV_SURF_DEFINITION_TYPE;
+
+    /// The class name (`GetClassString`).
+    #[must_use]
+    pub const fn class_string(&self) -> &'static str {
+        Self::CLASS_STRING
+    }
+
+    /// The class type (`GetClassType`).
+    #[must_use]
+    pub const fn class_type(&self) -> i64 {
+        Self::TYPE
+    }
+
+    /// Whether the surface is built from a surface boundary curve
+    /// (`IsFromSurfaceBoundaryCurve`).
+    #[must_use]
+    pub fn is_from_surface_boundary_curve(&self) -> bool {
+        self.tangency_type == TangencyType::NoTangency
+            || self.tangency_type == TangencyType::TanToEdges
+            || self.tangency_type == TangencyType::MatchNeighbors
+            || self.tangency_type == TangencyType::DirToReferenceCurve
+    }
+
+    /// The number of cross derivatives the curvature type needs (`GetNumDerivs`).
+    #[must_use]
+    pub const fn num_derivs(&self) -> usize {
+        match self.curvature_type {
+            CurvatureType::NoCurvature => 1,
+            CurvatureType::G3FromSurface => 3,
+            CurvatureType::G2FromSurface
+            | CurvatureType::G2FromCurve
+            | CurvatureType::FromParameters => 2,
+        }
+    }
+
+    /// Whether the stored options are consistent (`AssertValid`); failed checks are
+    /// reported to `list` (as object `key`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`AssertReport::new`].
+    pub fn assert_valid(&self, list: Option<&mut AssertArray>, key: ObjectKey) -> Result<bool> {
+        type T = TangencyType;
+        type C = CurvatureType;
+        let mut list = list;
+        let tt = self.tangency_type;
+        let ct = self.curvature_type;
+
+        // init return
+        let mut rtn = true;
+
+        // Building from a basecurve or a surface boundary curve
+        let base_curve = tt == T::G1FromCurve
+            || tt == T::AlongVector
+            || tt == T::PerpendicularToVector
+            || tt == T::ParallelToCurvature
+            || tt == T::PerpendicularToCurvature;
+
+        // enough sample points
+        rtn &= deriv_report(
+            &mut list,
+            key,
+            0,
+            self.num_samples >= 1,
+            UNDEF_DOUBLE,
+            UNDEF_DOUBLE,
+        )?;
+
+        // m_dStartDerivDirAngleDeg, m_dEndDerivDirAngleDeg limited to +/-360 degrees
+        let start = self.start_deriv_dir_angle_deg;
+        let end = self.end_deriv_dir_angle_deg;
+        let ok = (tt != T::TanToEdges && tt != T::MatchNeighbors)
+            || (is_contained(start, -360.0, 360.0) && is_contained(end, -360.0, 360.0));
+        let val = if start < -360.0 || start > 360.0 {
+            start
+        } else {
+            end
+        };
+        rtn &= deriv_report(&mut list, key, 1, ok, EFF_ZERO, val)?;
+
+        // CrossTangent reference
+        let has_ref = self.tangent_reference.is_some();
+        #[allow(clippy::nonminimal_bool)] // upstream's predicate, kept as written
+        let ok = (base_curve && tt == T::G1FromCurve && has_ref)
+            || (!base_curve && tt == T::DirToReferenceCurve && has_ref)
+            || !has_ref;
+        rtn &= deriv_report(&mut list, key, 2, ok, UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+
+        // CrossTangent length interpolation
+        let ok = self.start_tan_length >= 0.0 && self.end_tan_scale >= 0.0;
+        let val = smos_max(self.start_tan_length, self.end_tan_scale);
+        rtn &= deriv_report(&mut list, key, 3, ok, 0.0, val)?;
+
+        // Rotate angles about basecurve limited to +/-360 degrees
+        let start = self.start_angle_deg;
+        let end = self.end_angle_deg;
+        let ok = is_contained(start, -360.0, 360.0) && is_contained(end, -360.0, 360.0);
+        let val = if start < -360.0 || start > 360.0 {
+            start
+        } else {
+            end
+        };
+        rtn &= deriv_report(&mut list, key, 4, ok, EFF_ZERO, val)?;
+
+        // m_vVector value
+        let ok = (tt != T::AlongVector && tt != T::PerpendicularToVector)
+            || self.vector.is_initialized();
+        rtn &= deriv_report(&mut list, key, 5, ok, UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+
+        // curvature type
+        let ok = (base_curve && (ct == C::G2FromCurve || ct == C::FromParameters))
+            || (!base_curve && (ct == C::G2FromSurface || ct == C::G3FromSurface))
+            || ct == C::NoCurvature;
+        rtn &= deriv_report(&mut list, key, 6, ok, UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+
+        // Dvv lengths
+        let ok = self.start_radius >= 0.0 && self.end_rad_scale >= 0.0;
+        let val = smos_max(self.start_radius, self.end_rad_scale);
+        rtn &= deriv_report(&mut list, key, 7, ok, 0.0, val)?;
+
+        let ok = ct != C::G2FromCurve || self.curvature_reference.is_some();
+        rtn &= deriv_report(&mut list, key, 8, ok, UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+
+        // all done
+        Ok(rtn)
+    }
+
+    /// One cross-section curve per sample (`CreateCrossSectionCurves`): a uniform
+    /// interpolating curve of degree `2 * derivatives + 1` on `[0, 1]` with the given
+    /// start position and derivatives and the given end values or, without end
+    /// values, the values at `s = 1` of the start Taylor series.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for arrays of different sizes, a derivative without the lower ones,
+    /// end values not matching the start values' orders, or end derivatives without
+    /// end positions (and vice versa); those of
+    /// [`BSplineCurve::create_interpolating_curve`].
+    pub fn create_cross_section_curves(
+        &self,
+        values: &CrossSectionValues<'_>,
+    ) -> Result<Vec<BSplineCurve>> {
+        let err = || SolidError::sm_err(OP_DERIV);
+        let n = values.start_pos.len();
+        let size_ok = |a: Option<&[Vec3]>| a.is_none_or(|a| a.len() == n);
+        let start2 = values.start_2nd_derivs;
+        let start3 = values.start_3rd_derivs;
+        let end_pos = values.end_pos;
+        let end1 = values.end_1st_derivs;
+        let end2 = values.end_2nd_derivs;
+        let end3 = values.end_3rd_derivs;
+
+        // size constraint
+        if values.start_1st_derivs.len() != n
+            || !size_ok(start2)
+            || !size_ok(start3)
+            || !size_ok(end_pos)
+            || !size_ok(end1)
+            || !size_ok(end2)
+            || !size_ok(end3)
+        {
+            return Err(err());
+        }
+
+        // lesser derivative constraint
+        if (start3.is_some() && start2.is_none())
+            || (end3.is_some() && end2.is_none())
+            || (end2.is_some() && end1.is_none())
+            || (end1.is_some() && end_pos.is_none())
+        {
+            return Err(err());
+        }
+
+        // just start or matching end and start value constraints
+        if end3.is_some() != start3.is_some() || end2.is_some() != start2.is_some() {
+            return Err(err());
+        }
+
+        // start pos and 1st deriv are always required - just require end pos when end 1st derivs are given
+        if end1.is_some() != end_pos.is_some() {
+            return Err(err());
+        }
+
+        // pick crossSection degree high enough to interpolate all the given end values
+        let num_derivatives: usize = if start3.is_some() {
+            3
+        } else if start2.is_some() {
+            2
+        } else {
+            1
+        };
+        let degree = num_derivatives * 2 + 1;
+
+        // CreateInterpolatingCurve() locals
+        let mut tgt_pnts = [Vec3::UNDEF; 2];
+        let mut tgt_1sts = [Vec3::UNDEF; 2];
+        let mut tgt_higher = vec![Vec3::UNDEF; if num_derivatives == 3 { 4 } else { 2 }];
+        let mut c = Vec3::new(0.0, 0.0, 0.0);
+        let mut d = Vec3::new(0.0, 0.0, 0.0);
+        let at = |a: &[Vec3], i: usize| a.get(i).copied().ok_or_else(err);
+        let set = |a: &mut [Vec3], i: usize, v: Vec3| -> Result<()> {
+            *a.get_mut(i).ok_or_else(err)? = v;
+            Ok(())
+        };
+
+        let mut cross_sections = Vec::with_capacity(n);
+        // for every sample input
+        for ii in 0..n {
+            let p0 = at(values.start_pos, ii)?;
+            let d0 = at(values.start_1st_derivs, ii)?;
+            // shuffle start input for CreateInterpolatingCurve() call
+            tgt_pnts[0] = p0;
+            tgt_1sts[0] = d0;
+            if let Some(s2) = start2 {
+                set(&mut tgt_higher, 0, at(s2, ii)?)?;
+            }
+            if let Some(s3) = start3 {
+                set(&mut tgt_higher, 2, at(s3, ii)?)?;
+            }
+
+            if let (Some(ep), Some(e1)) = (end_pos, end1) {
+                // given end values
+                tgt_pnts[1] = at(ep, ii)?;
+                tgt_1sts[1] = at(e1, ii)?;
+                if let Some(e2) = end2 {
+                    set(&mut tgt_higher, 1, at(e2, ii)?)?;
+                }
+                if let Some(e3) = end3 {
+                    set(&mut tgt_higher, 3, at(e3, ii)?)?;
+                }
+            } else {
+                // Compute end points using 1st, 2nd, or 3rd degree taylor series approximation
+                // get high order taylor series coefficients
+                if let Some(s2) = start2 {
+                    c = at(s2, ii)?;
+                }
+                if let (Some(s2), Some(_)) = (start2, start3) {
+                    // upstream reads the 2nd derivatives here
+                    d = at(s2, ii)?;
+                }
+
+                // Compute CrossSection(s) for s = 1
+                tgt_pnts[1] = p0 + d0 + c / 2.0 + d / 6.0;
+                tgt_1sts[1] = d0 + c + d / 2.0;
+                if start2.is_some() {
+                    set(&mut tgt_higher, 1, c + d)?;
+                }
+                if start3.is_some() {
+                    set(&mut tgt_higher, 3, d)?;
+                }
+            }
+
+            // build an interpolating curve that equals target values at Curve(0) evaluations
+            let curve = BSplineCurve::create_interpolating_curve(
+                ParamMethod::Uniform,
+                3,
+                degree,
+                &tgt_pnts,
+                &tgt_1sts,
+                if num_derivatives >= 2 {
+                    Some(&tgt_higher)
+                } else {
+                    None
+                },
+                false,
+            )?;
+            cross_sections.push(curve);
+        }
+
+        Ok(cross_sections)
+    }
+
+    /// The derivative surface skinned through `cross_sections` along the rails
+    /// (`SkinDerivSurface`): synchronised `u` cross sections at rail parameters
+    /// `params`, degree in the sweep direction that of the rails (the larger of the
+    /// two), interpolating when `tolerance` is `0`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the rail degrees and of [`BSplineSurface::create_skinned_surface`].
+    pub fn skin_deriv_surface(
+        &self,
+        cross_sections: &[BSplineCurve],
+        params: &[f64],
+        start_rail: &mut BSplineCurve,
+        end_rail: Option<&mut BSplineCurve>,
+        tolerance: f64,
+    ) -> Result<BSplineSurface> {
+        // CreateSkinnedSurface locals
+        let degree = match end_rail.as_deref() {
+            Some(e) => {
+                let a = start_rail.degree()?;
+                let b = e.degree()?;
+                if a > b {
+                    a
+                } else {
+                    b
+                }
+            }
+            None => start_rail.degree()?,
+        };
+
+        // sweep the set of sample curves to make the derivative surface
+        BSplineSurface::create_skinned_surface(
+            cross_sections,
+            SkinnedSurfaceOptions {
+                synchronized: true,
+                cross_section_surf_param: SurfParamType::U,
+                approx_tol: tolerance,
+                rail1: Some(start_rail),
+                rail2: end_rail,
+                rail1_used_as_spine_curve: false,
+                intersections_with_rails: Some(params),
+                deriv_surfs: Some([None, None]),
+                degree,
+            },
+        )
+    }
+}
+
+// ---- SmDropCurveFail ----------------------------------------------------------------------
+
+/// `UNSURE` (`SmTypes.h`): the third value of an `SmBoolean`.
+pub const UNSURE: i32 = 2;
+
+/// `SM_ERR_UNKNOWN` (`SmMessages.h`): the status of an unused failure record.
+pub const SM_ERR_UNKNOWN: i32 = 1003;
+
+/// `SM_SS_NONE` (`SmTypes.h`): no singular sides.
+pub const SS_NONE: u64 = 0;
+
+/// The failure and recovery paths of `CreateUVTrimCurve`, `DropCurve` and
+/// `DropAndTrimCurve` (`SmCreateUVTrimCurvePathType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreateUvTrimCurvePathType {
+    /// `SM_CTC_UNKNOWN`.
+    #[default]
+    Unknown = 0,
+    /// `SM_CTC_OKAY`.
+    Okay,
+    /// `SM_CTC_FROM_CRVONSURF`.
+    FromCrvOnSurf,
+    /// `SM_CTC_REVERSEDROP_RECOVERY`.
+    ReverseDropRecovery,
+    /// `SM_CTC_TWOSINGULARENDPTS_RECOVERY`.
+    TwoSingularEndPtsRecovery,
+    /// `SM_CTC_SHORTPIECE_SEAMCROSS_RECOVERY`.
+    ShortPieceSeamCrossRecovery,
+    /// `SM_CTC_PICKONESEAM_RECOVERY`.
+    PickOneSeamRecovery,
+    /// `SM_CTC_10PERCENT_SEAMCROSS_RECOVERY`.
+    TenPercentSeamCrossRecovery,
+    /// `SM_CTC_1PERCENT_UVTRIMCURVETRIM_RECOVERY1`.
+    OnePercentUvTrimCurveTrimRecovery1,
+    /// `SM_CTC_1PERCENT_UVTRIMCURVETRIM_RECOVERY2`.
+    OnePercentUvTrimCurveTrimRecovery2,
+    /// `SM_CTC_1PERCENT_EDGETRIM_RECOVERY1`.
+    OnePercentEdgeTrimRecovery1,
+    /// `SM_CTC_1PERCENT_EDGETRIM_RECOVERY2`.
+    OnePercentEdgeTrimRecovery2,
+    /// `SM_CTC_1PERCENT_CURVETRIM_RECOVERY`.
+    OnePercentCurveTrimRecovery,
+    /// `SM_CTC_101POINTDROP_DEGENCURVE_RECOVERY`.
+    PointDropDegenCurveRecovery,
+    /// `SM_CTC_101POINTDROP_FITCURVE_RECOVERY`.
+    PointDropFitCurveRecovery,
+    /// `SM_CTC_ALLRECOVERIES_FAIL`.
+    AllRecoveriesFail,
+    /// `SM_CTC_DROPCURVE_OKAY`.
+    DropCurveOkay,
+    /// `SM_CTC_DEGENSURFACE_FAIL`.
+    DegenSurfaceFail,
+    /// `SM_CTC_DROPDOMAIN_UNCONTAINED_FAIL`.
+    DropDomainUncontainedFail,
+    /// `SM_CTC_FIRSTDROP_UNCONTAINED_FAIL`.
+    FirstDropUncontainedFail,
+    /// `SM_CTC_BAD_FIND_DEGENPARAM_WARNING`.
+    BadFindDegenParamWarning,
+    /// `SM_CTC_KEPT_BEYOND_TOL_DROP`.
+    KeptBeyondTolDrop,
+    /// `SM_CTC_DROPSTARTPOINT_FAIL`.
+    DropStartPointFail,
+    /// `SM_CTC_SPLIT_DROPSTEP_FAIL`.
+    SplitDropStepFail,
+    /// `SM_CTC_DROPANDTRIMCURVE_OKAY`.
+    DropAndTrimCurveOkay,
+}
+
+impl CreateUvTrimCurvePathType {
+    /// Every enumerator, in upstream order (the index is the upstream value).
+    pub const ALL: [Self; 25] = [
+        Self::Unknown,
+        Self::Okay,
+        Self::FromCrvOnSurf,
+        Self::ReverseDropRecovery,
+        Self::TwoSingularEndPtsRecovery,
+        Self::ShortPieceSeamCrossRecovery,
+        Self::PickOneSeamRecovery,
+        Self::TenPercentSeamCrossRecovery,
+        Self::OnePercentUvTrimCurveTrimRecovery1,
+        Self::OnePercentUvTrimCurveTrimRecovery2,
+        Self::OnePercentEdgeTrimRecovery1,
+        Self::OnePercentEdgeTrimRecovery2,
+        Self::OnePercentCurveTrimRecovery,
+        Self::PointDropDegenCurveRecovery,
+        Self::PointDropFitCurveRecovery,
+        Self::AllRecoveriesFail,
+        Self::DropCurveOkay,
+        Self::DegenSurfaceFail,
+        Self::DropDomainUncontainedFail,
+        Self::FirstDropUncontainedFail,
+        Self::BadFindDegenParamWarning,
+        Self::KeptBeyondTolDrop,
+        Self::DropStartPointFail,
+        Self::SplitDropStepFail,
+        Self::DropAndTrimCurveOkay,
+    ];
+
+    /// The enumerator of an upstream value, `None` outside the enum.
+    #[must_use]
+    pub fn from_code(code: u64) -> Option<Self> {
+        Self::ALL.get(usize::try_from(code).ok()?).copied()
+    }
+}
+
+/// What a failed `DropCurve` had computed (`SmDropCurveFail`), for
+/// `SmEdgeuse::CreateUVTrimCurve`'s recoveries. `O` names the objects upstream
+/// keeps pointers to (they are never dereferenced).
+#[derive(Debug, Clone)]
+pub struct DropCurveFail<O> {
+    /// `m_sFailStatus`: the failing status ([`SM_ERR_UNKNOWN`] when unused).
+    pub fail_status: i32,
+    /// `m_lFromCall`: 0 unused, 1 `DropCurve`, 2 `DropAndTrimCurve`, 3
+    /// `CreateUVTrimCurve`.
+    pub from_call: u64,
+    /// `m_eCreatePathType`.
+    pub create_path_type: CreateUvTrimCurvePathType,
+    /// `m_cpContext != NULL`.
+    pub has_context: bool,
+    /// `m_sUVDomain`.
+    pub uv_domain: Extent2d,
+    /// `m_cp3dSurface`.
+    pub surface: Option<O>,
+    /// `m_cp3dCurve`.
+    pub curve: Option<O>,
+    /// `m_sInterval`.
+    pub interval: Extent1d,
+    /// `m_sApproxTol3d`.
+    pub approx_tol_3d: f64,
+    /// `m_dMaxDropToSurfArg`.
+    pub max_drop_to_surf_arg: f64,
+    /// `m_dMaxApproxDev`.
+    pub max_approx_dev: f64,
+    /// `m_pUVCurvesArg`.
+    pub uv_curves_arg: Option<O>,
+    /// `m_bKeepAllDropCurves` (`SmBoolean`: 0, 1 or [`UNSURE`]).
+    pub keep_all_drop_curves: i32,
+    /// `m_bDegenCurve`.
+    pub degen_curve: i32,
+    /// `m_bDegenSurfU`.
+    pub degen_surf_u: i32,
+    /// `m_bDegenSurfV`.
+    pub degen_surf_v: i32,
+    /// `m_bDropDomainIsContained`.
+    pub drop_domain_is_contained: i32,
+    /// `m_dMaxDropToSurf`.
+    pub max_drop_to_surf: f64,
+    /// `m_sSolutions`.
+    pub solutions: SolutionArray<O>,
+    /// `m_sUVCurves`: copies of the curves made before the failure.
+    pub uv_curves: Vec<BSplineCurve>,
+    /// `m_bClosedU`.
+    pub closed_u: i32,
+    /// `m_bClosedV`.
+    pub closed_v: i32,
+    /// `m_eSrfClosure`.
+    pub srf_closure: SurfParamType,
+    /// `m_sSrfPolePoints`.
+    pub srf_pole_points: Vec<Point3>,
+    /// `m_sSrfPoleNormals`.
+    pub srf_pole_normals: Vec<Vec3>,
+    /// `m_lSingularities`.
+    pub singularities: u64,
+    /// `m_lApproxSingularities`.
+    pub approx_singularities: u64,
+    /// `m_sCtrlPoly`.
+    pub ctrl_poly: Vec<Point3>,
+    /// `m_sKnots`.
+    pub knots: Vec<f64>,
+    /// `m_pBrep` (kept by [`DropCurveFail::un_init`] and [`DropCurveFail::set`]).
+    pub brep: Option<O>,
+}
+
+/// The arguments of [`DropCurveFail::set`] (`SmDropCurveFail::Set`); the defaults
+/// are upstream's for the optional ones.
+#[derive(Debug, Clone)]
+pub struct DropCurveFailArgs<'a, O> {
+    /// arg 1, `sFailStatus`.
+    pub fail_status: i32,
+    /// arg 2, `lFromCall`.
+    pub from_call: u64,
+    /// arg 3, `eCreatePathType`.
+    pub create_path_type: CreateUvTrimCurvePathType,
+    /// arg 4, `cpContext != NULL`.
+    pub has_context: bool,
+    /// arg 5, `sUVDomain`.
+    pub uv_domain: Extent2d,
+    /// arg 6, `cp3dSurface`.
+    pub surface: Option<O>,
+    /// arg 7, `cp3dCurve`.
+    pub curve: Option<O>,
+    /// arg 8, `sInterval`.
+    pub interval: Extent1d,
+    /// arg 9, `sApproxTol3d`.
+    pub approx_tol_3d: f64,
+    /// arg 10, `dMaxDropToSurfArg`.
+    pub max_drop_to_surf_arg: f64,
+    /// arg 11, `dMaxApproxDev`.
+    pub max_approx_dev: f64,
+    /// arg 12, `pUVCurvesArg`.
+    pub uv_curves_arg: Option<O>,
+    /// arg 13, `bKeepAllDropCurves`.
+    pub keep_all_drop_curves: i32,
+    /// arg 14, `bDegenCurve`.
+    pub degen_curve: i32,
+    /// arg 15, `bDegenSurfU`.
+    pub degen_surf_u: i32,
+    /// arg 16, `bDegenSurfV`.
+    pub degen_surf_v: i32,
+    /// arg 17, `bDropDomainIsContained`.
+    pub drop_domain_is_contained: i32,
+    /// arg 18, `dMaxDropToSurf`.
+    pub max_drop_to_surf: f64,
+    /// arg 19, `bClosedU` (default `UNSURE`).
+    pub closed_u: i32,
+    /// arg 20, `bClosedV` (default `UNSURE`).
+    pub closed_v: i32,
+    /// arg 21, `eSrfClosure` (default `SM_SP_UNKNOWN`).
+    pub srf_closure: SurfParamType,
+    /// arg 22, `pSrfPolePoints` (default `NULL`).
+    pub srf_pole_points: Option<&'a [Point3]>,
+    /// arg 23, `pSrfPoleNormals` (default `NULL`).
+    pub srf_pole_normals: Option<&'a [Vec3]>,
+    /// arg 24, `lSingularities` (default `SM_SS_NONE`).
+    pub singularities: u64,
+    /// arg 25, `lApproxSingularities` (default `SM_SS_NONE`).
+    pub approx_singularities: u64,
+    /// arg 26, `pSolutions` (default `NULL`).
+    pub solutions: Option<&'a SolutionArray<O>>,
+    /// arg 27, `pCtrlPoly` (default `NULL`).
+    pub ctrl_poly: Option<&'a [Point3]>,
+    /// arg 28, `pKnots` (default `NULL`).
+    pub knots: Option<&'a [f64]>,
+    /// arg 29, `pUVCurves` (default `NULL`): copied only with a context.
+    pub uv_curves: Option<&'a [BSplineCurve]>,
+}
+
+impl<O> Default for DropCurveFailArgs<'_, O> {
+    fn default() -> Self {
+        Self {
+            fail_status: SM_ERR_UNKNOWN,
+            from_call: 0,
+            create_path_type: CreateUvTrimCurvePathType::Unknown,
+            has_context: false,
+            uv_domain: Extent2d::new(),
+            surface: None,
+            curve: None,
+            interval: Extent1d::new(),
+            approx_tol_3d: UNDEF_DOUBLE,
+            max_drop_to_surf_arg: UNDEF_DOUBLE,
+            max_approx_dev: UNDEF_DOUBLE,
+            uv_curves_arg: None,
+            keep_all_drop_curves: UNSURE,
+            degen_curve: UNSURE,
+            degen_surf_u: UNSURE,
+            degen_surf_v: UNSURE,
+            drop_domain_is_contained: UNSURE,
+            max_drop_to_surf: -1.0,
+            closed_u: UNSURE,
+            closed_v: UNSURE,
+            srf_closure: SurfParamType::Unknown,
+            srf_pole_points: None,
+            srf_pole_normals: None,
+            singularities: SS_NONE,
+            approx_singularities: SS_NONE,
+            solutions: None,
+            ctrl_poly: None,
+            knots: None,
+            uv_curves: None,
+        }
+    }
+}
+
+impl<O: SolutionObject> Default for DropCurveFail<O> {
+    /// `SmDropCurveFail()`: [`DropCurveFail::un_init`] with no B-rep.
+    fn default() -> Self {
+        let mut s = Self {
+            fail_status: SM_ERR_UNKNOWN,
+            from_call: 0,
+            create_path_type: CreateUvTrimCurvePathType::Unknown,
+            has_context: false,
+            uv_domain: Extent2d::new(),
+            surface: None,
+            curve: None,
+            interval: Extent1d::new(),
+            approx_tol_3d: UNDEF_DOUBLE,
+            max_drop_to_surf_arg: UNDEF_DOUBLE,
+            max_approx_dev: UNDEF_DOUBLE,
+            uv_curves_arg: None,
+            keep_all_drop_curves: 0,
+            degen_curve: 0,
+            degen_surf_u: 0,
+            degen_surf_v: 0,
+            drop_domain_is_contained: 0,
+            max_drop_to_surf: UNDEF_DOUBLE,
+            solutions: SolutionArray::new(),
+            uv_curves: Vec::new(),
+            closed_u: 0,
+            closed_v: 0,
+            srf_closure: SurfParamType::Unknown,
+            srf_pole_points: Vec::new(),
+            srf_pole_normals: Vec::new(),
+            singularities: 0,
+            approx_singularities: 0,
+            ctrl_poly: Vec::new(),
+            knots: Vec::new(),
+            brep: None,
+        };
+        s.un_init();
+        s
+    }
+}
+
+impl<O: SolutionObject> DropCurveFail<O> {
+    /// Resets to the unused state (`UnInit`); the B-rep is kept.
+    pub fn un_init(&mut self) {
+        self.fail_status = SM_ERR_UNKNOWN; // mem 1
+        self.from_call = 0;
+        self.create_path_type = CreateUvTrimCurvePathType::Unknown; // mem 3
+
+        // DropCurve(Input args)
+        self.has_context = false; // mem 4
+        self.uv_domain.init(); // mem 5
+        self.surface = None; // mem 6
+        self.curve = None; // mem 7
+        self.interval.init(); // mem 8
+        self.approx_tol_3d = UNDEF_DOUBLE; // mem 9
+        self.max_drop_to_surf_arg = UNDEF_DOUBLE; // mem 10
+        self.max_approx_dev = UNDEF_DOUBLE; // mem 11
+        self.uv_curves_arg = None; // mem 12
+        self.keep_all_drop_curves = UNSURE; // mem 13
+
+        self.degen_curve = UNSURE; // mem 14
+        self.degen_surf_u = UNSURE; // mem 15
+        self.degen_surf_v = UNSURE; // mem 16
+        self.drop_domain_is_contained = UNSURE; // mem 17
+
+        self.max_drop_to_surf = -1.0; // mem 18
+
+        self.solutions.reset(); // mem 19
+        self.uv_curves.clear(); // mem 20
+
+        self.closed_u = UNSURE; // mem 21
+        self.closed_v = UNSURE; // mem 22
+        self.srf_closure = SurfParamType::Unknown; // mem 23
+        self.srf_pole_points.clear(); // mem 24
+        self.srf_pole_normals.clear(); // mem 25
+
+        self.singularities = SS_NONE; // mem 26
+        self.approx_singularities = SS_NONE; // mem 27
+
+        self.ctrl_poly.clear(); // mem 28
+        self.knots.clear(); // mem 29
+                            // mem 30 - don't clear the Brep pointer
+    }
+
+    /// Whether the record is unused (`IsUnInit`).
+    #[must_use]
+    pub const fn is_un_init(&self) -> bool {
+        self.fail_status == SM_ERR_UNKNOWN
+    }
+
+    /// Records a failure (`Set`): every member from `args`; the arrays are copied
+    /// (the UV curves only with a context); the B-rep is kept.
+    pub fn set(&mut self, args: &DropCurveFailArgs<'_, O>) {
+        self.fail_status = args.fail_status;
+        self.from_call = args.from_call;
+        self.create_path_type = args.create_path_type;
+        // DropCurve(Input args)
+        self.has_context = args.has_context;
+        self.uv_domain = args.uv_domain;
+        self.surface = args.surface;
+        self.curve = args.curve;
+        self.interval = args.interval;
+        self.approx_tol_3d = args.approx_tol_3d;
+        self.max_drop_to_surf_arg = args.max_drop_to_surf_arg;
+        self.max_approx_dev = args.max_approx_dev;
+        self.uv_curves_arg = args.uv_curves_arg;
+        self.keep_all_drop_curves = args.keep_all_drop_curves;
+
+        // DropCurve Degen Geom classification
+        self.degen_curve = args.degen_curve;
+        self.degen_surf_u = args.degen_surf_u;
+        self.degen_surf_v = args.degen_surf_v;
+
+        // DropCurve input Domain check
+        self.drop_domain_is_contained = args.drop_domain_is_contained;
+
+        // DropCurve surface classification
+        self.max_drop_to_surf = args.max_drop_to_surf;
+        self.solutions.reset();
+        if let Some(s) = args.solutions {
+            self.solutions.append(s);
+        }
+        self.uv_curves.clear();
+        if let Some(curves) = args.uv_curves {
+            if args.has_context {
+                self.uv_curves.extend(curves.iter().cloned());
+            }
+        }
+
+        self.closed_u = args.closed_u;
+        self.closed_v = args.closed_v;
+        self.srf_closure = args.srf_closure;
+        self.srf_pole_points.clear();
+        if let Some(p) = args.srf_pole_points {
+            self.srf_pole_points.extend_from_slice(p);
+        }
+        self.srf_pole_normals.clear();
+        if let Some(n) = args.srf_pole_normals {
+            self.srf_pole_normals.extend_from_slice(n);
+        }
+        self.singularities = args.singularities;
+        self.approx_singularities = args.approx_singularities;
+
+        // copy array state
+        self.ctrl_poly.clear();
+        if let Some(c) = args.ctrl_poly {
+            self.ctrl_poly.extend_from_slice(c);
+        }
+        self.knots.clear();
+        if let Some(k) = args.knots {
+            self.knots.extend_from_slice(k);
+        }
+        // mem 30: the Brep must be set explicitly by the caller
+    }
+
+    /// `operator=`: a copy of `other`, whose UV curves are copied only when it has
+    /// a context.
+    pub fn assign(&mut self, other: &Self) {
+        let mut copy = other.clone();
+        if !other.has_context {
+            copy.uv_curves.clear();
+        }
+        *self = copy;
+    }
+}
+
+// ---- standalone surface numerics (smsurf_*) ------------------------------------------------
+
+/// The second derivative of a curve on a surface `S(C(s))` by the chain rule
+/// (`smsurf_LiftSecondDerivative`): `cs`, `css` are the UV curve's first and second
+/// derivatives, the rest the surface's first and second partial derivatives.
+#[must_use]
+pub fn lift_second_derivative(
+    cs: Vec3,
+    css: Vec3,
+    du: Vec3,
+    dv: Vec3,
+    duu: Vec3,
+    duv: Vec3,
+    dvv: Vec3,
+) -> Vec3 {
+    css.x * du + css.y * dv + cs.x * cs.x * duu + 2.0 * cs.x * cs.y * duv + cs.y * cs.y * dvv
+}
+
+/// The third derivative of a curve on a surface `S(C(s))` by the chain rule
+/// (`smsurf_LiftThirdDerivative`).
+#[must_use]
+pub fn lift_third_derivative(
+    cs: Vec3,
+    css: Vec3,
+    csss: Vec3,
+    su: Vec3,
+    sv: Vec3,
+    suu: Vec3,
+    suv: Vec3,
+    svv: Vec3,
+    suuu: Vec3,
+    suuv: Vec3,
+    suvv: Vec3,
+    svvv: Vec3,
+) -> Vec3 {
+    csss.x * su
+        + csss.y * sv
+        + 3.0 * cs.x * css.x * suu
+        + 3.0 * (css.x * cs.y + css.y * cs.x) * suv
+        + 3.0 * cs.y * css.y * svv
+        + cs.x * cs.x * cs.x * suuu
+        + 3.0 * cs.x * cs.x * cs.y * suuv
+        + 3.0 * cs.x * cs.y * cs.y * suvv
+        + cs.y * cs.y * cs.y * svvv
+}
+
+/// Scales STEP derivatives from per-radian to per-degree in the angular parameters
+/// (`smsurf_ScaleSTEPAngularDerivatives`): `derivatives[i * (hv + 1) + j]` (the
+/// derivative `i` times in `u`, `j` times in `v`) is multiplied by
+/// `(PI/180)^(i [u angular] + j [v angular])`; mixed derivatives with
+/// `i + j > min(hu, hv)` are left alone.
+///
+/// # Errors
+///
+/// `InvalidInput` when `derivatives` holds fewer than `(hu + 1) * (hv + 1)` values.
+pub fn scale_step_angular_derivatives(
+    derivatives: &mut [Vec3],
+    highest_u_deriv: usize,
+    highest_v_deriv: usize,
+    u_is_angular: bool,
+    v_is_angular: bool,
+) -> Result<()> {
+    let rad_per_deg = PI / 180.0;
+    let u_scale = if u_is_angular { rad_per_deg } else { 1.0 };
+    let v_scale = if v_is_angular { rad_per_deg } else { 1.0 };
+    let max_mixed_order = highest_u_deriv.min(highest_v_deriv);
+    let mut u_factor = 1.0;
+    for i in 0..=highest_u_deriv {
+        let mut factor = u_factor;
+        for j in 0..=highest_v_deriv {
+            if !(i != 0 && j != 0 && i + j > max_mixed_order) {
+                let d = derivatives.get_mut(i * (highest_v_deriv + 1) + j).ok_or(
+                    SolidError::invalid_input(
+                        "surface::surface::p2::scale_step_angular_derivatives",
+                        "derivative array too short",
+                    ),
+                )?;
+                *d *= factor;
+            }
+            factor *= v_scale;
+        }
+        u_factor *= u_scale;
+    }
+    Ok(())
+}
+
+/// The geometric properties of a surface point ([`evaluate_geometric`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeometricProperties {
+    /// `rdGaussianCurvature`: `K1 * K2`.
+    pub gaussian_curvature: f64,
+    /// `rdNormalCurvature`: the mean curvature `(K1 + K2) / 2`.
+    pub normal_curvature: f64,
+    /// `rdPrincipleCurvature1`: `K1`, the larger principal curvature.
+    pub principle_curvature1: f64,
+    /// `rdPrincipleCurvature2`: `K2`.
+    pub principle_curvature2: f64,
+    /// `rEFGOfFirstFundForm`: `[E, F, G]` of the first fundamental form.
+    pub efg_of_first_fund_form: Vec3,
+    /// `rLMNOfSecondFundForm`: `[L, M, N]` of the second fundamental form.
+    pub lmn_of_second_fund_form: Vec3,
+    /// `rPrincipleCurvatureVector1`: unit tangent in the first principal direction.
+    pub principle_curvature_vector1: Vec3,
+    /// `rPrincipleCurvatureVector2`: unit tangent in the second principal direction.
+    pub principle_curvature_vector2: Vec3,
+}
+
+/// Curvatures, fundamental forms and principal directions from an evaluation
+/// matrix (`smsurf_EvaluateGeometric`): `eval[0][0]` position, `[1][0]` `Du`, `[0][1]`
+/// `Dv`, `[1][1]` `Duv`, `[2][0]` `Duu`, `[0][2]` `Dvv`, and `[2][2]` an optional
+/// normal used where `Du x Dv` vanishes. A vanishing first derivative in `eval` is
+/// replaced by one rebuilt from the other and the normal (in place, as upstream).
+///
+/// # Errors
+///
+/// `SM_ERR` at a singular point (no normal) or where the fundamental forms
+/// degenerate.
+pub fn evaluate_geometric(eval: &mut [[Vec3; 3]; 3]) -> Result<GeometricProperties> {
+    let err = || SolidError::sm_err(OP_GEOM);
+
+    // local parametric surface properties
+    let duv = eval[1][1];
+    let duu = eval[2][0];
+    let dvv = eval[0][2];
+    let mut norm = eval[1][0].cross(eval[0][1]);
+
+    // when parametric surface is singular at point
+    if norm.length_squared() < EFF_ZERO_SQ {
+        // Note that we often store the normal in [2][2]; try that one.
+        norm = eval[2][2];
+        if norm.length_squared() < EFF_ZERO_SQ {
+            return Err(err());
+        }
+    } // end singular surface point check
+
+    // normalize SurfaceNormal
+    norm = norm.unitize()?;
+
+    // If one of the first derivatives is zero - backwards derive what it was after
+    // stepoff by crossing with normal.
+    if eval[1][0].length_squared() < EFF_ZERO_SQ {
+        eval[1][0] = eval[0][1].cross(norm);
+    }
+    if eval[0][1].length_squared() < EFF_ZERO_SQ {
+        eval[0][1] = norm.cross(eval[1][0]);
+    }
+    let du = eval[1][0];
+    let dv = eval[0][1];
+
+    // compute the terms of the 1st and 2nd fundamental forms
+    let e = du.dot(du);
+    let f = du.dot(dv);
+    let g = dv.dot(dv);
+    let l = duu.dot(norm);
+    let m = duv.dot(norm);
+    let n = dvv.dot(norm);
+
+    // get gaussian curvature checking for divide by zero
+    let numer1 = l * n - m * m;
+    let denom1 = e * g - f * f;
+    if denom1.abs() <= EFF_ZERO * numer1.abs() {
+        return Err(err());
+    }
+    let k = numer1 / denom1;
+
+    // get mean curvature checking for divide by zero
+    let numer2 = e * n - 2.0 * f * m + g * l;
+    let denom2 = 2.0 * (e * g - f * f);
+    if denom2.abs() <= EFF_ZERO * numer2.abs() {
+        return Err(err());
+    }
+    let h = numer2 / denom2;
+
+    // compute principal curvature values
+    let mut hhk = h * h - k;
+    if hhk < EFF_ZERO_SQ {
+        // was SM_EFF_ZERO_SQRT, but it's a square
+        hhk = 0.0; // [B16, 091015]
+    }
+    let tmp = sqrt(hhk);
+    let k1 = h + tmp; // K1 is the larger (algebraically) principal curvature
+    let k2 = h - tmp;
+
+    let mut out = GeometricProperties {
+        gaussian_curvature: k,
+        normal_curvature: h,
+        principle_curvature1: k1,
+        principle_curvature2: k2,
+        efg_of_first_fund_form: Vec3::new(e, f, g),
+        lmn_of_second_fund_form: Vec3::new(l, m, n),
+        principle_curvature_vector1: Vec3::UNDEF,
+        principle_curvature_vector2: Vec3::UNDEF,
+    };
+
+    // Note that if the principle curvatures are equal then we have an umbilical point
+    // or a planar point.
+    let scaled_zero = EFF_ZERO_SQRT * (1.0 + k1.abs() + k2.abs());
+    if (k1 - k2).abs() < scaled_zero {
+        // For umbilical take any two orthoginal vectors.
+        let v1 = du.unitize()?;
+        let v2 = v1.cross(dv).cross(v1).unitize()?; // orthoganilize
+        out.principle_curvature_vector1 = v1;
+        out.principle_curvature_vector2 = v2;
+        return Ok(out);
+    }
+
+    // Solve for V = v1*du + v2*dv holding v1 = 1
+    let coeff = [e * m - f * l, e * n - g * l, f * n - g * m];
+    let ans = solve_quadratic(&coeff, EFF_ZERO);
+    let (mut v1, mut v2);
+    if ans.is_empty() {
+        // Have some sort of bad matrix values. Just take any two perpendicular vectors
+        // in the tangent plane. In case one was (near) zero, use the larger:
+        if du.max_dimension() > dv.max_dimension() {
+            v1 = du;
+            v2 = norm.cross(v1);
+        } else {
+            v1 = dv;
+            v2 = v1.cross(norm);
+        }
+    } else {
+        let a0 = ans.first().copied().ok_or_else(err)?;
+        v1 = du + a0 * dv;
+        if v1.length_squared() < EFF_ZERO_SQ {
+            v1 = du;
+        }
+        v2 = norm.cross(v1);
+    }
+
+    // Pair each direction with its curvature by measuring the normal curvature along
+    // v1 directly.
+    {
+        let w = v1;
+        let wu = w.dot(du);
+        let wv = w.dot(dv);
+        let a = (g * wu - f * wv) / denom1; // dDenom1 = E*G - F*F, checked non-zero above
+        let b = (-f * wu + e * wv) / denom1;
+        let i = e * a * a + 2.0 * f * a * b + g * b * b;
+        if i > EFF_ZERO_SQ {
+            let kn1 = (l * a * a + 2.0 * m * a * b + n * b * b) / i;
+            if (kn1 - k2).abs() < (kn1 - k1).abs() {
+                core::mem::swap(&mut v1, &mut v2);
+            }
+        }
+    }
+
+    if v1.length_squared() > EFF_ZERO_SQ {
+        v1 = v1.unitize()?;
+    }
+    if v2.length_squared() > EFF_ZERO_SQ {
+        v2 = v2.unitize()?;
+    }
+
+    let norm_tmp = v1.cross(v2);
+    if norm_tmp.dot(norm) < 0.0 {
+        v2 = -v2;
+    }
+
+    out.principle_curvature_vector1 = v1;
+    out.principle_curvature_vector2 = v2;
+    Ok(out)
+}
+
+/// The shape of a surface at a point (`SmLocalSurfaceType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalSurfaceType {
+    /// `SM_LS_PLANAR`: both iso-parameter curves are planar.
+    Planar = 0,
+    /// `SM_LS_ELLIPTICAL`: both bend the same way (a bowl or hill).
+    Elliptical = 1,
+    /// `SM_LS_HYPERBOLIC`: they bend in different directions (a saddle).
+    Hyperbolic = 2,
+    /// `SM_LS_CYLINDRICAL`: only one of them is planar.
+    Cylindrical = 3,
+}
+
+/// The side of the tangent plane an iso-parameter curve bends to
+/// (`SmSurfaceSideType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceSideType {
+    /// `SM_SS_ON`: in the plane perpendicular to the normal.
+    On = 0,
+    /// `SM_SS_ABOVE`: bends towards the normal.
+    Above = 1,
+    /// `SM_SS_BELOW`: bends away from the normal.
+    Below = 2,
+}
+
+impl SurfaceSideType {
+    /// The enumerator of an upstream value, `None` outside the enum.
+    #[must_use]
+    pub const fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::On,
+            1 => Self::Above,
+            2 => Self::Below,
+            _ => return None,
+        })
+    }
+}
+
+/// Classifies a surface point from its normal and second derivatives
+/// (`smsurf_ComputeSurfacePointType`). The `u` classification is written to
+/// `side_uu`; `want_side_vv` (`pOptSurfSideDVV !=
+/// NULL`) only redirects the `v` side there, the `v` output is never written. (Upstream
+/// crashes when the `v` side is requested without the `u` side; nothing is written
+/// then.)
+#[must_use]
+pub fn compute_surface_point_type(
+    normal: Vec3,
+    duu: Vec3,
+    dvv: Vec3,
+    side_uu: Option<&mut SurfaceSideType>,
+    want_side_vv: bool,
+) -> LocalSurfaceType {
+    // let tol = 10 * EFF_ZERO * (1+vector lengths)
+    let tol = EFF_ZERO_SQRT * 10.0 * (1.0 + normal.length() + duu.length() + dvv.length());
+
+    let dot_uu = normal.dot(duu);
+    let dot_vv = normal.dot(dvv);
+
+    let classify = |d: f64| {
+        if d.abs() < tol {
+            SurfaceSideType::On
+        } else if d >= tol {
+            SurfaceSideType::Above
+        } else {
+            SurfaceSideType::Below
+        }
+    };
+    let surf_side_duu = classify(dot_uu);
+    let surf_side_dvv = classify(dot_vv);
+
+    // set outputs
+    let mut side_uu = side_uu;
+    if let Some(s) = side_uu.as_deref_mut() {
+        *s = surf_side_duu;
+    }
+    if want_side_vv {
+        if let Some(s) = side_uu {
+            *s = surf_side_dvv;
+        }
+    }
+
+    if surf_side_duu == SurfaceSideType::On && surf_side_dvv == SurfaceSideType::On {
+        LocalSurfaceType::Planar
+    } else if surf_side_duu == SurfaceSideType::On || surf_side_dvv == SurfaceSideType::On {
+        LocalSurfaceType::Cylindrical
+    } else if surf_side_duu == surf_side_dvv {
+        LocalSurfaceType::Elliptical
+    } else {
+        LocalSurfaceType::Hyperbolic
+    }
+}
+
+/// The UV components of `vectors` in the tangent plane spanned by `du` and `dv`
+/// (`smsurf_DropVectors`): `vec ~ u * du + v * dv`. Zero tangents give zero
+/// components; tangents shorter than `sqrt(SM_EFF_ZERO)` are unitised for the
+/// fallback projection.
+///
+/// # Errors
+///
+/// `SM_ERR` when the tangents are parallel or the projected equations are singular.
+pub fn drop_vectors(du: Vec3, dv: Vec3, vectors: &[Vec3]) -> Result<Vec<Vec2>> {
+    let zero = Vec2::new(0.0, 0.0);
+    let mut sdu = du;
+    let mut sdv = dv;
+
+    // check state - surface tangents must be nonZero
+    let du_length_sq = sdu.length_squared();
+    let dv_length_sq = sdv.length_squared();
+    if du_length_sq < EFF_ZERO_SQ || dv_length_sq < EFF_ZERO_SQ {
+        return Ok(vec![zero; vectors.len()]);
+    }
+
+    // unitize short tangent vectors (probably near singularities)
+    if du_length_sq < EFF_ZERO {
+        sdu = sdu.unitize_or_z();
+    }
+    if dv_length_sq < EFF_ZERO {
+        sdv = sdv.unitize_or_z();
+    }
+    let norm = sdu.cross(sdv);
+
+    // normalize the normal vector to make stable calculations near singularity cases
+    if norm.length_squared() < EFF_ZERO_SQ {
+        return Err(SolidError::sm_err(OP_DROP));
+    }
+    let norm = norm.unitize_or_z();
+
+    // First, in regular cases, write the vector as a linear combination of the basis.
+    let mut out = vec![zero; vectors.len()];
+    let mut ok = false;
+    for (slot, &vec) in out.iter_mut().zip(vectors) {
+        match vec_lin_comb_two_vectors(du, dv, vec) {
+            Ok(uv) => {
+                *slot = uv;
+                ok = true;
+            }
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if ok {
+        return Ok(out);
+    }
+
+    // Linear combination didn't work: project to plane, using unitized basis vectors.
+    let mut plane = Axis2Placement::default();
+    let orig = Vec3::new(0.0, 0.0, 0.0);
+    let _ = plane.set_step_canonical(orig, norm, sdu);
+
+    // for every vector being dropped
+    for (slot, &vec) in out.iter_mut().zip(vectors) {
+        // If drop vector is zero, then its projection is zero.
+        if vec.length_squared() < EFF_ZERO_SQ {
+            *slot = zero;
+            continue;
+        }
+
+        // get in-plane 2d vectors for the sDU and sDV surface tangent vectors.
+        let du_2d = plane_drop_point(&plane, sdu);
+        let dv_2d = plane_drop_point(&plane, sdv);
+        let vec_2d = plane_drop_point(&plane, vec);
+        let eq1 = Vec3::new(du_2d.x, dv_2d.x, vec_2d.x);
+        let eq2 = Vec3::new(du_2d.y, dv_2d.y, vec_2d.y);
+        let sol = eq1
+            .solve_two_linear_equations(eq2)
+            .map_err(|_| SolidError::sm_err(OP_DROP))?;
+        *slot = Vec2::new(sol.x, sol.y);
+    }
+
+    Ok(out)
+}
+
+// ---- file-static helpers -------------------------------------------------------------------
+
+/// `sm_ConvertToParameterDelta`: the parameter step along a curve with tangent
+/// `tangent` that moves by the projection of `delta` on it (`0` for a zero tangent).
+#[must_use]
+pub fn convert_to_parameter_delta(tangent: Vec3, delta: Vec3) -> f64 {
+    let tan_len = tangent.length();
+    if tan_len < EFF_ZERO {
+        return 0.0;
+    }
+    let unit_tan = tangent / tan_len;
+    let dot = unit_tan.dot(delta);
+    dot / tan_len
+}
+
+/// `sm_MergeDoubleArrays`: merges two increasing sequences into one, values within
+/// their scaled zero (`SM_ARE_SAME`) merged. When neither array is empty, the merge
+/// stops as soon as one of them is exhausted (upstream drops the rest of the other).
+#[must_use]
+pub fn merge_double_arrays(params1: &[f64], params2: &[f64]) -> Vec<f64> {
+    // low work - one or both of the arrays is empty
+    if params1.is_empty() {
+        return params2.to_vec();
+    }
+    if params2.is_empty() {
+        return params1.to_vec();
+    }
+
+    let mut out = Vec::with_capacity(params1.len() + params2.len());
+    let mut i1 = 0;
+    let mut i2 = 0;
+    while let (Some(&p1), Some(&p2)) = (params1.get(i1), params2.get(i2)) {
+        // values within SM_EFF_ZERO of one another are merged into one
+        if are_same(p1, p2) {
+            out.push(p1);
+            i1 += 1;
+            i2 += 1;
+        }
+        // else add next smallest value to output
+        else if p1 < p2 {
+            out.push(p1);
+            i1 += 1;
+        } else {
+            out.push(p2);
+            i2 += 1;
+        }
+    }
+    out
+}
+
+/// `s_MapUV`: `(u, v)` mirrored in the unit square along the directions with
+/// negative `dir_u` / `dir_v`, then swapped for [`OrientType::Opposite`].
+#[must_use]
+pub fn map_uv(u: f64, v: f64, orient: OrientType, dir_u: f64, dir_v: f64) -> Point2 {
+    let mut ret = Point2::new(u, v);
+    if dir_u < 0.0 {
+        ret.x = 1.0 - ret.x;
+    }
+    if dir_v < 0.0 {
+        ret.y = 1.0 - ret.y;
+    }
+    if orient == OrientType::Opposite {
+        ret = ret.swap_xy();
+    }
+    ret
+}
+
+/// `s_IsEven`.
+#[must_use]
+pub const fn is_even(num: i32) -> bool {
+    (num / 2) * 2 == num
+}
+
+/// `sm_SetUpBreaks`: trims `breaks` to the values inside `ivl` and makes it start at
+/// `ivl.min()` and end at `ivl.max()` (adding them when farther than
+/// `SM_EFF_ZERO_SQRT`).
+///
+/// # Errors
+///
+/// `InvalidInput` for empty `breaks` (upstream reads past the array).
+pub fn set_up_breaks(breaks: &mut Vec<f64>, ivl: &Extent1d) -> Result<()> {
+    let empty = || SolidError::invalid_input(OP_BREAKS, "empty break array");
+    loop {
+        let first = *breaks.first().ok_or_else(empty)?;
+        if ivl.contains_value(first, 0.0) {
+            break;
+        }
+        breaks.remove(0);
+        if breaks.is_empty() {
+            breaks.push(ivl.min());
+            break;
+        }
+    }
+    let first = *breaks.first().ok_or_else(empty)?;
+    if (first - ivl.min()).abs() > EFF_ZERO_SQRT {
+        breaks.insert(0, ivl.min());
+    }
+
+    loop {
+        let last = *breaks.last().ok_or_else(empty)?;
+        if ivl.contains_value(last, 0.0) {
+            break;
+        }
+        breaks.pop();
+        if breaks.len() == 1 {
+            break;
+        }
+    }
+    let last = *breaks.last().ok_or_else(empty)?;
+    if (last - ivl.max()).abs() > EFF_ZERO_SQRT {
+        breaks.push(ivl.max());
+    }
+    Ok(())
+}
+
+/// Inserts `t` into the sorted `split_params` unless a value within `tol` is there.
+fn insert_split(split_params: &mut Vec<f64>, t: f64, tol: f64) {
+    let mut insert_index = split_params.len();
+    let mut split = true;
+    for (jj, &p) in split_params.iter().enumerate() {
+        if (t - p).abs() < tol {
+            split = false;
+            break;
+        } else if t < p {
+            insert_index = jj;
+            break;
+        }
+    }
+    if split {
+        split_params.insert(insert_index, t);
+    }
+}
+
+/// `sm_IntersectAndSplit`: adds the parameters where `uv_curve` over `interval`
+/// crosses the plane through `plane_pnt` with normal `plane_norm` to the sorted
+/// `split_params` (skipping values within `SM_EFF_ZERO_SQRT` of one there).
+///
+/// # Errors
+///
+/// Those of `SmCurve::GlobalPropertyAnalysis`.
+pub fn intersect_and_split<O: SolutionObject>(
+    k: &Kernel,
+    uv_curve: &Curve,
+    interval: &Extent1d,
+    plane_pnt: Point3,
+    plane_norm: Vec3,
+    split_params: &mut Vec<f64>,
+) -> Result<()> {
+    let plane_d = -plane_norm.dot(plane_pnt);
+    let vectors = [plane_norm];
+    let analysis = uv_curve.global_property_analysis::<O>(
+        k,
+        interval,
+        CurvePropertyType::PlaneIntersection,
+        EFF_ZERO_SQRT,
+        &PropertyAnalysisOptions {
+            property_value: Some(plane_d),
+            opt_vectors: &vectors,
+            want_comb: false,
+            handle: None,
+        },
+    )?;
+
+    for sol in analysis.solutions.as_slice() {
+        insert_split(split_params, sol.start.parameters[0], EFF_ZERO_SQRT);
+    } // end for all solutions
+    Ok(())
+}
+
+/// `sm_IntersectCurveAndSplit`: adds the parameters where `uv_curve` over `interval`
+/// crosses `line` over `line_interval` (2D intersections at distance `scaled_zero`)
+/// to the sorted `split_params` (skipping values within `SM_EFF_ZERO_PARAM` of one
+/// there).
+///
+/// # Errors
+///
+/// Those of `SmCurve::GlobalCurveIntersect`.
+pub fn intersect_curve_and_split<O: SolutionObject>(
+    k: &Kernel,
+    uv_curve: &Curve,
+    interval: &Extent1d,
+    line: &Line,
+    line_interval: &Extent1d,
+    scaled_zero: f64,
+    split_params: &mut Vec<f64>,
+) -> Result<()> {
+    let line = Curve::from(line.clone());
+    // Find UVCurve/Line 2d XSects
+    let sols = uv_curve.global_curve_intersect::<O>(
+        k,
+        interval,
+        &line,
+        line_interval,
+        scaled_zero,
+        &CurveIntersectOptions::default(),
+    )?;
+
+    // for every solution - sort new solutions into rSplitParameters
+    for sol in sols.as_slice() {
+        insert_split(split_params, sol.start.parameters[0], eff_zero_param());
+    } // end for all solutions
+    Ok(())
+}
+
+/// `sm_CCLocalSolve`: the extrema of the distance between `curve1` over `interval1`
+/// and `curve2` over `interval2` (`op` is [`SolverOperation::Minimize`] or
+/// `Maximize`): the end points with position discontinuities (`conts[0] <= C0` at
+/// the start, `<= DISCONTINUOUS` at the end) solved against the other curve, then a
+/// curve/curve solve from the interval midpoints. Each solution has two variables
+/// (the parameters on `curve1` and `curve2`).
+///
+/// # Errors
+///
+/// Those of the evaluations and local solves.
+pub fn cc_local_solve<O: SolutionObject>(
+    curve1: &Curve,
+    interval1: &Extent1d,
+    conts1: [ContinuityType; 2],
+    curve2: &Curve,
+    interval2: &Extent1d,
+    conts2: [ContinuityType; 2],
+    op: SolverOperation,
+    tol_3d: f64,
+) -> Result<SolutionArray<O>> {
+    let mut solutions = SolutionArray::new();
+    let no_opts = PointSolveOptions::default();
+    let c0 = ContinuityType::C0 as i32;
+    let discontinuous = ContinuityType::Discontinuous as i32;
+    let set_param = |s: &mut Solution<O>, i: usize, v: f64| -> Result<()> {
+        *s.start.param_mut(i)? = v;
+        Ok(())
+    };
+
+    // If we have a total discontinuity (i.e. end of curve) then we always test.  If we
+    // have a derivative discontinuity then we just test the ones on the left side.
+    if (conts1[0] as i32) <= c0 {
+        let pnt = curve1.evaluate_point(interval1.min())?;
+        let (found, mut sol) =
+            curve2.local_point_solve::<O>(interval2, op, pnt, &no_opts, interval2.evaluate(0.5))?;
+        if found {
+            sol.num_variables = 2;
+            let p0 = sol.start.param(0)?;
+            set_param(&mut sol, 1, p0)?;
+            set_param(&mut sol, 0, interval1.min())?;
+            solutions.add(&sol);
+        }
+    }
+    if (conts1[1] as i32) <= discontinuous {
+        let pnt = curve1.evaluate_point(interval1.max())?;
+        let (found, mut sol) =
+            curve2.local_point_solve::<O>(interval2, op, pnt, &no_opts, interval2.evaluate(0.5))?;
+        if found {
+            sol.num_variables = 2;
+            let p0 = sol.start.param(0)?;
+            set_param(&mut sol, 1, p0)?;
+            set_param(&mut sol, 0, interval1.max())?;
+            solutions.add(&sol);
+        }
+    }
+    if (conts2[0] as i32) <= c0 {
+        let pnt = curve2.evaluate_point(interval2.min())?;
+        let (found, mut sol) =
+            curve1.local_point_solve::<O>(interval1, op, pnt, &no_opts, interval1.evaluate(0.5))?;
+        if found {
+            sol.num_variables = 2;
+            set_param(&mut sol, 1, interval2.min())?;
+            solutions.add(&sol);
+        }
+    }
+    if (conts2[1] as i32) <= discontinuous {
+        let pnt = curve2.evaluate_point(interval2.max())?;
+        let (found, mut sol) =
+            curve1.local_point_solve::<O>(interval1, op, pnt, &no_opts, interval1.evaluate(0.5))?;
+        if found {
+            sol.num_variables = 2;
+            set_param(&mut sol, 1, interval2.max())?;
+            solutions.add(&sol);
+        }
+    }
+
+    // Take midpoint of interval for guess.
+    let guess1 = interval1.evaluate(0.5);
+    let guess2 = interval2.evaluate(0.5);
+    let (found, mut sol) = curve1.local_curve_solve::<O>(
+        interval1,
+        curve2,
+        interval2,
+        op,
+        tol_3d,
+        None,
+        None,
+        [guess1, guess2],
+        [None, None],
+    )?;
+    if found {
+        sol.num_variables = 2;
+        solutions.add(&sol);
+    }
+    Ok(solutions)
+}
+
+/// `sm_CsArePerpenDisjoint`: true when no line from the curve node's span to the
+/// surface node's Bezier patch can be perpendicular to both (the patch's normal
+/// cone and the span's tangent cone are disjoint from the cone between the boxes).
+///
+/// # Errors
+///
+/// Those of `SmExtent3d::ComputeConeBoundTo`; [`SolidError::Unported`] once the
+/// patch's polar box is needed (`SmBezierPatch`, `surface.surface_cache_p1`).
+pub fn cs_are_perpen_disjoint<O>(
+    curve_tree: &Tree<O>,
+    curve_node: &TreeNode<O>,
+    surface_node: &TreeNode<O>,
+) -> Result<bool> {
+    // Surface node has a polar box
+    if surface_node.aux_type == AuxDataType::BezierSurface
+        || surface_node.aux_type == AuxDataType::BezierSurfaceHead
+    {
+        let (cone_vec, cone_angle_rad) = surface_node.bbox.cone_bound_to(&curve_node.bbox)?;
+        if cone_angle_rad > PI / 2.0 {
+            return Ok(false);
+        }
+
+        // UNPORTED(surface.surface_cache_p1): SmBezierPatch::GetPolarBox
+        // (then IsDisjointWithCone, and for a curve span node the chord cone test
+        // smgu_ConesAreDisjointPerpen with the span's turning angle plus 3 degrees)
+        let _ = (curve_tree, cone_vec);
+        return Err(SolidError::unported(
+            "SmBezierPatch::GetPolarBox",
+            "surface.surface_cache_p1",
+        ));
+    }
+
+    // node does not have a polar box to check
+    Ok(false)
+}
+
+// ---- SmLSIGlobalSolver ------------------------------------------------------------------------
+
+/// The line/surface intersection global solver (`SmLSIGlobalSolver`): one tree (the
+/// surface cache tree), solutions `[line t, surface u, surface v]`.
+#[derive(Debug, Clone)]
+pub struct LsiGlobalSolver<'t, 's, O> {
+    /// The `SmGlobalSolver` state.
+    pub base: GlobalSolver<'t, O>,
+    /// `m_pSurf`: the surface being solved for.
+    pub surface: Option<&'s Surface>,
+    /// `m_crUVDomain`: the intersection domain.
+    pub uv_domain: Extent2d,
+    /// `m_vLinePoint`.
+    pub line_point: Point3,
+    /// `m_vLineVector`.
+    pub line_vector: Vec3,
+    /// `m_cpLineInterval`: the line interval, if any.
+    pub line_interval: Option<Extent1d>,
+    /// `m_bRayFire`: skip intersections at negative line parameters.
+    pub ray_fire: bool,
+    /// `m_dDistanceTolerance`: smallest distance between distinct points.
+    pub distance_tolerance: f64,
+}
+
+impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
+    /// `BranchMayContainAnswers`: false when the line provably misses the bounding
+    /// sphere (or, with an interval or ray, its part of the line) or the box of the
+    /// surface node `branch[0]`, grown by the distance tolerance.
+    ///
+    /// # Errors
+    ///
+    /// Those of the branch lookup and of `SmExtent3d::IntersectLine` (a zero line
+    /// vector or an undefined box; upstream then reads an uninitialised count).
+    pub fn may_contain_answers(&self, branch: &Branch) -> Result<bool> {
+        let surface_node = self.base.branch_node(branch, 0)?;
+
+        // compute SphereBound Radius for SurfaceNode with tolerance
+        let surf_box = &surface_node.bbox;
+        let sphere = surf_box.sphere_bound();
+        let sph_center = sphere.center;
+        let sph_radius = sphere.radius;
+        let min_radius = sphere.min_radius;
+        let tol = self.distance_tolerance;
+        let rad_dist_sq = (sph_radius + tol) * (sph_radius + tol);
+
+        // get Line/SphereCenter minimum distance
+        let line_param = line_closest_point(self.line_point, self.line_vector, sph_center);
+        let point_on_line = self.line_point + line_param * self.line_vector;
+        let dist_to_line_sq = point_on_line.distance_squared(sph_center);
+
+        // when the Line is outside the SphereBound - No Answers possible
+        if dist_to_line_sq > rad_dist_sq {
+            return Ok(false);
+        }
+
+        // For RayFiring - and sphere is behind rayStartPoint
+        if self.ray_fire && line_param < 0.0 {
+            // and rayStart is outside of the sphereBound
+            let dist_to_start_sq = self.line_point.distance_squared(sph_center);
+            if dist_to_start_sq > rad_dist_sq {
+                return Ok(false);
+            }
+        }
+
+        // when given a line interval
+        if let Some(ivl) = &self.line_interval {
+            // If sphere is below line interval
+            if line_param < ivl.min() {
+                let start_pt = self.line_point + ivl.min() * self.line_vector;
+                if start_pt.distance_squared(sph_center) > rad_dist_sq {
+                    return Ok(false);
+                }
+            }
+
+            // if sphere is above line interval
+            if line_param > ivl.max() {
+                let end_pt = self.line_point + ivl.max() * self.line_vector;
+                if end_pt.distance_squared(sph_center) > rad_dist_sq {
+                    return Ok(false);
+                }
+            }
+        }
+
+        // check linePoint bounding box intersections
+        if dist_to_line_sq <= (min_radius + tol) * (min_radius + tol)
+            || surf_box.contains_point(point_on_line, tol)
+        {
+            Ok(true)
+        } else {
+            // check lineVector for bounding box intersections
+            let hit = surf_box.intersect_line(point_on_line, self.line_vector)?;
+            Ok(hit.count() > 0)
+        }
+    }
+}
+
+impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for LsiGlobalSolver<'t, '_, O> {
+    fn solver(&self) -> &GlobalSolver<'t, O> {
+        &self.base
+    }
+
+    fn solver_mut(&mut self) -> &mut GlobalSolver<'t, O> {
+        &mut self.base
+    }
+
+    fn branch_may_contain_answers(&mut self, branch: &Branch) -> Result<bool> {
+        self.may_contain_answers(branch)
+    }
+
+    fn local_solve(&mut self, _branch: &Branch) -> Result<bool> {
+        // UNPORTED(surface.surface_p10): SmLSIGlobalSolver::LocalSolve
+        Err(SolidError::unported(
+            "SmLSIGlobalSolver::LocalSolve",
+            "surface.surface_p10",
+        ))
+    }
+
+    fn identical_solutions(
+        &self,
+        _sol1: &Solution<O>,
+        _sol2: &Solution<O>,
+    ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
+        // UNPORTED(surface.surface_p5): SmLSIGlobalSolver::IdenticalSolutions
+        Err(SolidError::unported(
+            "SmLSIGlobalSolver::IdenticalSolutions",
+            "surface.surface_p5",
+        ))
+    }
+}
+
+// ---- SmIsoCurveLengthIFEO -----------------------------------------------------------------------
+
+/// The integrand of the length of a `u` iso-parameter curve (`SmIsoCurveLengthIFEO`,
+/// used for surface areas). Its `Evaluate` belongs to unit `surface.surface_p1`.
+#[derive(Debug, Clone, Copy)]
+pub struct IsoCurveLengthIntegrand<'s> {
+    /// `m_crSurface`.
+    pub surface: &'s Surface,
+    /// `m_dUIsoValue`.
+    pub u_iso_value: f64,
+}
+
+impl<'s> IsoCurveLengthIntegrand<'s> {
+    /// `SmIsoCurveLengthIFEO(crSurface, dUIsoValue)`.
+    #[must_use]
+    pub const fn new(surface: &'s Surface, u_iso_value: f64) -> Self {
+        Self {
+            surface,
+            u_iso_value,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::tree::NodeId;
+    use crate::geom::vector2d::Vec2;
+
+    fn bilinear() -> Surface {
+        Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(2.0, 3.0, 1.0),
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn merge_drops_tail() {
+        assert_eq!(merge_double_arrays(&[], &[1.0, 2.0]), vec![1.0, 2.0]);
+        assert_eq!(merge_double_arrays(&[1.0], &[]), vec![1.0]);
+        // upstream stops when one array is exhausted
+        assert_eq!(
+            merge_double_arrays(&[0.0, 1.0], &[1.0, 2.0, 3.0]),
+            vec![0.0, 1.0]
+        );
+        assert_eq!(merge_double_arrays(&[0.5], &[0.0, 1.0]), vec![0.0, 0.5]);
+    }
+
+    #[test]
+    fn set_up_breaks_clamps() {
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let mut b = vec![-1.0, 0.5, 2.0];
+        set_up_breaks(&mut b, &ivl).unwrap();
+        assert_eq!(b, vec![0.0, 0.5, 1.0]);
+        let mut b = vec![5.0, 6.0];
+        set_up_breaks(&mut b, &ivl).unwrap();
+        assert_eq!(b, vec![0.0, 1.0]);
+        assert!(set_up_breaks(&mut Vec::new(), &ivl).is_err());
+    }
+
+    #[test]
+    fn small_helpers() {
+        assert!(is_even(4) && !is_even(3) && is_even(-2) && !is_even(-3));
+        let p = map_uv(0.25, 0.5, OrientType::Opposite, -1.0, 1.0);
+        assert_eq!(p, Vec2::new(0.5, 0.75));
+        assert_eq!(convert_to_parameter_delta(Vec3::ZERO, Vec3::X), 0.0);
+        assert_eq!(convert_to_parameter_delta(2.0 * Vec3::X, Vec3::X), 0.5);
+        assert!(derivative_limit(Vec3::new(1.0, -3.0, 2.0)) > 0.0);
+        assert_eq!(normal_limit(), 1.0e-8);
+    }
+
+    #[test]
+    fn lift_matches_chain_rule_for_linear_curve() {
+        let z = Vec3::ZERO;
+        let d =
+            lift_second_derivative(Vec3::new(1.0, 0.0, 0.0), z, Vec3::X, Vec3::Y, Vec3::Z, z, z);
+        assert_eq!(d, Vec3::Z);
+        let t = lift_third_derivative(
+            Vec3::new(1.0, 1.0, 0.0),
+            z,
+            z,
+            z,
+            z,
+            z,
+            z,
+            z,
+            Vec3::X,
+            z,
+            z,
+            Vec3::Y,
+        );
+        assert_eq!(t, Vec3::new(1.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn scale_step_derivatives() {
+        let mut d = vec![Vec3::new(1.0, 1.0, 1.0); 4];
+        scale_step_angular_derivatives(&mut d, 1, 1, true, false).unwrap();
+        let s = PI / 180.0;
+        assert_eq!(d[0], Vec3::new(1.0, 1.0, 1.0));
+        assert_eq!(d[2], Vec3::new(s, s, s));
+        // mixed order 2 > min(1, 1): untouched
+        assert_eq!(d[3], Vec3::new(1.0, 1.0, 1.0));
+        assert!(scale_step_angular_derivatives(&mut d, 2, 2, true, true).is_err());
+    }
+
+    #[test]
+    fn geometric_properties_of_cylinder_point() {
+        // cylinder of radius 2 about z: S(u,v) = (2cos u, 2sin u, v) at u = 0
+        let mut e = [[Vec3::UNDEF; 3]; 3];
+        e[0][0] = Vec3::new(2.0, 0.0, 0.0);
+        e[1][0] = Vec3::new(0.0, 2.0, 0.0);
+        e[0][1] = Vec3::Z;
+        e[1][1] = Vec3::ZERO;
+        e[2][0] = Vec3::new(-2.0, 0.0, 0.0);
+        e[0][2] = Vec3::ZERO;
+        let g = evaluate_geometric(&mut e).unwrap();
+        assert!(g.gaussian_curvature.abs() < 1e-12);
+        let ks = [g.principle_curvature1, g.principle_curvature2];
+        assert!(ks.iter().any(|k| (k.abs() - 0.5).abs() < 1e-12));
+        // singular without normal
+        let mut s = [[Vec3::ZERO; 3]; 3];
+        assert!(evaluate_geometric(&mut s).is_err());
+    }
+
+    /// `TestSmPrincipalDirectionPairing` (`SM_API_test`, `TestSmGeneral.cpp`): curvatures 1
+    /// and 0 with directions (5,-12,0)/13 and (12,5,0)/13 on a skewed UV frame.
+    #[test]
+    fn principal_direction_pairing() {
+        let mut e = [[Vec3::ZERO; 3]; 3];
+        e[1][0] = Vec3::new(1.0, 0.0, 0.0);
+        e[0][1] = Vec3::new(1.0, 1.0, 0.0);
+        e[2][0] = Vec3::new(0.0, 0.0, 25.0 / 169.0);
+        e[1][1] = Vec3::new(0.0, 0.0, -35.0 / 169.0);
+        e[0][2] = Vec3::new(0.0, 0.0, 49.0 / 169.0);
+        let g = evaluate_geometric(&mut e).unwrap();
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-12;
+        assert!(close(g.gaussian_curvature, 0.0) && close(g.normal_curvature, 0.5));
+        assert!(close(g.principle_curvature1, 1.0) && close(g.principle_curvature2, 0.0));
+        let same = |a: Vec3, b: Vec3| (a.dot(b).abs() - 1.0).abs() <= 1e-12;
+        assert!(same(
+            g.principle_curvature_vector1,
+            Vec3::new(5.0 / 13.0, -12.0 / 13.0, 0.0)
+        ));
+        assert!(same(
+            g.principle_curvature_vector2,
+            Vec3::new(12.0 / 13.0, 5.0 / 13.0, 0.0)
+        ));
+        assert!(close(
+            g.principle_curvature_vector1
+                .cross(g.principle_curvature_vector2)
+                .z,
+            1.0
+        ));
+    }
+
+    #[test]
+    fn point_type_keeps_upstream_bug() {
+        let mut uu = SurfaceSideType::On;
+        let t = compute_surface_point_type(Vec3::Z, Vec3::Z, -Vec3::Z, Some(&mut uu), true);
+        assert_eq!(t, LocalSurfaceType::Hyperbolic);
+        assert_eq!(uu, SurfaceSideType::Below);
+        let t = compute_surface_point_type(Vec3::Z, Vec3::Z, Vec3::X, Some(&mut uu), false);
+        assert_eq!(t, LocalSurfaceType::Cylindrical);
+        assert_eq!(uu, SurfaceSideType::Above);
+    }
+
+    #[test]
+    fn drop_vectors_basis() {
+        let r = drop_vectors(Vec3::X, 2.0 * Vec3::Y, &[Vec3::new(3.0, 4.0, 5.0)]).unwrap();
+        assert_eq!(r, vec![Vec2::new(3.0, 2.0)]);
+        let r = drop_vectors(Vec3::ZERO, Vec3::Y, &[Vec3::X, Vec3::Y]).unwrap();
+        assert_eq!(r, vec![Vec2::new(0.0, 0.0); 2]);
+        assert!(drop_vectors(Vec3::X, 2.0 * Vec3::X, &[Vec3::Y]).is_err());
+    }
+
+    #[test]
+    fn surface_dispatch() {
+        let mut s = bilinear();
+        assert_eq!(s.type_code(), B_SPLINE_SURFACE_TYPE);
+        assert!(s.is_kind_of(TYPE).unwrap());
+        assert!(s.owner().is_none());
+        let d = s.natural_uv_domain();
+        assert_eq!(s.step_uv_domain().min(), d.min());
+        assert_eq!(s.degree(SurfParamType::U), 1);
+        let p = s.evaluate_point(Point2::new(1.0, 1.0)).unwrap();
+        assert!((p - Vec3::new(2.0, 3.0, 1.0)).length() < 1e-12);
+        let ev = s
+            .evaluate(Point2::new(0.5, 0.5), 1, 1, EvaluateFlags::default())
+            .unwrap();
+        assert_eq!(ev.len(), 2);
+        assert!(s
+            .drop_point_fast::<ObjectRef2>(
+                &d,
+                SolverOperation::Minimize,
+                Vec3::ZERO,
+                None,
+                0.0,
+                None,
+                SolutionRequested::All
+            )
+            .is_err());
+        s.swap_uv().unwrap();
+        let (a, b) = s.split_at(0.5, SurfParamType::U).unwrap();
+        assert!(a.natural_uv_domain().u_max() <= 0.5 + 1e-12);
+        assert!(b.natural_uv_domain().u_min() >= 0.5 - 1e-12);
+        assert_eq!(
+            s.convert_uv_from_step_to_nurbs(Point2::new(0.1, 0.2)),
+            Point2::new(0.1, 0.2)
+        );
+        assert!(base_copy().is_err());
+        assert_eq!(base_degree(), 1001);
+        assert_eq!(base_natural_uv_domain().max(), Point2::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn read_from_db_unported_types() {
+        let mut db = DatabaseReader::default();
+        let e = Surface::read_from_db(PLANE_TYPE, &mut db, 1).unwrap_err();
+        assert!(e.is_unported());
+        assert!(!Surface::read_from_db(12345, &mut db, 1)
+            .unwrap_err()
+            .is_unported());
+    }
+
+    #[test]
+    fn surface_eval_is_lazy() {
+        let s = bilinear();
+        let mut ev = SurfaceEval::with_uv(Some(&s), 0.5, 0.5);
+        assert_eq!(ev.flags(), [false; 4]);
+        ev.eval().unwrap();
+        assert!(ev.flags()[0]);
+        assert!(!ev.values()[2][2].is_initialized());
+        ev.set_uv_coords(0.5, 0.5);
+        assert!(ev.flags()[0]);
+        ev.set_uv(Point2::new(0.25, 0.5));
+        assert!(!ev.flags()[0]);
+        let mut none = SurfaceEval::new(None);
+        assert!(none.eval().is_err());
+    }
+
+    #[test]
+    fn deriv_surf_definition_checks() {
+        let d = DerivSurfDefinition::default();
+        let mut list = AssertArray::new();
+        assert!(d.assert_valid(Some(&mut list), ObjectKey(1)).unwrap());
+        assert!(list.is_empty());
+        assert!(d.is_from_surface_boundary_curve());
+        assert_eq!(d.num_derivs(), 2);
+        let bad = DerivSurfDefinition {
+            num_samples: 0,
+            start_angle_deg: 400.0,
+            curvature_type: CurvatureType::G2FromCurve,
+            ..DerivSurfDefinition::default()
+        };
+        assert!(!bad.assert_valid(Some(&mut list), ObjectKey(1)).unwrap());
+        assert_eq!(list.len(), 4);
+    }
+
+    #[test]
+    fn cross_sections() {
+        let d = DerivSurfDefinition::default();
+        let pos = [Vec3::ZERO, Vec3::X];
+        let d1 = [Vec3::Z, Vec3::Z];
+        let v = CrossSectionValues {
+            start_pos: &pos,
+            start_1st_derivs: &d1,
+            ..CrossSectionValues::default()
+        };
+        let c = d.create_cross_section_curves(&v).unwrap();
+        assert_eq!(c.len(), 2);
+        let bad = CrossSectionValues {
+            start_pos: &pos,
+            start_1st_derivs: &d1[..1],
+            ..CrossSectionValues::default()
+        };
+        assert!(d.create_cross_section_curves(&bad).is_err());
+    }
+
+    #[test]
+    fn drop_curve_fail_record() {
+        let mut f: DropCurveFail<ObjectRef2> = DropCurveFail::default();
+        assert!(f.is_un_init());
+        let knots = [0.0, 1.0];
+        f.set(&DropCurveFailArgs {
+            fail_status: 1001,
+            from_call: 1,
+            knots: Some(&knots),
+            ..DropCurveFailArgs::default()
+        });
+        assert!(!f.is_un_init());
+        assert_eq!(f.knots, knots.to_vec());
+        let mut g = DropCurveFail::default();
+        g.assign(&f);
+        assert_eq!(g.fail_status, 1001);
+        f.un_init();
+        assert!(f.is_un_init() && f.knots.is_empty());
+    }
+
+    #[test]
+    fn lsi_branch_test() {
+        let mut tree: Tree<ObjectRef2> = Tree::new_spatial(&Extent3d::from_points(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 1.0),
+        ));
+        let node = TreeNode {
+            bbox: Extent3d::from_points(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)),
+            ..tree.nodes()[0]
+        };
+        let id: NodeId = tree.add_node(node);
+        let mut solver = LsiGlobalSolver {
+            base: GlobalSolver::with_tree(&tree, 3),
+            surface: None,
+            uv_domain: Extent2d::new(),
+            line_point: Vec3::new(0.5, 0.5, -5.0),
+            line_vector: Vec3::Z,
+            line_interval: None,
+            ray_fire: false,
+            distance_tolerance: 1e-6,
+        };
+        let mut branch: Branch = Default::default();
+        branch[0] = Some(id);
+        assert!(solver.may_contain_answers(&branch).unwrap());
+        solver.line_point = Vec3::new(5.0, 5.0, 0.0);
+        assert!(!solver.may_contain_answers(&branch).unwrap());
+        assert!(solver.local_solve(&branch).unwrap_err().is_unported());
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ObjectRef2;
+    impl SolutionObject for ObjectRef2 {
+        fn kind(&self) -> crate::geom::solution_array::ObjectKind {
+            crate::geom::solution_array::ObjectKind::Surface
+        }
+    }
+}

@@ -475,8 +475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0005",
@@ -551,8 +551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0014",
@@ -643,8 +643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -703,8 +703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -771,8 +771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0040",
@@ -927,8 +927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0059",
@@ -1263,8 +1263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -1395,8 +1395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0116",
@@ -1599,8 +1599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0141",
@@ -1851,8 +1851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0172",
@@ -1887,8 +1887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0176",
@@ -2115,8 +2115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0204",
@@ -2739,8 +2739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0281",
@@ -3371,8 +3371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0358",
@@ -3979,8 +3979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0433",
@@ -3991,8 +3991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0434",
@@ -4003,8 +4003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetNaturalUVDomain",
-        "unit": "surface.surface_p2"
+        "symbol": "SmCrvOnSurf::ApproximateCurve",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0435",
@@ -5344,8 +5344,8 @@
   "cases_passed": 628,
   "cases_total": 654,
   "deferred_by_unit": {
+    "curve.crv_on_surf": 17,
     "curve.curve_p5": 4,
-    "surface.surface_p2": 17,
     "surface.surface_p7": 5
   },
   "max_rel_err": 0.0,

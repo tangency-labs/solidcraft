@@ -21,7 +21,10 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
+use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_tangent_field::{self as ffi, Op};
@@ -293,9 +296,17 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side --------------------------------------------------------------------------
 
-/// The surface as the Rust side sees it (every `SmSurface` call is unported).
-#[derive(Debug)]
-struct SurfaceStandIn(#[allow(dead_code)] [[f64; 3]; 4]);
+/// The surface the shim builds from four corners (`read_surface`): a bilinear
+/// `SmBSplineSurface` on `[0, 1]^2` with unit weights, corners in the order
+/// `(u0,v0) (u1,v0) (u0,v1) (u1,v1)`.
+fn stand_in(c: [[f64; 3]; 4]) -> Result<BSplineSurface, HarnessError> {
+    let [c00, c10, c01, c11] = c.map(|[x, y, z]| CPoint::new(x, y, z, 1.0));
+    let net = vec![vec![c00, c01], vec![c10, c11]];
+    let kn = vec![0.0, 0.0, 1.0, 1.0];
+    let sur = NlSurface::new(net, 1, 1, kn.clone(), kn)
+        .map_err(|e| harness(format!("surface: {e}")))?;
+    Ok(BSplineSurface::from_nurb(sur, false))
+}
 
 fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::from_array(p)
@@ -373,7 +384,7 @@ fn push_string(o: &mut Vec<f64>, s: &str) {
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let op = op_of(&i.op)?;
-    let srf = SurfaceStandIn(i.surface.unwrap_or(UNIT_SQUARE));
+    let srf = stand_in(i.surface.unwrap_or(UNIT_SQUARE))?;
     if op == Op::ReadDb {
         let r = i.read.as_ref().ok_or_else(|| harness("missing read"))?;
         let ft = if r.file_type == 0 {
@@ -464,7 +475,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         },
         Op::Equal => {
             let fb = i.field_b.as_ref().ok_or_else(|| harness("missing field_b"))?;
-            let srf_b = SurfaceStandIn(i.surface_b.unwrap_or(srf.0));
+            let srf_b = stand_in(i.surface_b.or(i.surface).unwrap_or(UNIT_SQUARE))?;
             let srf_b_ref = if i.flags & 1 != 0 { &srf } else { &srf_b };
             let uv_b_own = build(&fb.curve)?;
             let uv_b = if i.flags & 2 != 0 { &uv_a } else { &uv_b_own };

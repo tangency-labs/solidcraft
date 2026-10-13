@@ -62,9 +62,8 @@
 //!   `CreateSphereFromArcs` `SmCurve::IsArc`
 //!   (`curve.curve_p5`); `CreateTrimmedPlaneFromRuled` (unless the ruled
 //!   surface is a rectangle) `SmSurface::Evaluate1stDerivatives`
-//!   (`surface.surface_p1`); `IsDegeneratePoint` `SmSurface::IsKindOf`
-//!   (`surface.surface_p2`) and `SmSurface::IsDegeneratePoint`
-//!   (`surface.surface_p1`); `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and
+//!   (`surface.surface_p1`); `IsDegeneratePoint` over another domain
+//!   `SmSurface::IsDegeneratePoint` (`surface.surface_p1`); `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and
 //!   `IsClosed` (`surface.surface_p7`). Those calls return [`SolidError::Unported`].
 
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
@@ -895,8 +894,8 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::IsKindOf` (the `SmCrvOnSurf` test) and
-    /// `SmSurface::IsDegeneratePoint` are not ported; `SM_ERR` without NURB.
+    /// [`SolidError::Unported`] for a domain other than the natural one
+    /// (`SmSurface::IsDegeneratePoint`); `SM_ERR` without NURB.
     pub fn is_degenerate_point(&self, tol_3d: f64, uv_domain: Option<&Extent2d>) -> Result<bool> {
         // low work - for nonNaturalUVInterval intervals pass the call
         //  along to the general SmSurface::IsDegenerate
@@ -1557,7 +1556,11 @@ mod tests {
         let unported = |r: Result<()>| matches!(r, Err(SolidError::Unported { .. }));
         assert!(unported(s.copy_and_add_analytics().map(|_| ())));
         assert!(unported(s.max_analytic_domain().map(|_| ())));
-        assert!(unported(s.is_degenerate_point(1e-6, None).map(|_| ())));
+        assert!(s.is_degenerate_point(1e-6, None).is_ok());
+        let sub = Extent2d::from_bounds(0.0, 0.0, 0.5, 0.5);
+        assert!(unported(
+            s.is_degenerate_point(1e-6, Some(&sub)).map(|_| ())
+        ));
         assert!(matches!(
             BSplineSurface::create_sphere_from_arcs(&[], 1e-6),
             Err(SolidError::Upstream { code: 1001, .. })
