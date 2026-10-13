@@ -7,6 +7,7 @@
 //! `source/SMLib/inc/NL_SrfAdv.h`). The file is split over several plan units
 //! (`nlib.srf_adv_p1`, `_p2`, ...); each lives in its own submodule.
 
+pub mod p1;
 pub mod p2;
 pub mod p3;
 pub mod p4;
