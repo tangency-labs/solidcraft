@@ -78,10 +78,12 @@
 //!   `SmCurve::IsClosed` (`curve.curve_p4`); `CreateAnalyticCurve` builds `SmLine`
 //!   (`curve.line`) and `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`); `CreateSimpleOffset` calls `SmCurve::IsArc`
-//!   (`curve.curve_p5`) and approximates an `SmOffsetCurve` (`curve.offset_curve`,
-//!   `SmCurve::ApproximateCurve` in `curve.curve_p1`). Those calls return
+//!   (`curve.curve_p5`) and approximates an [`OffsetCurve`] with
+//!   `SmCurve::ApproximateCurve` (`curve.curve_p1`). Those calls return
 //!   [`SolidError::Unported`] until the units are ported.
 
+use crate::curve::curve::Curve;
+use crate::curve::offset_curve::OffsetCurve;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -238,17 +240,37 @@ fn curve_is_arc(_curve: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<O
 /// `ApproximateCurve(ctx, {ivl.min, ivl.max}, tol, gap, approx, bMatch, FALSE)`: the
 /// approximation and its maximum gap.
 fn offset_curve_approximation(
-    _curve: &BSplineCurve,
-    _interval: &Extent1d,
-    _normal: Vec3,
-    _distance: f64,
+    curve: &BSplineCurve,
+    interval: &Extent1d,
+    normal: Vec3,
+    distance: f64,
+    approx_tol_3d: f64,
+    match_parameterization: bool,
+) -> Result<(BSplineCurve, f64)> {
+    let off = OffsetCurve::new(
+        3,
+        Curve::from(curve.clone()),
+        *interval,
+        normal,
+        distance,
+        false,
+    );
+    let breaks = [interval.min(), interval.max()];
+    approximate_curve(&off, &breaks, approx_tol_3d, match_parameterization)
+}
+
+/// `SmCurve::ApproximateCurve(ctx, breaks, tol, gap, approx, bMatch, FALSE)` of
+/// `curve`: the approximation and its maximum gap.
+fn approximate_curve(
+    _curve: &OffsetCurve,
+    _breaks: &[f64],
     _approx_tol_3d: f64,
     _match_parameterization: bool,
 ) -> Result<(BSplineCurve, f64)> {
-    // UNPORTED(curve.offset_curve): SmOffsetCurve::ApproximateCurve
+    // UNPORTED(curve.curve_p1): SmCurve::ApproximateCurve
     Err(SolidError::Unported {
-        upstream: "SmOffsetCurve::ApproximateCurve",
-        unit: "curve.offset_curve",
+        upstream: "SmCurve::ApproximateCurve",
+        unit: "curve.curve_p1",
     })
 }
 
