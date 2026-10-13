@@ -1233,6 +1233,7 @@ fn elevate_to_common_degree(curves: &mut [Curve]) -> Result<usize> {
 fn merge_and_refine(
     curves: &mut [Curve],
     merge: impl FnOnce(&mut [Vec<f64>]) -> Result<Vec<Vec<f64>>>,
+    mut trace: Option<&mut [EntryKnots]>,
 ) -> Result<()> {
     // Merge knot vectors.
     let mut knots: Vec<Vec<f64>> = curves.iter().map(|c| c.knots().to_vec()).collect();
@@ -1242,15 +1243,46 @@ fn merge_and_refine(
             *dst = *src;
         }
     }
+    if let Some(t) = trace.as_deref_mut() {
+        EntryKnots::observe(t, curves);
+    }
     let knx = merged?;
 
     // Refine curves.
-    for (c, x) in curves.iter_mut().zip(&knx) {
+    for (i, (c, x)) in curves.iter_mut().zip(&knx).enumerate() {
         if !x.is_empty() {
             *c = c.refine(x)?;
+            if let Some(e) = trace.as_deref_mut().and_then(|t| t.get_mut(i)) {
+                e.live = false;
+            }
         }
     }
     Ok(())
+}
+
+/// The knot storage a curve had on entry to [`make_compatible_knot_tol_traced`], as
+/// upstream's in-place writes leave it: `N_CrvReparamToInterval` and the knot merging
+/// write into the curve's current knot array, while a degree elevation or a
+/// refinement gives the curve a new one (the entry array then keeps its contents).
+/// Callers whose curve shares its knot array with another object (upstream
+/// `N_CrvFromCPolygonAndKnotVector` over a surface's knot vector) see these writes.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EntryKnots {
+    /// Contents of the entry storage.
+    pub(crate) knots: Vec<f64>,
+    /// The curve still uses its entry storage.
+    pub(crate) live: bool,
+}
+
+impl EntryKnots {
+    /// Copies the current knots of every curve still using its entry storage.
+    fn observe(trace: &mut [EntryKnots], curves: &[Curve]) {
+        for (e, c) in trace.iter_mut().zip(curves) {
+            if e.live {
+                e.knots = c.knots().to_vec();
+            }
+        }
+    }
 }
 
 /// Makes a set of curves compatible in place: the same rationality and dimension,
@@ -1265,7 +1297,23 @@ fn merge_and_refine(
 /// Errors with `InvalidInput` for an empty set, with the errors of degree
 /// elevation, knot merging and refinement (the curves keep the changes made before).
 pub fn make_compatible_knot_tol(curves: &mut [Curve], knot_tol: f64) -> Result<()> {
+    make_compatible_knot_tol_traced(curves, knot_tol).map(|_| ())
+}
+
+/// [`make_compatible_knot_tol`], also returning what upstream's in-place writes leave
+/// in each curve's entry knot storage ([`EntryKnots`]).
+pub(crate) fn make_compatible_knot_tol_traced(
+    curves: &mut [Curve],
+    knot_tol: f64,
+) -> Result<Vec<EntryKnots>> {
     const OP: &str = "nurbs::crv_tool::p2::make_compatible_knot_tol";
+    let mut trace: Vec<EntryKnots> = curves
+        .iter()
+        .map(|c| EntryKnots {
+            knots: c.knots().to_vec(),
+            live: true,
+        })
+        .collect();
     let mut knot_tol = knot_tol;
     if curves.is_empty() {
         return Err(oob(OP));
@@ -1292,6 +1340,7 @@ pub fn make_compatible_knot_tol(curves: &mut [Curve], knot_tol: f64) -> Result<(
         if knot_tol == 0.0 {
             knot_tol = 0.001;
         }
+        EntryKnots::observe(&mut trace, curves);
     }
 
     if knot_tol == 0.0 {
@@ -1299,13 +1348,24 @@ pub fn make_compatible_knot_tol(curves: &mut [Curve], knot_tol: f64) -> Result<(
         knot_tol = (ue - us) / 1000.0;
     }
 
+    let degrees: Vec<usize> = curves.iter().map(Curve::degree).collect();
     elevate_to_common_degree(curves)?;
+    for ((e, c), p) in trace.iter_mut().zip(curves.iter()).zip(&degrees) {
+        if c.degree() != *p {
+            e.live = false;
+        }
+    }
 
     if knot_tol <= COMPATIBLE_KNOT_TOL {
-        merge_and_refine(curves, compatible_knot_array)
+        merge_and_refine(curves, compatible_knot_array, Some(&mut trace))?;
     } else {
-        merge_and_refine(curves, |k| compatible_knot_vectors_to_tol(k, knot_tol))
+        merge_and_refine(
+            curves,
+            |k| compatible_knot_vectors_to_tol(k, knot_tol),
+            Some(&mut trace),
+        )?;
     }
+    Ok(trace)
 }
 
 /// [`make_compatible_knot_tol`] with the default knot tolerance `0`
@@ -1371,7 +1431,7 @@ pub fn make_compatible_adj_knots(curves: &mut [Curve], tol: f64) -> Result<()> {
         }
     }
 
-    merge_and_refine(curves, |k| compatible_knot_vectors_to_tol(k, tol))
+    merge_and_refine(curves, |k| compatible_knot_vectors_to_tol(k, tol), None)
 }
 
 #[cfg(test)]
