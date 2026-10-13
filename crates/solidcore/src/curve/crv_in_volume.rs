@@ -1134,7 +1134,7 @@ impl CrvInVolume {
             }
 
             // read every Continuity
-            let mut codes = Vec::with_capacity(count);
+            let mut codes = Vec::new(); // grown as read: count comes from the file
             if ascii {
                 let s = db.in_stream_mut().ok_or_else(no_stream)?;
                 for _ in 0..count {

@@ -711,13 +711,14 @@ impl CompositeCurve {
             closed = db.read_boolean()?;
         }
 
-        // allocate room for the segments (a segment takes at least 32 binary bytes, or
-        // one ASCII character per field)
+        // Bound the segment count (a segment takes at least 32 binary bytes, or one
+        // ASCII character per field). Upstream preallocates the array; we grow it as
+        // segments are read, since a segment is far larger in memory than on disk.
         let n = usize::try_from(num_segments).map_err(|_| {
             SolidError::invalid_input(OP_READ, "segment count exceeds the remaining input")
         })?;
         db.ensure_available(n, if ascii { 3 } else { 32 }, OP_READ)?;
-        let mut segments = Vec::with_capacity(n);
+        let mut segments = Vec::new();
 
         // for every CompositeCurveSegment
         for _ in 0..n {

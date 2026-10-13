@@ -523,7 +523,7 @@ impl PolarConversion {
 
         if ascii {
             let read_reals = |db: &mut DatabaseReader, n: usize| -> Result<Vec<f64>> {
-                let mut v = Vec::with_capacity(n);
+                let mut v = Vec::new(); // grown as read: n comes from the file
                 for ii in 0..n {
                     let x = db
                         .in_stream_mut()
@@ -541,7 +541,7 @@ impl PolarConversion {
             };
             pc.natural_knots = read_reals(db, n_knots)?;
             pc.angles = read_reals(db, n_angles)?;
-            let mut flags = Vec::with_capacity(n_exact);
+            let mut flags = Vec::new(); // grown as read: n_exact comes from the file
             for ii in 0..n_exact {
                 let x = db
                     .in_stream_mut()
