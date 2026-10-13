@@ -67,7 +67,7 @@
 //!   implementation of [`FindCurveDistanceExtrema`].
 //! - **Curve kinds.** `SM_CAST_NONNULL_PTR(SmBSplineCurve, ...)` is non-null for
 //!   [`CurveKind::BSpline`] and the analytic B-spline kinds ([`CurveKind::Hyperbola`]),
-//!   whose NURB is decomposed exactly; the other kinds (Hermite, conic) are
+//!   whose NURB is decomposed exactly; the other kinds (Hermite, conic, projected) are
 //!   approximated by cubic spans over their knots.
 //! - **Undefined behaviour.** Where upstream would index past an array (a
 //!   continuity array shorter than the span list, a non-cubic span in
@@ -570,7 +570,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 }
                 true
             }
-            CurveKind::Hermite(_) | CurveKind::Conic(_) => false,
+            CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Projected(_) => false,
         };
 
         // ordered leaf Beziers each passing the tessellation tests
@@ -587,7 +587,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             let nurb = match self.curve.kind() {
                 CurveKind::BSpline(b) => b.gw_nurb(),
                 CurveKind::Hyperbola(h) => h.base().gw_nurb(),
-                CurveKind::Hermite(_) | CurveKind::Conic(_) => None,
+                CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Projected(_) => None,
             };
             create_bezier_segment_block(nurb, &self.curve)?
         };
