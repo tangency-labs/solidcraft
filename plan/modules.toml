@@ -1011,10 +1011,10 @@ depends_on = ["curve.curve_p2", "geom.extent1d", "geom.extent2d", "geom.object",
 est_lines = 310
 layer = 14
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-curve.iso_curve-a1"
 claimed_at = "2026-10-13T01:17:13Z"
-notes = "16 fns; largest: SmIsoCurve::Evaluate, SmIsoCurve::ReadFromDB, SmIsoCurve::SmIsoCurve, SmIsoCurve::CreateUVIsoLine; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(8), curve.curve_p5(2), curve.line(1), surface.surface_p1(1), surface.surface_p6(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2874 cases (874 fixture: Surface.sms / offset_nurb.sms / DropCurveSurface.sms iso curves at domain ends, interior knots, outside the domain with and without clamping, bilinear patch and NURB-less surface edge cases, all ten SmSurfParamType values, equality near SM_IS_ZERO, ReadFromDB streams + 2000 generated), 2234 pass bit-identical (max_rel_err 0), 640 deferred (nurbs.b_spline_surface_n_lib_p2 355: SmBSplineSurface::Evaluate; surface.surface_p6 120: SmSurface::CalculateContinuities; surface.surface_p2 101: SmSurface::ReadFromDB; curve.line 64: SmLine ctor in CreateUVIsoLine); --perturb SENSITIVE; base surface held as BSplineSurface (the only ported SmSurface); EvaluatePoint wired to nurbs.b_spline_surface_n_lib_p1; wired SmCurve::ReadFromDB(SmIsoCurve_TYPE) in curve.curve_p2 (still deferred on SmSurface::ReadFromDB, no counts changed); CurveKind::Iso. 16 fns; largest: SmIsoCurve::Evaluate, SmIsoCurve::ReadFromDB, SmIsoCurve::SmIsoCurve, SmIsoCurve::CreateUVIsoLine; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(8), curve.curve_p5(2), curve.line(1), surface.surface_p1(1), surface.surface_p6(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.line"
