@@ -157,8 +157,11 @@ fn refine<O: SolutionObject>(sols: &mut SolutionArray<O>, named: &Named<'_, O>) 
 }
 
 /// The analytic curve of a cache (`GetAnalyticCurve`), copied out of the cache.
-fn cache_analytic<O: SolutionObject>(cache: &mut CurveCache<O>) -> Result<Option<Curve>> {
-    Ok(cache.analytic_curve()?.cloned())
+fn cache_analytic<O: SolutionObject>(
+    k: &Kernel,
+    cache: &mut CurveCache<O>,
+) -> Result<Option<Curve>> {
+    Ok(cache.analytic_curve(k)?.cloned())
 }
 
 /// The cache tree (`GetTree`, `NER`).
@@ -232,6 +235,7 @@ impl Curve {
         if self.is_analytic() && other.is_analytic() {
             // get Line/Line intersection
             let r = analytic_curve_intersect(
+                k,
                 AnalyticOperand::Curve(self),
                 interval,
                 AnalyticOperand::Curve(other),
@@ -281,13 +285,13 @@ impl Curve {
         // special case: curves converted to Analytic/Analytic intersection by
         // SmCurve::CreateAnalyticCurve(). Note, GetAnalyticCurve() can be expensive,
         // so call it only as many times as necessary.
-        let analy1 = cache_analytic(&mut cache1)?;
+        let analy1 = cache_analytic(k, &mut cache1)?;
         let mut analy2: Option<Curve> = None;
         if let Some(a1) = analy1.as_ref() {
             // (the same curve shares its cache, so its analytic curve is the same
             // object: a self intersection, which the line intersector skips)
             if let Some(c2) = cache2_own.as_mut() {
-                analy2 = cache_analytic(c2)?;
+                analy2 = cache_analytic(k, c2)?;
             }
             let a2_ref = if same_curve {
                 Some(a1)
@@ -309,6 +313,7 @@ impl Curve {
 
                 // execute analytic/analytic intersection
                 let r = analytic_curve_intersect(
+                    k,
                     AnalyticOperand::Curve(a1),
                     interval,
                     AnalyticOperand::Curve(a2),
