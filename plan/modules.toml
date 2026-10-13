@@ -920,9 +920,9 @@ depends_on = ["curve.hermite_curve", "geom.a_object", "geom.axis2_placement", "g
 est_lines = 2302
 layer = 13
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.curve_p2-a1"
+claimed_at = "2026-10-13T00:14:00Z"
 notes = "79 fns; largest: SmCurvePropertyGS::BranchMayContainAnswers, SmCurve::SurfaceMaxDistanceBetween, SmCurve::EvaluateContinuity, sm_FlushCrv; cycle back-edges (call into later units; stub or co-port): curve.curve_cache(4), surface.surface_p2(3), curve.ellipse_p1(2), curve.composite_curve_p2(1), curve.conic(1), curve.crv_in_volume(1), curve.crv_on_surf(1), curve.hyperbola(1), curve.iso_curve(1), curve.line(1), curve.offset_curve(1), curve.parabola(1), curve.projected_curve(1), curve.tangent_field(1), surface.surface_p5(1), surface.surface_p7(1), topology.topology(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
