@@ -8,9 +8,11 @@
 
 pub mod p1;
 pub mod p2;
+pub mod p3;
 
 pub use p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, Ends, KnotType, NurbCircleParam, ProjectionType,
     Tessellation,
 };
 pub use p2::{AnalyticCurve, BoundingBoxRequest, BoundingBoxes, ControlPointForm, CurveCanonical};
+pub use p3::{GapFix, OnPlane, SegmentLine};

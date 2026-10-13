@@ -1,0 +1,7191 @@
+{
+ "cases": [
+  {
+   "name": "DropCurveCurve_pole",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_pole_tight",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "DropCurveCurve_scale",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "ev": [
+     -0.2,
+     0.1,
+     0.0
+    ],
+    "deg": 15.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_scale_norot",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_segment",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "segment",
+    "a": 0.0,
+    "b": 42.28906088099045,
+    "ns": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_cp0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_cp1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_cp2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_cp_last_plus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2000
+   }
+  },
+  {
+   "name": "DropCurveCurve_on_plane_z0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_on_plane_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_subdivide_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 1,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_subdivide_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_subdivide_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 3,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_subdivide_7",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 7,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_subdivide_13",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 13,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_assert_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_assert_level0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": false
+   }
+  },
+  {
+   "name": "closedCurve_pole",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_pole_tight",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "closedCurve_scale",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "ev": [
+     -0.2,
+     0.1,
+     0.0
+    ],
+    "deg": 15.0
+   }
+  },
+  {
+   "name": "closedCurve_scale_norot",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_segment",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "segment",
+    "a": 0.0,
+    "b": 3.5,
+    "ns": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_cp0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "closedCurve_cp1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "closedCurve_cp2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "closedCurve_cp_last_plus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2000
+   }
+  },
+  {
+   "name": "closedCurve_on_plane_z0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_on_plane_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_subdivide_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 1,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_subdivide_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_subdivide_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 3,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_subdivide_7",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 7,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_subdivide_13",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 13,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_assert_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "closedCurve_assert_level0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": false
+   }
+  },
+  {
+   "name": "crvToOffset_pole",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_pole_tight",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "crvToOffset_scale",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "ev": [
+     -0.2,
+     0.1,
+     0.0
+    ],
+    "deg": 15.0
+   }
+  },
+  {
+   "name": "crvToOffset_scale_norot",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_segment",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "segment",
+    "a": -47.0,
+    "b": -23.5,
+    "ns": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvToOffset_cp0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvToOffset_cp1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvToOffset_cp2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvToOffset_cp_last_plus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2000
+   }
+  },
+  {
+   "name": "crvToOffset_on_plane_z0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_on_plane_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_subdivide_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 1,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_subdivide_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_subdivide_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 3,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_subdivide_7",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 7,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_subdivide_13",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 13,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_assert_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "crvToOffset_assert_level0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": false
+   }
+  },
+  {
+   "name": "crvTrim1_pole",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim1_pole_tight",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim1_scale",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "ev": [
+     -0.2,
+     0.1,
+     0.0
+    ],
+    "deg": 15.0
+   }
+  },
+  {
+   "name": "crvTrim1_scale_norot",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "crvTrim1_segment",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "segment",
+    "a": 0.0,
+    "b": 9.66275948689218,
+    "ns": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_cp0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim1_cp1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim1_cp2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim1_cp_last_plus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2000
+   }
+  },
+  {
+   "name": "crvTrim1_on_plane_z0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_on_plane_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_subdivide_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 1,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_subdivide_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_subdivide_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 3,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_subdivide_7",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 7,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_subdivide_13",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 13,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_assert_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "crvTrim1_assert_level0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": false
+   }
+  },
+  {
+   "name": "crvTrim2_pole",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim2_pole_tight",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim2_scale",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "ev": [
+     -0.2,
+     0.1,
+     0.0
+    ],
+    "deg": 15.0
+   }
+  },
+  {
+   "name": "crvTrim2_scale_norot",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "crvTrim2_segment",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "segment",
+    "a": 0.0,
+    "b": 1.0,
+    "ns": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_cp0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim2_cp1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim2_cp2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim2_cp_last_plus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2000
+   }
+  },
+  {
+   "name": "crvTrim2_on_plane_z0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_on_plane_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_subdivide_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 1,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_subdivide_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_subdivide_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 3,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_subdivide_7",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 7,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_subdivide_13",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 13,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_assert_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "crvTrim2_assert_level0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": false
+   }
+  },
+  {
+   "name": "curve0_pole",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "curve0_pole_tight",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "pole",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "curve0_scale",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "ev": [
+     -0.2,
+     0.1,
+     0.0
+    ],
+    "deg": 15.0
+   }
+  },
+  {
+   "name": "curve0_scale_norot",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "curve0_segment",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "segment",
+    "a": 0.0,
+    "b": 99.54197620795051,
+    "ns": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "curve0_cp0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "curve0_cp1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "curve0_cp2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "curve0_cp_last_plus",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2000
+   }
+  },
+  {
+   "name": "curve0_on_plane_z0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_on_plane_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0
+    ],
+    "pn": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_subdivide_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 1,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "curve0_subdivide_2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "curve0_subdivide_3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 3,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "curve0_subdivide_7",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 7,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "curve0_subdivide_13",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 13,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "curve0_assert_given",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "curve0_assert_level0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "assert",
+    "given": false
+   }
+  },
+  {
+   "name": "curve_interface_join_default_tol",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6801 (my_test_curve_interface JoinWith)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         4,
+         0,
+         0
+        ],
+        [
+         4,
+         4,
+         0
+        ],
+        [
+         8,
+         4,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         8,
+         4,
+         0
+        ],
+        [
+         12,
+         4,
+         0
+        ],
+        [
+         12,
+         8,
+         0
+        ],
+        [
+         16,
+         8,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "other_end": false
+   }
+  },
+  {
+   "name": "curve_interface_join_tol",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6842 (JoinWith with dTol = 0.01)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         4,
+         0,
+         0
+        ],
+        [
+         4,
+         4,
+         0
+        ],
+        [
+         8,
+         4,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         8,
+         4,
+         0
+        ],
+        [
+         12,
+         4,
+         0
+        ],
+        [
+         12,
+         8,
+         0
+        ],
+        [
+         16,
+         8,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "other_end": false,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "curve_interface_join_tol_3",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6842 (JoinWith with dTol = 0.01)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         8,
+         4,
+         0
+        ],
+        [
+         12,
+         4,
+         0
+        ],
+        [
+         12,
+         8,
+         0
+        ],
+        [
+         16,
+         8,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         16,
+         8,
+         0
+        ],
+        [
+         20,
+         8,
+         0
+        ],
+        [
+         20,
+         16,
+         0
+        ],
+        [
+         24,
+         16,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "other_end": false,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "curve_interface_join_start",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6801 (my_test_curve_interface JoinWith)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         8,
+         4,
+         0
+        ],
+        [
+         12,
+         4,
+         0
+        ],
+        [
+         12,
+         8,
+         0
+        ],
+        [
+         16,
+         8,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         4,
+         0,
+         0
+        ],
+        [
+         4,
+         4,
+         0
+        ],
+        [
+         8,
+         4,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "other_end": true,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "curve_interface_join_gap",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6801 (my_test_curve_interface JoinWith)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         4,
+         0,
+         0
+        ],
+        [
+         4,
+         4,
+         0
+        ],
+        [
+         8,
+         4,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "interp": {
+       "pts": [
+        [
+         16,
+         8,
+         0
+        ],
+        [
+         20,
+         8,
+         0
+        ],
+        [
+         20,
+         16,
+         0
+        ],
+        [
+         24,
+         16,
+         0
+        ]
+       ],
+       "deg": 3
+      }
+     }
+    },
+    "other_end": false,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "curve_interface_get_cp_0",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 3
+   }
+  },
+  {
+   "name": "curve_interface_get_cp_1",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 3
+   }
+  },
+  {
+   "name": "curve_interface_get_cp_2",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 3
+   }
+  },
+  {
+   "name": "curve_interface_get_cp_idx0",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 0
+   }
+  },
+  {
+   "name": "curve_interface_get_cp_idx9",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 9
+   }
+  },
+  {
+   "name": "curve_interface_get_cp_idx10",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 10
+   }
+  },
+  {
+   "name": "curve_interface_joined_subdivide",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "curve_interface_joined_assert",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "curve_interface_joined_on_plane",
+   "upstream_ref": "upstream/tests/prog_test/src/smCurveTest.cpp:6957 (GetControlPoint of the CreateByJoining curve, index 3)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "joined": [
+       {
+        "pts": [
+         [
+          0,
+          0,
+          0
+         ],
+         [
+          4,
+          0,
+          0
+         ],
+         [
+          4,
+          4,
+          0
+         ],
+         [
+          8,
+          4,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          8,
+          4,
+          0
+         ],
+         [
+          12,
+          4,
+          0
+         ],
+         [
+          12,
+          8,
+          0
+         ],
+         [
+          16,
+          8,
+          0
+         ]
+        ],
+        "deg": 3
+       },
+       {
+        "pts": [
+         [
+          16,
+          8,
+          0
+         ],
+         [
+          20,
+          8,
+          0
+         ],
+         [
+          20,
+          12,
+          0
+         ],
+         [
+          24,
+          12,
+          0
+         ]
+        ],
+        "deg": 3
+       }
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     1
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "reversed_line_join_0",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_1",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_2",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_3",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_4",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_5",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_6",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_7",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_8",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_9",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_10",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_11",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_12",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_13",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_14",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "reversed_line_join_15",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       2,
+       2,
+       7,
+       7
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        20,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       2,
+       2
+      ]
+     }
+    },
+    "other_end": true,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "rectangle_join_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rectangle_gap_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 0,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_gap_far_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 1,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_join_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rectangle_gap_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 0,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_gap_far_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 1,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_join_2",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rectangle_gap_2",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 0,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_gap_far_2",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 1,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_join_3",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "rectangle_gap_3",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 0,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "rectangle_gap_far_3",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 1,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "polygon3_join_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon3_join_rev_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon3_scale_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     -1
+    ],
+    "deg": 30.0
+   }
+  },
+  {
+   "name": "polygon3_on_plane_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0.5
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "polygon3_join_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon3_join_rev_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon3_scale_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     -1
+    ],
+    "deg": 30.0
+   }
+  },
+  {
+   "name": "polygon3_on_plane_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0.5
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "polygon5_join_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon5_join_rev_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon5_scale_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     -1
+    ],
+    "deg": 30.0
+   }
+  },
+  {
+   "name": "polygon5_on_plane_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0.5
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "polygon5_join_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498951,
+        -1.175570504584946,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon5_join_rev_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498951,
+        -1.175570504584946,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon5_scale_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     -1
+    ],
+    "deg": 30.0
+   }
+  },
+  {
+   "name": "polygon5_on_plane_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0.6180339887498949,
+        1.902113032590307,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.6180339887498947,
+        1.1755705045849465,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0.5
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "polygon6_join_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon6_join_rev_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon6_scale_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     -1
+    ],
+    "deg": 30.0
+   }
+  },
+  {
+   "name": "polygon6_on_plane_0",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0.5
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "polygon6_join_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.0,
+        2.4492935982947064e-16,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon6_join_rev_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.0,
+        2.4492935982947064e-16,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": false,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "polygon6_scale_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     -1
+    ],
+    "deg": 30.0
+   }
+  },
+  {
+   "name": "polygon6_on_plane_1",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     0.5
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "no_nurb_pole",
+   "upstream_ref": "SmBSplineCurve(lDim) without NURB",
+   "inputs": {
+    "this": {
+     "dim": 3
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "no_nurb_assert_given",
+   "upstream_ref": "SmBSplineCurve(lDim) without NURB",
+   "inputs": {
+    "this": {
+     "dim": 3
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "closed_scale",
+   "upstream_ref": "SmBSplineCurve edge cases (closed curve: SM_ERR)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     0,
+     1,
+     0
+    ],
+    "deg": 10.0
+   }
+  },
+  {
+   "name": "scale_coincident_moved_ends",
+   "upstream_ref": "SmBSplineCurve edge cases (moved ends coincide: SM_ERR_INVALID_INPUT)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     1,
+     0,
+     0
+    ],
+    "ev": [
+     0,
+     0,
+     0
+    ],
+    "deg": 10.0
+   }
+  },
+  {
+   "name": "internal_pole",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.3,
+       0.6,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "pole",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "internal_pole_assert",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.3,
+       0.6,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "assert_interior_mult_p_plus_1",
+   "upstream_ref": "SmBSplineCurve edge cases (AssertValid test 2)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       0.5,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "assert_end_mult_p_plus_2",
+   "upstream_ref": "SmBSplineCurve edge cases (AssertValid test 1)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "assert",
+    "given": true
+   }
+  },
+  {
+   "name": "rational_cp_0",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0.7071067811865476,
+        0.7071067811865476,
+        0,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 1
+   }
+  },
+  {
+   "name": "rational_cp_1",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0.7071067811865476,
+        0.7071067811865476,
+        0,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 1
+   }
+  },
+  {
+   "name": "rational_cp_2",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0.7071067811865476,
+        0.7071067811865476,
+        0,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 1
+   }
+  },
+  {
+   "name": "rational_scale",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0.7071067811865476,
+        0.7071067811865476,
+        0,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     0,
+     1
+    ],
+    "ev": [
+     0,
+     0,
+     1
+    ],
+    "deg": 45.0
+   }
+  },
+  {
+   "name": "twod_cp_0",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 0,
+    "index": 2
+   }
+  },
+  {
+   "name": "twod_cp_1",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 1,
+    "index": 2
+   }
+  },
+  {
+   "name": "twod_cp_2",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "cp",
+    "form": 2,
+    "index": 2
+   }
+  },
+  {
+   "name": "twod_scale",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "scale",
+    "sv": [
+     0,
+     1,
+     0
+    ],
+    "ev": [
+     1,
+     0,
+     0
+    ],
+    "deg": 0.0
+   }
+  },
+  {
+   "name": "twod_on_plane_off",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "on_plane",
+    "pp": [
+     0,
+     0,
+     1
+    ],
+    "pn": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "subdivide_single_span_circle",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "circle": {
+       "center": [
+        0,
+        0,
+        0
+       ],
+       "radius": 2.0,
+       "a0": 0,
+       "a1": 90
+      }
+     }
+    },
+    "op": "subdivide",
+    "cont": 2,
+    "ang": 1.0
+   }
+  },
+  {
+   "name": "gap_far",
+   "upstream_ref": "SmBSplineCurve edge cases",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        5,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 0,
+    "dmin": 1.0
+   }
+  },
+  {
+   "name": "gap_small",
+   "upstream_ref": "SmBSplineCurve edge cases (gap to close: deferred)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "gap",
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1.01,
+        0.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.01,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "fix": 0,
+    "dmin": 0.1
+   }
+  },
+  {
+   "name": "join_line_continuing",
+   "upstream_ref": "SmBSplineCurve edge cases (SmLine test: deferred)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "join",
+    "this_end": true,
+    "other": {
+     "dim": 3,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "other_end": false,
+    "tol": 1e-06
+   }
+  }
+ ]
+}
