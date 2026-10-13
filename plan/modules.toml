@@ -1284,9 +1284,9 @@ depends_on = ["curve.curve_p2", "curve.curve_p3", "curve.curve_p6", "curve.line"
 est_lines = 1728
 layer = 19
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.crv_on_surf-a1"
+claimed_at = "2026-10-13T04:49:20Z"
 notes = "38 fns; largest: SmCrvOnSurf::SurfaceCurveMaxDistanceBetween, SmCrvOnSurf::Evaluate, SmCrvOnSurf::GetKnots, SmCrvOnSurf::SetAll; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(14), surface.surface_p1(4), curve.curve_p5(3), intersect.curve_class_p1(2), surface.surface_p7(2), curve.curve_p1(1), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
