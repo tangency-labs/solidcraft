@@ -390,7 +390,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "partial"
 claimed_by = "swarm-geom.grid-a1"
 claimed_at = "2026-10-12T20:21:29Z"
-notes = "PARTIAL: difftest 615 cases (15 fixture + 600 generated), 613 pass bit-identical, 2 deferred (surface.surface_cache_p1 1: SmSurfaceGridElement::Init; surface.surface_p2 1: SmSurfaceHierarchyElement::ExpandHierarchy); 30k-seed run clean; no UNPORTED(geom.grid) stubs existed. 23 fns; largest: SmGrid::Setup3DDDA, SmGrid::Step3DDDA, SmSurfaceHierarchyElement::ExpandHierarchy, SmGrid::AddElement; cycle back-edges (call into later units; stub or co-port): geom.extent2d(2), surface.surface_cache_p1(2), surface.surface_p2(2), geom.polar_box(1), geom.pseudo_box(1), surface.surface_cache_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 615 cases (15 fixture + 600 generated), 613 pass bit-identical, 2 deferred (surface.surface_cache_p1 2: SmSurfaceGridElement::Init, ExpandHierarchy via smsurf_GetSurfaceCache); 30k-seed run clean; no UNPORTED(geom.grid) stubs existed. 23 fns; largest: SmGrid::Setup3DDDA, SmGrid::Step3DDDA, SmSurfaceHierarchyElement::ExpandHierarchy, SmGrid::AddElement; cycle back-edges (call into later units; stub or co-port): geom.extent2d(2), surface.surface_cache_p1(2), surface.surface_p2(2), geom.polar_box(1), geom.pseudo_box(1), surface.surface_cache_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "geom.polar_box"
@@ -910,7 +910,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-nurbs.b_spline_surface_p1-a1"
 claimed_at = "2026-10-12T23:03:31Z"
-notes = "difftest 2120 cases: 1985 pass, 135 deferred (surface.surface_p2 102: SmSurface::IsKindOf via CalculateBoundingBox/IsParallelToVector; surface.surface_p1 33: CreateOffsetSurface, IsDegenerateCurve, STEPInversion point solves); 41 fns; largest: SmBSplineSurface::CalculateBoundingBox, SmBSplineSurface::CreateCanonical, SmBSplineSurface::ReadFromDB, SmBSplineSurface::IsDegenerateCurve; cycle back-edges (call into later units; stub or co-port): surface.cone_p1(8), surface.plane_p1(5), surface.surface_p1(5), surface.sphere(4), surface.surf_of_extrusion_p1(4), surface.surf_of_revolution_p1(4), surface.torus(4), surface.surface_p2(3), surface.surface_p7(3), surface.surface_p5(2), surface.surface_p4(1), topology.brep_p1(1), topology.face_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest 2120 cases: 2058 pass, 62 deferred (surface.surface_p1 43, surface.surface_p7 19; surface.surface_p2 IsKindOf wired); difftest 2120 cases: 1985 pass, 135 deferred (surface.surface_p2 102: SmSurface::IsKindOf via CalculateBoundingBox/IsParallelToVector; surface.surface_p1 33: CreateOffsetSurface, IsDegenerateCurve, STEPInversion point solves); 41 fns; largest: SmBSplineSurface::CalculateBoundingBox, SmBSplineSurface::CreateCanonical, SmBSplineSurface::ReadFromDB, SmBSplineSurface::IsDegenerateCurve; cycle back-edges (call into later units; stub or co-port): surface.cone_p1(8), surface.plane_p1(5), surface.surface_p1(5), surface.sphere(4), surface.surf_of_extrusion_p1(4), surface.surf_of_revolution_p1(4), surface.torus(4), surface.surface_p2(3), surface.surface_p7(3), surface.surface_p5(2), surface.surface_p4(1), topology.brep_p1(1), topology.face_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_p2"
@@ -1079,7 +1079,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-curve.tangent_field-a1"
 claimed_at = "2026-10-13T01:00:35Z"
-notes = "difftest 655 cases, 264 deferred (surface.surface_p2 143, surface.surface_p7 110, surface.surface_p1 11; curve.crv_on_surf 2 wired: SmCrvOnSurf::ReadFromDB); 12 fns; largest: SmTangentField::EvaluatePoint, SmTangentField::Create, SmTangentField::ReadFromDB, SmTangentField::Evaluate; cycle back-edges (call into later units; stub or co-port): curve.crv_on_surf(5), surface.surface_p7(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest 655 cases, 511 pass, 144 deferred (surface.surface_p7 132, surface.surface_p1 12; surface.surface_p2 GetNaturalUVDomain wired, runner uses the shim bilinear surface); 12 fns; largest: SmTangentField::EvaluatePoint, SmTangentField::Create, SmTangentField::ReadFromDB, SmTangentField::Evaluate; cycle back-edges (call into later units; stub or co-port): curve.crv_on_surf(5), surface.surface_p7(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "nlib.srf_adv_p4"
@@ -1274,7 +1274,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "partial"
 claimed_by = "swarm-nurbs.b_spline_surface_n_lib_p2-a1"
 claimed_at = "2026-10-13T01:27:54Z"
-notes = "PARTIAL: difftest 654 cases (54 fixture + 600 generated), 628 pass bit-identical, 26 deferred (surface.surface_p2 17: SmTangentField ctor GetNaturalUVDomain in G1 corner blends; surface.surface_p7 5: EvaluateNormal in n-sided blends; curve.curve_p3 4: LocalCurveIntersect for re-synchronized rails); 20k-seed run clean; GetDerivativeLimit co-ported (CO-PORT(surface.surface_p2)); no UNPORTED(nurbs.b_spline_surface_n_lib_p2) stubs existed. 4 fns; largest: SmBSplineSurface::CreateCornerBlend, SmBSplineSurface::Evaluate, SmBSplineSurface::CreateSkinnedSurface, SmBSplineSurface::TrimWithDomain; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(4), surface.surface_p2(3), curve.tangent_field(2), curve.crv_on_surf(1), curve.curve_p3(1), curve.curve_p4(1), surface.surface_p1(1), surface.surface_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 654 cases (54 fixture + 600 generated), 628 pass bit-identical, 26 deferred (curve.crv_on_surf 17: SmCrvOnSurf::ApproximateCurve in G1 corner blends (surface.surface_p2 GetNaturalUVDomain wired); surface.surface_p7 5; curve.curve_p5 4); 20k-seed run clean; GetDerivativeLimit co-ported (CO-PORT(surface.surface_p2)); no UNPORTED(nurbs.b_spline_surface_n_lib_p2) stubs existed. 4 fns; largest: SmBSplineSurface::CreateCornerBlend, SmBSplineSurface::Evaluate, SmBSplineSurface::CreateSkinnedSurface, SmBSplineSurface::TrimWithDomain; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(4), surface.surface_p2(3), curve.tangent_field(2), curve.crv_on_surf(1), curve.curve_p3(1), curve.curve_p4(1), surface.surface_p1(1), surface.surface_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.crv_on_surf"
@@ -1326,7 +1326,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "partial"
 claimed_by = "swarm-nurbs.b_spline_surface_p2-a1"
 claimed_at = "2026-10-13T02:06:41Z"
-notes = "difftest: 763 cases, 709 pass, 54 deferred (curve.curve_p5 11, surface.surface_p1 20, surface.surface_p2 9, surface.surface_p7 9, surface.plane_p2 5); 16 fns; largest: SmBSplineSurface::CreateSurfOfRevolution, SmBSplineSurface::CreateSphereFromArcs, SmBSplineSurface::CreateIsoParametricCurve, SmBSplineSurface::GetControlPointsExpert; cycle back-edges (call into later units; stub or co-port): curve.iso_curve(3), surface.plane_p1(3), curve.ellipse_p1(2), surface.surface_p1(2), surface.surface_p2(2), surface.surface_p7(2), curve.curve_p5(1), curve.ellipse_p2(1), curve.line(1), surface.cone_p2(1), surface.plane_p2(1), surface.sphere(1), surface.surf_of_extrusion_p2(1), surface.surf_of_revolution_p2(1), surface.surface_p6(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "difftest: 763 cases, 718 pass, 45 deferred (curve.curve_p5 11, surface.surface_p1 20, surface.surface_p7 9, surface.plane_p2 5); 16 fns; largest: SmBSplineSurface::CreateSurfOfRevolution, SmBSplineSurface::CreateSphereFromArcs, SmBSplineSurface::CreateIsoParametricCurve, SmBSplineSurface::GetControlPointsExpert; cycle back-edges (call into later units; stub or co-port): curve.iso_curve(3), surface.plane_p1(3), curve.ellipse_p1(2), surface.surface_p1(2), surface.surface_p2(2), surface.surface_p7(2), curve.curve_p5(1), curve.ellipse_p2(1), curve.line(1), surface.cone_p2(1), surface.plane_p2(1), surface.sphere(1), surface.surf_of_extrusion_p2(1), surface.surf_of_revolution_p2(1), surface.surface_p6(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_p8"
@@ -1375,10 +1375,10 @@ depends_on = ["curve.curve_cache", "curve.curve_p2", "curve.curve_p3", "curve.cu
 est_lines = 2398
 layer = 21
 tests = ["SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix"]
-status = "claimed"
-claimed_by = "swarm-surface.surface_p2-a1"
-claimed_at = "2026-10-13T06:03:03Z"
-notes = "91 fns; largest: SmDerivSurfDefinition::CreateCrossSectionCurves, smsurf_EvaluateGeometric, smsurf_DropVectors, sm_CCLocalSolve; cycle back-edges (call into later units; stub or co-port): intersect.curve_class_p1(5), intersect.point_class(3), intersect.surface_intersector_p1(3), intersect.adv_surface_intersector(2), surface.cone_p1(2), surface.surface_cache_p1(2), topology.trimming_tools(2), intersect.curve_class_p2(1), intersect.curve_class_p8(1), intersect.surface_intersector_p4(1), intersect.surface_intersector_p5(1), surface.curve_bounded_surface(1), surface.offset_surface(1), surface.plane_p2(1), surface.sphere(1), surface.srf_in_volume(1), surface.surf_of_extrusion_p2(1), surface.surf_of_revolution_p3(1), surface.surface_p1(1), surface.torus(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit"
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "PARTIAL: difftest 869 cases (69 fixture: Surface.sms / DropCurveSurface.sms / offset_nurb.sms queries, evaluation, knots, edits, copies, SmSurfaceEval, ReadFromDB; base SmSurface() defaults; TestSmPrincipalDirectionPairing; + 800 generated), 756 pass bit-identical, 113 deferred (surface.surface_p5 36, curve.curve_p5 33, surface.surface_p7 18, surface.surface_p1 13, surface.plane_p2 11, intersect.adv_surface_intersector 1, topology.trimming_tools 1); wired UNPORTED(surface.surface_p2) in nurbs.b_spline_surface_p1 (IsKindOf), curve.curve_p2, curve.tangent_field, nurbs.b_spline_curve_n_lib, curve.iso_curve, curve.crv_on_surf (ReadFromDB, lift co-ports), nurbs.b_spline_surface_n_lib_p2 (GetDerivativeLimit co-port); geom.grid now blocked on surface.surface_cache_p1; geom.solution_array keeps 2 handle-lookup markers; 91 fns; largest: SmDerivSurfDefinition::CreateCrossSectionCurves, smsurf_EvaluateGeometric, smsurf_DropVectors, sm_CCLocalSolve; cycle back-edges (call into later units; stub or co-port): intersect.curve_class_p1(5), intersect.point_class(3), intersect.surface_intersector_p1(3), intersect.adv_surface_intersector(2), surface.cone_p1(2), surface.surface_cache_p1(2), topology.trimming_tools(2), intersect.curve_class_p2(1), intersect.curve_class_p8(1), intersect.surface_intersector_p4(1), intersect.surface_intersector_p5(1), surface.curve_bounded_surface(1), surface.offset_surface(1), surface.plane_p2(1), surface.sphere(1), surface.srf_in_volume(1), surface.surf_of_extrusion_p2(1), surface.surf_of_revolution_p3(1), surface.surface_p1(1), surface.torus(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.composite_curve_p2"
