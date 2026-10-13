@@ -95,8 +95,7 @@
 //!   hands the new curve back only when the B-spline deformation succeeds (upstream
 //!   also returns it with the failing status).
 //! - **`IntersectWithEllipse`** passes the call to `SmEllipse::IntersectWithLine`
-//!   (unit `curve.ellipse_p2`), which returns [`SolidError::Unported`]; the other curve
-//!   is a [`crate::curve::curve::Curve`] until `SmEllipse` is ported.
+//!   ([`Ellipse::intersect_with_line`], unit `curve.ellipse_p2`).
 //! - **`JoinWith`**'s other curve (an `SmBSplineCurve*`) is a
 //!   [`crate::curve::curve::Curve`] of B-spline or line kind; its `IsLine` is
 //!   [`Line::is_line`] or [`BSplineCurve::is_line`] (which can reach the unported
@@ -109,6 +108,7 @@
 
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
+use crate::curve::ellipse::Ellipse;
 use crate::error::{Result, SolidError};
 use crate::geom::assert_array::labels;
 use crate::geom::assert_array::{AssertArray, ObjectKey, ReportSpec};
@@ -279,22 +279,6 @@ fn new_solution<O: Copy>() -> Solution<O> {
         objects: [None; MAX_TREES],
         nodes: [None; MAX_TREES],
     }
-}
-
-/// `SmEllipse::IntersectWithLine(other_interval, line, interval, tol, ...)` of the
-/// ellipse `ellipse`.
-fn ellipse_intersect_with_line<O>(
-    _ellipse: &Curve,
-    _ellipse_interval: &Extent1d,
-    _line: &Line,
-    _interval: &Extent1d,
-    _tol: f64,
-) -> Result<LineLineIntersection<O>> {
-    // UNPORTED(curve.ellipse_p2): SmEllipse::IntersectWithLine
-    Err(SolidError::Unported {
-        upstream: "SmEllipse::IntersectWithLine",
-        unit: "curve.ellipse_p2",
-    })
 }
 
 /// `SmCurve::IsLine` answer of the other curve of [`Line::join_with`].
@@ -1224,23 +1208,37 @@ impl Line {
         (param, loc)
     }
 
-    /// Intersections of this line over `interval` with `other` (an `SmEllipse`) over
-    /// `other_interval` (`IntersectWithEllipse`: `SmEllipse::IntersectWithLine` with
-    /// the objects and parameters of every solution swapped).
+    /// Intersections of this line over `interval` with the ellipse `other` over
+    /// `other_interval` (`IntersectWithEllipse`: [`Ellipse::intersect_with_line`] with
+    /// the objects and parameters of every solution swapped). Solutions name
+    /// `this_obj` and `other_obj`; `start.parameters` holds `[this param, other
+    /// param]`.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmEllipse::IntersectWithLine` (unit
-    /// `curve.ellipse_p2`).
+    /// The errors of [`Ellipse::intersect_with_line`].
     pub fn intersect_with_ellipse<O: Copy>(
         &self,
         interval: &Extent1d,
-        other: &Curve,
+        other: &Ellipse,
         other_interval: &Extent1d,
         tol: f64,
+        this_obj: Option<O>,
+        other_obj: Option<O>,
     ) -> Result<LineLineIntersection<O>> {
         // pass the call to SmEllipse::IntersectWithLine
-        let mut r = ellipse_intersect_with_line(other, other_interval, self, interval, tol)?;
+        let r = other.intersect_with_line::<O>(
+            other_interval,
+            self,
+            interval,
+            tol,
+            other_obj,
+            this_obj,
+        )?;
+        let mut r = LineLineIntersection {
+            solutions: r.solutions,
+            needs_more_intersections: r.needs_more_intersections,
+        };
 
         // set output - for every solution swap the object and parameter orders
         for sol in &mut r.solutions {

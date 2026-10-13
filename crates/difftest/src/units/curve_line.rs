@@ -10,14 +10,15 @@
 //! values `rec`. A case whose Rust side reaches an unported unit is deferred as a
 //! whole.
 //!
-//! Deferred cases: `IntersectWithEllipse` (`SmEllipse::IntersectWithLine`,
-//! `curve.ellipse_p2`) and `AssertValid` below `SM_LEVEL_GIVEN`
+//! Deferred cases: `IntersectWithEllipse` reaching `SmCurve::GlobalPointSolve`
+//! (`curve.curve_p1`) and `AssertValid` below `SM_LEVEL_GIVEN`
 //! (`SmCurve::AssertValid`, `curve.curve_p4`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::curve::Curve;
+use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::line::{BoundedLineOptions, Line, TessellationRequest};
 use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
@@ -968,10 +969,31 @@ fn rust_op(op: &OpIn, a: &mut Line, o: &mut Vec<f64>) -> Result<(), Fail> {
                 put_sols(o, &r.solutions);
             }
         }
-        OpIn::IntersectEllipse { ivl, tol, .. } => {
+        OpIn::IntersectEllipse {
+            ivl,
+            frame,
+            domain,
+            radii,
+            tol,
+        } => {
             let i = ivl_of(a, *ivl);
-            let dummy = Curve::from(Line::default());
-            let r = a.intersect_with_ellipse::<i64>(&i, &dummy, &i, *tol);
+            let k = Kernel::default();
+            let e = Ellipse::new(
+                &k,
+                v3(frame[0]),
+                v3(frame[1]),
+                v3(frame[2]),
+                Extent1d::from_min_max(domain[0], domain[1]),
+                radii[0],
+                radii[1],
+                &EllipseOptions::default(),
+            );
+            let e = e.map_err(|err| match Output::unported(&err) {
+                Some(d) => Fail::Deferred(Box::new(d)),
+                None => Fail::Harness(harness(err.to_string())),
+            })?;
+            let ei = e.base().natural_interval();
+            let r = a.intersect_with_ellipse::<i64>(&i, &e, &ei, *tol, Some(0), Some(1));
             if let Some(r) = st(o, r)? {
                 o.push(b(r.needs_more_intersections));
                 put_sols(o, &r.solutions);

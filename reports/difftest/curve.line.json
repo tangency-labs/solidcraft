@@ -530,16 +530,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::IntersectWithLine",
-        "unit": "curve.ellipse_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ix_ellipse",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.line/upstream.json#66 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -16835,13 +16831,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 2,
+  "cases_deferred": 1,
   "cases_failed": 0,
-  "cases_passed": 2101,
+  "cases_passed": 2102,
   "cases_total": 2103,
   "deferred_by_unit": {
-    "curve.curve_p4": 1,
-    "curve.ellipse_p2": 1
+    "curve.curve_p4": 1
   },
   "max_rel_err": 0.0,
   "pass": true,
