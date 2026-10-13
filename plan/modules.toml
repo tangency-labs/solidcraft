@@ -1128,10 +1128,10 @@ depends_on = ["nlib.basis_adv", "nlib.crv_adv_p1", "nlib.crv_adv_p2", "nlib.crv_
 est_lines = 1970
 layer = 15
 tests = ["SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection"]
-status = "claimed"
+status = "green"
 claimed_by = "swarm-nlib.srf_adv_p5-a1"
 claimed_at = "2026-10-12T23:52:36Z"
-notes = "1 fns; largest: N_CreateSkinSrfBoundaryContinuity; unit-SCC #22 (220 units); 159 upstream test entry points reach this unit"
+notes = "1 fns; largest: N_CreateSkinSrfBoundaryContinuity; unit-SCC #22 (220 units); 159 upstream test entry points reach this unit; difftest 3073 cases (73 fixtures + 3000 generated), 0 deferred, max_rel_err 0"
 
 [[unit]]
 id = "surface.volume_p1"
