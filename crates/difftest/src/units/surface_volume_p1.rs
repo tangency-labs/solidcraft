@@ -14,9 +14,10 @@
 //! `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a
 //! Rust error upstream cannot produce) and the rest as `out`.
 //!
-//! Deferred cases: ops reaching the simple maps of the twist and unbend volumes
-//! (units `surface.twist_volume`, `surface.unbend_volume`), which carry no data on the
-//! Rust side.
+//! Deferred cases: ops reaching the simple maps of the unbend volume (unit
+//! `surface.unbend_volume`), which carries no data on the Rust side. The twist maps
+//! are default-constructed on both sides (period `0`: their values are NaN or
+//! infinite).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,6 +37,7 @@ use solidcore::surface::volume::p1::{
     lift_third_derivative, lift_third_derivative_srf, lift_third_derivative_vol,
     FindPvIntersect,
 };
+use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::volume::{Discontinuities3d, EvalOptions, Volume, VolumeKind};
 use solidcore::SolidError;
 use solidcore_ffi::units::surface_volume_p1::{self as ffi, Op};
@@ -520,7 +522,7 @@ fn build(v: &Vol) -> Result<Volume, HarnessError> {
             1 => VolumeKind::Transform(transform_of(
                 m.t.ok_or_else(|| harness("transform map without t"))?,
             )),
-            2 => VolumeKind::Twist,
+            2 => VolumeKind::Twist(TwistVolume::new()),
             3 => VolumeKind::Unbend,
             k => return Err(harness(format!("bad map kind {k}"))),
         };

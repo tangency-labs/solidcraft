@@ -5378,122 +5378,82 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsBoundedSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "bounded_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#672 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_twist_n0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#673 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_twist_n0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#674 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_twist_n1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#675 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_twist_n1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#676 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_twist_n2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#677 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_twist_n2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#678 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_twist_n3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#679 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_twist_n3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#680 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_twist_n4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#681 (upstream unit edge case (no upstream test calls SmVolume directly))",
       "values_compared": 0
     },
@@ -5506,40 +5466,28 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_twist_nocomp",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#683 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_twist_nocomp",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#684 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_point_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#685 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5550,16 +5498,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_simple_twist_n0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#687 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5570,16 +5514,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_simple_twist_n1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#689 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -5590,16 +5530,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_simple_twist_n3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#691 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -5610,14 +5546,10 @@
       "values_compared": 648
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_simple_twist_n5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#693 (upstream unit edge case (no upstream test calls SmVolume directly))",
       "values_compared": 0
     },
@@ -5686,136 +5618,92 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_point_simple_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#702 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_1st_simple_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#703 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::InvEvaluateGuessPointSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "inv_guess_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#704 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsPointInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "simple_preds_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#705 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsPointInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "pt_in_inspace_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#706 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsLineInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "line_in_param_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#707 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsLineInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "line_in_param_twist_nocomp",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#708 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_param_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#709 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_param_twist_nocomp",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#710 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_in_space_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#711 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_in_space_twist_nocomp",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#712 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5890,40 +5778,28 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Copy",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "copy_twist_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#722 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Copy",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "copy_twist_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#723 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::operator==",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "equal_twist_same",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#724 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5934,16 +5810,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::operator==",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "equal_twist_t",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#726 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5962,40 +5834,28 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsBoundedSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "trim_box_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#729 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "pv_eval_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#730 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "pv_eval_twist_conv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#731 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6562,112 +6422,76 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsBoundedSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "bounded_t_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#788 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_t_twist_n0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#789 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_t_twist_n0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#790 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_t_twist_n1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#791 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_t_twist_n1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#792 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_t_twist_n2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#793 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_t_twist_n2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#794 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "eval_t_twist_n3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#795 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_t_twist_n3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#796 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -6702,16 +6526,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "map_point_t_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#801 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6882,16 +6702,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "line_in_param_t_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#823 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6902,16 +6718,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_param_t_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#825 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6922,16 +6734,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_in_space_t_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#827 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7014,16 +6822,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Copy",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "copy_t_twist_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#838 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -7034,16 +6838,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::operator==",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "equal_t_twist_same",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#840 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7078,16 +6878,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsBoundedSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "trim_box_t_twist",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.volume_p1/cases.json#845 (upstream unit edge case (no upstream test calls SmVolume directly))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8114,16 +7910,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295765601",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -8294,16 +8086,12 @@
       "values_compared": 74
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsBoundedSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen0109",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295765623",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9858,16 +9646,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Copy",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen0304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295765818",
-      "values_compared": 0
+      "values_compared": 157
     },
     {
       "max_rel_err": 0.0,
@@ -10158,14 +9942,10 @@
       "values_compared": 109
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::Evaluate",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen0341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295765855",
       "values_compared": 0
     },
@@ -10490,16 +10270,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::IsCurveInParamDomainSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen0382",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295765896",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19078,16 +18854,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::operator==",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen1453",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295766967",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -21174,16 +20946,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen1714",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295767228",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -21626,16 +21394,12 @@
       "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen1770",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295767284",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -23130,14 +22894,10 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTwistVolume::EvaluateSimple",
-        "unit": "surface.twist_volume"
-      },
       "max_rel_err": 0.0,
       "name": "gen1956",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=525458918295767470",
       "values_compared": 0
     },
@@ -23487,12 +23247,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 99,
+  "cases_deferred": 39,
   "cases_failed": 0,
-  "cases_passed": 2787,
+  "cases_passed": 2847,
   "cases_total": 2886,
   "deferred_by_unit": {
-    "surface.twist_volume": 60,
     "surface.unbend_volume": 39
   },
   "max_rel_err": 0.0,

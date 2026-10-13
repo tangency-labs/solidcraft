@@ -7,4 +7,5 @@
 //! `SmSurfOfRevolution`, `SmOffsetSurface`, `SmBlendSurface`, ...) in `source/SMLib`,
 //! and `SM_API/SmApiSurfaces`.
 
+pub mod twist_volume;
 pub mod volume;
