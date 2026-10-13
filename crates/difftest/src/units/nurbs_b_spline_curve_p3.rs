@@ -637,7 +637,7 @@ fn rust_op(
         }
         OpIn::Assert { given } => {
             let mut list = AssertArray::new();
-            let ok = c.assert_valid(Some(&mut list), *given, ObjectKey(1))?;
+            let ok = c.assert_valid(&k, Some(&mut list), *given, ObjectKey(1))?;
             o.push(flag(ok));
             o.push(list.len() as f64);
             for r in list.reports() {

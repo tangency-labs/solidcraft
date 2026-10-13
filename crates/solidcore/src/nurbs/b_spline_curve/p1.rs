@@ -106,11 +106,10 @@
 //!   call's status; if it failed, upstream copies its default-constructed
 //!   `SmVector3d` (`SM_UNDEF_DOUBLE`), so the port uses [`Vec3::UNDEF`] there.
 //! - **Back-edges.** `CalculateContinuities` calls `SmCurve::EvaluateContinuity`
-//!   (unit `curve.curve_p2`) for each interior knot and `Tessellate` calls
-//!   `SmCurve::ApproximateLength` (`curve.curve_p2`) and
-//!   `SmCurve::TessellateByBisection` (`curve.curve_p1`); those calls return
-//!   [`SolidError::Unported`] until the units are ported. `IsKindOf` answers for
-//!   `SmBSplineCurve_TYPE` and returns `Unported` (`SmCurve::IsKindOf`) otherwise.
+//!   and `Tessellate` calls `SmCurve::ApproximateLength` (both in
+//!   [`crate::curve::curve::p2`]) and `SmCurve::TessellateByBisection`
+//!   (`curve.curve_p1`), which returns [`SolidError::Unported`] until that unit is
+//!   ported. `IsKindOf` adds `SmBSplineCurve_TYPE` to `SmCurve::IsKindOf`.
 
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -350,28 +349,29 @@ pub fn split_cubic_bezier(cp1: CPoint, cp2: CPoint, cp3: CPoint, cp4: CPoint) ->
 /// `SmCurve::EvaluateContinuity` of `this` at `this_param` against `other` at
 /// `other_param`.
 fn evaluate_continuity(
-    _this: &BSplineCurve,
-    _this_param: f64,
-    _this_from_left: bool,
-    _other: &BSplineCurve,
-    _other_param: f64,
-    _other_from_left: bool,
-    _angle_tol: f64,
+    this: &BSplineCurve,
+    this_param: f64,
+    this_from_left: bool,
+    other: &BSplineCurve,
+    other_param: f64,
+    other_from_left: bool,
+    angle_tol: f64,
 ) -> Result<ContinuityType> {
-    // UNPORTED(curve.curve_p2): SmCurve::EvaluateContinuity
-    Err(SolidError::Unported {
-        upstream: "SmCurve::EvaluateContinuity",
-        unit: "curve.curve_p2",
-    })
+    Ok(crate::curve::curve::p2::evaluate_continuity(
+        this,
+        this_param,
+        this_from_left,
+        other,
+        other_param,
+        other_from_left,
+        angle_tol,
+    )?
+    .continuity)
 }
 
 /// `SmCurve::ApproximateLength` of `curve` over `interval` with `samples` samples.
-fn approximate_length(_curve: &BSplineCurve, _interval: &Extent1d, _samples: usize) -> Result<f64> {
-    // UNPORTED(curve.curve_p2): SmCurve::ApproximateLength
-    Err(SolidError::Unported {
-        upstream: "SmCurve::ApproximateLength",
-        unit: "curve.curve_p2",
-    })
+fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize) -> Result<f64> {
+    Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
 }
 
 /// `SmCurve::TessellateByBisection` of `curve`.
@@ -643,17 +643,9 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for any other type: the base `SmCurve::IsKindOf` is
-    /// not ported yet.
+    /// None (kept fallible for callers written against the unported base).
     pub fn is_kind_of(&self, t: i64) -> Result<bool> {
-        if t == Self::TYPE {
-            return Ok(true);
-        }
-        // UNPORTED(curve.curve_p2): SmCurve::IsKindOf
-        Err(SolidError::Unported {
-            upstream: "SmCurve::IsKindOf",
-            unit: "curve.curve_p2",
-        })
+        Ok(t == Self::TYPE || crate::curve::curve::p2::is_kind_of(t))
     }
 
     // ---- queries ----------------------------------------------------------------------
@@ -834,8 +826,7 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB; [`SolidError::Unported`] when the curve has interior
-    /// knots (`SmCurve::EvaluateContinuity`, unit `curve.curve_p2`).
+    /// `SM_ERR` without a NURB; those of `SmCurve::EvaluateContinuity`.
     pub fn calculate_continuities(
         &self,
         angle_tol: f64,
@@ -989,8 +980,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmCurve::ApproximateLength` (`curve.curve_p2`) and
-    /// `SmCurve::TessellateByBisection` (`curve.curve_p1`) are not ported yet.
+    /// [`SolidError::Unported`] from `SmCurve::TessellateByBisection`
+    /// (`curve.curve_p1`), which is not ported yet.
     pub fn tessellate(
         &self,
         interval: &Extent1d,
@@ -1729,7 +1720,8 @@ mod tests {
         assert_eq!(c.type_code(), 14033);
         assert_eq!(c.class_string(), "SmBSplineCurve");
         assert!(c.is_kind_of(BSplineCurve::TYPE).unwrap());
-        assert!(matches!(c.is_kind_of(1), Err(SolidError::Unported { .. })));
+        assert!(!c.is_kind_of(1).unwrap());
+        assert!(c.is_kind_of(14001).unwrap());
     }
 
     #[test]
@@ -1798,10 +1790,10 @@ mod tests {
         let (k, m) = c.knots(None).unwrap();
         assert_eq!(k, vec![0.0, 0.5, 1.0]);
         assert_eq!(m, vec![4, 1, 4]);
-        assert!(matches!(
-            c.calculate_continuities(1.0),
-            Err(SolidError::Unported { .. })
-        ));
+        let (min_c, conts) = c.calculate_continuities(1.0).unwrap();
+        assert_eq!(conts.len(), 3);
+        assert_eq!(conts[0], ContinuityType::Discontinuous);
+        assert_eq!(conts[1], min_c);
         assert!(matches!(
             c.tessellate(&c.natural_interval(), 0.1, 10.0, 0),
             Err(SolidError::Unported {

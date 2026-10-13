@@ -54,8 +54,7 @@
 //! - **Derived types.** `SetControlPoint`'s `IsKindOf(SmEllipse_TYPE)` only logs a
 //!   message and is false for a plain B-spline; it is omitted (as `EditEndPoint`'s in
 //!   `p1`). `IsDegenerate` asks `IsKindOf(SmCrvOnSurf_TYPE)` through
-//!   [`BSplineCurve::is_kind_of`], which answers only once `SmCurve::IsKindOf`
-//!   (unit `curve.curve_p2`) is ported.
+//!   [`BSplineCurve::is_kind_of`] (false for a plain B-spline).
 //! - **Input checks.** Where upstream would read or write outside its arrays the port
 //!   returns `InvalidInput`: `CreateByJoining` with no segments or fewer senses than
 //!   segments, `GetControlPointsExpert` for a dimension below 2 (it writes two values
@@ -73,8 +72,8 @@
 //!   ignores, leaving the caller's interval; the port then returns the old interval.
 //! - **Back-edges.** `IsLine` defers to `SmCurve::IsLine` (unit `curve.curve_p5`) for
 //!   rational curves and curves it cannot classify from the control points;
-//!   `IsDegenerate` calls `SmCurve::IsKindOf` (`curve.curve_p2`) and
-//!   `SmCurve::IsDegenerate` (`curve.curve_p4`); `GetMaxAnalyticDomain` calls
+//!   `IsDegenerate` calls `SmCurve::IsDegenerate` (`curve.curve_p4`) for other
+//!   intervals; `GetMaxAnalyticDomain` calls
 //!   `SmCurve::IsClosed` (`curve.curve_p4`); `CreateAnalyticCurve` builds `SmLine`
 //!   (`curve.line`) and `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`); `CreateSimpleOffset` calls `SmCurve::IsArc`
@@ -1212,9 +1211,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the `SmCrvOnSurf_TYPE` test needs `SmCurve::IsKindOf`
-    /// (unit `curve.curve_p2`), another interval `SmCurve::IsDegenerate`
-    /// (`curve.curve_p4`); `SM_ERR` without a NURB.
+    /// [`SolidError::Unported`] for another interval (`SmCurve::IsDegenerate`,
+    /// `curve.curve_p4`); `SM_ERR` without a NURB.
     pub fn is_degenerate(&self, tol3d: f64, interval: Option<&Extent1d>) -> Result<bool> {
         // low work - for nonNaturalInterval intervals pass the call along to the
         // general SmCurve::IsDegenerate

@@ -1,0 +1,15 @@
+//! The curve base class `SmCurve`: the [`Curve`] object (a concrete curve kind plus
+//! the owner pointer), its virtual interface dispatched over the curve kinds, and the
+//! numerical methods implemented once on the base class.
+//!
+//! Upstream: `source/SMLib/src/SmCurve.cpp`, `source/SMLib/inc/SmCurve.h`.
+//! The file is split over several plan units (`curve.curve_p1`, `_p2`, ...); each
+//! lives in its own submodule and adds methods to [`Curve`] (or generic functions
+//! over [`CurveEvaluate`]).
+
+pub mod p2;
+
+pub use p2::{
+    Curve, CurveEvaluate, CurveKind, CurvePropertyType, LineIntersection, OwnerChange, StepOff,
+    TessStepResult,
+};

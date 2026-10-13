@@ -29,9 +29,9 @@
 //!   [`HermiteCurve::dim`] (the base constructor `SmCurve(ULONG)` sets it; its
 //!   `Notify` call has no context to reach). `SmCurve::operator==` (same type, same
 //!   dimension) is the dimension test in [`HermiteCurve::approx_eq`], the type test
-//!   being the Rust type. `SmCurve::IsKindOf` (`curve.curve_p2`) is not ported yet:
-//!   [`HermiteCurve::is_kind_of`] answers for `SmHermiteCurve_TYPE` and returns
-//!   [`SolidError::Unported`] for every other type.
+//!   being the Rust type. [`HermiteCurve::is_kind_of`] adds `SmHermiteCurve_TYPE` to
+//!   `SmCurve::IsKindOf` ([`crate::curve::curve::p2::is_kind_of`]). As a
+//!   [`crate::curve::curve::Curve`] kind the class gets the `SmCurve` base defaults.
 //! - Out-params become return values; arguments upstream marks `NotUsed`
 //!   (`CalculateContinuities`' angle tolerance, `CalculateBoundingBox`'s interval
 //!   and expand flag, `Evaluate`'s `bFromLeft`) are dropped. `CalculateBoundingBox`
@@ -54,7 +54,7 @@
 //!   `GetBSplineControlPolygon`, `AssertValid`, `WriteToDB`, `GetMemoryUsed`,
 //!   `GetRootCurve` and `Dump` are not part of this unit.
 
-use crate::error::{Result, SolidError};
+use crate::error::Result;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::segment_point_distance;
@@ -487,17 +487,9 @@ impl HermiteCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for any other type: the base `SmCurve::IsKindOf`
-    /// is not ported yet.
+    /// None (kept fallible for callers written against the unported base).
     pub fn is_kind_of(&self, t: i64) -> Result<bool> {
-        if t == Self::TYPE {
-            return Ok(true);
-        }
-        // UNPORTED(curve.curve_p2): SmCurve::IsKindOf
-        Err(SolidError::Unported {
-            upstream: "SmCurve::IsKindOf",
-            unit: "curve.curve_p2",
-        })
+        Ok(t == Self::TYPE || crate::curve::curve::p2::is_kind_of(t))
     }
 }
 
@@ -557,7 +549,8 @@ mod tests {
         let ivl = Extent1d::from_min_max(0.5, 2.0);
         assert_eq!(h.knots(Some(&ivl)), (vec![1.0], vec![3]));
         assert!(h.is_kind_of(HermiteCurve::TYPE).unwrap());
-        assert!(h.is_kind_of(1).is_err());
+        assert!(!h.is_kind_of(1).unwrap());
+        assert!(h.is_kind_of(14001).unwrap());
         assert!(h.approx_eq(&sample()));
         assert!(!h.approx_eq(&HermiteCurve::empty(3)));
     }

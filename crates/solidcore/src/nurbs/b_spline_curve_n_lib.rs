@@ -78,7 +78,7 @@
 //!   port returns `InvalidInput`.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
-//!   `SmCurve::ApproximateLength` (`curve.curve_p2`), `SmSurface::LocalPointSolve`
+//!   `SmCurve::ApproximateLength` ([`crate::curve::curve::p2`]), `SmSurface::LocalPointSolve`
 //!   (`surface.surface_p5`), `SmSurface::GetNaturalUVDomain`, `SmSurface::Evaluate` and
 //!   `smsurf_DropVectors` (`surface.surface_p2`); `DeformToEndPointTargets` calls
 //!   [`BSplineCurve::degree_elevate`] for curves of degree below 3 or of even degree.
@@ -326,12 +326,8 @@ fn degree_elevate(curve: &mut BSplineCurve, new_degree: usize) -> Result<()> {
 }
 
 /// `SmCurve::ApproximateLength` of `curve` over `interval` with `samples` samples.
-fn approximate_length(_curve: &BSplineCurve, _interval: &Extent1d, _samples: usize) -> Result<f64> {
-    // UNPORTED(curve.curve_p2): SmCurve::ApproximateLength
-    Err(SolidError::Unported {
-        upstream: "SmCurve::ApproximateLength",
-        unit: "curve.curve_p2",
-    })
+fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize) -> Result<f64> {
+    Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
 }
 
 /// `SmSurface::GetNaturalUVDomain`.
