@@ -1,0 +1,4458 @@
+{
+ "cases": [
+  {
+   "name": "file_Boolean_BoltMBox1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Boolean/BoltMBox1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Boolean_BoltMBox1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Boolean/BoltMBox1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Boolean_BoltMBox2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Boolean/BoltMBox2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Boolean_BoltMBox2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Boolean/BoltMBox2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Boolean_extrudeHoles1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Boolean/extrudeHoles1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Boolean_extrudeHoles1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Boolean/extrudeHoles1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Boolean_extrudeHoles2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Boolean/extrudeHoles2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Boolean_extrudeHoles2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Boolean/extrudeHoles2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_LShape_I",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/LShape_I.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_LShape_II",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/LShape_II.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_Platte",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/Platte.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_brep1",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/brep1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_defillet",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/defillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_extrusion",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/extrusion.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Defeature_extrusion",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Defeature/extrusion.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_flathead_screw_top",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/flathead_screw_top.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_inset_cube",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/inset_cube.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_inset_cube_1x1fillet",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/inset_cube_1x1fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_inset_cube_1x2fillet",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/inset_cube_1x2fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_inset_cube_1x3fillet",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/inset_cube_1x3fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Defeature_inset_cube_3x1fillet",
+   "upstream_ref": "tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Defeature/inset_cube_3x1fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Endcap",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Endcap.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Endcap",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Endcap.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_0311",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/0311.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_0311",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/0311.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_2cyls_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/2cyls_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_2cyls_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/2cyls_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_6_sided_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/6_sided_corner.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_6_sided_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/6_sided_corner.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_Heart",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/Heart.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_Heart",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/Heart.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_bague",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/bague.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_bague",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/bague.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_blade_fillet_fails",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/blade_fillet_fails.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_blade_hub",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_blade_hub",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_blade_hub_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub_1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_blade_hub_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub_1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_blade_hub_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub_2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_blade_hub_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub_2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_blade_hub_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub_3.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_blade_hub_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/blade_hub_3.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_bolt",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/bolt.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_bolt",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/bolt.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_bottle",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/bottle.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_bottle",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/bottle.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box1x1x2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box1x1x2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box1x1x2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box1x1x2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_diff_3cyls",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_diff_3cyls.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_diff_3cyls",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_diff_3cyls.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_diff_cyl",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_diff_cyl.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_diff_cyl",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_diff_cyl.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_diff_cyl_big_rad",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_diff_cyl_big_rad",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_extrusion1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_extrusion1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_extrusion1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_extrusion1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_extrusion2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_extrusion2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_extrusion2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_extrusion2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_box_w_slot",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/box_w_slot.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_box_w_slot",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/box_w_slot.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_brepForFillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/brepForFillet1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_brepForFillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/brepForFillet1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_brepForFillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/brepForFillet2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_brepForFillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/brepForFillet2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/brick.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/brick.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cap1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cap1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cap1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cap1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_caps_coons",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/caps_coons.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_caps_coons",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/caps_coons.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_caps_nside",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/caps_nside.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_caps_nside",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/caps_nside.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_case_ext",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/case_ext.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_case_ext",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/case_ext.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_case_int",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/case_int.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_case_int",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/case_int.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cliff_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cliff_1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cliff_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cliff_1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cliff_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cliff_2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cliff_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cliff_2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cliff_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cliff_3.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cliff_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cliff_3.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cliff_4",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cliff_4.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cliff_4",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cliff_4.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cone_34",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cone_34.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cone_34",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cone_34.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_coons_01_03_29",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/coons_01_03_29.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_coons_01_03_29",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/coons_01_03_29.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_corner_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/corner_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_corner_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/corner_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_crown",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/crown.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_crown",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/crown.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cube_sphere2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cube_sphere2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cube_sphere2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cube_sphere2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_cyl_219",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_cyl_219.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_cyl_219",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_cyl_219.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_cyl_2191",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_cyl_2191.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_cyl_2191",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_cyl_2191.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_cyl_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_cyl_shell.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_cyl_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_cyl_shell.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box_w_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box_w_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box_w_fillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box_w_fillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box_w_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box_w_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box_w_tan_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box_w_tan_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_on_box_w_tan_hole2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_on_box_w_tan_hole2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/cyl_sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/cyl_sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_eg1_srf1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_eg1_srf2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_ext_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/ext_w_hole.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_ext_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/ext_w_hole.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_extrusion0206",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/extrusion0206.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_extrusion0206",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/extrusion0206.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_extrusion0210",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/extrusion0210.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_extrusion0210",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/extrusion0210.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_extrusion1002",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/extrusion1002.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_extrusion1002",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/extrusion1002.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_fillet0114",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/fillet0114.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_fillet0114",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/fillet0114.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_fillet0227",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/fillet0227.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_fillet0227",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/fillet0227.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_fillet1010",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/fillet1010.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_fillet1010",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/fillet1010.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_fillet1017",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/fillet1017.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_fillet1017",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/fillet1017.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_fillet1018",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/fillet1018.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_fillet1018",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/fillet1018.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_fillet1019",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/fillet1019.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_fillet1019",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/fillet1019.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_filleted_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/filleted_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_filleted_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/filleted_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_knife",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/knife.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_knife",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/knife.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_l_shaped_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/l_shaped_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_l_shaped_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/l_shaped_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_letter_g",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/letter_g.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_letter_g",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/letter_g.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_loft_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/loft_brick.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_loft_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/loft_brick.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_box1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_box1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_cone.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_cone.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_nurb_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_nurb_1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_nurb_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_nurb_1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_nurb_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_nurb_2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_nurb_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_nurb_2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_plane_w_notch1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_plane_w_notch1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_plane_w_notch1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_plane_w_notch1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_plane_w_notch2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_plane_w_notch2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_plane_w_notch2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_plane_w_notch2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_sph_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_sph_1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_sph_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_sph_1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_nurb_sph_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/nurb_sph_2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_nurb_sph_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/nurb_sph_2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_open_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/open_shell.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_open_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/open_shell.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_rollover_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/rollover_corner.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_rollover_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/rollover_corner.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_shell_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/shell_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_shell_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/shell_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_shell_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/shell_fillet2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_shell_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/shell_fillet2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_sphere_dif_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/sphere_dif_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_sphere_dif_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/sphere_dif_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_sphere_diff_3cylinders",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_sphere_diff_3cylinders",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_sphere_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/sphere_plane.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_sphere_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/sphere_plane.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test4",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test4.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test4",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test4.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test5",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test5.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test5",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test5.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test6",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test6.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test6",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test6.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test7",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test7.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test7",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test7.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test8",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test8.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test8",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test8.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_test9",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/test9.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_test9",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/test9.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_tilt_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_tilt_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_torii_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/torii_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_torii_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/torii_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_torii_unioned",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/torii_unioned.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_torii_unioned",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/torii_unioned.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_vase",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/vase.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_vase",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/vase.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_vase1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/vase1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_vase1",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/vase1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_vase2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/vase2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_vase2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/vase2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Fillet_vase3",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Fillet/vase3.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Fillet_vase3",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Fillet/vase3.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Mouse",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Mouse.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Mouse",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Mouse.smb"
+    }
+   }
+  },
+  {
+   "name": "part_Platform_db_v32",
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp ReadPartFromDB (version 32 from the curve count)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 32,
+    "persist": true,
+    "path": {
+     "$upstream_file": "Platform.smb"
+    },
+    "skip_lines": 12
+   }
+  },
+  {
+   "name": "file_Shell_ShellBrep_983",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/ShellBrep_983.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_ShellBrep_983",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/ShellBrep_983.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell10",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell10.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell10",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell10.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell11",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell11.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell11",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell11.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell12",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell12.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell12",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell12.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell13",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell13.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell13",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell13.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell14",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell14.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell14",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell14.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell15",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell15.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell15",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell15.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell16",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell16.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell16",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell16.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell17",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell17.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell17",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell17.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell18",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell18.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell18",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell18.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell19",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell19.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell19",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell19.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell2",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell2",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell20",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell20.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell20",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell20.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell21",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell21.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell21",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell21.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell22",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell22.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell22",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell22.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell23",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell23.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell23",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell23.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell3",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell3.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell3",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell3.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell4",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell4.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell4",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell4.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell5",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell5.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell5",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell5.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell6",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell6.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell6",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell6.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell7",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell7.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell7",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell7.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell8",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell8.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell8",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell8.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Shell_problemShell9",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Shell/problemShell9.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Shell_problemShell9",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Shell/problemShell9.smb"
+    }
+   }
+  },
+  {
+   "name": "part_SmallBox_db_v32",
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp ReadPartFromDB (version 32 from the curve count)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 32,
+    "persist": true,
+    "path": {
+     "$upstream_file": "SmallBox.smb"
+    },
+    "skip_lines": 12
+   }
+  },
+  {
+   "name": "file_Solids_InsetCone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/InsetCone.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_InsetCone",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/InsetCone.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_InsetTaperedExtrude",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/InsetTaperedExtrude.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_InsetTaperedExtrude",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/InsetTaperedExtrude.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_OffsetBoxCylOnCorner",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxCylOnCorner.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_OffsetBoxCylOnCorner",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxCylOnCorner.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_OffsetBoxCylOnCorner_edited",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxCylOnCorner_edited.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_OffsetBoxCylOnCorner_healed",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxCylOnCorner_healed.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_OffsetBoxSphOnCorner",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxSphOnCorner.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_OffsetBoxSphOnCorner",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxSphOnCorner.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_OffsetBoxWithBoss",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxWithBoss.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_OffsetBoxWithBoss",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/OffsetBoxWithBoss.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_boolean_trees_result",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/boolean_trees_result.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_boolean_trees_result",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/boolean_trees_result.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_box",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_box",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_cylinder",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/cylinder.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_cylinder",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/cylinder.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_extrusion",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/extrusion.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_extrusion",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/extrusion.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_extrusion2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/extrusion2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_extrusion2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/extrusion2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_extrusion_old",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/extrusion_old.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_extrusion_old",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/extrusion_old.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_fillet_cut",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/fillet_cut.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_fillet_cut",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/fillet_cut.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_fillet_ts",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/fillet_ts.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_fillet_ts",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/fillet_ts.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_l_shape_with_boss",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/l_shape_with_boss.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_l_shape_with_boss",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/l_shape_with_boss.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_mouse_1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/mouse_1.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_mouse_1",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/mouse_1.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_mouse_2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/mouse_2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_mouse_2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/mouse_2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_mouse_3",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/mouse_3.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_mouse_3",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/mouse_3.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_mouse_4",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/mouse_4.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_mouse_4",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/mouse_4.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_mouse_5",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/mouse_5.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_mouse_5",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/mouse_5.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_nurb_fillet",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/nurb_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_nurb_fillet",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/nurb_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_off_extrusion",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/off_extrusion.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_off_extrusion",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/off_extrusion.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_offset_bracket2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/offset_bracket2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_offset_bracket2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/offset_bracket2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_offset_bracket_box",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/offset_bracket_box.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_offset_bracket_box",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/offset_bracket_box.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_plane",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/plane.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_plane",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/plane.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_pyramid",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/pyramid.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_pyramid",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/pyramid.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_revolution",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/revolution.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_revolution",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/revolution.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_revolution2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/revolution2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_revolution2",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/revolution2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_revolution_360",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/revolution_360.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_revolution_360",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/revolution_360.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_revolution_mold",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/revolution_mold.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_revolution_mold",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/revolution_mold.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Solids_sphere",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Solids/sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Solids_sphere",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Solids/sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Tess_nurby_box_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Tess/nurby_box_cyl_sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Tess_nurby_box_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Tess/nurby_box_cyl_sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "file_Tess_tess_20_2_80_0",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "Tess/tess_20_2_80_0.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_Tess_tess_20_2_80_0",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "Tess/tess_20_2_80_0.smb"
+    }
+   }
+  },
+  {
+   "name": "file_box_with_large_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_box_with_large_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    }
+   }
+  },
+  {
+   "name": "file_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "cone.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "cone.smb"
+    }
+   }
+  },
+  {
+   "name": "file_disk",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "disk.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_disk",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "disk.smb"
+    }
+   }
+  },
+  {
+   "name": "file_ellips_ts2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "ellips_ts2.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_ellips_ts2",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "ellips_ts2.smb"
+    }
+   }
+  },
+  {
+   "name": "file_plane_circ",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "plane_circ.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_plane_circ",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "plane_circ.smb"
+    }
+   }
+  },
+  {
+   "name": "file_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "plane_square.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "plane_square.smb"
+    }
+   }
+  },
+  {
+   "name": "file_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "sphere.smb"
+    }
+   }
+  },
+  {
+   "name": "file_surf_extrude",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "surf_extrude.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_surf_extrude",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "surf_extrude.smb"
+    }
+   }
+  },
+  {
+   "name": "file_surf_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "surf_rev.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_surf_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "surf_rev.smb"
+    }
+   }
+  },
+  {
+   "name": "file_surf_sphere150",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "surf_sphere150.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_surf_sphere150",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "surf_sphere150.smb"
+    }
+   }
+  },
+  {
+   "name": "file_torus",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "torus.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_torus",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "torus.smb"
+    }
+   }
+  },
+  {
+   "name": "file_toruswvy",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "toruswvy.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_toruswvy",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "toruswvy.smb"
+    }
+   }
+  },
+  {
+   "name": "file_vase_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "file",
+    "binary": false,
+    "path": {
+     "$upstream_file": "vase_rev.smb"
+    }
+   }
+  },
+  {
+   "name": "db_v30_vase_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (SmBrep::ReadFromFile input)",
+   "inputs": {
+    "mode": "db",
+    "binary": false,
+    "version": 30,
+    "persist": true,
+    "pre": 3,
+    "path": {
+     "$upstream_file": "vase_rev.smb"
+    }
+   }
+  }
+ ]
+}

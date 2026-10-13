@@ -22,6 +22,7 @@
 //! `plan/modules.toml` (regions, face/loop/edge/vertex uses, geometry binding,
 //! tolerances, attributes) extend these records; keep the id/arena/accessor shape.
 
+pub mod brep_data;
 pub mod database_io;
 #[allow(clippy::module_inception)]
 pub mod topology;

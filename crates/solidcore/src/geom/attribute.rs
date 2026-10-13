@@ -47,6 +47,7 @@
 //! | [`AttributeStore::propagate_regions_through_booleans`] | `PropagateRegionsThroughBooleans` (base, `SmColorAttribute`) |
 //! | [`AttributeStore::has_any_other_propagated_attribs`] | `SmMergeRegionAttribute::HasAnyOtherPropagatedAttribs` |
 //! | [`AttributeStore::read_indexed_attributes_from_db`] | `SmAttributeData::ReadIndexedAttributesFromDB` |
+//! | [`AttributeStore::read_indexed_attributes_from_db_partial`] | the same, with the out-param a failed line skip leaves |
 //! | [`AttributeStore::add_attribute`]                 | `SmAObject::AddAttribute` (co-ported)            |
 //! | [`AttributeStore::remove_attribute`]              | `SmAObject::RemoveAttribute` (co-ported)         |
 //! | [`AttributeStore::clear_attributes`]              | `SmAObject::ClearAttributes` (co-ported)         |
@@ -81,7 +82,9 @@
 //!   behaviour) unless it is standalone. [`AttributeStore::destroy`] frees it once.
 //! - **`ReadIndexedAttributesFromDB`.** Returns the index array instead of filling an
 //!   out-param; on error the partially read index array is dropped (upstream leaves
-//!   it in the out-param, callers return at once). An ASCII count whose extraction
+//!   it in the out-param). Callers that ignore the status, as `SmBrepData`'s readers
+//!   do, use [`AttributeStore::read_indexed_attributes_from_db_partial`], which keeps
+//!   the indices read before a failed line skip. An ASCII count whose extraction
 //!   stores nothing (stream already failed or at its end: upstream reads an
 //!   uninitialised variable), a count or index above [`MAX_INDEXED_ATTRIBUTES`]
 //!   (upstream allocates the size asked for, or wraps for `ULONG_MAX`), and a reader
@@ -1291,6 +1294,26 @@ impl AttributeStore {
         all_attributes: &mut Vec<Option<AttributeHandle>>,
         db: &mut DatabaseReader,
     ) -> Result<Vec<u64>> {
+        let read = self.read_indexed_attributes_from_db_partial(all_attributes, db)?;
+        match read.status {
+            Some(e) => Err(e),
+            None => Ok(read.indices),
+        }
+    }
+
+    /// [`Self::read_indexed_attributes_from_db`] for callers that ignore its status
+    /// (upstream `SmBrepData`'s readers): when the ASCII line skip after the indices
+    /// fails (`SM_ERR`), the indices read so far are returned with that status in
+    /// [`IndexedAttributes::status`] and, as upstream, no placeholder is created.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::read_indexed_attributes_from_db`] other than the line skip's.
+    pub fn read_indexed_attributes_from_db_partial(
+        &mut self,
+        all_attributes: &mut Vec<Option<AttributeHandle>>,
+        db: &mut DatabaseReader,
+    ) -> Result<IndexedAttributes> {
         const OP: &str = "geom::attribute::AttributeStore::read_indexed_attributes_from_db";
         let ascii = db.file_type() == FileType::Ascii;
         let no_stream = || SolidError::InvalidInput {
@@ -1307,10 +1330,14 @@ impl AttributeStore {
             db.read_ulong()?
         };
         if count == 0 {
+            let mut status = None;
             if ascii {
-                goto_next_attline(db.in_stream_mut().ok_or_else(no_stream)?)?;
+                status = goto_next_attline(db.in_stream_mut().ok_or_else(no_stream)?).err();
             }
-            return Ok(Vec::new());
+            return Ok(IndexedAttributes {
+                indices: Vec::new(),
+                status,
+            });
         }
         let too_big = || SolidError::InvalidInput {
             operation: OP,
@@ -1328,7 +1355,12 @@ impl AttributeStore {
                     *x = value;
                 }
             }
-            goto_next_attline(s)?;
+            if let Err(e) = goto_next_attline(s) {
+                return Ok(IndexedAttributes {
+                    indices: v,
+                    status: Some(e),
+                });
+            }
             v
         } else {
             db.read_longs(n)?
@@ -1349,8 +1381,21 @@ impl AttributeStore {
                 }
             }
         }
-        Ok(indices)
+        Ok(IndexedAttributes {
+            indices,
+            status: None,
+        })
     }
+}
+
+/// Result of [`AttributeStore::read_indexed_attributes_from_db_partial`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexedAttributes {
+    /// The attribute indices read (upstream's `rAttributes` out-param).
+    pub indices: Vec<u64>,
+    /// `Some` when upstream returned `SM_ERR` from the ASCII line skip
+    /// (`GOTO_NEXT_ATTLINE`); the placeholders were then not created.
+    pub status: Option<SolidError>,
 }
 
 /// One half of `SmMergeRegionAttribute::Merge`'s accumulation: appends each source
