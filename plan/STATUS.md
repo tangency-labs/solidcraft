@@ -1,7 +1,7 @@
 # solidcore status
 
-Last updated: 2026-10-12, Wave 1 in progress (after `curve.curve_p2`). Update a
-summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
+Last updated: 2026-10-12, Wave 1 in progress (after `curve.curve_cache` and style review
+batch #12). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
 
@@ -11,12 +11,12 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | | |
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
-| Green | **66** (78,832 lines): `nlib.knots`, `geom.vector2d`, `topology.database_io`, `nlib.math`, `geom.periodic_extent1d`, `geom.matrix`, `geom.assert_array`, `nlib.geom`, `geom.vector3d`, `geom.tol`, `geom.context`, `geom.extent1d`, `geom.polynomial`, `nlib.srf_basic`, `geom.extent2d`, `nlib.basis_basic`, `geom.hash_table`, `geom.local_solve_nd`, `geom.local_solve1d`, `geom.polar_box`, `nlib.bezier`, `nlib.funcs_basic`, `nlib.basis_adv`, `geom.geom_utility_p1`, `geom.axis2_placement`, `geom.geom_utility_p2`, `geom.extent3d`, `geom.pseudo_box`, `nlib.iges`, `nlib.srf_tool_p1`, `nlib.crv_fit_p1`, `nlib.funcs_adv`, `nlib.crv_tool_p1`, `geom.point_set`, `nlib.srf_fit`, `nlib.crv_fit_p2`, `topology.topology`, `nlib.crv_nurb`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nlib.crv_basic`, `nurbs.nurbs_crv`, `nlib.crv_fit_p3`, `nlib.crv_common`, `nlib.crv_adv_p1`, `nlib.spiral`, `nlib.srf_common`, `nlib.srf_nurb`, `nlib.crv_adv_p2`, `nlib.srf_tool_p2`, `nlib.crv_offset`, `nurbs.nurbs_srf`, `nlib.crv_approx`, `nlib.srf_tool_p3`, `nlib.srf_adv_p3`, `nlib.srf_tool_p4`, `nlib.srf_adv_p2`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_offset`, `nlib.srf_adv_p6`, `curve.hermite_curve`, `nurbs.b_spline_curve_n_lib`, `curve.conic`, `curve.projected_curve` |
-| Partial | **16** (20,310 lines): `geom.tree`, `geom.attribute`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.tools`, `geom.transform`, `geom.global_solver`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_surface_p1`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_curve_p3`, `curve.curve_p2`, `nurbs.b_spline_surface_n_lib_p1`, `curve.hyperbola` |
-| Ported (green + partial) | 82 units, 99,142 upstream lines (25.6%); about 97,000 Rust lines in `crates/solidcore/src` |
-| Claimed | 7 (5,869 lines): `curve.crv_in_volume`, `curve.curve_cache`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `curve.tangent_field` |
+| Green | **66** (78,832 lines): `geom.extent3d`, `geom.vector2d`, `nlib.knots`, `nlib.math`, `topology.database_io`, `geom.tol`, `nlib.geom`, `geom.assert_array`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.periodic_extent1d`, `geom.vector3d`, `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.polynomial`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box`, `nlib.crv_basic`, `geom.pseudo_box`, `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_fit_p2`, `nlib.crv_nurb`, `nlib.funcs_adv`, `nlib.srf_fit`, `nlib.crv_fit_p3`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv`, `topology.topology`, `nlib.crv_adv_p1`, `nlib.crv_common`, `nlib.spiral`, `nlib.crv_adv_p2`, `nlib.srf_common`, `nlib.crv_approx`, `nlib.crv_offset`, `nlib.srf_nurb`, `nlib.srf_tool_p2`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_srf`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nlib.srf_tool_p4`, `curve.conic`, `curve.projected_curve`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_adv_p6`, `nlib.srf_offset` |
+| Partial | **18** (22,103 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1` |
+| Ported (green + partial) | 84 units, 100,935 upstream lines (26.0%); about 104,600 Rust lines in `crates/solidcore/src` |
+| Claimed | 6 (6,008 lines): `curve.crv_in_volume`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2` |
 | Blocked | 0 |
-| Todo | 181 (290,657 lines) |
+| Todo | 170 (280,960 lines) |
 
 ## What Wave 0 produced
 
@@ -130,19 +130,31 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `curve.curve_p2` | `curve::curve::p2` | 3021 cases (21 fixture: prog_test line and circle curves, `ApproximateLength(ivl, 20)`, circle seam continuity, Hermite base defaults, `ReadFromDB` dispatch incl. conics + 3000 generated over B-spline, Hermite and arc curves, static helpers, solver box tests), 3015 bit-identical; `--perturb` SENSITIVE | 6 (`curve.curve_p5` 5: `SmCurve::IsArc`; `curve.line` 1: `SmLine`) |
 | `nurbs.b_spline_surface_n_lib_p1` | `nurbs::b_spline_surface_n_lib::p1` | 665 cases (65 fixture: my_test_bsplinesurface_nlib offset/sweep/swung, my_test_surface_interface ops on the surf1 net, surf1 Coons patches, the three pt_TestFiles .sms surfaces and 3D .smc curves through every op, edge cases + 600 generated), 638 bit-identical; `--perturb` SENSITIVE | 27 (`surface.surface_p5`: `SmSurface::IsSingularity` in `CreateExtendedSurface`) |
 | `curve.hyperbola` | `curve::hyperbola` | 2062 cases (62 fixture: smCurveTest.cpp my_test_analytic_curves hyperbola (CreateCanonical, AdjustSTEPInterval(-1,2), evaluation, GlobalPointSolveSTEP, ReverseParameterization), the smSurfaceTest.cpp extrusion-generator hyperbola, edge cases, ReadFromDB records + 2000 generated), 1960 bit-identical; `--perturb` SENSITIVE | 102 (`curve.curve_p1` 70: `SmCurve::GlobalPointSolve`; `curve.curve_p5` 32: `SmCurve::EvaluateSTEPPoint` in classifying `STEPInversion`) |
+| `curve.curve_cache` | `curve::curve_cache` | 638 cases (38 fixture: lines, cubics, C0 quadratic, closed, degenerate, 2D, rational arc and Hermite curves through `Tessellate` with every option, sub/beyond/disjoint/reversed intervals, `GetAnalyticCurve`, type queries + 600 generated), 635 bit-identical | 3 (`curve.curve_p5` 2: `SmCurve::IsArc`; `curve.line` 1: `SmLine` in `GetAnalyticCurve`) |
+| `curve.tangent_field` | `curve::tangent_field` | 655 cases, 389 bit-identical | 266 (`surface.surface_p2` 143, `surface.surface_p7` 110, `surface.surface_p1` 11, `curve.crv_on_surf` 2) |
 
 ## Ready set
 
-`curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`,
-`curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`,
-`curve.projected_curve`, `curve.tangent_field` (layer 14, unblocked by `curve.curve_p2`;
-all claimed). New curve classes become `CurveKind`
-variants of `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2).
+empty: every todo unit still waits on a claimed or todo dependency. Claimed and in
+progress: `curve.crv_in_volume`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2`. New curve classes become `CurveKind` variants of
+`curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a merge that adds a
+variant must also extend the exhaustive matches in `curve::curve_cache`.
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 76 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 84 ported
   units is bit-identical (`max_rel_err = 0`).
+- `curve.curve_cache` co-ported `SmFindCurveDistanceExtremaEFO::Evaluate`
+  (`curve.curve_p4`) and `SmCurve::IsLine` (`curve::curve::p5::is_line_base`); porters of
+  `curve.curve_p4` / `_p5` must not port them twice. `sm_ComputeConstants` stops at the
+  first non-zero polygon angle with angle tolerance `0` (kept).
+- `curve.hyperbola`: a NURB-less hyperbola (failed `MakeNurb`) segfaults upstream in
+  `GlobalPointSolveSTEP`; `curve.curve_p1`'s porter decides the port (`SM_ERR`).
+- Nested polymorphic reads (`SmCurve::ReadFromDB` -> projected/offset/iso curve ->
+  `SmCurve::ReadFromDB`) have no depth limit upstream; the port bounds them at
+  `MAX_READ_NESTING` = 64.
+- `curve.tangent_field`: `SmTangentField` derives from `SmCrvOnSurf`; `SetAll`,
+  `GetNaturalInterval`, `IsKindOf`, `operator==` are `CO-PORT(curve.crv_on_surf)`.
 - `nlib.srf_adv_p5`: with rails and rational input the derivative curves share the
   derivative surfaces' knot arrays, so in-place knot writes reach `der` (ported with
   `make_compatible_knot_tol_traced`). `nlib.srf_adv_p1`: the periodic wrap of
@@ -532,27 +544,56 @@ wasm32 check.
   `b_spline_curve/p1..p3`; the `AnalyticCurve` empty enum (until `curve.line` /
   `curve.ellipse_p1` land).
 
-## Resume note (2026-10-12, after style review batch #11)
+## Style review batch #12 (2026-10-12)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Two units are claimed
-  (`curve.curve_p2`, `nlib.srf_adv_p6`) with worktrees in `../solidcore-wt/`; the
-  ready set is empty until one lands. `curve.curve_p2` is the big unlock: it holds
-  most deferred cases of the partial units (wire its `UNPORTED(curve.curve_p2)` stubs).
-- For worktrees branched before batch #11: `srf_adv::p2::KNOT_SNAP_TOL` is gone (use
-  `srf_adv::p3::KNOT_TOL`); `nurbs::index` gained `at`/`put`/`at2`/`put2`;
-  `BSplineCurve::nurb_ref_mut` is the `pub(super)` mutable NURB accessor. Earlier API
-  changes (batch #10 and before) still apply: `SolidError::nl_ser`, `nurbs::math::BIGD`,
-  `BSplineCurve::edit_parameterization(&Extent1d)`, `nurbs::nurbs_crv::to_euclid`,
-  `Entity126` / `Entity128`, `extract_patch(.., Rectangle)`, `nurbs::geom::Frame`.
-- Use `SolidError::sm_err` / `nl_ser` / `nlib` and `nurbs::index` (`get`/`set` signed,
-  `at`/`put` unsigned, `oob`) in new code; older files still carry private copies
-  (`grep -rn "fn sm_err\|^fn nlib(\|^fn oob(\|^fn at<" crates/solidcore/src`).
-- Remaining partial waits: see the Partial units table (mostly `curve.curve_p2`,
-  `curve.curve_p4`/`_p5`, the surface caches and topology units).
-- Next style review batch: `nlib.srf_offset`, `nlib.crv_fit_p3`, `nlib.crv_adv_p1`,
-  `nlib.crv_common`, `nlib.spiral`, `nlib.srf_common` and the units that merge next
-  (`curve.curve_p2`, `nlib.srf_adv_p6`); optionally migrate the remaining private
-  `nlib` / `sm_err` / `oob` / `at` copies to the shared helpers.
+Workflow batch #4: reviewed `nlib.srf_offset`, `nlib.srf_adv_p6`, `curve.curve_p2`,
+`curve.conic` and `nurbs.b_spline_surface_n_lib_p1` against AGENTS.md (merge
+`bd22019`). `curve.parabola` was still claimed (not merged) and is left for a later
+batch. Numerics and operation order were not changed; every touched unit (also
+`nurbs.b_spline_surface_p1`, `topology.database_io` and, after merging main,
+`curve.hyperbola` and `curve.projected_curve`) re-ran difftest with unchanged counts and
+status, plus fmt, clippy, tests and the wasm32 check.
+
+- **`error::SM_ERR_NULL_POINTER` + `SolidError::null_pointer(op)`** (upstream `NER` on a
+  `NULL` pointer): replaces four private copies of the `1006` constant and the `ner` /
+  `no_stream` / inline `Upstream { code: SM_ERR_NULL_POINTER, .. }` builders in
+  `b_spline_surface_n_lib/p1`, `b_spline_surface/p1`, `curve/curve/p2` and
+  `topology/database_io` (whose `pub const` is gone: import it from `crate::error`).
+- `srf_adv/p6`: `nurbs::index::{at, put, oob}` and `SolidError::nlib` instead of private
+  `oob` / `nlib` / `at` copies; `*mt(v, i, op)? = x` writes are `put(v, i, x, op)?`, and
+  the rescaled derivative curves are rescaled through one slot borrow.
+- `srf_offset`: `offset_patch_net` is a `Surface` method (was an associated fn taking
+  the patch); `UNIT_SQUARE` listed in the header table.
+- `conic`: `Conic::TYPE` is `curve::curve::p2::CONIC_TYPE` (no private
+  `CURV_BASE_TYPE`); error operation paths name the methods
+  (`curve::conic::Conic::evaluate`, ...).
+- `curve/curve/p2`: `stack_look` destructures `last_chunk::<7>()` instead of indexing
+  with an `unwrap_or(0.0)` fallback.
+- Not changed (judged faithful or out of scope): `b_spline_surface_n_lib/p1`'s identical
+  `build_nlib_curve` / `create_nlib_curve` (two upstream statics) and its `invalid`
+  helper; `srf_adv/p6`'s `rf` / `mt` reference accessors (no shared equivalent yet);
+  `curve/curve/p2`'s `u64 as usize` multiplicities of Hermite/conic knots; private
+  `CURV_BASE_TYPE` copies in `hermite_curve`, `hyperbola` and `b_spline_curve/p1`
+  (use `curve::curve::p2::*_TYPE` next time those files are touched).
+
+## Resume note (2026-10-12, after style review batch #12)
+
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). 66 green, 18 partial,
+  6 claimed (`curve.crv_in_volume`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2`), 170 todo, 0 blocked. The ready set is empty until a
+  claimed unit lands.
+- For worktrees branched before batch #12: `SM_ERR_NULL_POINTER` lives in
+  `crate::error` (the `topology::database_io` and `b_spline_surface_n_lib::p1` exports
+  are gone); build the error with `SolidError::null_pointer(OP)`. Earlier changes still
+  apply: `nurbs::index::{get, set, at, put, at2, put2, oob}`, `SolidError::{sm_err,
+  nl_ser, nlib}`, `srf_adv::p3::KNOT_TOL`, `BSplineCurve::nurb_ref(_mut)`,
+  `nurbs::math::BIGD`.
+- Adding a `CurveKind` variant: extend the exhaustive matches in `curve::curve::p2` and
+  `curve::curve_cache` (main was briefly broken when `curve.projected_curve` and
+  `curve.curve_cache` merged back to back; fixed in `d65651e`).
+- Next style review batch: `curve.parabola` (once merged), `curve.hyperbola`,
+  `curve.projected_curve`, `curve.curve_cache`, `curve.tangent_field`, and the
+  remaining private `CURV_BASE_TYPE` / `oob` / `at` copies
+  (`grep -rn "CURV_BASE_TYPE: i64\|^fn oob(\|^fn at<" crates/solidcore/src`).
 
 ## Known problems
 
