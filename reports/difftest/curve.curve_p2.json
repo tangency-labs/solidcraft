@@ -3,6 +3,30 @@
   "cases": [
     {
       "max_rel_err": 0.0,
+      "name": "read_db_conic_parabola",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p2/conic.json#0 (upstream source/SMLib/src/SmCurve.cpp:23728 (SmConic::ReadFromDB dispatch))",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_db_conic_ellipse",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p2/conic.json#1 (upstream source/SMLib/src/SmCurve.cpp:23728 (SmConic::ReadFromDB dispatch))",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "read_db_conic_hyperbola_rotated",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p2/conic.json#2 (upstream source/SMLib/src/SmCurve.cpp:23728 (SmConic::ReadFromDB dispatch))",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "line_info",
       "outcome": "pass",
       "pass": true,
@@ -24173,8 +24197,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 6,
   "cases_failed": 0,
-  "cases_passed": 3012,
-  "cases_total": 3018,
+  "cases_passed": 3015,
+  "cases_total": 3021,
   "deferred_by_unit": {
     "curve.curve_p5": 5,
     "curve.line": 1

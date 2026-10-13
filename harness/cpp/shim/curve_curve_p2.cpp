@@ -23,6 +23,7 @@
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
+#include <SmConic.h>
 #include <SmContext.h>
 #include <SmCurve.h>
 #include <SmCurveCache.h>
@@ -1568,6 +1569,24 @@ void put_state(std::vector<double>& o, const SmCurve* c)
         put_vec(o, a[1]);
         put_vec(o, b[0]);
         put_vec(o, b[1]);
+    }
+    else if (c->IsKindOf(SmConic_TYPE))
+    {
+        // the defining data evaluated back: position and tangent at 0 and 0.5
+        o.push_back(2.0);
+        o.push_back((double)c->GetDim());
+        const double ts[2] = {0.0, 0.5};
+        for (double t : ts)
+        {
+            SmVector3d v[2];
+            if (c->Evaluate(t, 1, TRUE, v, FALSE) == SM_SUCCESS)
+            {
+                put_vec(o, v[0]);
+                put_vec(o, v[1]);
+            }
+            else
+                o.push_back(-1.0);
+        }
     }
     else
         o.push_back(-1.0);

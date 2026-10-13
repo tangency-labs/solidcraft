@@ -703,6 +703,20 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
                 pv(o, *v);
             }
         }
+        CurveKind::Conic(k) => {
+            // the defining data evaluated back: position and tangent at 0 and 0.5
+            o.extend([2.0, k.dim() as f64]);
+            for t in [0.0, 0.5] {
+                match k.evaluate(t, 1, false) {
+                    Ok(v) => {
+                        for p in v.iter().take(2) {
+                            pv(o, *p);
+                        }
+                    }
+                    Err(_) => o.push(-1.0),
+                }
+            }
+        }
     }
 }
 
