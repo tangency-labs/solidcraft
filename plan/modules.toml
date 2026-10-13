@@ -1297,9 +1297,9 @@ depends_on = ["curve.curve_cache", "curve.curve_p2", "curve.curve_p3", "curve.cu
 est_lines = 1666
 layer = 19
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.curve_p7-a1"
+claimed_at = "2026-10-13T04:46:38Z"
 notes = "2 fns; largest: SmCCIGlobalSolver::LocalSolve, SmCurve::GlobalPropertyAnalysis; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(2); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
