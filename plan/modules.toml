@@ -1102,9 +1102,9 @@ depends_on = ["curve.curve_p2", "curve.line", "geom.axis2_placement", "geom.exte
 est_lines = 1916
 layer = 15
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.ellipse_p2-a1"
+claimed_at = "2026-10-13T02:16:47Z"
 notes = "44 fns; largest: SmEllipse::IntersectWithEllipse, SmPolarConversion::SetUpPolarConversion, SmEllipse::IntersectWithLine, SmEllipse::DropPointFast; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(3), curve.curve_p1(2), curve.curve_p3(2), curve.curve_p6(1), curve.ellipse_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
