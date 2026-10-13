@@ -70,8 +70,9 @@
 //! - **`ReverseParameterization`** sets the new interval with `SetMinMax`, whose
 //!   failure (new min above new max, only for an inverted natural interval) upstream
 //!   ignores, leaving the caller's interval; the port then returns the old interval.
-//! - **Back-edges.** `IsLine` defers to `SmCurve::IsLine` (unit `curve.curve_p5`) for
-//!   rational curves and curves it cannot classify from the control points;
+//! - **Back-edges.** `IsLine` defers to `SmCurve::IsLine` (unit `curve.curve_p5`,
+//!   co-ported by `curve.curve_cache` as [`crate::curve::curve::p5::is_line_base`])
+//!   for rational curves and curves it cannot classify from the control points;
 //!   `IsDegenerate` calls `SmCurve::IsDegenerate` (`curve.curve_p4`) for other
 //!   intervals; `GetMaxAnalyticDomain` calls
 //!   `SmCurve::IsClosed` (`curve.curve_p4`); `CreateAnalyticCurve` builds `SmLine`
@@ -188,17 +189,14 @@ fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
 // ---- back-edges -------------------------------------------------------------------
 
 /// `SmCurve::IsLine` of `curve`: the line point and vector when the curve is a
-/// constant-speed line.
+/// constant-speed line (co-ported by unit `curve.curve_cache` into
+/// [`crate::curve::curve::p5`]).
 fn curve_is_line(
-    _curve: &BSplineCurve,
-    _num_samples: u64,
-    _tol: f64,
+    curve: &BSplineCurve,
+    num_samples: u64,
+    tol: f64,
 ) -> Result<Option<(Point3, Vec3)>> {
-    // UNPORTED(curve.curve_p5): SmCurve::IsLine
-    Err(SolidError::Unported {
-        upstream: "SmCurve::IsLine",
-        unit: "curve.curve_p5",
-    })
+    crate::curve::curve::p5::is_line_base(curve, num_samples, tol)
 }
 
 /// `SmCurve::IsDegenerate` of `curve` over `interval`.
@@ -350,8 +348,7 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB or when a span cannot be found; [`SolidError::Unported`]
-    /// when the Bezier line test reaches `SmCurve::IsLine`.
+    /// `SM_ERR` without a NURB or when a span cannot be found.
     pub fn calculate_bounding_box(
         &self,
         interval: &Extent1d,
@@ -1103,8 +1100,7 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB; [`SolidError::Unported`] where `SmCurve::IsLine`
-    /// (unit `curve.curve_p5`) is needed.
+    /// `SM_ERR` without a NURB.
     pub fn is_line(&self, num_samples: u64, tol: f64) -> Result<Option<(Point3, Vec3)>> {
         let num_samples = num_samples.max(3);
 
@@ -1787,11 +1783,9 @@ mod tests {
     }
 
     #[test]
-    fn non_bezier_line_test_is_unported() {
-        assert!(matches!(
-            cubic().is_line(3, 1e-9),
-            Err(SolidError::Unported { .. })
-        ));
+    fn non_bezier_line_test_samples_the_curve() {
+        // a curved cubic: SmCurve::IsLine (co-ported) rejects it
+        assert!(cubic().is_line(3, 1e-9).unwrap().is_none());
     }
 
     #[test]

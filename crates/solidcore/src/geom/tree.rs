@@ -37,6 +37,7 @@
 //! | [`TreeNode`], [`TreeNode::new`]        | `SmTreeNode`, `SmTreeNode()`                    |
 //! | [`TreeNode::bounding_box`]             | `SmTreeNode::GetBoundingBox`                    |
 //! | [`ObjectList`]                         | `SmObjectList`                                  |
+//! | [`Tree::curve_spans`], [`Tree::curve_parents`], [`Tree::curve_aux`], [`Tree::curve_span`], [`Tree::set_curve_data`], [`CurveSpanRef`] | the owning `SmCurveCache`'s `m_sBezMgr` / `m_sParentMgr` and the casts of `m_pData` to `SmBezierAux1d*` / `SmBezierSpan*` |
 //! | [`SurfaceAux`]                         | the `SmBezierAux2d` fields read here (`m_eSplitDir`, `m_bIsMarked`, `m_eNodeClass`, `m_pFace`, `mBA_pSurface`) |
 //! | [`AuxDataType`], [`NodeGeomType`], [`SplitDir`], [`NodeClass`] | `SmAuxDataType`, `SmNodeGeomType`, `SmSurfParamType` (U/V), `SmNodeClassType` |
 //!
@@ -59,13 +60,18 @@
 //! - The single-point constructor always allocates its node (and object-list
 //!   item) in the tree's arenas; upstream can also use caller-owned memory, which
 //!   is then invisible to `GetAllTreeNodes`/`GetNodeCount`.
-//! - The tree owner is a [`TreeOwner`] kind. `GetOwnerObject` and
-//!   `GetFirstBezierPatch` call into the curve/surface caches and B-spline
-//!   surfaces, which are not ported yet; those paths return
-//!   [`SolidError::Unported`] (see the `UNPORTED` markers).
+//! - The tree owner is a [`TreeOwner`] kind. A curve cache
+//!   ([`crate::curve::curve_cache::CurveCache`]) hands its span data (upstream
+//!   reached through `m_pData` pointers into the cache) and its curve handle to the
+//!   tree it builds ([`Tree::set_curve_data`]); `GetOwnerObject` of a curve tree
+//!   returns that handle. `GetOwnerObject` of surface trees and
+//!   `GetFirstBezierPatch` call into the surface caches and B-spline surfaces,
+//!   which are not ported yet; those paths return [`SolidError::Unported`] (see the
+//!   `UNPORTED` markers).
 //! - `SM_ASSERT`, `WARN` (bad split-direction data) and debug drawing are not
 //!   ported; a `WARN` branch simply adds nothing, as upstream.
 
+use crate::curve::curve_cache::{BezierAux1d, BezierSpan};
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object;
@@ -249,6 +255,17 @@ pub struct SurfaceAux<O> {
     pub surface: Option<O>,
 }
 
+/// Curve decomposition data a node points at: an entry of [`Tree::curve_spans`]
+/// or of [`Tree::curve_parents`] (upstream `SmBezierSpan*` in the curve cache's
+/// `m_sBezMgr`, `SmBezierAux1d*` in its `m_sParentMgr`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CurveSpanRef {
+    /// Leaf span `i` (`SmBezierSpan`, `SM_AD_BEZIER_CURVE`).
+    Span(usize),
+    /// Parent data `i` (`SmBezierAux1d`, `SM_AD_CURVE_DATA`).
+    Parent(usize),
+}
+
 /// Auxiliary data of a node (`SmTreeNode::m_pData`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NodeData<O> {
@@ -259,6 +276,8 @@ pub enum NodeData<O> {
     ObjectList(Option<ListId>),
     /// Surface subdivision data (`SmBezierAux2d*` / `SmBezierPatch*`).
     Surface(SurfaceAux<O>),
+    /// Curve decomposition data (`SmBezierSpan*` / `SmBezierAux1d*`).
+    Curve(CurveSpanRef),
 }
 
 /// One item of a node's linked list of objects (`SmObjectList`).
@@ -338,7 +357,7 @@ impl<O> TreeNode<O> {
     pub const fn list_head(&self) -> Option<ListId> {
         match self.data {
             NodeData::ObjectList(h) => h,
-            NodeData::None | NodeData::Surface(_) => None,
+            NodeData::None | NodeData::Surface(_) | NodeData::Curve(_) => None,
         }
     }
 }
@@ -384,6 +403,13 @@ pub struct Tree<O> {
     nodes: Vec<TreeNode<O>>,
     /// `m_sListMgr`: every object-list item, in allocation order.
     lists: Vec<ObjectList<O>>,
+    /// The owning curve cache's leaf spans (its `m_sBezMgr`), for curve trees.
+    curve_spans: Vec<BezierSpan>,
+    /// The owning curve cache's parent data (its `m_sParentMgr`), for curve trees.
+    curve_parents: Vec<BezierAux1d>,
+    /// The curve of an owning curve cache (`SmCurveCache::GetCurve`), as the
+    /// caller's handle.
+    owner_curve: Option<O>,
 }
 
 /// C `int` expression `1 << count` widened to `ULONG` (sign-extended, as on
@@ -443,6 +469,73 @@ fn cyclic_links(operation: &'static str) -> SolidError {
     }
 }
 
+impl<O> Tree<O> {
+    /// The leaf spans of a curve tree, in span order (the owning `SmCurveCache`'s
+    /// `m_sBezMgr`).
+    #[must_use]
+    pub fn curve_spans(&self) -> &[BezierSpan] {
+        &self.curve_spans
+    }
+
+    /// The parent data of a curve tree (the owning `SmCurveCache`'s `m_sParentMgr`).
+    #[must_use]
+    pub fn curve_parents(&self) -> &[BezierAux1d] {
+        &self.curve_parents
+    }
+
+    /// Hands the curve decomposition data of the owning curve cache to the tree
+    /// (the arenas [`CurveSpanRef`] indexes) together with the cache's curve handle
+    /// ([`Tree::owner_object`]).
+    pub fn set_curve_data(
+        &mut self,
+        spans: Vec<BezierSpan>,
+        parents: Vec<BezierAux1d>,
+        owner_curve: Option<O>,
+    ) {
+        self.curve_spans = spans;
+        self.curve_parents = parents;
+        self.owner_curve = owner_curve;
+    }
+
+    /// The curve decomposition data of `node`: its `SmBezierAux1d` part (upstream
+    /// casts `m_pData`, for a leaf an `SmBezierSpan`).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the node carries no curve data or the index is out of
+    /// range (upstream reads through whatever `m_pData` points at).
+    pub fn curve_aux(&self, node: &TreeNode<O>) -> Result<&BezierAux1d> {
+        let found = match node.data {
+            NodeData::Curve(CurveSpanRef::Span(i)) => self.curve_spans.get(i).map(|s| &s.aux),
+            NodeData::Curve(CurveSpanRef::Parent(i)) => self.curve_parents.get(i),
+            NodeData::None | NodeData::ObjectList(_) | NodeData::Surface(_) => None,
+        };
+        found.ok_or(SolidError::InvalidInput {
+            operation: "geom::tree::Tree::curve_aux",
+            reason: "node has no curve decomposition data",
+        })
+    }
+
+    /// The leaf span of `node` (upstream casts `m_pData` to `SmBezierSpan*`).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when the node does not point at a leaf span.
+    pub fn curve_span(&self, node: &TreeNode<O>) -> Result<&BezierSpan> {
+        let found = match node.data {
+            NodeData::Curve(CurveSpanRef::Span(i)) => self.curve_spans.get(i),
+            NodeData::Curve(CurveSpanRef::Parent(_))
+            | NodeData::None
+            | NodeData::ObjectList(_)
+            | NodeData::Surface(_) => None,
+        };
+        found.ok_or(SolidError::InvalidInput {
+            operation: "geom::tree::Tree::curve_span",
+            reason: "node has no curve leaf span",
+        })
+    }
+}
+
 impl<O: Copy + PartialEq> Tree<O> {
     /// `SmTree_TYPE`.
     pub const TYPE: i32 = SM_TREE_TYPE;
@@ -458,6 +551,9 @@ impl<O: Copy + PartialEq> Tree<O> {
             top: None,
             nodes: Vec::new(),
             lists: Vec::new(),
+            curve_spans: Vec::new(),
+            curve_parents: Vec::new(),
+            owner_curve: None,
         }
     }
 
@@ -535,11 +631,7 @@ impl<O: Copy + PartialEq> Tree<O> {
     /// or surface cache (`SmTree::GetOwnerObject`).
     pub fn owner_object(&self) -> Result<Option<O>> {
         match self.owner {
-            // UNPORTED(curve.curve_cache): SmCurveCache::GetCurve
-            Some(TreeOwner::CurveCache) => Err(SolidError::Unported {
-                upstream: "SmCurveCache::GetCurve",
-                unit: "curve.curve_cache",
-            }),
+            Some(TreeOwner::CurveCache) => Ok(self.owner_curve),
             // UNPORTED(surface.surface_cache_p1): SmSurfaceCache::GetSurface
             Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => {
                 Err(SolidError::Unported {
@@ -633,10 +725,12 @@ impl<O: Copy + PartialEq> Tree<O> {
     fn surface_aux(&self, id: NodeId, operation: &'static str) -> Result<&SurfaceAux<O>> {
         match &self.node(id)?.data {
             NodeData::Surface(a) => Ok(a),
-            NodeData::None | NodeData::ObjectList(_) => Err(SolidError::InvalidInput {
-                operation,
-                reason: "node has no surface subdivision data",
-            }),
+            NodeData::None | NodeData::ObjectList(_) | NodeData::Curve(_) => {
+                Err(SolidError::InvalidInput {
+                    operation,
+                    reason: "node has no surface subdivision data",
+                })
+            }
         }
     }
 
@@ -648,10 +742,12 @@ impl<O: Copy + PartialEq> Tree<O> {
     ) -> Result<&mut SurfaceAux<O>> {
         match &mut self.node_mut(id)?.data {
             NodeData::Surface(a) => Ok(a),
-            NodeData::None | NodeData::ObjectList(_) => Err(SolidError::InvalidInput {
-                operation,
-                reason: "node has no surface subdivision data",
-            }),
+            NodeData::None | NodeData::ObjectList(_) | NodeData::Curve(_) => {
+                Err(SolidError::InvalidInput {
+                    operation,
+                    reason: "node has no surface subdivision data",
+                })
+            }
         }
     }
 

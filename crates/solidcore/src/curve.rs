@@ -8,6 +8,7 @@
 pub mod conic;
 #[allow(clippy::module_inception)]
 pub mod curve;
+pub mod curve_cache;
 pub mod hermite_curve;
 pub mod hyperbola;
 pub mod projected_curve;

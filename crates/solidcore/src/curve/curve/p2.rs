@@ -109,9 +109,11 @@
 //!   `curve.curve_p9` (`SmCCGlobalSolver`), `curve.curve_p1` (`SmCPGlobalSolver`),
 //!   `curve.curve_p3` (`SmCurvePropertyGS`) and `curve.curve_p7`
 //!   (`SmCCIGlobalSolver`) and return [`SolidError::Unported`]. Curve tree nodes
-//!   hold `SmBezierSpan` / `SmBezierAux1d` data built by the curve cache (unit
-//!   `curve.curve_cache`): reading its turning angle, end points or pseudo box
-//!   returns [`SolidError::Unported`]. A node without data (upstream `NER` on a
+//!   hold `SmBezierSpan` / `SmBezierAux1d` data built by the curve cache
+//!   ([`crate::curve::curve_cache`]), read from the tree
+//!   ([`Tree::curve_aux`], [`Tree::curve_span`]); the span end points are those the
+//!   cache stored when it built the tree (`GetEnds`); a node pointing at other data
+//!   is [`SolidError::InvalidInput`] (upstream casts whatever `m_pData` holds). A node without data (upstream `NER` on a
 //!   null `m_pData`) makes `BranchMayContainAnswers` return
 //!   `SM_ERR_NULL_POINTER`, which callers read as `TRUE`: the port answers `true`;
 //!   in `FindBestSubdivisionNode` a missing child is `SM_ERR_NULL_POINTER`
@@ -2428,30 +2430,20 @@ const fn has_data<O>(node: &TreeNode<O>) -> bool {
 }
 
 /// `SmBezierAux1d::m_dMaxTurningAngleDeg` of a curve tree node.
-fn span_max_turning_angle_deg<O>(_tree: &Tree<O>, _node: &TreeNode<O>) -> Result<f64> {
-    // UNPORTED(curve.curve_cache): SmBezierAux1d::m_dMaxTurningAngleDeg
-    Err(SolidError::Unported {
-        upstream: "SmBezierAux1d::m_dMaxTurningAngleDeg",
-        unit: "curve.curve_cache",
-    })
+fn span_max_turning_angle_deg<O>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<f64> {
+    Ok(tree.curve_aux(node)?.max_turning_angle_deg)
 }
 
-/// `SmBezierAux1d::GetEnds` of a curve tree node (start and end point).
-fn span_ends<O>(_tree: &Tree<O>, _node: &TreeNode<O>) -> Result<(Point3, Point3)> {
-    // UNPORTED(curve.curve_cache): SmBezierAux1d::GetEnds
-    Err(SolidError::Unported {
-        upstream: "SmBezierAux1d::GetEnds",
-        unit: "curve.curve_cache",
-    })
+/// `SmBezierAux1d::GetEnds` of a curve tree node (start and end point, as stored
+/// by the curve cache when it built the tree).
+fn span_ends<O>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<(Point3, Point3)> {
+    let [start, end] = tree.curve_aux(node)?.ends;
+    Ok((start, end))
 }
 
 /// The corners of `SmBezierSpan::GetPseudoBox` of a curve tree node.
-fn span_pseudo_box_corners<O>(_tree: &Tree<O>, _node: &TreeNode<O>) -> Result<[Point3; 8]> {
-    // UNPORTED(curve.curve_cache): SmBezierSpan::GetPseudoBox
-    Err(SolidError::Unported {
-        upstream: "SmBezierSpan::GetPseudoBox",
-        unit: "curve.curve_cache",
-    })
+fn span_pseudo_box_corners<O>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<[Point3; 8]> {
+    Ok(tree.curve_span(node)?.pseudo_box.corners())
 }
 
 /// Curve/curve global solver (`SmCCGlobalSolver`): one parameter per tree.
