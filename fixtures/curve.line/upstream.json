@@ -1,0 +1,5811 @@
+{
+ "cases": [
+  {
+   "name": "reversed_line_join_00",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_01",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_02",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_03",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_04",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_05",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_06",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_07",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 0,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_08",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_09",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_11",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_12",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_13",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_14",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_15",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3862 my_test_reversed_line_join",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "ends"
+     },
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "bounded",
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      },
+      "end_other": 1,
+      "tol": 1e-07
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 3.0,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_canonical_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1105 SmLine::CreateCanonical + AdjustSTEPInterval",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      -10,
+      -10,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       20
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 6.666666666666667,
+      "n": 3
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 4,
+      "flags": 7
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_canonical_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1105 SmLine::CreateCanonical + AdjustSTEPInterval",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      10,
+      -10,
+      0
+     ],
+     "v": [
+      0,
+      1,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       20
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 6.666666666666667,
+      "n": 3
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 4,
+      "flags": 7
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_canonical_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1105 SmLine::CreateCanonical + AdjustSTEPInterval",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      10,
+      10,
+      0
+     ],
+     "v": [
+      -1,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       20
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 6.666666666666667,
+      "n": 3
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 4,
+      "flags": 7
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_canonical_3",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1105 SmLine::CreateCanonical + AdjustSTEPInterval",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      -10,
+      10,
+      0
+     ],
+     "v": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       20
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 6.666666666666667,
+      "n": 3
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 4,
+      "flags": 7
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_canonical_4",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1105 SmLine::CreateCanonical + AdjustSTEPInterval",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      2,
+      0,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      -1
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       2
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 0.6666666666666666,
+      "n": 3
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 4,
+      "flags": 7
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_canonical_5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1105 SmLine::CreateCanonical + AdjustSTEPInterval",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      0,
+      2,
+      -1
+     ],
+     "v": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       2
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "evaluate",
+      "t": 0.6666666666666666,
+      "n": 3
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 4,
+      "flags": 7
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4885 my_test_analytic_curves",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      1,
+      0,
+      0
+     ],
+     "v": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "ivl": [
+       -1,
+       2
+      ]
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0.5
+     },
+     {
+      "op": "to_step",
+      "t": 0.5
+     },
+     {
+      "op": "evaluate_step",
+      "t": 1.5,
+      "n": 2
+     },
+     {
+      "op": "evaluate",
+      "t": -0.25,
+      "n": 1
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 3,
+      "p": [
+       3,
+       1,
+       4
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 4,
+      "p": [
+       3,
+       1,
+       0.5
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 5,
+      "p": [
+       3,
+       1,
+       9
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 0,
+      "p": [
+       1,
+       0,
+       1
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "step_inversion",
+      "p": [
+       1,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "step_inversion",
+      "p": [
+       1,
+       0,
+       7
+      ]
+     },
+     {
+      "op": "step_inversion",
+      "p": [
+       2,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "reverse",
+      "ivl": "nat"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "eq"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_line_infinite",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4885 my_test_analytic_curves (before AdjustSTEPInterval)",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "p": [
+      1,
+      0,
+      0
+     ],
+     "v": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0.5
+     },
+     {
+      "op": "evaluate",
+      "t": 2.0,
+      "n": 1
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       4,
+       4,
+       4
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0.0
+     },
+     {
+      "op": "approx_length",
+      "ivl": [
+       -1,
+       2
+      ],
+      "turn": true
+     },
+     {
+      "op": "reverse",
+      "ivl": [
+       -1,
+       2
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "bsplinecurve_nlib_line_deform",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9222 my_test_bsplinecurve_nlib",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      9,
+      -4.5,
+      0.6
+     ],
+     "b": [
+      9,
+      4.5,
+      -0.2
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "deform",
+      "want_new": true,
+      "start_type": 2,
+      "end_type": 2,
+      "start": [
+       9.1,
+       -4.0,
+       0.7
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "deform",
+      "want_new": true,
+      "start_type": 0,
+      "end_type": 2,
+      "start": [
+       9.1,
+       -4.0,
+       0.7
+      ],
+      "start_tan": [
+       0,
+       9.1,
+       -0.7000000000000001
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "deform",
+      "want_new": true,
+      "start_type": 2,
+      "end_type": 2,
+      "end": [
+       9.1,
+       5.0,
+       -0.1
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "deform",
+      "want_new": true,
+      "start_type": 2,
+      "end_type": 0,
+      "end": [
+       9.1,
+       5.0,
+       -0.1
+      ],
+      "end_tan": [
+       0.1,
+       9.0,
+       -0.7000000000000001
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "deform",
+      "want_new": true,
+      "start_type": 0,
+      "end_type": 0,
+      "start": [
+       9,
+       -4.5,
+       0.6
+      ],
+      "end": [
+       9,
+       4.5,
+       -0.2
+      ],
+      "start_tan": [
+       0,
+       9.0,
+       -0.8
+      ],
+      "end_tan": [
+       0,
+       9.0,
+       -0.8
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "bsplinecurve_nlib_line_copy",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9223 my_test_bsplinecurve_nlib (SmLine copy)",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      9,
+      -4.5,
+      0.6
+     ],
+     "b": [
+      9,
+      4.5,
+      -0.2
+     ]
+    },
+    "ops": [
+     {
+      "op": "copy"
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "points",
+       "a": [
+        9,
+        -4.5,
+        0.6
+       ],
+       "b": [
+        9,
+        4.5,
+        -0.2
+       ]
+      }
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "points",
+       "a": [
+        9,
+        -4.5,
+        0.6
+       ],
+       "b": [
+        9,
+        4.5,
+        -0.2
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "sm_api_line_segment",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:52 SmApiCreateLineSegment",
+   "inputs": {
+    "make": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      10,
+      10,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "evaluate",
+      "t": 0.5,
+      "n": 2
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 3,
+      "flags": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "sm_api_line_segment_zero",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:57 zero direction",
+   "inputs": {
+    "make": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      0,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "continuity_failure_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:786 SmContinuityFailureLine",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      10,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "evaluate",
+      "t": 0.0,
+      "n": 2
+     },
+     {
+      "op": "evaluate",
+      "t": 1.0,
+      "n": 2
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "brep_profile_line_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2352",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      -3.0,
+      -2.0,
+      0
+     ],
+     "b": [
+      3.0,
+      -2.0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        5,
+        5,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "brep_profile_line_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2352",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      3.0,
+      -2.0,
+      0
+     ],
+     "b": [
+      3.0,
+      2.0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        5,
+        5,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "brep_profile_line_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2352",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      3.0,
+      2.0,
+      0
+     ],
+     "b": [
+      -3.0,
+      2.0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        5,
+        5,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "brep_profile_line_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2352",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      -3.0,
+      2.0,
+      0
+     ],
+     "b": [
+      -3.0,
+      -2.0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        5,
+        5,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "default_line",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "default"
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0
+     },
+     {
+      "op": "kind_of",
+      "t": 14010
+     },
+     {
+      "op": "kind_of",
+      "t": 14033
+     },
+     {
+      "op": "kind_of",
+      "t": 14001
+     },
+     {
+      "op": "kind_of",
+      "t": 14022
+     }
+    ]
+   }
+  },
+  {
+   "name": "degenerate_points",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      1,
+      2,
+      3
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 7
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "bounded_zero_vector",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      5
+     ],
+     "scale": 3.0
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "bounded_with_nurb",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      0,
+      4
+     ],
+     "scale": 1.0,
+     "nurb": {
+      "dim": 3,
+      "p": 1,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        null
+       ],
+       [
+        4,
+        0,
+        0,
+        null
+       ]
+      ],
+      "knots": [
+       5,
+       5,
+       9,
+       9
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 6,
+      "n": 1
+     },
+     {
+      "op": "to_step",
+      "t": 6
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "bounded_inside_out_nurb",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      0,
+      4
+     ],
+     "inside_out": true,
+     "nurb": {
+      "dim": 3,
+      "p": 1,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        null
+       ],
+       [
+        0,
+        0,
+        0,
+        null
+       ]
+      ],
+      "knots": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 0.25,
+      "n": 1
+     },
+     {
+      "op": "to_nurbs",
+      "t": 1
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "infinite_inside_out",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "infinite",
+     "p": [
+      1,
+      2,
+      3
+     ],
+     "v": [
+      0,
+      2,
+      0
+     ],
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 3,
+      "n": 2
+     },
+     {
+      "op": "to_step",
+      "t": 3
+     },
+     {
+      "op": "drop",
+      "ivl": [
+       -5,
+       5
+      ],
+      "sop": 3,
+      "p": [
+       0,
+       10,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       -2,
+       3
+      ],
+      "mode": 0
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "infinite_trim_unsure",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "infinite",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      1,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "trim",
+      "ivl": [
+       -2,
+       3
+      ],
+      "mode": 2
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       -2,
+       3
+      ],
+      "mode": 1
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "infinite_zero_vector",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "infinite",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      0,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      6,
+      8
+     ],
+     "dim": 2
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "to_2d"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "to_3d"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "bounded_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      1,
+      2,
+      3
+     ],
+     "v": [
+      1,
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      2
+     ],
+     "dim": 2
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "to_3d"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "to_2d"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_to_2d_then_ends",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      6,
+      8
+     ]
+    },
+    "ops": [
+     {
+      "op": "to_2d"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "ends_makes_nurb",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      3,
+      4,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "ends"
+     },
+     {
+      "op": "length",
+      "ivl": "nat"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "segment_interval",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      3,
+      4,
+      0
+     ],
+     "interval": [
+      2,
+      7
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 4,
+      "n": 1
+     },
+     {
+      "op": "to_step",
+      "t": 4
+     }
+    ]
+   }
+  },
+  {
+   "name": "segment_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "segment",
+     "dim": 2,
+     "a": [
+      0,
+      0,
+      1
+     ],
+     "b": [
+      3,
+      4,
+      5
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_bin_30",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 30,
+     "binary": true,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 1,
+      "n": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_bin_33",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 33,
+     "binary": true,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 1,
+      "n": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_ascii_30",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 30,
+     "binary": false,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 1,
+      "n": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_ascii_33",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 33,
+     "binary": false,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "evaluate",
+      "t": 1,
+      "n": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_2d_of_3d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "dim": 2,
+     "version": 33,
+     "binary": true,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_2d_file",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "dim": 2,
+     "version": 33,
+     "binary": false,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 2,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_rational",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 33,
+     "binary": true,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 1,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        1,
+        4,
+        0,
+        0,
+        2,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_inverted_domain",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 33,
+     "binary": true,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       3,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": 0,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_inside_out",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "read",
+     "version": 33,
+     "binary": false,
+     "db": {
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "vector": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 1.0,
+      "inside_out": 1,
+      "base": {
+       "n": 1,
+       "p": 1,
+       "rat": 0,
+       "dim": 3,
+       "kt": 1,
+       "form": 0,
+       "vals": [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "queries"
+     },
+     {
+      "op": "canonical"
+     },
+     {
+      "op": "is_line"
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_crossing",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      2,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        1,
+        -1,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_overlap",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      4,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        6,
+        0,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_overlap_reversed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      4,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        6,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_contained",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      4,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        3,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      4,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        0,
+        1,
+        0
+       ],
+       "b": [
+        4,
+        1,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_disjoint_boxes",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        5,
+        5,
+        5
+       ],
+       "b": [
+        6,
+        6,
+        6
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_skew_near",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      2,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        1,
+        -1,
+        0.0001
+       ],
+       "b": [
+        1,
+        1,
+        0.0001
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 0.001
+     },
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        1,
+        -1,
+        0.01
+       ],
+       "b": [
+        1,
+        1,
+        0.01
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_degenerate",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      2,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_self",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      2,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_subintervals",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      10
+     ],
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "infinite",
+       "p": [
+        0,
+        5,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ]
+      },
+      "other_ivl": [
+       -2,
+       9
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "intersect_line",
+      "ivl": "nat",
+      "other": {
+       "kind": "points",
+       "a": [
+        3,
+        3,
+        0
+       ],
+       "b": [
+        8,
+        8,
+        0
+       ]
+      },
+      "other_ivl": "nat",
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "ix_ellipse",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      2,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "ivl": "nat",
+      "frame": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       1,
+       0.5
+      ],
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       20,
+       1,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       -3,
+       1,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       6,
+       1,
+       0
+      ],
+      "tol": 1e-06,
+      "target": 0.5
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 3,
+      "p": [
+       6,
+       1,
+       0
+      ],
+      "tol": 0.6,
+      "target": 0.5
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 0,
+      "p": [
+       6,
+       1,
+       0
+      ],
+      "tol": 0.5
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 0,
+      "p": [
+       6,
+       1e-08,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "ivl": "nat",
+      "sop": 4,
+      "p": [
+       6,
+       1,
+       0
+      ],
+      "tol": 0.5
+     },
+     {
+      "op": "drop",
+      "ivl": [
+       3,
+       4
+      ],
+      "sop": 3,
+      "p": [
+       6,
+       1,
+       0
+      ],
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "gps_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 4,
+      "p": [
+       9,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 4,
+      "p": [
+       3,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 5,
+      "p": [
+       30,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 5,
+      "p": [
+       8,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 0,
+      "p": [
+       8,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 0,
+      "p": [
+       8,
+       3,
+       0
+      ],
+      "tol": 5
+     },
+     {
+      "op": "gps",
+      "ivl": "step",
+      "sop": 3,
+      "p": [
+       -8,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": [
+       0,
+       10
+      ],
+      "sop": 3,
+      "p": [
+       -8,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "gps",
+      "ivl": [
+       20,
+       30
+      ],
+      "sop": 3,
+      "p": [
+       8,
+       3,
+       0
+      ],
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "step_inversion_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "step_inversion",
+      "p": [
+       6,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "step_inversion",
+      "p": [
+       6,
+       1e-12,
+       0
+      ]
+     },
+     {
+      "op": "step_inversion",
+      "p": [
+       6,
+       1,
+       0
+      ]
+     },
+     {
+      "op": "step_inversion",
+      "p": [
+       100,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "trim",
+      "ivl": [
+       1,
+       8
+      ],
+      "mode": 0
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       3,
+       5
+      ],
+      "mode": 0
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       3.5,
+       4
+      ],
+      "mode": 1
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim_inside_out",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      6
+     ],
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "trim",
+      "ivl": [
+       1,
+       2
+      ],
+      "mode": 0
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "evaluate",
+      "t": 1.5,
+      "n": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "reverse_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "reverse",
+      "ivl": [
+       3,
+       5
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "reverse",
+      "ivl": "nat"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "reverse_two_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      5,
+      6
+     ]
+    },
+    "ops": [
+     {
+      "op": "reverse",
+      "ivl": "nat"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "adjust_noop_and_change",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "ivl": "step"
+     },
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       1
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "adjust_two_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      5,
+      6
+     ]
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "ivl": [
+       0,
+       2
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edit_param",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      5,
+      6
+     ]
+    },
+    "ops": [
+     {
+      "op": "edit_param",
+      "ivl": [
+       0,
+       1
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "edit_param",
+      "ivl": [
+       3,
+       9
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "refresh"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "refresh_inside_out",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      1,
+      0,
+      0
+     ],
+     "v": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      1,
+      3
+     ],
+     "inside_out": true,
+     "scale": 2
+    },
+    "ops": [
+     {
+      "op": "edit_param",
+      "ivl": [
+       0,
+       10
+      ]
+     },
+     {
+      "op": "refresh"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "refresh_degenerate",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      1,
+      1
+     ],
+     "b": [
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "refresh"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "offset_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "offset",
+      "n": [
+       0,
+       0,
+       1
+      ],
+      "d": 2.0
+     },
+     {
+      "op": "offset",
+      "n": [
+       1,
+       0,
+       0
+      ],
+      "d": 2.0
+     },
+     {
+      "op": "offset",
+      "n": [
+       0,
+       1,
+       1
+      ],
+      "d": -1.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "transform_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "transform",
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "transform",
+      "frame": [
+       [
+        1,
+        2,
+        3
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        -1,
+        0,
+        0
+       ]
+      ],
+      "scale": [
+       2,
+       1,
+       0.5
+      ]
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "transform",
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "scale": [
+       3,
+       3,
+       3
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "transform_two_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      5,
+      6
+     ]
+    },
+    "ops": [
+     {
+      "op": "transform",
+      "frame": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "deform_noop_and_invalid",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "deform",
+      "want_new": false,
+      "start_type": 1,
+      "end_type": 2
+     },
+     {
+      "op": "deform",
+      "start": [
+       1,
+       1,
+       1
+      ],
+      "want_new": false,
+      "start_type": 1,
+      "end_type": 2
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "deform_unconstrained",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "deform",
+      "start": [
+       1,
+       1,
+       1
+      ],
+      "want_new": false,
+      "start_type": 2,
+      "end_type": 2
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "deform",
+      "end": [
+       1,
+       1,
+       1
+      ],
+      "want_new": true,
+      "start_type": 2,
+      "end_type": 2
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "deform_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "deform",
+      "start": [
+       1,
+       1,
+       1
+      ],
+      "want_new": true,
+      "start_type": 1,
+      "end_type": 1
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "assert_mismatch",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "set_scale",
+      "s": 3.0
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": false
+     },
+     {
+      "op": "set_domain",
+      "a": 0,
+      "b": 1
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "assert_mismatch_inside_out",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "set_domain",
+      "a": 0,
+      "b": 1
+     },
+     {
+      "op": "assert",
+      "given": true,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "assert_base",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "assert",
+      "given": false,
+      "with_list": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "join_far",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "points",
+       "a": [
+        20,
+        0,
+        0
+       ],
+       "b": [
+        30,
+        0,
+        0
+       ]
+      },
+      "end_other": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "join_bent",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "points",
+       "a": [
+        14,
+        0,
+        0
+       ],
+       "b": [
+        20,
+        1,
+        0
+       ]
+      },
+      "end_other": 0,
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "join_bspline_line",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_bspline": {
+       "dim": 3,
+       "p": 1,
+       "cpts": [
+        [
+         14,
+         0,
+         0,
+         null
+        ],
+        [
+         20,
+         0,
+         0,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "end_other": 0
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "join_bspline_curved",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_bspline": {
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         14,
+         0,
+         0,
+         null
+        ],
+        [
+         16,
+         3,
+         0,
+         null
+        ],
+        [
+         20,
+         0,
+         0,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      },
+      "end_other": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "join_start_default_tol",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end_this": 0,
+      "other_line": {
+       "kind": "points",
+       "a": [
+        4,
+        0,
+        0
+       ],
+       "b": [
+        0,
+        0,
+        0
+       ]
+      },
+      "end_other": 0
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "join_two_point_other",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end_this": 1,
+      "other_line": {
+       "kind": "points",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        3,
+        0,
+        0
+       ]
+      },
+      "end_other": 0
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "analytic",
+      "ivl": "nat"
+     },
+     {
+      "op": "analytic",
+      "ivl": [
+       3,
+       4
+      ]
+     },
+     {
+      "op": "analytic",
+      "ivl": [
+       0,
+       9
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_two_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      4,
+      5,
+      6
+     ]
+    },
+    "ops": [
+     {
+      "op": "analytic",
+      "ivl": "nat"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "eq_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "eq"
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "bounded",
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0
+      }
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "bounded",
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.000000000001
+      }
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "bounded",
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "points",
+       "a": [
+        4,
+        0,
+        0
+       ],
+       "b": [
+        14,
+        0,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "domain_boundary",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      0,
+      1,
+      0
+     ],
+     "b": [
+      0,
+      5,
+      0
+     ],
+     "dim": 2
+    },
+    "ops": [
+     {
+      "op": "domain_boundary",
+      "dom": [
+       0,
+       0,
+       4,
+       6
+      ],
+      "tol": 1e-10
+     },
+     {
+      "op": "domain_boundary",
+      "dom": [
+       -4,
+       0,
+       0,
+       6
+      ],
+      "tol": 1e-10
+     },
+     {
+      "op": "domain_boundary",
+      "dom": [
+       1,
+       0,
+       4,
+       6
+      ],
+      "tol": 1e-10
+     }
+    ]
+   }
+  },
+  {
+   "name": "domain_boundary_v",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "points",
+     "a": [
+      1,
+      6,
+      0
+     ],
+     "b": [
+      3,
+      6,
+      0
+     ],
+     "dim": 2
+    },
+    "ops": [
+     {
+      "op": "domain_boundary",
+      "dom": [
+       0,
+       0,
+       4,
+       6
+      ],
+      "tol": 1e-10
+     },
+     {
+      "op": "domain_boundary",
+      "dom": [
+       0,
+       6,
+       4,
+       9
+      ],
+      "tol": 1e-10
+     }
+    ]
+   }
+  },
+  {
+   "name": "tessellate_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 0,
+      "flags": 7
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 5,
+      "flags": 1
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 5,
+      "flags": 2
+     },
+     {
+      "op": "tessellate",
+      "ivl": "nat",
+      "nseg": 5,
+      "flags": 4
+     },
+     {
+      "op": "tessellate",
+      "ivl": [
+       3,
+       4
+      ],
+      "nseg": 3,
+      "flags": 6
+     }
+    ]
+   }
+  },
+  {
+   "name": "bbox_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 1
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 2
+     },
+     {
+      "op": "bbox",
+      "ivl": "nat",
+      "flags": 4
+     },
+     {
+      "op": "bbox",
+      "ivl": [
+       4,
+       4
+      ],
+      "flags": 7
+     },
+     {
+      "op": "tight_bbox",
+      "ivl": "nat"
+     }
+    ]
+   }
+  },
+  {
+   "name": "approx_length_cases",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "approx_length",
+      "ivl": "nat",
+      "turn": false
+     },
+     {
+      "op": "approx_length",
+      "ivl": [
+       3,
+       3.5
+      ],
+      "turn": true
+     },
+     {
+      "op": "length",
+      "ivl": [
+       3,
+       3
+      ]
+     },
+     {
+      "op": "length",
+      "ivl": [
+       3,
+       3.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "degenerate_tols",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "domain": [
+      2,
+      7
+     ],
+     "scale": 2.0
+    },
+    "ops": [
+     {
+      "op": "is_degenerate",
+      "tol": 0
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 10.0
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 11.0
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 1.0,
+      "ivl": [
+       3,
+       3.2
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

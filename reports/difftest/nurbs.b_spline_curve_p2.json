@@ -274,16 +274,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmLine::SmLine",
-        "unit": "curve.line"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveCurve_analytic",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_p2/cases.json#33 (upstream upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -2250,28 +2246,20 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmLine::SmLine",
-        "unit": "curve.line"
-      },
       "max_rel_err": 0.0,
       "name": "analytic_line",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_p2/cases.json#273 (upstream SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmLine::SmLine",
-        "unit": "curve.line"
-      },
       "max_rel_err": 0.0,
       "name": "analytic_line_sub",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_p2/cases.json#274 (upstream SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS))",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -5062,16 +5050,12 @@
       "values_compared": 327
     },
     {
-      "deferred": {
-        "symbol": "SmLine::SmLine",
-        "unit": "curve.line"
-      },
       "max_rel_err": 0.0,
       "name": "gen0288",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015583054428973378",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -15090,16 +15074,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmLine::SmLine",
-        "unit": "curve.line"
-      },
       "max_rel_err": 0.0,
       "name": "gen1521",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015583054428974611",
-      "values_compared": 0
+      "values_compared": 23
     },
     {
       "max_rel_err": 0.0,
@@ -19003,14 +18983,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 94,
+  "cases_deferred": 89,
   "cases_failed": 0,
-  "cases_passed": 2234,
+  "cases_passed": 2239,
   "cases_total": 2328,
   "deferred_by_unit": {
     "curve.curve_p4": 79,
-    "curve.curve_p5": 10,
-    "curve.line": 5
+    "curve.curve_p5": 10
   },
   "max_rel_err": 0.0,
   "pass": true,

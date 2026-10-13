@@ -47,10 +47,9 @@
 //!   `CalculateBoundingBox`'s sampling fallback for derived types, whose `Evaluate`
 //!   calls have no NURB to evaluate either.
 //! - **Analytics.** `CreateAnalyticCurve` (with `USE_ANALYTICS`, defined in
-//!   `SmConfig.h`) builds an `SmLine` or `SmCircle`; those types are not ported, so
-//!   [`AnalyticCurve`] has no values yet and building one returns
-//!   [`SolidError::Unported`]. The end point check of the new curve is written when
-//!   they land.
+//!   `SmConfig.h`) builds an `SmLine` ([`crate::curve::line::Line`]) or an
+//!   `SmCircle`; `SmCircle` is not ported, so building one returns
+//!   [`SolidError::Unported`].
 //! - **Derived types.** `SetControlPoint`'s `IsKindOf(SmEllipse_TYPE)` only logs a
 //!   message and is false for a plain B-spline; it is omitted (as `EditEndPoint`'s in
 //!   `p1`). `IsDegenerate` asks `IsKindOf(SmCrvOnSurf_TYPE)` through
@@ -75,14 +74,15 @@
 //!   for rational curves and curves it cannot classify from the control points;
 //!   `IsDegenerate` calls `SmCurve::IsDegenerate` (`curve.curve_p4`) for other
 //!   intervals; `GetMaxAnalyticDomain` calls
-//!   `SmCurve::IsClosed` (`curve.curve_p4`); `CreateAnalyticCurve` builds `SmLine`
-//!   (`curve.line`) and `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
+//!   `SmCurve::IsClosed` (`curve.curve_p4`); `CreateAnalyticCurve` builds
+//!   `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`); `CreateSimpleOffset` calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`) and approximates an [`OffsetCurve`] with
 //!   `SmCurve::ApproximateCurve` (`curve.curve_p1`). Those calls return
 //!   [`SolidError::Unported`] until the units are ported.
 
 use crate::curve::curve::Curve;
+use crate::curve::line::{BoundedLineOptions, Line};
 use crate::curve::offset_curve::OffsetCurve;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -275,24 +275,41 @@ fn approximate_curve(
 }
 
 /// An analytic curve [`BSplineCurve::create_analytic_curve`] makes (`SmLine`,
-/// `SmCircle`). The analytic curve types belong to units `curve.line` and
-/// `curve.ellipse_p1`, which are not ported yet, so no value of this type exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalyticCurve {}
+/// `SmCircle`). `SmCircle` belongs to unit `curve.ellipse_p1`, which is not ported
+/// yet, so only lines are made.
+#[derive(Debug, Clone)]
+pub enum AnalyticCurve {
+    /// An `SmLine`.
+    Line(Line),
+}
+
+impl AnalyticCurve {
+    /// The point at NURB parameter `t` (`EvaluatePoint` of the analytic curve).
+    fn evaluate_point(&self, t: f64) -> Point3 {
+        match self {
+            Self::Line(l) => l.evaluate_point(t),
+        }
+    }
+}
 
 /// `new SmLine(origin, vector, interval, scale, dim)`.
 fn make_line(
-    _origin: Point3,
-    _vector: Vec3,
-    _interval: &Extent1d,
-    _scale: f64,
-    _dim: u64,
-) -> Result<AnalyticCurve> {
-    // UNPORTED(curve.line): SmLine::SmLine
-    Err(SolidError::Unported {
-        upstream: "SmLine::SmLine",
-        unit: "curve.line",
-    })
+    origin: Point3,
+    vector: Vec3,
+    interval: &Extent1d,
+    scale: f64,
+    dim: u64,
+) -> AnalyticCurve {
+    AnalyticCurve::Line(Line::bounded(
+        origin,
+        vector,
+        interval,
+        &BoundedLineOptions {
+            scale,
+            dim,
+            ..BoundedLineOptions::default()
+        },
+    ))
 }
 
 /// `new SmCircle(origin, x, y, angle_ivl, radius, dim, ctx, curve)`.
@@ -602,9 +619,9 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB; [`SolidError::Unported`] when a line or circle would be
-    /// built (`SmLine`, unit `curve.line`; `SmCircle`, `curve.ellipse_p1`) and for the
-    /// arc test of rational quadratics (`SmCurve::IsArc`, `curve.curve_p5`).
+    /// `SM_ERR` without a NURB; [`SolidError::Unported`] when a circle would be built
+    /// (`SmCircle`, `curve.ellipse_p1`) and for the arc test of rational quadratics
+    /// (`SmCurve::IsArc`, `curve.curve_p5`).
     pub fn create_analytic_curve(&self, interval: &Extent1d) -> Result<Option<AnalyticCurve>> {
         // use midPoint to set dScaledZero
         let mid_pnt = self.evaluate_point(interval.evaluate(0.456789))?;
@@ -626,7 +643,7 @@ impl BSplineCurve {
                     interval,
                     scale,
                     self.dim,
-                )?);
+                ));
             }
         } else if self.degree()? == 2 && self.is_rational()? {
             // check for circular arcs
@@ -699,12 +716,29 @@ impl BSplineCurve {
             }
         }
 
-        // when an analytic derived object was created its end points over the interval
-        // are compared with the curve's (within the scaled zero) before it is returned
-        match analytic {
-            Some(a) => match a {},
-            None => Ok(None),
+        // when an analytic derived object was created
+        let Some(a) = analytic else {
+            return Ok(None);
+        };
+
+        // if original and analytic given interval begin endpoints are too far apart
+        let or_pnt = self.evaluate_point(interval.min())?;
+        let an_pnt = a.evaluate_point(interval.min());
+        if or_pnt.distance(an_pnt) > scaled_zero {
+            // don't return the analytic object
+            return Ok(None);
         }
+
+        // if original and analytic end given interval endpoints are too far apart
+        let or_pnt = self.evaluate_point(interval.max())?;
+        let an_pnt = a.evaluate_point(interval.max());
+        if or_pnt.distance(an_pnt) > scaled_zero {
+            // don't return the analytic object
+            return Ok(None);
+        }
+
+        // get here when orig endpoints are close to analytic endpoints
+        Ok(Some(a))
     }
 
     /// Joins end-to-end connected `segments` into one curve (`CreateByJoining`). The
@@ -1922,9 +1956,10 @@ mod tests {
             .unwrap()
             .is_none());
         let l = line(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
-        assert!(matches!(
-            l.create_analytic_curve(&l.natural_interval()),
-            Err(SolidError::Unported { .. })
-        ));
+        let Some(AnalyticCurve::Line(a)) = l.create_analytic_curve(&l.natural_interval()).unwrap()
+        else {
+            panic!("expected a line");
+        };
+        assert_eq!(a.evaluate_point(1.0), Point3::new(2.0, 0.0, 0.0));
     }
 }

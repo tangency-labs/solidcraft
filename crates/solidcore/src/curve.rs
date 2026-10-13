@@ -13,6 +13,7 @@ pub mod curve_cache;
 pub mod hermite_curve;
 pub mod hyperbola;
 pub mod iso_curve;
+pub mod line;
 pub mod offset_curve;
 pub mod projected_curve;
 pub mod tangent_field;

@@ -32,6 +32,7 @@ use solidcore::curve::curve::p2::{
     CurvePropertyGs, CurvePropertyType, LengthIntegrand,
 };
 use solidcore::curve::hermite_curve::HermiteCurve;
+use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::Extent3d;
@@ -725,7 +726,7 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
             }
         }
         // the shim reports another type as -1
-        CurveKind::Projected(_) | CurveKind::Offset(_) | CurveKind::CrvInVolume(_) => o.push(-1.0),
+        CurveKind::Projected(_) | CurveKind::Offset(_) | CurveKind::CrvInVolume(_) | CurveKind::Line(_) => o.push(-1.0),
     }
 }
 
@@ -1123,7 +1124,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(0.0);
         }
         OpIn::IntersectLine => {
-            let r = c_ref()?.intersect_with_line();
+            let c = c_ref()?;
+            let ivl = c.natural_interval();
+            let r = tri!(
+                o,
+                c.intersect_with_line(&ivl, &Line::default(), &ivl, 1e-6)
+            );
             o.extend([0.0, b(r.needs_more_intersections), r.solutions.len() as f64]);
         }
         OpIn::Snap {

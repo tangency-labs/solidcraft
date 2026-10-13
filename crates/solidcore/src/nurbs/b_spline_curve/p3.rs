@@ -53,9 +53,10 @@
 //!   a report that was added, and report equality ignores those fields). `WARN`
 //!   messages are not ported.
 //! - **Back-edges.** `HasInternalPole` calls `IsDegenerate` (`p2`); `IsSegmentLine`,
-//!   `IsOnPlane` and `JoinWith` test `IsKindOf(SmLine_TYPE)` and `JoinWith` adjusts an
-//!   `SmLine` (`curve.line`) and measures `SmCurve::ApproximateLength` without a gap
-//!   tolerance; `SubdivideAtDiscontinuity` calls `CalculateContinuities`
+//!   `IsOnPlane` and `JoinWith` test `IsKindOf(SmLine_TYPE)` (false for a
+//!   `BSplineCurve`; a line is a [`crate::curve::line::Line`], whose `JoinWith`
+//!   overrides this one) and `JoinWith` measures `SmCurve::ApproximateLength` without
+//!   a gap tolerance; `SubdivideAtDiscontinuity` calls `CalculateContinuities`
 //!   (`SmCurve::EvaluateContinuity`);
 //!   `TrimGap` intersects with `SmCurve::GlobalCurveIntersect` (`curve.curve_p8`);
 //!   `AssertValid` calls `SmCurve::AssertValid` (`curve.curve_p4`) and
@@ -678,13 +679,9 @@ impl BSplineCurve {
                 }
             }
             if can_join_lines {
-                if self.is_kind_of(LINE_TYPE)? {
-                    // UNPORTED(curve.line): SmLine::GetCanonical
-                    return Err(SolidError::Unported {
-                        upstream: "SmLine::GetCanonical",
-                        unit: "curve.line",
-                    });
-                }
+                // (upstream's `SM_CAST_NONNULL_PTR(SmLine, this)` branch extends an
+                // `SmLine`'s STEP interval; a `BSplineCurve` is never a line here, lines
+                // join through `crate::curve::line::Line::join_with`)
                 let new_line = if this_at_end {
                     Self::create_line_segment(self.dim, pnt1b, pnt2b)?
                 } else {

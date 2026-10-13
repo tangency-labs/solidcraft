@@ -32,8 +32,8 @@
 //!   upstream writes it into the curve's array); `CalculateContinuities` (not overridden:
 //!   `SmSurface::CalculateContinuities`, unit `surface.surface_p6`) and
 //!   `SmSurface::ReadFromDB` (unit `surface.surface_p2`) return
-//!   [`SolidError::Unported`]. `CreateUVIsoLine` builds an `SmLine` (unit
-//!   `curve.line`): [`SolidError::Unported`] too.
+//!   [`SolidError::Unported`]. `CreateUVIsoLine` builds an `SmLine`
+//!   ([`crate::curve::line::Line`]).
 //! - **Equality.** `operator==` accepts identical surface pointers before comparing the
 //!   surfaces (`SmBSplineSurface::operator==`); the port always compares the surfaces
 //!   ([`BSplineSurface::approx_eq`], which is reflexive for NaN-free data).
@@ -57,6 +57,7 @@
 
 use crate::curve::curve::p2::{self as curve_base, ISO_CURVE_TYPE};
 use crate::curve::curve::Curve;
+use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -181,7 +182,7 @@ impl IsoCurve {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] unless the curve is constant `u` (upstream tests
-    /// `SM_SP_U` twice); [`SolidError::Unported`] (`SmLine`, unit `curve.line`).
+    /// `SM_SP_U` twice).
     pub fn create_uv_iso_line(&self) -> Result<Curve> {
         // locals
         let domain = self.surface.natural_uv_domain();
@@ -198,7 +199,7 @@ impl IsoCurve {
         };
 
         // create IsoLine
-        new_line(line_point, line_unit_vec, &line_ivl, 1.0, 2)
+        Ok(new_line(line_point, line_unit_vec, &line_ivl, 1.0, 2))
     }
 
     /// The minimum continuity and the continuities at the knots, inherited from the
@@ -404,18 +405,17 @@ fn surface_read_from_db(
 }
 
 /// `new SmLine(point, unit_vec, interval, scale, dim, context)`.
-fn new_line(
-    _point: Point3,
-    _unit_vec: Vec3,
-    _interval: &Extent1d,
-    _scale: f64,
-    _dim: u64,
-) -> Result<Curve> {
-    // UNPORTED(curve.line): SmLine::SmLine
-    Err(SolidError::Unported {
-        upstream: "SmLine::SmLine",
-        unit: "curve.line",
-    })
+fn new_line(point: Point3, unit_vec: Vec3, interval: &Extent1d, scale: f64, dim: u64) -> Curve {
+    Curve::from(Line::bounded(
+        point,
+        unit_vec,
+        interval,
+        &BoundedLineOptions {
+            scale,
+            dim,
+            ..BoundedLineOptions::default()
+        },
+    ))
 }
 
 #[cfg(test)]

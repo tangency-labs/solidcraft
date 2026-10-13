@@ -1614,8 +1614,9 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` for [`InValueType::Specified`] without a tangent or without a NURB;
-    /// `InvalidInput` where upstream would index outside its arrays;
-    /// [`SolidError::Unported`] for a degree below 3 or even (`DegreeElevate`).
+    /// `InvalidInput` where upstream would index outside its arrays (e.g. a curve over
+    /// a zero-length knot interval, whose degree elevation fails; upstream ignores
+    /// that status, see `plan/findings.md`).
     pub fn deform_to_end_point_targets(
         &mut self,
         tgt_start: Option<Point3>,
@@ -1648,12 +1649,18 @@ impl BSplineCurve {
             return Err(SolidError::sm_err(OP));
         }
 
-        // increment CurrCrv degree when needed
+        // increment CurrCrv degree when needed (the status is ignored upstream, e.g.
+        // for a curve over a zero-length knot interval)
         let degree = nurb_of(self, OP)?.degree();
-        if degree < 3 {
-            degree_elevate(self, 3)?;
+        let elevated = if degree < 3 {
+            degree_elevate(self, 3)
         } else if degree % 2 == 0 {
-            degree_elevate(self, degree + 1)?;
+            degree_elevate(self, degree + 1)
+        } else {
+            Ok(())
+        };
+        if let Err(e @ SolidError::Unported { .. }) = elevated {
+            return Err(e);
         }
 
         // Build new curve - a copy of the current one

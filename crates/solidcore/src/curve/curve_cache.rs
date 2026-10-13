@@ -552,6 +552,12 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 }
                 true
             }
+            CurveKind::Line(l) => {
+                if l.base().gw_nurb().is_none() {
+                    l.make_nurb_owned(owner)?;
+                }
+                true
+            }
             CurveKind::Hermite(_)
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
@@ -574,6 +580,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             let nurb = match self.curve.kind() {
                 CurveKind::BSpline(b) => b.gw_nurb(),
                 CurveKind::Hyperbola(h) => h.base().gw_nurb(),
+                CurveKind::Line(l) => l.base().gw_nurb(),
                 CurveKind::Hermite(_)
                 | CurveKind::Conic(_)
                 | CurveKind::Projected(_)
