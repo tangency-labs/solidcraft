@@ -1158,8 +1158,12 @@ impl Curve {
             CRV_ON_SURF_TYPE => unported("SmCrvOnSurf::ReadFromDB", "curve.crv_on_surf"),
             // UNPORTED(curve.crv_in_volume): SmCrvInVolume::ReadFromDB
             CRV_IN_VOLUME_TYPE => unported("SmCrvInVolume::ReadFromDB", "curve.crv_in_volume"),
-            // UNPORTED(curve.tangent_field): SmTangentField::ReadFromDB
-            TANGENT_FIELD_TYPE => unported("SmTangentField::ReadFromDB", "curve.tangent_field"),
+            TANGENT_FIELD_TYPE => {
+                // SmTangentField::ReadFromDB; its SmCrvOnSurf part is unported
+                crate::curve::tangent_field::read_from_db(db, dim, version)?;
+                // UNPORTED(curve.crv_on_surf): SmTangentField as a curve kind
+                unported("SmCrvOnSurf::ReadFromDB", "curve.crv_on_surf")
+            }
             HERMITE_CURVE_TYPE => HermiteCurve::read_from_db(db).map(Self::from),
             // UNPORTED(curve.iso_curve): SmIsoCurve::ReadFromDB
             ISO_CURVE_TYPE => unported("SmIsoCurve::ReadFromDB", "curve.iso_curve"),

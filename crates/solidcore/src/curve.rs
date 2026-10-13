@@ -9,3 +9,4 @@ pub mod conic;
 #[allow(clippy::module_inception)]
 pub mod curve;
 pub mod hermite_curve;
+pub mod tangent_field;
