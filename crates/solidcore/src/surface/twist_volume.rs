@@ -298,10 +298,10 @@ impl TwistVolume {
     ) -> Result<Vec<Vec3>> {
         // check input - limit the number of derivatives
         if n > MAX_DERIV {
-            return Err(SolidError::InvalidInput {
-                operation: OP_EVAL,
-                reason: "highest derivative above 3",
-            });
+            return Err(SolidError::invalid_input(
+                OP_EVAL,
+                "highest derivative above 3",
+            ));
         }
         let n1 = n + 1;
         let sv = |u: usize, v: usize, w: usize| (u * n1 + v) * n1 + w;
@@ -395,10 +395,10 @@ impl TwistVolume {
     pub fn evaluate_simple(&self, param_point: Point3, n: usize) -> Result<Vec<Vec3>> {
         // check input - limit the number of derivatives
         if n > MAX_DERIV {
-            return Err(SolidError::InvalidInput {
-                operation: OP_EVAL_SIMPLE,
-                reason: "highest derivative above 3",
-            });
+            return Err(SolidError::invalid_input(
+                OP_EVAL_SIMPLE,
+                "highest derivative above 3",
+            ));
         }
         let n1 = n + 1;
         let sv = |u: usize, v: usize, w: usize| (u * n1 + v) * n1 + w;
@@ -497,11 +497,10 @@ impl TwistVolume {
         if !param_box.any_bounds() {
             // return unbounded ProjSpace boxes
             let Some(b) = proj_box else {
-                return Err(SolidError::InvalidInput {
-                    operation: OP_BOX,
-                    reason:
-                        "unbounded parameter box without a box output (upstream dereferences null)",
-                });
+                return Err(SolidError::invalid_input(
+                    OP_BOX,
+                    "unbounded parameter box without a box output (upstream dereferences null)",
+                ));
             };
             b.set_unbounded();
             if let Some(pb) = proj_pseudo_box {
@@ -774,10 +773,10 @@ impl TwistVolume {
         let _volume = Volume::new(VolumeKind::Twist(twist));
         // The members are read; the base-class read that follows is not ported yet.
         // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-        Err(SolidError::Unported {
-            upstream: "SmVolume::ReadFromDB",
-            unit: "surface.volume_p2",
-        })
+        Err(SolidError::unported(
+            "SmVolume::ReadFromDB",
+            "surface.volume_p2",
+        ))
     }
 }
 
