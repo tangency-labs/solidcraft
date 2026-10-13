@@ -1,0 +1,6054 @@
+{
+ "cases": [
+  {
+   "name": "rect_edge0_is_planar",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_planar",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "rect_edge0_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "rect_edge1_is_planar",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_planar",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "rect_edge1_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "rect_edge2_is_planar",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_planar",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "rect_edge2_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "rect_edge3_is_planar",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_planar",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "rect_edge3_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "hex_edge0_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "hex_edge1_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "hex_edge2_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "hex_edge3_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "hex_edge4_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.4999999999999964,
+        -4.330127018922195,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "hex_edge5_bbox",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.4999999999999964,
+        -4.330127018922195,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "rect_simple_0_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "rect_max_dist_0_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": 0.0,
+    "e": 1.0,
+    "nsamp": 5,
+    "max": null
+   }
+  },
+  {
+   "name": "rect_simple_1_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "rect_max_dist_1_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": 0.0,
+    "e": 1.0,
+    "nsamp": 5,
+    "max": null
+   }
+  },
+  {
+   "name": "rect_simple_2_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "rect_max_dist_2_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": 0.0,
+    "e": 1.0,
+    "nsamp": 5,
+    "max": null
+   }
+  },
+  {
+   "name": "rect_simple_3_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "rect_max_dist_3_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": 0.0,
+    "e": 1.0,
+    "nsamp": 5,
+    "max": null
+   }
+  },
+  {
+   "name": "rect_global_opposite",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "global",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "rect_max_dist_opposite_reversed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": 1.0,
+    "e": 0.0,
+    "nsamp": 0,
+    "max": null
+   }
+  },
+  {
+   "name": "rect_edge_self_gap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "c2": null,
+    "s": 1.0,
+    "e": 0.0,
+    "nsamp": 0,
+    "max": null
+   }
+  },
+  {
+   "name": "rect_edge_sub_segment_simple",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "pb1": false,
+    "pb2": false
+   }
+  },
+  {
+   "name": "rect_edge_sub_segment_simple_reversed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "hex_drop_mid_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "vec": null,
+    "tol": 0.001,
+    "guess": 0.5,
+    "sop": 3
+   }
+  },
+  {
+   "name": "hex_drop_mid_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "vec": null,
+    "tol": 0.001,
+    "guess": 0.5,
+    "sop": 3
+   }
+  },
+  {
+   "name": "hex_drop_mid_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468 (SmApiCreateRegularPolygon((0,0,0), 6, 5.0))",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "vec": null,
+    "tol": 0.001,
+    "guess": 0.5,
+    "sop": 3
+   }
+  },
+  {
+   "name": "join0_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join0_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join0_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join0_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join1_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join1_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join1_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join1_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join2_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join2_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join2_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join2_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join3_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": true,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join3_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join3_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join3_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join4_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join4_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join4_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join4_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join5_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join5_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join5_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join5_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join6_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join6_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join6_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join6_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join7_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join7_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join7_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join7_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join8_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join8_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join8_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join8_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join9_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": true,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join9_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join9_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join9_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join10_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join10_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join10_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join10_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join11_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join11_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join11_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join11_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join12_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": true,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join12_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join12_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join12_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join13_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join13_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join13_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join13_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join14_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": false,
+    "pb2": true
+   }
+  },
+  {
+   "name": "join14_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": null
+   }
+  },
+  {
+   "name": "join14_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     14.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join14_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "join15_simple",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "simple",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "pb1": true,
+    "pb2": false
+   }
+  },
+  {
+   "name": "join15_max_dist",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "max_dist",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "s": 0.0,
+    "e": 2.0,
+    "nsamp": 4,
+    "max": 1e-07
+   }
+  },
+  {
+   "name": "join15_drop_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "p": [
+     4.0,
+     0,
+     0
+    ],
+    "vec": null,
+    "tol": 1e-07,
+    "guess": 4.5,
+    "sop": 0
+   }
+  },
+  {
+   "name": "join15_gps_step",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gps_step",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl": [
+     2.0,
+     7.0
+    ],
+    "sop": 3,
+    "p": [
+     -2.0,
+     0,
+     0
+    ],
+    "tol": 1e-07,
+    "target": null,
+    "req": 1
+   }
+  },
+  {
+   "name": "nurb_drop_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point: points of the curve dropped back onto it; local solve from a guess)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     10,
+     -4.5,
+     0.5
+    ],
+    "vec": null,
+    "tol": 1e-05,
+    "guess": 0.0,
+    "sop": 3
+   }
+  },
+  {
+   "name": "nurb_drop_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point: points of the curve dropped back onto it; local solve from a guess)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     11,
+     -4,
+     0.4
+    ],
+    "vec": null,
+    "tol": 1e-05,
+    "guess": 0.2,
+    "sop": 0
+   }
+  },
+  {
+   "name": "nurb_drop_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point: points of the curve dropped back onto it; local solve from a guess)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     10,
+     -3.5,
+     0.3
+    ],
+    "vec": null,
+    "tol": 1e-05,
+    "guess": 0.4,
+    "sop": 5
+   }
+  },
+  {
+   "name": "nurb_drop_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point: points of the curve dropped back onto it; local solve from a guess)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     9,
+     -3,
+     0.2
+    ],
+    "vec": null,
+    "tol": 1e-05,
+    "guess": 0.6,
+    "sop": 3
+   }
+  },
+  {
+   "name": "nurb_drop_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point: points of the curve dropped back onto it; local solve from a guess)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     11,
+     -0.5,
+     0.1
+    ],
+    "vec": null,
+    "tol": 1e-05,
+    "guess": 0.8,
+    "sop": 0
+   }
+  },
+  {
+   "name": "nurb_drop_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point: points of the curve dropped back onto it; local solve from a guess)",
+   "inputs": {
+    "op": "drop_point",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "p": [
+     10,
+     -1.5,
+     0.0
+    ],
+    "vec": null,
+    "tol": 1e-05,
+    "guess": 1.0,
+    "sop": 5
+   }
+  },
+  {
+   "name": "deform_nurb_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": [
+     9.1,
+     -4.0,
+     0.7
+    ],
+    "e": null,
+    "want": false,
+    "st": null,
+    "st_type": 1,
+    "et": null,
+    "et_type": 1
+   }
+  },
+  {
+   "name": "deform_line_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "line": {
+      "p": [
+       9,
+       -4.5,
+       0.6
+      ],
+      "v": [
+       2,
+       4.5,
+       -0.8
+      ],
+      "domain": [
+       0.0,
+       1.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "s": [
+     9.1,
+     -4.0,
+     0.7
+    ],
+    "e": null,
+    "want": true,
+    "st": null,
+    "st_type": 2,
+    "et": null,
+    "et_type": 2
+   }
+  },
+  {
+   "name": "deform_nurb_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": [
+     9.1,
+     -4.0,
+     0.7
+    ],
+    "e": null,
+    "want": false,
+    "st": [
+     1.4,
+     0.4,
+     0.30000000000000004
+    ],
+    "st_type": 0,
+    "et": null,
+    "et_type": 1
+   }
+  },
+  {
+   "name": "deform_line_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "line": {
+      "p": [
+       9,
+       -4.5,
+       0.6
+      ],
+      "v": [
+       2,
+       4.5,
+       -0.8
+      ],
+      "domain": [
+       0.0,
+       1.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "s": [
+     9.1,
+     -4.0,
+     0.7
+    ],
+    "e": null,
+    "want": true,
+    "st": [
+     2,
+     4.6,
+     -0.7000000000000001
+    ],
+    "st_type": 0,
+    "et": null,
+    "et_type": 2
+   }
+  },
+  {
+   "name": "deform_nurb_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": null,
+    "e": [
+     11.1,
+     0.5,
+     -0.1
+    ],
+    "want": false,
+    "st": null,
+    "st_type": 1,
+    "et": null,
+    "et_type": 1
+   }
+  },
+  {
+   "name": "deform_line_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "line": {
+      "p": [
+       9,
+       -4.5,
+       0.6
+      ],
+      "v": [
+       2,
+       4.5,
+       -0.8
+      ],
+      "domain": [
+       0.0,
+       1.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "s": null,
+    "e": [
+     11.1,
+     0.5,
+     -0.1
+    ],
+    "want": true,
+    "st": null,
+    "st_type": 2,
+    "et": null,
+    "et_type": 2
+   }
+  },
+  {
+   "name": "deform_nurb_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": null,
+    "e": [
+     11.1,
+     0.5,
+     -0.1
+    ],
+    "want": false,
+    "st": null,
+    "st_type": 1,
+    "et": [
+     2.4,
+     1.4,
+     0.30000000000000004
+    ],
+    "et_type": 0
+   }
+  },
+  {
+   "name": "deform_line_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "line": {
+      "p": [
+       9,
+       -4.5,
+       0.6
+      ],
+      "v": [
+       2,
+       4.5,
+       -0.8
+      ],
+      "domain": [
+       0.0,
+       1.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "s": null,
+    "e": [
+     11.1,
+     0.5,
+     -0.1
+    ],
+    "want": true,
+    "st": null,
+    "st_type": 2,
+    "et": [
+     2.1,
+     4.5,
+     -0.7000000000000001
+    ],
+    "et_type": 0
+   }
+  },
+  {
+   "name": "deform_nurb_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9,
+        -4.5,
+        0.6,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -4.5,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -4,
+        0.4,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -3.5,
+        0.3,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -3,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        -0.5,
+        0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        -1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9,
+        -1,
+        -0.1,
+        -1.7976931348623157e+308
+       ],
+       [
+        11,
+        0,
+        -0.2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.14285714285714285,
+       0.2857142857142857,
+       0.42857142857142855,
+       0.5714285714285714,
+       0.7142857142857143,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "s": [
+     9,
+     -4.5,
+     0.6
+    ],
+    "e": [
+     11,
+     0,
+     -0.2
+    ],
+    "want": false,
+    "st": [
+     1,
+     0.0,
+     -0.09999999999999998
+    ],
+    "st_type": 0,
+    "et": [
+     2,
+     1,
+     -0.1
+    ],
+    "et_type": 0
+   }
+  },
+  {
+   "name": "deform_line_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9309 (DeformToEndPointTargets of my_create_nurb(sPnts1 + (10,-5,0), deg 3) and SmLine; each step on the original curve)",
+   "inputs": {
+    "op": "deform",
+    "curve": {
+     "line": {
+      "p": [
+       9,
+       -4.5,
+       0.6
+      ],
+      "v": [
+       2,
+       4.5,
+       -0.8
+      ],
+      "domain": [
+       0.0,
+       1.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "s": [
+     9,
+     -4.5,
+     0.6
+    ],
+    "e": [
+     11,
+     0,
+     -0.2
+    ],
+    "want": true,
+    "st": [
+     2,
+     4.5,
+     -0.8
+    ],
+    "st_type": 0,
+    "et": [
+     2,
+     4.5,
+     -0.8
+    ],
+    "et_type": 0
+   }
+  },
+  {
+   "name": "circle_bbox",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (CreateCircleSegment(center (0,3,0), r 1, 0..360, quadratic))",
+   "inputs": {
+    "op": "b_box",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "circle_is_planar",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (CreateCircleSegment(center (0,3,0), r 1, 0..360, quadratic))",
+   "inputs": {
+    "op": "is_planar",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "circle_global_far_segment",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (CreateCircleSegment(center (0,3,0), r 1, 0..360, quadratic))",
+   "inputs": {
+    "op": "global",
+    "c1": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        12,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05
+   }
+  }
+ ]
+}

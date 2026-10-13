@@ -80,12 +80,13 @@
 //!   that [`SolidError::Unported`] is always propagated. Upstream outputs written
 //!   before a failing status (partial solution arrays) are not returned.
 //! - **Back-edges.** `SmCurve::LocalPropertyAnalysis` (`curve.curve_p5`),
-//!   `SmCurve::GlobalPointSolve` of the ellipse and
-//!   `SmCurve::GlobalCoincidenceChecker` (`curve.curve_p6`) return
-//!   [`SolidError::Unported`]. The global point solve is ported
-//!   ([`curve_base::Curve::global_point_solve`]) but needs the ellipse as a curve
-//!   kind (its `DropPointFast` override, its cache), which is unit
-//!   `curve.ellipse_p1`'s (`SmEllipse` joins [`curve_base::CurveKind`] there). The
+//!   `SmCurve::GlobalPointSolve` and `SmCurve::GlobalCoincidenceChecker` of the
+//!   ellipse return [`SolidError::Unported`]. Both are ported
+//!   ([`curve_base::Curve::global_point_solve`],
+//!   [`curve_base::Curve::global_coincidence_checker`]) but need the ellipse as a curve
+//!   kind (its `DropPointFast`, `IsDegenerate` and `GetDegree` overrides, its cache),
+//!   which is unit `curve.ellipse_p1`'s (`SmEllipse` joins
+//!   [`curve_base::CurveKind`] there). The
 //!   line's `GlobalPointSolve(SM_SO_INTERSECT)` of `IntersectWithLine` is the line's
 //!   `DropPointFast`, which handles every intersection. `SmCurve::LocalCurveSolve` (unit
 //!   `curve.curve_p3`) evaluates the ellipse through its B-spline base and the line
@@ -244,7 +245,11 @@ fn local_curve_solve_line<O: Copy>(
 }
 
 /// `SmCurve::GlobalCoincidenceChecker(Interval, Other, OtherInterval, dTol,
-/// bNeedsMoreWork, rSolutions, FALSE)` of `curve`.
+/// bNeedsMoreWork, rSolutions, FALSE)` of `curve`. The checker is ported
+/// (`Curve::global_coincidence_checker`, unit `curve.curve_p6`); running it on
+/// ellipses needs `SmEllipse` as a curve kind (its `IsDegenerate` / `GetDegree`
+/// overrides and the global point solve of its drops), which unit `curve.ellipse_p1`
+/// adds.
 fn global_coincidence_checker<O: Copy>(
     _curve: &Ellipse,
     _interval: &Extent1d,
@@ -252,10 +257,10 @@ fn global_coincidence_checker<O: Copy>(
     _other_interval: &Extent1d,
     _tol: f64,
 ) -> Result<(bool, Vec<Solution<O>>)> {
-    // UNPORTED(curve.curve_p6): SmCurve::GlobalCoincidenceChecker
+    // UNPORTED(curve.ellipse_p1): SmCurve::GlobalCoincidenceChecker on SmEllipse (CurveKind::Ellipse)
     Err(SolidError::Unported {
         upstream: "SmCurve::GlobalCoincidenceChecker",
-        unit: "curve.curve_p6",
+        unit: "curve.ellipse_p1",
     })
 }
 

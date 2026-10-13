@@ -380,7 +380,7 @@
     {
       "deferred": {
         "symbol": "SmCurve::GlobalCoincidenceChecker",
-        "unit": "curve.curve_p6"
+        "unit": "curve.ellipse_p1"
       },
       "max_rel_err": 0.0,
       "name": "circle_circle_coincident",
@@ -17893,8 +17893,7 @@
   "cases_total": 2102,
   "deferred_by_unit": {
     "curve.curve_p5": 37,
-    "curve.curve_p6": 1,
-    "curve.ellipse_p1": 229
+    "curve.ellipse_p1": 230
   },
   "max_rel_err": 0.0,
   "pass": true,
