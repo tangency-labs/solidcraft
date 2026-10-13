@@ -139,7 +139,12 @@ impl Reader<'_> {
     }
 
     fn domain(&mut self) -> Result<[f64; 4], FfiError> {
-        let d = [self.finite()?, self.finite()?, self.finite()?, self.finite()?];
+        let d = [
+            self.finite()?,
+            self.finite()?,
+            self.finite()?,
+            self.finite()?,
+        ];
         if d[0] > d[2] || d[1] > d[3] {
             return Err(bad("domain not ordered"));
         }
@@ -199,7 +204,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -214,7 +221,9 @@ fn check_points(rd: &mut Reader<'_>, k: usize, two_d: bool, what: &str) -> Resul
         let z = rd.num()?;
         let w = rd.num()?;
         if two_d != (z == NOZ) {
-            return Err(bad(format!("{what}: dimension does not match the z marker")));
+            return Err(bad(format!(
+                "{what}: dimension does not match the z marker"
+            )));
         }
         let rational = w != NOW;
         if *w0.get_or_insert(rational) != rational {
@@ -224,7 +233,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, two_d: bool, what: &str) -> Resul
             return Err(bad(format!("{what}: weight out of range")));
         }
         let zz = if two_d { 0.0 } else { z };
-        if [x, y, zz].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, zz]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -344,7 +356,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             let enabled = rd.flag()?;
             let modified = rd.flag()?;
             if enabled && !modified {
-                return Err(bad("point test without face would classify against a null face"));
+                return Err(bad(
+                    "point test without face would classify against a null face",
+                ));
             }
             rd.finite()?;
             rd.finite()?;
@@ -420,4 +434,52 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn surface() -> Vec<f64> {
+        let mut input = vec![0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.0, 3.0];
+        for (x, y) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
+            input.extend([x, y, 0.0, NOW]);
+        }
+        input.extend([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0]);
+        input
+    }
+
+    #[test]
+    fn rejects_truncation_and_trailing_data_before_cpp() {
+        let mut input = surface();
+        input.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 1.0, 15120.0]);
+        assert!(validate(Op::New, &input).is_ok());
+        for end in 0..input.len() {
+            assert!(validate(Op::New, &input[..end]).is_err(), "prefix {end}");
+        }
+        input.push(0.0);
+        assert!(validate(Op::New, &input).is_err());
+    }
+
+    #[test]
+    fn rejects_null_face_classification_before_cpp() {
+        let mut input = surface();
+        input.extend([1.0, 0.0, 0.5, 0.5, 1.0, 0.001]);
+        assert!(validate(Op::PointTest, &input).is_err());
+        input[33] = 1.0; // face modified: upstream bypasses classification
+        assert!(validate(Op::PointTest, &input).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_surface_counts_and_nonfinite_coordinates() {
+        let mut input = surface();
+        input.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0]);
+        for bad_count in [-1.0, 1.5, f64::INFINITY, 1e30] {
+            let mut bad = input.clone();
+            bad[2] = bad_count;
+            assert!(validate(Op::New, &bad).is_err());
+        }
+        input[8] = f64::NAN;
+        assert!(validate(Op::New, &input).is_err());
+    }
 }

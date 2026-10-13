@@ -2512,3 +2512,30 @@ Upstream behaviour worth knowing:
     `LocalSolve`, and `SmCurvePropertyGS::LocalSolve`'s angle special case copies it into
     `m_apNodes[1]` of a one-object solution. The `curve.curve_p7` harness reports the second
     node only for two-object solutions.
+
+
+## surface.trim_srf_cache: resumed handoff port (2026-10-13)
+
+Resumed the interrupted `152e005` WIP under the draft-PR coordination workflow.
+The constructor and type/state queries, PointTest bypass, and edge-use insertion
+were compared with the pinned C++ reference: 620 cases (20 fixtures and 600 seeded
+cases), 458 bit-identical, 0 failed, 162 deferred. The perturbation check detected
+all 458 perturbed outputs. The touched surface.surface_cache_p1 runner also passes
+its non-deferred cases (872 total, 709 identical, 163 deferred).
+
+Deferred paths: surface.surface_cache_p3 (BuildTree, FindUVNodes, SubdivideNode;
+103 cases), surface.surface_p1 (GetFace; 33), surface.surface_p3 (GetSingularities;
+26). ImplantVertexuse and ImplantPolyEdge have translated bodies but cannot yet
+execute past Evaluate1stDerivatives / MapTo2d (surface.surface_p1); Rust regressions
+check that these explicit deferrals preserve state. They are not claimed as
+C++-verified. The base MarkFaceContainment dispatch remains unported before it
+could reach the trim-specific PointClassify; it must use that override when wired.
+The face-build path preserves the temporary brep-editing guard through explicit
+unported topology accessors, restoring the flag on both success and failure. These dependencies prevent end-to-end trimmed-face use.
+
+Fixtures exercise prepend order, shared boundaries, degenerate and curved trim
+curves, existing face extents and the deferred subdivision/pole/face paths. File
+fixtures use Surface.sms and offset_nurb.sms from the allowed upstream corpus.
+The C++ shim deliberately excludes classifying a surface without a face: upstream
+would dereference null. FFI regression tests reject this path, truncated/trailing
+records, invalid counts and non-finite coordinates before entering C++.

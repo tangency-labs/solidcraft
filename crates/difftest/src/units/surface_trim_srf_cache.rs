@@ -192,7 +192,10 @@ struct Inputs {
 fn numbers(path: &str) -> Result<Vec<f64>, HarnessError> {
     let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
     text.split_whitespace()
-        .map(|t| t.parse::<f64>().map_err(|e| harness(format!("{path}: {e}"))))
+        .map(|t| {
+            t.parse::<f64>()
+                .map_err(|e| harness(format!("{path}: {e}")))
+        })
         .collect()
 }
 
@@ -209,7 +212,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let m = int(path, num()?)?;
     let p = int(path, num()?)?;
@@ -225,8 +231,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -238,9 +248,15 @@ fn srf(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 }
 
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -272,7 +288,12 @@ fn push_srf(o: &mut Vec<f64>, b: &BssIn) -> Result<(), HarnessError> {
 
 fn push_crv(o: &mut Vec<f64>, c: &Crv2In) {
     let n = c.cpts.len().saturating_sub(1);
-    o.extend([2.0, n as f64, c.p as f64, (c.u.len().saturating_sub(1)) as f64]);
+    o.extend([
+        2.0,
+        n as f64,
+        c.p as f64,
+        (c.u.len().saturating_sub(1)) as f64,
+    ]);
     for &[x, y, w] in &c.cpts {
         o.extend([x, y, NOZ, w]);
     }
@@ -343,8 +364,12 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
 }
 
 fn to_output(flat: &[f64]) -> Output {
-    let (status, rest) = flat.split_first().map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
-    Output::new().values("status", vec![status]).values("out", rest.to_vec())
+    let (status, rest) = flat
+        .split_first()
+        .map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
+    Output::new()
+        .values("status", vec![status])
+        .values("out", rest.to_vec())
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -359,7 +384,11 @@ fn surface_of(s: &InlineSrf) -> Result<NlSurface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|r| r.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect())
+        .map(|r| {
+            r.iter()
+                .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                .collect()
+        })
         .collect();
     NlSurface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("surface input: {e}")))
@@ -589,27 +618,26 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                     }
                 }
             }
-            match err {
-                Some(e) => Err(e),
-                None => {
-                    push_dom(&mut o, &ext);
-                    let t = c.base().tree().ok_or_else(|| harness("no tree"))?;
-                    for id in 0..tree.len() {
-                        let n = t.node(NodeId(id)).map_err(|e| harness(e.to_string()))?;
-                        let NodeData::Surface(a) = n.data else {
-                            return Err(harness("node lost its surface data"));
-                        };
-                        o.push(flag(a.is_marked));
-                        o.push(class_code(a.node_class));
-                        let aux = c
-                            .base()
-                            .aux(NodeId(id))
-                            .map_err(|e| harness(e.to_string()))?;
-                        o.push(aux.edgeuse_list.len() as f64);
-                        o.extend(aux.edgeuse_list.iter().map(|&e| e as f64));
-                    }
-                    Ok(o)
+            if let Some(e) = err {
+                Err(e)
+            } else {
+                push_dom(&mut o, &ext);
+                let t = c.base().tree().ok_or_else(|| harness("no tree"))?;
+                for id in 0..tree.len() {
+                    let n = t.node(NodeId(id)).map_err(|e| harness(e.to_string()))?;
+                    let NodeData::Surface(a) = n.data else {
+                        return Err(harness("node lost its surface data"));
+                    };
+                    o.push(flag(a.is_marked));
+                    o.push(class_code(a.node_class));
+                    let aux = c
+                        .base()
+                        .aux(NodeId(id))
+                        .map_err(|e| harness(e.to_string()))?;
+                    o.push(aux.edgeuse_list.len() as f64);
+                    o.extend(aux.edgeuse_list.iter().map(|&e| e as f64));
                 }
+                Ok(o)
             }
         }
         OpIn::Face { build, points } => {
@@ -678,7 +706,11 @@ fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
     let n = p + rng.below(3) as usize;
     let m = q + rng.below(3) as usize;
     let kind = rng.below(5);
-    let amp = if kind == 1 { 0.0 } else { rng.uniform(0.0, 1.0) };
+    let amp = if kind == 1 {
+        0.0
+    } else {
+        rng.uniform(0.0, 1.0)
+    };
     let rational = rng.chance(0.15);
     let net = (0..=n)
         .map(|i| {
@@ -727,7 +759,11 @@ fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
 fn gen_bss(rng: &mut Rng, s: InlineSrf) -> BssIn {
     BssIn {
         oob: rng.chance(0.1),
-        form: if rng.chance(0.85) { 11 } else { rng.below(10) as u8 },
+        form: if rng.chance(0.85) {
+            11
+        } else {
+            rng.below(10) as u8
+        },
         srf: SrfIn::Inline(s),
     }
 }
@@ -802,7 +838,11 @@ fn gen_tree(rng: &mut Rng, dom: [f64; 4]) -> Vec<NodeIn> {
         node.c2 = n + 1;
         node.split = split;
         node.aux = aux;
-        let f = if rng.chance(0.7) { 0.5 } else { rng.uniform(0.2, 0.8) };
+        let f = if rng.chance(0.7) {
+            0.5
+        } else {
+            rng.uniform(0.2, 0.8)
+        };
         let (d1, d2) = if split == 0 {
             let m = d[0] + f * (d[2] - d[0]);
             ([d[0], d[1], m, d[3]], [m, d[1], d[2], d[3]])
@@ -887,7 +927,11 @@ fn gen_curve(rng: &mut Rng, dom: [f64; 4]) -> Crv2In {
             }
         })
         .collect();
-    let ends = if rng.chance(0.7) { (0.0, 1.0) } else { gen_ends(rng) };
+    let ends = if rng.chance(0.7) {
+        (0.0, 1.0)
+    } else {
+        gen_ends(rng)
+    };
     Crv2In {
         cpts,
         p,
@@ -902,16 +946,40 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let op = match rng.below(10) {
         0 => OpIn::New {
             opts: [
-                if rng.chance(0.5) { 0.0 } else { rng.uniform(0.0, 0.1) },
-                if rng.chance(0.5) { 0.0 } else { rng.uniform(0.0, 30.0) },
-                if rng.chance(0.7) { 0.0 } else { rng.uniform(1.0, 10.0) },
-                if rng.chance(0.7) { 0.0 } else { rng.uniform(0.1, 10.0) },
-                if rng.chance(0.7) { 0.0 } else { rng.uniform(0.0, 0.1) },
-                if rng.chance(0.5) { 0.001 } else { rng.uniform(0.0, 0.1) },
+                if rng.chance(0.5) {
+                    0.0
+                } else {
+                    rng.uniform(0.0, 0.1)
+                },
+                if rng.chance(0.5) {
+                    0.0
+                } else {
+                    rng.uniform(0.0, 30.0)
+                },
+                if rng.chance(0.7) {
+                    0.0
+                } else {
+                    rng.uniform(1.0, 10.0)
+                },
+                if rng.chance(0.7) {
+                    0.0
+                } else {
+                    rng.uniform(0.1, 10.0)
+                },
+                if rng.chance(0.7) {
+                    0.0
+                } else {
+                    rng.uniform(0.0, 0.1)
+                },
+                if rng.chance(0.5) {
+                    0.001
+                } else {
+                    rng.uniform(0.0, 0.1)
+                },
             ],
             kinds: {
                 let pool = [15120, 15100, 15150, 15000, 11001, 16002, 15011, 0];
-                (0..1 + rng.below(5))
+                (0..=rng.below(5))
                     .map(|_| *rng.choose(&pool).unwrap_or(&15120))
                     .collect()
             },
@@ -935,17 +1003,17 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         2 => {
             let build = rng.chance(0.6);
             OpIn::Face {
-            build,
-            points: (0..rng.below(3) + u64::from(!build))
-                .map(|_| PtIn {
-                    uv: [
-                        rng.uniform(d[0] - 0.1, d[2] + 0.1),
-                        rng.uniform(d[1] - 0.1, d[3] + 0.1),
-                    ],
-                    test_tol: rng.chance(0.5),
-                    tol: rng.uniform(1e-6, 1e-3),
-                })
-                .collect(),
+                build,
+                points: (0..rng.below(3) + u64::from(!build))
+                    .map(|_| PtIn {
+                        uv: [
+                            rng.uniform(d[0] - 0.1, d[2] + 0.1),
+                            rng.uniform(d[1] - 0.1, d[3] + 0.1),
+                        ],
+                        test_tol: rng.chance(0.5),
+                        tol: rng.uniform(1e-6, 1e-3),
+                    })
+                    .collect(),
             }
         }
         _ => {
@@ -953,7 +1021,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let dom = gen_cache_dom(rng, d, touch);
             let tree = gen_tree(rng, dom);
             let nn = tree.len() as u64;
-            let calls = (0..1 + rng.below(4))
+            let calls = (0..=rng.below(4))
                 .map(|_| {
                     let node = if rng.chance(0.06) {
                         -1
@@ -969,7 +1037,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 .collect();
             OpIn::ImplantEu {
                 dom,
-                factor: if rng.chance(0.5) { 20.0 } else { rng.uniform(1.0, 60.0) },
+                factor: if rng.chance(0.5) {
+                    20.0
+                } else {
+                    rng.uniform(1.0, 60.0)
+                },
                 tree,
                 fe: rng.chance(0.4).then(|| {
                     let a = gen_cache_dom(rng, d, false);
@@ -1058,7 +1130,11 @@ mod tests {
                     for j in 0..k {
                         let id = o.get(at + 3 + j).copied().unwrap_or(-1.0) as usize;
                         let curved = calls.get(id).is_some_and(|c| c.crv.p > 1);
-                        let key = if curved { "implant:curved" } else { "implant:line" };
+                        let key = if curved {
+                            "implant:curved"
+                        } else {
+                            "implant:line"
+                        };
                         *tally.entry(("ImplantEu".into(), key.into())).or_default() += 1;
                     }
                     at += 3 + k;
@@ -1068,7 +1144,11 @@ mod tests {
         }
         for key in ["implant:curved", "implant:line"] {
             assert!(
-                tally.get(&("ImplantEu".to_string(), key.to_string())).copied().unwrap_or(0) > 20,
+                tally
+                    .get(&("ImplantEu".to_string(), key.to_string()))
+                    .copied()
+                    .unwrap_or(0)
+                    > 20,
                 "too few {key}"
             );
         }

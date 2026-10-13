@@ -263,9 +263,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         let (class, object) = face_point_classify(face, uv_point, src_zone_tol_3d)?;
 
         // Point is ok when it classified to a topology object
-        let ok = class == POINT_CLASS_FACE
-            || class == POINT_CLASS_EDGE
-            || class == POINT_CLASS_VERTEX;
+        let ok =
+            class == POINT_CLASS_FACE || class == POINT_CLASS_EDGE || class == POINT_CLASS_VERTEX;
         Ok((ok, object))
     }
 
@@ -386,6 +385,15 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// edge use and vertex use, reduce the cache domain to the face domain and
     /// classify the nodes. `true` when the face containment is done.
     fn implant_face(&mut self, k: &Kernel, face: O) -> Result<bool> {
+        let saved_editing = face_brep_editing_enabled(face)?;
+        set_face_brep_editing_enabled(face, true)?;
+        let result = self.implant_face_body(k, face);
+        // SmTemporaryChangeValue restores the brep editing flag on errors too.
+        set_face_brep_editing_enabled(face, saved_editing)?;
+        result
+    }
+
+    fn implant_face_body(&mut self, k: &Kernel, face: O) -> Result<bool> {
         // create UVTrimCurve for every face->edge
         face_create_uv_trim_curves(face)?;
 
@@ -400,7 +408,14 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         for &lu in &loopuses {
             for eu in loopuse_edgeuses(lu)? {
                 let curve = edgeuse_uv_trim_curve(eu)?;
-                self.implant_edgeuse(k, eu, curve.as_ref(), do_subdivision, &mut face_domain, None)?;
+                self.implant_edgeuse(
+                    k,
+                    eu,
+                    curve.as_ref(),
+                    do_subdivision,
+                    &mut face_domain,
+                    None,
+                )?;
             }
         }
 
@@ -533,10 +548,22 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
             // list m_sUVDomain boundaries near SrfNaturalDomain boundaries
             let d = self.base.uv_domain();
-            let mut poles = (if (d.min().x - u_ivl.min()).abs() < u_tol { 1 } else { 0 })
-                + (if (d.min().y - v_ivl.min()).abs() < v_tol { 2 } else { 0 })
-                + (if (d.max().x - u_ivl.max()).abs() < u_tol { 4 } else { 0 })
-                + (if (d.max().y - v_ivl.max()).abs() < v_tol { 8 } else { 0 });
+            let mut poles = u64::from((d.min().x - u_ivl.min()).abs() < u_tol)
+                + (if (d.min().y - v_ivl.min()).abs() < v_tol {
+                    2
+                } else {
+                    0
+                })
+                + (if (d.max().x - u_ivl.max()).abs() < u_tol {
+                    4
+                } else {
+                    0
+                })
+                + (if (d.max().y - v_ivl.max()).abs() < v_tol {
+                    8
+                } else {
+                    0
+                });
 
             // eliminate boundaries which are not poles
             if poles != 0 {
@@ -800,7 +827,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         if embed {
             // Add segment to this node's m_sPolyEdgeList
             self.set_on_boundary(node, false)?;
-            self.aux_mut(node)?.poly_edge_list.insert(0, input.poly_edge);
+            self.aux_mut(node)?
+                .poly_edge_list
+                .insert(0, input.poly_edge);
         }
         Ok(())
     }
@@ -851,10 +880,22 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         let v_tol = v_ivl.length() / 100.0;
 
         // Get boundaries close to sUV
-        let mut poles = (if (uv.x - u_ivl.min()).abs() < u_tol { 1 } else { 0 })
-            + (if (uv.y - v_ivl.min()).abs() < v_tol { 2 } else { 0 })
-            + (if (uv.x - u_ivl.max()).abs() < u_tol { 4 } else { 0 })
-            + (if (uv.y - v_ivl.max()).abs() < v_tol { 8 } else { 0 });
+        let mut poles = u64::from((uv.x - u_ivl.min()).abs() < u_tol)
+            + (if (uv.y - v_ivl.min()).abs() < v_tol {
+                2
+            } else {
+                0
+            })
+            + (if (uv.x - u_ivl.max()).abs() < u_tol {
+                4
+            } else {
+                0
+            })
+            + (if (uv.y - v_ivl.max()).abs() < v_tol {
+                8
+            } else {
+                0
+            });
 
         // when sUV is close enough to boundaries for a pole check
         if poles != SS_NONE {
@@ -988,7 +1029,11 @@ fn face_zone_tol_3d<O>(_face: O) -> Result<f64> {
 
 /// `SmFace::PointClassify(uv, tol, FALSE, TRUE, sPC)` into a fresh
 /// `SmPointClassification`: its class and object.
-fn face_point_classify<O>(_face: O, _uv: Point2, _src_zone_tol_3d: f64) -> Result<(i32, Option<O>)> {
+fn face_point_classify<O>(
+    _face: O,
+    _uv: Point2,
+    _src_zone_tol_3d: f64,
+) -> Result<(i32, Option<O>)> {
     // UNPORTED(intersect.point_class): SmPointClassification::SmPointClassification
     // UNPORTED(query.face_p2): SmFace::PointClassify
     Err(SolidError::unported(
@@ -1001,6 +1046,15 @@ fn face_point_classify<O>(_face: O, _uv: Point2, _src_zone_tol_3d: f64) -> Resul
 fn face_brep_editing_enabled<O>(_face: O) -> Result<bool> {
     // UNPORTED(topology.face_p4): SmFace::GetBrep
     Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
+}
+
+/// The temporary `GetFace()->GetBrep()->m_bEditingEnabled` assignment.
+fn set_face_brep_editing_enabled<O>(_face: O, _editing: bool) -> Result<()> {
+    // UNPORTED(topology.brep_p1): SmBrep::m_bEditingEnabled
+    Err(SolidError::unported(
+        "SmBrep::m_bEditingEnabled",
+        "topology.brep_p1",
+    ))
 }
 
 /// `SmFace::CreateUVTrimCurves(TRUE, NULL, NULL, ..)`.
@@ -1070,7 +1124,9 @@ fn vertexuse_vertex_tolerance<O>(_vertexuse: O) -> Result<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::tree::{AuxDataType, NodeGeomType, SplitDir, SurfaceAux, Tree, TreeNode, TreeOwner};
+    use crate::geom::tree::{
+        AuxDataType, NodeGeomType, SplitDir, SurfaceAux, Tree, TreeNode, TreeOwner,
+    };
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -1084,8 +1140,14 @@ mod tests {
                     .collect()
             })
             .collect();
-        let s = NlSurface::new(net, 1, 1, vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0])
-            .expect("surface");
+        let s = NlSurface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .expect("surface");
         Surface::from(BSplineSurface::from_nurb(s, false))
     }
 
@@ -1094,7 +1156,11 @@ mod tests {
             CPoint::new(a[0], a[1], NOZ, NOW),
             CPoint::new(b[0], b[1], NOZ, NOW),
         ];
-        BSplineCurve::from_nurb(NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).expect("curve"), 2, false)
+        BSplineCurve::from_nurb(
+            NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).expect("curve"),
+            2,
+            false,
+        )
     }
 
     /// A cache over [0.2, 0.8]^2 whose tree is the root and two halves split in u.
@@ -1107,7 +1173,11 @@ mod tests {
             Extent2d::from_bounds(0.2, 0.2, 0.5, 0.8),
             Extent2d::from_bounds(0.5, 0.2, 0.8, 0.8),
         ];
-        let links = [(None, Some(1), Some(2)), (Some(0), None, None), (Some(0), None, None)];
+        let links = [
+            (None, Some(1), Some(2)),
+            (Some(0), None, None),
+            (Some(0), None, None),
+        ];
         let mut tree: Tree<i64> = Tree::new(Some(TreeOwner::SurfaceCache));
         let mut auxs = Vec::new();
         for (k, (d, (p, c1, c2))) in doms.iter().zip(links).enumerate() {
@@ -1154,9 +1224,15 @@ mod tests {
         let k = Kernel::default();
         let mut c: TrimSrfCache<i64> = TrimSrfCache::new(plane(), SurfaceCacheOptions::default());
         c.base_mut().point_test_enabled = false;
-        assert_eq!(c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap(), (true, None));
+        assert_eq!(
+            c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap(),
+            (true, None)
+        );
         c.base_mut().point_test_enabled = true;
-        assert!(c.point_test(&k, Point2::new(5.0, 5.0), None).unwrap_err().is_unported());
+        assert!(c
+            .point_test(&k, Point2::new(5.0, 5.0), None)
+            .unwrap_err()
+            .is_unported());
     }
 
     #[test]
@@ -1177,6 +1253,57 @@ mod tests {
         assert!(c
             .implant_edgeuse(&k, 9, None, false, &mut ext, Some(NodeId(1)))
             .is_err());
+    }
+
+    #[test]
+    fn invalid_node_returns_error_without_changing_boundary() {
+        let k = Kernel::default();
+        let mut c = cache();
+        let crv = line_2d([0.3, 0.3], [0.4, 0.7]);
+        let mut ext = Extent2d::new();
+        assert!(c
+            .implant_edgeuse(&k, 7, Some(&crv), false, &mut ext, Some(NodeId(usize::MAX)))
+            .is_err());
+        assert!(c.base().aux(NodeId(1)).unwrap().edgeuse_list.is_empty());
+        assert!(ext.is_init());
+    }
+
+    #[test]
+    fn unavailable_surface_operations_are_explicit_and_preserve_state() {
+        let k = Kernel::default();
+        let mut c = cache();
+        let mut ext = Extent2d::new();
+        let before = ext;
+        let vu = VertexuseInput {
+            vertexuse: 7,
+            uv_point: Point2::new(0.4, 0.4),
+            vertex_tolerance: 0.001,
+        };
+        assert!(matches!(
+            c.implant_vertexuse(&k, vu, &mut ext),
+            Err(SolidError::Unported {
+                unit: "surface.surface_p1",
+                ..
+            })
+        ));
+        assert_eq!(ext, before);
+        let surface = plane();
+        let edge = PolyEdgeInput {
+            poly_edge: 8,
+            start: Point3::new(0.3, 0.3, 0.0),
+            end: Point3::new(0.4, 0.7, 0.0),
+            tolerance: 0.001,
+            surface: &surface,
+        };
+        assert!(matches!(
+            c.implant_poly_edge(edge, NodeId(1)),
+            Err(SolidError::Unported {
+                unit: "surface.surface_p1",
+                ..
+            })
+        ));
+        let aux = c.base().aux(NodeId(1)).unwrap();
+        assert!(aux.poly_edge_list.is_empty() && aux.vertex_list.is_empty());
     }
 
     #[test]
