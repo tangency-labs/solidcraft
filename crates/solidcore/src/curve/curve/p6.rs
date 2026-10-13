@@ -450,6 +450,7 @@ impl Curve {
         match self.kind() {
             CurveKind::BSpline(c) => c.calculate_bounding_box(interval, req),
             CurveKind::Hyperbola(c) => c.base().calculate_bounding_box(interval, req),
+            CurveKind::Parabola(c) => c.base().calculate_bounding_box(interval, req),
             CurveKind::Line(c) => Ok(c.calculate_bounding_box(interval, req)),
             CurveKind::Hermite(c) => {
                 let mut normal = Extent3d::new();
@@ -617,13 +618,14 @@ impl Curve {
         Ok(out)
     }
 
-    /// `GlobalPointSolveSTEP`: the line and hyperbola overrides; the base passes the
-    /// call to [`Curve::global_point_solve`]. `this` names the curve in the
-    /// solutions (the hyperbola's name no object, see its unit).
+    /// `GlobalPointSolveSTEP`: the line, hyperbola and parabola overrides; the base
+    /// passes the call to [`Curve::global_point_solve`]. `this` names the curve in the
+    /// solutions (the hyperbola's and parabola's name no object, see their units).
     ///
     /// # Errors
     ///
-    /// Those of the hyperbola override and of [`Curve::global_point_solve`].
+    /// Those of the hyperbola and parabola overrides and of
+    /// [`Curve::global_point_solve`].
     pub fn global_point_solve_step<O: SolutionObject>(
         &mut self,
         k: &Kernel,
@@ -651,6 +653,31 @@ impl Curve {
                     target_distance,
                     requested,
                     owner,
+                )?;
+                Ok(sols
+                    .iter()
+                    .map(|s| {
+                        let mut r: Solution<O> = Solution::new();
+                        r.solution_type = s.solution_type;
+                        r.num_variables = s.num_variables;
+                        r.start = s.start;
+                        r.end = s.end;
+                        r.num_objects = s.num_objects;
+                        r.nodes = s.nodes;
+                        r
+                    })
+                    .collect())
+            }
+            CurveKind::Parabola(p) => {
+                let sols = p.global_point_solve_step(
+                    k,
+                    owner,
+                    step_interval,
+                    op,
+                    test_point,
+                    dist_tol,
+                    target_distance,
+                    requested,
                 )?;
                 Ok(sols
                     .iter()
@@ -839,6 +866,7 @@ impl Curve {
                 let borrowed = match self.kind() {
                     CurveKind::BSpline(c) => Some(c.is_nurb_borrowed()),
                     CurveKind::Hyperbola(c) => Some(c.base().is_nurb_borrowed()),
+                    CurveKind::Parabola(c) => Some(c.base().is_nurb_borrowed()),
                     CurveKind::Line(c) => Some(c.base.is_nurb_borrowed()),
                     _ => None,
                 };
@@ -1719,6 +1747,10 @@ impl Curve {
             // for derived BSpline types: copy the Nurb curve as a plain BSplineCurve
             CurveKind::Hyperbola(h) => {
                 let nurb = h.base.get_or_create_gw_nurb()?;
+                BSplineCurve::from_gw_nurb(dim, nurb)
+            }
+            CurveKind::Parabola(p) => {
+                let nurb = p.base_mut().get_or_create_gw_nurb()?;
                 BSplineCurve::from_gw_nurb(dim, nurb)
             }
 

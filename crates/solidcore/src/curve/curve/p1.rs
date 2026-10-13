@@ -1906,6 +1906,12 @@ impl Curve {
                 angle_tol_deg,
                 min_segments as usize,
             ),
+            CurveKind::Parabola(c) => c.base().tessellate(
+                interval,
+                chord_height_tol,
+                angle_tol_deg,
+                min_segments as usize,
+            ),
             CurveKind::Hermite(_)
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)

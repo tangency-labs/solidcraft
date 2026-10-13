@@ -681,21 +681,26 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
+/// The B-spline state (`0 dim n p m cpts knots`, `-1` without NURB).
+fn bspline_state(o: &mut Vec<f64>, b: &BSplineCurve) {
+    o.extend([0.0, b.dim() as f64]);
+    match b.gw_nurb() {
+        None => o.push(-1.0),
+        Some(cur) => {
+            o.extend([cur.n() as f64, cur.degree() as f64, cur.m() as f64]);
+            for p in cur.cpts() {
+                o.extend([p.x, p.y, p.z, p.w]);
+            }
+            o.extend_from_slice(cur.knots());
+        }
+    }
+}
+
 fn state(o: &mut Vec<f64>, c: &Curve) {
     match c.kind() {
-        CurveKind::BSpline(b) => {
-            o.extend([0.0, b.dim() as f64]);
-            match b.gw_nurb() {
-                None => o.push(-1.0),
-                Some(cur) => {
-                    o.extend([cur.n() as f64, cur.degree() as f64, cur.m() as f64]);
-                    for p in cur.cpts() {
-                        o.extend([p.x, p.y, p.z, p.w]);
-                    }
-                    o.extend_from_slice(cur.knots());
-                }
-            }
-        }
+        CurveKind::BSpline(b) => bspline_state(o, b),
+        // an SmBSplineCurve (the shim's IsKindOf(SmBSplineCurve_TYPE))
+        CurveKind::Parabola(p) => bspline_state(o, p.base()),
         CurveKind::Hyperbola(h) => {
             // not produced by this unit's cases (see curve.hyperbola's runner)
             o.extend([2.0, h.base().dim() as f64]);

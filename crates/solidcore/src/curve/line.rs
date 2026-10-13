@@ -260,6 +260,7 @@ fn other_is_line(other: &Curve, num_samples: u64, tol: f64) -> Result<bool> {
         CurveKind::Line(_) => Ok(true),
         CurveKind::BSpline(b) => Ok(b.is_line(num_samples, tol)?.is_some()),
         CurveKind::Hyperbola(h) => Ok(h.base().is_line(num_samples, tol)?.is_some()),
+        CurveKind::Parabola(p) => Ok(p.base().is_line(num_samples, tol)?.is_some()),
         // curves that are not an SmBSplineCurve
         _ => Err(SolidError::invalid_input(
             OP_JOIN,
@@ -274,6 +275,7 @@ fn other_ends(other: &Curve) -> Result<Ends> {
         CurveKind::Line(l) => l.ends_copy(),
         CurveKind::BSpline(b) => b.ends(),
         CurveKind::Hyperbola(h) => h.base().ends(),
+        CurveKind::Parabola(p) => p.base().ends(),
         // curves that are not an SmBSplineCurve
         _ => Err(SolidError::invalid_input(
             OP_JOIN,

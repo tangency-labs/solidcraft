@@ -1018,6 +1018,7 @@ impl Curve {
         match self.kind() {
             CurveKind::BSpline(c) => c.is_degenerate(tol3d, interval),
             CurveKind::Hyperbola(c) => c.base().is_degenerate(tol3d, interval),
+            CurveKind::Parabola(c) => c.base().is_degenerate(tol3d, interval),
             CurveKind::Line(l) => Ok(l.is_degenerate(tol3d, interval)),
             _ => is_degenerate_base(self, tol3d, interval),
         }

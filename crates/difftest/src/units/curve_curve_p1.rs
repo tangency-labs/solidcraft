@@ -576,6 +576,7 @@ fn put_curve(o: &mut Vec<f64>, c: &Curve) {
         CurveKind::BSpline(b) => b.gw_nurb(),
         CurveKind::Line(l) => l.base().gw_nurb(),
         CurveKind::Hyperbola(h) => h.base().gw_nurb(),
+        CurveKind::Parabola(p) => p.base().gw_nurb(),
         _ => None,
     };
     let Some(nurb) = nurb else {
