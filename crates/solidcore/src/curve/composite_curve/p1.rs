@@ -338,9 +338,9 @@ impl CompositeCurveSegment {
 /// the first segment's.
 #[derive(Debug, Clone)]
 pub struct CompositeCurve {
-    dim: u64,
-    segments: Vec<CompositeCurveSegment>,
-    closed: bool,
+    pub(super) dim: u64,
+    pub(super) segments: Vec<CompositeCurveSegment>,
+    pub(super) closed: bool,
 }
 
 /// [`CompositeCurve::canonical`]: the data the composite was built from
@@ -1450,9 +1450,29 @@ pub fn convert_to_bspline_curves(
     match_pz: bool,
     just_copy_bsplines: bool,
 ) -> Result<(Vec<Curve>, Vec<f64>)> {
+    let (out, gaps, _) =
+        convert_to_bspline_curves_indexed(k, curves, approx_tol_3d, match_pz, just_copy_bsplines)?;
+    Ok((out, gaps))
+}
+
+/// [`convert_to_bspline_curves`], also returning the index in `curves` each
+/// approximation was made from (the offsetters move the source curve's offset map
+/// attribute to it, as upstream's `RemoveAttribute` / `AddAttribute`).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the approximations.
+pub(super) fn convert_to_bspline_curves_indexed(
+    k: &Kernel,
+    curves: &[&Curve],
+    approx_tol_3d: f64,
+    match_pz: bool,
+    just_copy_bsplines: bool,
+) -> Result<(Vec<Curve>, Vec<f64>, Vec<usize>)> {
     // init output
     let mut out = Vec::with_capacity(curves.len());
     let mut gaps = Vec::with_capacity(curves.len());
+    let mut sources = Vec::with_capacity(curves.len());
 
     // locals
     let mut max_gap = 0.0;
@@ -1463,7 +1483,7 @@ pub fn convert_to_bspline_curves(
     };
 
     // for every curve - approx with BSplineCurve
-    for c in curves {
+    for (index, c) in curves.iter().enumerate() {
         let ivl = c.natural_interval();
         let breaks = [ivl.min(), ivl.max()];
 
@@ -1474,9 +1494,10 @@ pub fn convert_to_bspline_curves(
             }
             out.push(a.curve);
             gaps.push(max_gap);
+            sources.push(index);
         }
     }
-    Ok((out, gaps))
+    Ok((out, gaps, sources))
 }
 
 // ---- offset corners -------------------------------------------------------------------

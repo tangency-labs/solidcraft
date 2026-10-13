@@ -1692,9 +1692,8 @@ impl Curve {
             HYPERBOLA_TYPE => Hyperbola::read_from_db(db, dim, version).map(Self::from),
             LINE_TYPE => Line::read_from_db(db, dim, version).map(Self::from),
             PARABOLA_TYPE => Parabola::read_from_db(db, dim, version).map(Self::from),
-            // UNPORTED(curve.composite_curve_p2): SmCompositeCurve::ReadFromDB
             COMPOSITE_CURVE_TYPE => {
-                unported("SmCompositeCurve::ReadFromDB", "curve.composite_curve_p2")
+                CompositeCurve::read_from_db(k, db, dim, version).map(Self::from)
             }
             CONIC_TYPE => Conic::read_from_db(db).map(Self::from),
             CRV_ON_SURF_TYPE => CrvOnSurf::read_from_db(k, db, version).map(Self::from),

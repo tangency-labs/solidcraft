@@ -9,8 +9,10 @@
 //! lives in its own submodule and adds methods to [`CompositeCurve`].
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{
     BuiltComposites, CompositeApproximation, CompositeCanonical, CompositeCurve,
     CompositeCurveSegment, CornerCurves, OffsetCornerType, OffsetMapAttribute,
 };
+pub use p2::{OffsetDirection, OffsetParams, OffsetPiece, TrimmedOffsets};
