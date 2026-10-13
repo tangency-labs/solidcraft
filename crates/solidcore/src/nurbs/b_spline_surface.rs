@@ -7,8 +7,12 @@
 //! each lives in its own submodule and adds methods to [`BSplineSurface`].
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{
     BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, BoundingBoxes, CanonicalSurfaceData,
     ControlPointNet, LocationType, SurfParamType, SurfaceCanonical,
+};
+pub use p2::{
+    ControlPointBlock, IsoCurveOptions, IsoParametricCurve, SphereFromArcs, TrimmedPlane,
 };

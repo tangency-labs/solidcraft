@@ -1,0 +1,1576 @@
+//! `SmBSplineSurface`, part 2: analytic copies, iso-parametric curves, spheres and
+//! surfaces of revolution, trimmed planes from ruled surfaces, degeneracy and bilinear
+//! tests, control point access and editing, the canonical setter, sub-patches,
+//! splitting, u/v swapping, the maximum analytic domain and STEP domain adjustment.
+//!
+//! Upstream: `source/SMLib/src/SmBSplineSurface.cpp`, `source/SMLib/inc/SmBSplineSurface.h`.
+//!
+//! | Rust                                              | Upstream                         |
+//! |---------------------------------------------------|----------------------------------|
+//! | [`BSplineSurface::copy_and_add_analytics`]        | `CopyAndAddAnalytics`            |
+//! | [`BSplineSurface::create_iso_parametric_curve`], [`IsoCurveOptions`], [`IsoParametricCurve`] | `CreateIsoParametricCurve` |
+//! | [`BSplineSurface::create_sphere_from_arcs`], [`SphereFromArcs`] | `CreateSphereFromArcs`   |
+//! | [`BSplineSurface::create_surf_of_revolution`]     | `CreateSurfOfRevolution`         |
+//! | [`BSplineSurface::create_trimmed_plane_from_ruled`], [`TrimmedPlane`] | `CreateTrimmedPlaneFromRuled` |
+//! | [`BSplineSurface::is_degenerate_point`]           | `IsDegeneratePoint`              |
+//! | [`BSplineSurface::is_bilinear`]                   | `IsBilinear`                     |
+//! | [`BSplineSurface::control_point`]                 | `GetControlPoint`                |
+//! | [`BSplineSurface::control_points_expert`], [`ControlPointBlock`] | `GetControlPointsExpert` |
+//! | [`BSplineSurface::max_analytic_domain`]           | `GetMaxAnalyticDomain`           |
+//! | [`BSplineSurface::set_canonical`]                 | `SetCanonical`                   |
+//! | [`BSplineSurface::set_control_point`]             | `SetControlPoint`                |
+//! | [`BSplineSurface::copy_sub_patch`]                | `CopySubPatch`                   |
+//! | [`BSplineSurface::split_at`]                      | `SplitAt`                        |
+//! | [`BSplineSurface::swap_uv`]                       | `SwapUV`                         |
+//! | [`BSplineSurface::adjust_step_uv_domain`]         | `AdjustSTEPUVDomain`             |
+//! | `transpose` (private)                             | `SmTArray<T>::Transpose`         |
+//!
+//! Deviations:
+//! - **Out-params** become return values (structs where there are several). The
+//!   `SmContext` arguments only choose where upstream allocates and are dropped.
+//! - **Surface type.** Only the plain B-spline is ported, so `GetType()` is always
+//!   `SmBSplineSurface_TYPE` here: `SetControlPoint`'s refusal for analytic surfaces
+//!   and `CopyAndAddAnalytics`' "copy an analytic as is" branch are never taken. The
+//!   generator of `CreateSurfOfRevolution` is a plain [`BSplineCurve`], never an
+//!   `SmLine` (a separate type here, `crate::curve::line`), so its arc length
+//!   reparametrisation of cylinders is never taken either.
+//! - **Missing NURB.** Where upstream dereferences the `NULL` NURB of a surface built
+//!   by `SmBSplineSurface()` (`GetControlPointsExpert`, `SetControlPoint`,
+//!   `CopySubPatch`, `SplitAt`) the port returns `SM_ERR`
+//!   ([`SolidError::Upstream`]); `CreateIsoParametricCurve` keeps its
+//!   `SM_ERR_NULL_POINTER` (`NER`).
+//! - **Array bounds.** `GetControlPointsExpert` checks indices also for a single
+//!   point (upstream reads outside the net there) and returns the output array
+//!   (sized to the last value written, unwritten slots `0`). `CreateSurfOfRevolution`
+//!   returns `InvalidInput` where upstream would index past the sweep circle's
+//!   weights or polygon.
+//! - **Ignored statuses** stay ignored: `CreateIsoParametricCurve`'s
+//!   `N_SrfExtractIsoCrv` failure is reported upstream and the empty allocated curve
+//!   used; the port returns `SM_ERR` there instead (only reachable for a knot
+//!   multiplicity above the degree). Its `Trim` and `CreateUVIsoLine` statuses are
+//!   ignored (the UV curve is then `None`), except [`SolidError::Unported`], which is
+//!   propagated, as everywhere.
+//! - **`CreateSphereFromArcs`** returns the indices of the input arcs in CCW order
+//!   (upstream returns the same curve pointers). The recomputing `IsArc` calls whose
+//!   result upstream ignores keep the previous frame and angles when they fail.
+//! - **`SetCanonical`** passes no domain to `CreateCanonical` (as upstream), so the
+//!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only
+//!   the NURB is replaced: form and knot type stay those of the surface.
+//! - **Back-edges.** `CopyAndAddAnalytics` needs `SmPlane::IsNurbSurfacePlane`
+//!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
+//!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
+//!   `CreateSphereFromArcs` `SmCurve::IsArc`
+//!   (`curve.curve_p5`); `CreateSurfOfRevolution`'s optional sweep circle an
+//!   `SmCircle` (`curve.ellipse_p1`); `CreateTrimmedPlaneFromRuled` (unless the ruled
+//!   surface is a rectangle) `SmSurface::Evaluate1stDerivatives`
+//!   (`surface.surface_p1`); `IsDegeneratePoint` `SmSurface::IsKindOf`
+//!   (`surface.surface_p2`) and `SmSurface::IsDegeneratePoint`
+//!   (`surface.surface_p1`); `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and
+//!   `IsClosed` (`surface.surface_p7`). Those calls return [`SolidError::Unported`].
+
+use crate::curve::curve::Curve as SmCurve;
+use crate::curve::iso_curve::IsoCurve;
+use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
+use crate::geom::geom_utility::p1::line_closest_point;
+use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
+use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm, NurbCircleParam};
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::geom::Rectangle;
+use crate::nurbs::math::{NOW, NOZ};
+use crate::nurbs::nurbs_srf::{is_nsrf_degenerate, split_srf};
+use crate::nurbs::srf_basic::Direction;
+use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch};
+
+use super::p1::{
+    BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, CanonicalSurfaceData, SurfParamType,
+};
+
+/// `CURV_BASE_TYPE` (`SmTypes.h`).
+const CURV_BASE_TYPE: i64 = 14000;
+/// `SmCrvOnSurf_TYPE`.
+const CRV_ON_SURF_TYPE: i64 = CURV_BASE_TYPE + 48;
+
+const OP_ISO: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_iso_parametric_curve";
+const OP_SPHERE: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_sphere_from_arcs";
+const OP_REV: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_surf_of_revolution";
+const OP_PLANE: &str =
+    "nurbs::b_spline_surface::p2::BSplineSurface::create_trimmed_plane_from_ruled";
+const OP_DEGEN: &str = "nurbs::b_spline_surface::p2::BSplineSurface::is_degenerate_point";
+const OP_EXPERT: &str = "nurbs::b_spline_surface::p2::BSplineSurface::control_points_expert";
+const OP_SET_CP: &str = "nurbs::b_spline_surface::p2::BSplineSurface::set_control_point";
+const OP_PATCH: &str = "nurbs::b_spline_surface::p2::BSplineSurface::copy_sub_patch";
+const OP_SPLIT: &str = "nurbs::b_spline_surface::p2::BSplineSurface::split_at";
+
+/// The options of [`BSplineSurface::create_iso_parametric_curve`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IsoCurveOptions {
+    /// Domain whose bounds replace the natural domain and to which the curve is
+    /// trimmed (`pOptDomain`).
+    pub domain: Option<Extent2d>,
+    /// Also build the UV line of the curve (`pOptUVIsoCurve`).
+    pub uv_iso_curve: bool,
+}
+
+/// The result of [`BSplineSurface::create_iso_parametric_curve`].
+#[derive(Debug, Clone)]
+pub struct IsoParametricCurve {
+    /// The 3D iso-parametric curve (`rpNewIsoCurve`).
+    pub curve: BSplineCurve,
+    /// The achieved maximum gap, always `0` for the exact B-spline extraction
+    /// (`pOptMaxGap3d`).
+    pub max_gap_3d: f64,
+    /// The 2D UV line when asked for and built (`pOptUVIsoCurve`).
+    pub uv_iso_curve: Option<SmCurve>,
+}
+
+/// The result of [`BSplineSurface::create_sphere_from_arcs`].
+#[derive(Debug, Clone)]
+pub struct SphereFromArcs {
+    /// Indices of the input arcs, ordered counter-clockwise about the sphere
+    /// (`rCCWArcs`).
+    pub ccw_arcs: Vec<usize>,
+    /// Orientation of each of them relative to that order (`rOrients`).
+    pub orients: Vec<OrientType>,
+    /// The sphere, a surface of revolution (`rpNewSphere`).
+    pub sphere: BSplineSurface,
+}
+
+/// The result of [`BSplineSurface::create_trimmed_plane_from_ruled`].
+#[derive(Debug, Clone)]
+pub struct TrimmedPlane {
+    /// The planar surface (`rpPlanarNurb`).
+    pub plane: BSplineSurface,
+    /// 3D trimming curves (`r3DTrimmingCurves`; empty when the ruled surface is a
+    /// rectangle).
+    pub trimming_curves: Vec<SmCurve>,
+    /// Their orientations (`rTrimOrientations`).
+    pub trim_orientations: Vec<OrientType>,
+}
+
+/// The block of control points [`BSplineSurface::control_points_expert`] copies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControlPointBlock {
+    /// First u index.
+    pub start_u: usize,
+    /// Last u index.
+    pub end_u: usize,
+    /// First v index.
+    pub start_v: usize,
+    /// Last v index.
+    pub end_v: usize,
+    /// Output values between consecutive u points (`lCtrlPointUStride`).
+    pub u_stride: usize,
+    /// Output values between consecutive v points (`lCtrlPointVStride`).
+    pub v_stride: usize,
+}
+
+/// An `SmCurve::IsArc` result: frame, radius, start and end angle (degrees).
+struct ArcData {
+    frame: Axis2Placement,
+    radius: f64,
+    start_deg: f64,
+    end_deg: f64,
+}
+
+fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
+    SolidError::InvalidInput { operation, reason }
+}
+
+/// Lets [`SolidError::Unported`] through an ignored upstream status.
+fn keep_unported<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// `SmTArray<T>::Transpose(lNumRows)`: `a` read as `num_rows` columns of
+/// `len / num_rows` values becomes its transpose (nothing for `num_rows == 0`).
+fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
+    if num_rows < 1 {
+        return;
+    }
+    let num_columns = a.len() / num_rows;
+    let temp = a.to_vec();
+    for ii in 0..num_rows {
+        for jj in 0..num_columns {
+            if let (Some(dst), Some(&src)) = (
+                a.get_mut(ii * num_columns + jj),
+                temp.get(jj * num_rows + ii),
+            ) {
+                *dst = src;
+            }
+        }
+    }
+}
+
+// ---- unported callees ---------------------------------------------------------------
+
+/// `SmPlane::IsNurbSurfacePlane` (then the cone, sphere, revolution and extrusion
+/// recognisers).
+fn is_nurb_surface_plane(_srf: &BSplineSurface) -> Result<Option<BSplineSurface>> {
+    // UNPORTED(surface.plane_p2): SmPlane::IsNurbSurfacePlane
+    Err(SolidError::Unported {
+        upstream: "SmPlane::IsNurbSurfacePlane",
+        unit: "surface.plane_p2",
+    })
+}
+
+/// `SmCurve::IsArc(lNumberOfSamplePoints, d3DTol, ..)` of a B-spline curve.
+fn curve_is_arc(_c: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<Option<ArcData>> {
+    // UNPORTED(curve.curve_p5): SmCurve::IsArc
+    Err(SolidError::Unported {
+        upstream: "SmCurve::IsArc",
+        unit: "curve.curve_p5",
+    })
+}
+
+/// The canonical data, radius and frame of an `SmCircle` sweep curve.
+fn sweep_circle(_c: &SmCurve) -> Result<()> {
+    // UNPORTED(curve.ellipse_p1): SmCircle::GetRadius
+    Err(SolidError::Unported {
+        upstream: "SmCircle::GetRadius",
+        unit: "curve.ellipse_p1",
+    })
+}
+
+/// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: point, `S_u`, `S_v`.
+fn evaluate_1st_derivatives(_srf: &BSplineSurface, _uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
+    // UNPORTED(surface.surface_p1): SmSurface::Evaluate1stDerivatives
+    Err(SolidError::Unported {
+        upstream: "SmSurface::Evaluate1stDerivatives",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// The parts of `SmPlane(point, x_dir, y_dir, (1, 1), domain)` that
+/// `CreateTrimmedPlaneFromRuled` uses.
+struct PlaneData {
+    /// `EvaluateNormal` at the domain centre.
+    normal: Vec3,
+    /// The points at the domain corners `(0, 0)`, `(0, 1)`, `(1, 0)`, `(1, 1)`
+    /// (relative).
+    corners: [Point3; 4],
+}
+
+/// `new SmPlane(point, x_dir, y_dir, scale, domain)`, its normal and corners.
+fn new_plane(_point: Point3, _x_dir: Vec3, _y_dir: Vec3, _domain: &Extent2d) -> Result<PlaneData> {
+    // UNPORTED(surface.plane_p1): SmPlane::SmPlane
+    Err(SolidError::Unported {
+        upstream: "SmPlane::SmPlane",
+        unit: "surface.plane_p1",
+    })
+}
+
+/// `SmSurface::CreateNaturalUVTrimCurves(domain, SM_SP_U, FALSE, ..)`: the 3D trimming
+/// curves and their orientations.
+fn create_natural_uv_trim_curves(
+    _srf: &BSplineSurface,
+    _domain: &Extent2d,
+) -> Result<(Vec<SmCurve>, Vec<OrientType>)> {
+    // UNPORTED(surface.surface_p6): SmSurface::CreateNaturalUVTrimCurves
+    Err(SolidError::Unported {
+        upstream: "SmSurface::CreateNaturalUVTrimCurves",
+        unit: "surface.surface_p6",
+    })
+}
+
+/// `SmSurface::IsDegeneratePoint(d3DTol, pUVDomain)`.
+fn surface_is_degenerate_point(
+    _srf: &BSplineSurface,
+    _tol_3d: f64,
+    _uv_domain: Option<&Extent2d>,
+) -> Result<bool> {
+    // UNPORTED(surface.surface_p1): SmSurface::IsDegeneratePoint
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsDegeneratePoint",
+        unit: "surface.surface_p1",
+    })
+}
+
+/// `SmSurface::IsPlanar()`.
+fn surface_is_planar(_srf: &BSplineSurface) -> Result<bool> {
+    // UNPORTED(surface.surface_p7): SmSurface::IsPlanar
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsPlanar",
+        unit: "surface.surface_p7",
+    })
+}
+
+/// `SmSurface::IsClosed(domain, dir)`.
+fn surface_is_closed(
+    _srf: &BSplineSurface,
+    _domain: &Extent2d,
+    _dir: SurfParamType,
+) -> Result<bool> {
+    // UNPORTED(surface.surface_p7): SmSurface::IsClosed
+    Err(SolidError::Unported {
+        upstream: "SmSurface::IsClosed",
+        unit: "surface.surface_p7",
+    })
+}
+
+/// Expands `ivl` relatively by 100 (degree 1), 1 (degree 2) or 0.5.
+fn expand_by_degree(ivl: &mut Extent1d, deg: usize) {
+    if deg == 1 {
+        ivl.expand_relative(100.0);
+    } else if deg == 2 {
+        ivl.expand_relative(1.0);
+    } else {
+        ivl.expand_relative(0.5);
+    }
+}
+
+impl BSplineSurface {
+    /// A copy of the surface as an analytic surface when its shape is one (plane,
+    /// cone, sphere, surface of revolution or extrusion), else as a B-spline
+    /// (`CopyAndAddAnalytics`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: the recognisers (`SmPlane::IsNurbSurfacePlane`, ...)
+    /// are not ported.
+    pub fn copy_and_add_analytics(&self) -> Result<Self> {
+        // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
+        // SmPlane (then SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion)
+        if let Some(analytic) = is_nurb_surface_plane(self)? {
+            return Ok(analytic);
+        }
+        // arrive here - make sure it's a copy
+        Ok(self.copy())
+    }
+
+    /// The 3D iso-parametric curve at `iso_parameter` (`CreateIsoParametricCurve`):
+    /// constant u for [`SurfParamType::U`] (a curve in v), constant v otherwise. The
+    /// parameter must lie in the (optional or natural) domain within
+    /// `SM_EFF_ZERO_SQRT` and is clamped to it; with an optional domain the curve is
+    /// trimmed to it.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a parameter outside the domain or when the extraction fails;
+    /// `SM_ERR_NULL_POINTER` without NURB; [`SolidError::Unported`] from the UV iso
+    /// line or the trim.
+    pub fn create_iso_parametric_curve(
+        &self,
+        k: &Kernel,
+        surf_param: SurfParamType,
+        iso_parameter: f64,
+        options: IsoCurveOptions,
+    ) -> Result<IsoParametricCurve> {
+        let mut iso_parameter = iso_parameter;
+
+        // get natural or optional domain min/max points
+        let uv_domain = options.domain.unwrap_or_else(|| self.natural_uv_domain());
+        let (min_param, max_param) = if surf_param == SurfParamType::U {
+            (uv_domain.min().x, uv_domain.max().x)
+        } else {
+            (uv_domain.min().y, uv_domain.max().y)
+        };
+
+        // Clamp ParamValues within Tolerance to interval boundaries
+        if iso_parameter < min_param || iso_parameter > max_param {
+            let ivl = Extent1d::from_min_max(min_param, max_param);
+
+            // error - ParamValue out of boundary tolerance
+            if !ivl.is_value_on_boundary(iso_parameter, EFF_ZERO_SQRT).0 {
+                return Err(SolidError::sm_err(OP_ISO));
+            }
+            iso_parameter = ivl.clamp_value(iso_parameter);
+        }
+
+        // when asked - build associated 2d UVTrimCurve line (different parameterization)
+        let uv_iso_curve = if options.uv_iso_curve {
+            // define the isoParameter Curve as an object
+            let iso = IsoCurve::new(self.copy(), surf_param, iso_parameter, true, true);
+            // build OptUVIsoCurve (status ignored)
+            keep_unported(iso.create_uv_iso_line())?
+        } else {
+            None
+        };
+
+        let surface = self.nurb.as_ref().ok_or(SolidError::null_pointer(OP_ISO))?;
+        // constant U curves go in V direction, constant V curves in U direction
+        let dir = if surf_param == SurfParamType::U {
+            Direction::V
+        } else {
+            Direction::U
+        };
+
+        // build the isoParameter gw_CURVE
+        let cur =
+            extract_iso_crv(surface, iso_parameter, dir).map_err(SolidError::nl_ser(OP_ISO))?;
+
+        // Use it as m_pNurb in a BSplineCurve object
+        let mut new_iso_curve = BSplineCurve::from_nurb(cur, 3, false);
+
+        // when asked - trim curve to optional domain limits
+        if options.domain.is_some() {
+            let mut trim_ivl = if surf_param == SurfParamType::U {
+                uv_domain.v_interval()
+            } else {
+                uv_domain.u_interval()
+            };
+            // may snap the interval by tol to existing knots (status ignored)
+            keep_unported(new_iso_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+        }
+
+        Ok(IsoParametricCurve {
+            curve: new_iso_curve,
+            max_gap_3d: 0.0,
+            uv_iso_curve,
+        })
+    }
+
+    /// The sphere through three arcs of a common center and radius (within `tol_3d`)
+    /// (`CreateSphereFromArcs`): the largest arc is revolved about the axis through
+    /// the center and the point it does not share with its larger neighbour, by 110%
+    /// of the neighbour's span (at most 360 degrees).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` unless there are exactly three arcs of a common center and radius
+    /// meeting at their ends; [`SolidError::Unported`] (`SmCurve::IsArc`).
+    pub fn create_sphere_from_arcs(arcs: &[BSplineCurve], tol_3d: f64) -> Result<SphereFromArcs> {
+        let total_curves = arcs.len();
+
+        // no work - not given exactly 3 curves
+        if total_curves != 3 {
+            return Err(SolidError::sm_err(OP_SPHERE)); // Only works for 3 now
+        }
+        let arc = |i: usize| arcs.get(i).ok_or_else(|| SolidError::sm_err(OP_SPHERE));
+
+        // no work - first curve is not an arc
+        let Some(first) = curve_is_arc(arc(0)?, 5, tol_3d)? else {
+            return Err(SolidError::sm_err(OP_SPHERE));
+        };
+        let rad = first.radius;
+        let mut ref_frame = first.frame;
+        let mut gen_curve_index = 0usize;
+
+        // extract Sphere Params from Arc shapes
+        let mut angle_span = first.end_deg - first.start_deg;
+        let origin = ref_frame.origin();
+
+        // for all other input arcs - check for Compatible centers and radii
+        for i in 1..total_curves {
+            // no work - other Curve is not an arc of the same radius as the 1st Curve
+            let Some(a) = curve_is_arc(arc(i)?, 5, tol_3d)? else {
+                return Err(SolidError::sm_err(OP_SPHERE));
+            };
+            if (a.radius - rad).abs() > tol_3d {
+                return Err(SolidError::sm_err(OP_SPHERE));
+            }
+            ref_frame = a.frame;
+
+            // no work - OtherCurve center is not the same as 1st Curve cent
+            let diff = ref_frame.origin() - origin;
+            if diff.length() > tol_3d {
+                return Err(SolidError::sm_err(OP_SPHERE));
+            }
+
+            // remember the largest ArcAngle seen
+            let angle_span1 = a.end_deg - a.start_deg;
+            if angle_span1 > angle_span {
+                gen_curve_index = i; // Will choose the largest arc as generator curve
+                angle_span = angle_span1;
+            }
+        }
+        let (mut start_ang, mut end_ang) = (0.0, 0.0);
+
+        // Get 1st Neighbor Curve to largest Span
+        let mut second_largest = (gen_curve_index + 1) % total_curves;
+        if let Some(a) = curve_is_arc(arc(second_largest)?, 5, tol_3d)? {
+            ref_frame = a.frame;
+            start_ang = a.start_deg;
+            end_ang = a.end_deg;
+        }
+        let mut ref_z_axis = ref_frame.z_axis();
+        angle_span = end_ang - start_ang;
+
+        // get other Neighbor Curve to largest Span
+        let other = ((gen_curve_index + total_curves) - 1) % total_curves;
+        let mut smallest = other;
+        let (mut start_ang1, mut end_ang1) = (0.0, 0.0);
+        if let Some(a) = curve_is_arc(arc(other)?, 5, tol_3d)? {
+            ref_frame = a.frame;
+            start_ang1 = a.start_deg;
+            end_ang1 = a.end_deg;
+        }
+        let angle_span1 = end_ang1 - start_ang1;
+
+        // Order the Neighbor Curves based on length
+        if angle_span1 > angle_span {
+            angle_span = angle_span1;
+            smallest = second_largest;
+            second_largest = other;
+            ref_z_axis = ref_frame.z_axis();
+        }
+
+        // Increase angle span by 10% to make sure it's big enough
+        angle_span *= 1.1;
+        if angle_span > 360.0 {
+            angle_span = 360.0;
+        }
+
+        // Now find the non common point between the second largest and the gen curve
+        let ends = |c: &BSplineCurve| -> Result<(Point3, Point3)> {
+            let ivl = c.natural_interval();
+            Ok((c.evaluate_point(ivl.min())?, c.evaluate_point(ivl.max())?))
+        };
+        let gen_curve = arc(gen_curve_index)?;
+        let (st1, end1) = ends(gen_curve)?;
+        let (st2, end2) = ends(arc(second_largest)?)?;
+        let (st3, _end3) = ends(arc(smallest)?)?;
+
+        // Set 1st Curve of output = GenCurve
+        let mut ccw_arcs = vec![gen_curve_index];
+        let mut orients = vec![OrientType::Opposite];
+        let opposite_if = |b: bool| {
+            if b {
+                OrientType::Opposite
+            } else {
+                OrientType::Same
+            }
+        };
+        let same_if = |b: bool| {
+            if b {
+                OrientType::Same
+            } else {
+                OrientType::Opposite
+            }
+        };
+
+        // Set 2nd and 3rd Curves of output based on EndPoint coincidences
+        let non_common_pnt;
+        if st1.distance(st2) < tol_3d {
+            non_common_pnt = end1;
+            ccw_arcs.push(second_largest);
+            orients.push(OrientType::Same);
+            ccw_arcs.push(smallest);
+            orients.push(opposite_if(end1.distance(st3) < tol_3d));
+        } else if st1.distance(end2) < tol_3d {
+            ref_z_axis = -ref_z_axis;
+            non_common_pnt = end1;
+            ccw_arcs.push(second_largest);
+            orients.push(OrientType::Opposite);
+            ccw_arcs.push(smallest);
+            orients.push(opposite_if(end1.distance(st3) < tol_3d));
+        } else if end1.distance(st2) < tol_3d {
+            non_common_pnt = st1;
+            ccw_arcs.push(smallest);
+            orients.push(same_if(st1.distance(st3) < tol_3d));
+            ccw_arcs.push(second_largest);
+            orients.push(OrientType::Opposite);
+        } else if end1.distance(end2) < tol_3d {
+            ref_z_axis = -ref_z_axis;
+            non_common_pnt = st1;
+            ccw_arcs.push(smallest);
+            orients.push(same_if(st1.distance(st3) < tol_3d));
+            ccw_arcs.push(second_largest);
+            orients.push(OrientType::Same);
+        } else {
+            return Err(SolidError::sm_err(OP_SPHERE));
+        }
+
+        // Define ZAxis in same general direction as sRefZAxis
+        let mut z_axis = origin - non_common_pnt;
+        if z_axis.dot(ref_z_axis) < 0.0 {
+            z_axis = -z_axis;
+        }
+        let z_axis = z_axis.unitize_or_z();
+
+        // Make the Sphere as a SurfOfRevolution
+        let sphere =
+            Self::create_surf_of_revolution(gen_curve, origin, z_axis, angle_span, false, None)?;
+        Ok(SphereFromArcs {
+            ccw_arcs,
+            orients,
+            sphere,
+        })
+    }
+
+    /// The surface of revolution of `gen_curve` about the axis through `origin` along
+    /// `axis_dir` by `angle_span_deg` (0 to 360) degrees (`CreateSurfOfRevolution`):
+    /// each control point sweeps a quadratic circle segment (all equal for points on
+    /// the axis). The circular direction is v, or u with `swap_uv`; an optional sweep
+    /// circle (`pOptSweepCurve`) would set its parametrisation. The form is
+    /// `SM_SF_SURF_OF_REVOLUTION`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a zero axis or an angle outside `[-360, 360]`; `SM_ERR` when
+    /// every control point is on the axis or a circle or the surface cannot be built;
+    /// [`SolidError::Unported`] with a sweep circle (`SmCircle`).
+    pub fn create_surf_of_revolution(
+        gen_curve: &BSplineCurve,
+        origin: Point3,
+        axis_dir: Vec3,
+        angle_span_deg: f64,
+        swap_uv: bool,
+        opt_sweep_curve: Option<&SmCurve>,
+    ) -> Result<Self> {
+        // unitized rotation axis
+        let axis_dir = axis_dir.unitize()?;
+
+        // GenCurve locals
+        let crv_ivl = gen_curve.natural_interval();
+        let gen = gen_curve.canonical()?;
+        let crv_deg = gen.degree;
+        let crv_ctrl_pts = &gen.control_points;
+        let is_gen_crv_rational = !gen.weights.is_empty();
+
+        // Sweep direction locals
+        let mut cir_deg = 0usize;
+        let mut cir_knots: Vec<f64> = Vec::new();
+        let mut cir_knot_mult: Vec<usize> = Vec::new();
+        let mut cir_weights: Vec<f64> = Vec::new();
+        let mut cir_ivl = Extent1d::new();
+        let mut num_cir_ctrl_pts = 0usize;
+        let mut knot_type = gen.knot_type;
+
+        // when given an option SweepCurve
+        if let Some(sweep) = opt_sweep_curve {
+            // use it to specify the sweep curve parameters
+            sweep_circle(sweep)?;
+        } else {
+            // Rotate each control point about the axis to get a circle: find the first
+            // non-degenerate one to size the circles' control points and knots
+            for &pnt in crv_ctrl_pts {
+                let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+
+                // Get sPnt/RotationAxis Distance
+                let mut x_vec = pnt - origin;
+                let t = x_vec.dot(axis_dir);
+                let center = origin + t * axis_dir;
+                x_vec = pnt - center;
+                let radius = x_vec.length();
+
+                // skip points on the rotation axis
+                if radius < scaled_zero {
+                    continue;
+                }
+
+                // create circle segment for this point's rotational sweep
+                // (operator/, not the guarded operator/= of the loop below)
+                let x_unit = x_vec / radius;
+                let y_vec = axis_dir.cross(x_unit);
+                let ref_frame = Axis2Placement::new(center, x_unit, y_vec);
+                let cir = BSplineCurve::create_circle_segment(
+                    3,
+                    &ref_frame,
+                    radius,
+                    0.0,
+                    angle_span_deg,
+                    NurbCircleParam::Quadratic,
+                )?;
+                // (a generator SmLine parallel to the axis would be reparametrised
+                // with arc length here; a BSplineCurve never is one)
+
+                // get the sweep circle parameters
+                let c = cir.canonical()?;
+                cir_deg = c.degree;
+                cir_knot_mult = c.knot_multiplicities;
+                cir_knots = c.knots;
+                knot_type = c.knot_type;
+                cir_weights = c.weights;
+                num_cir_ctrl_pts = c.control_points.len();
+                cir_ivl = cir.natural_interval();
+
+                // quit after 1st controlPoint not on rotation axis
+                break;
+            }
+        }
+
+        // quit when all GenCurve ControlPoints are on rotation vector
+        if num_cir_ctrl_pts == 0 {
+            return Err(SolidError::sm_err(OP_REV));
+        }
+
+        // For every ControlPoint in the output Surface, build a sweep circle.
+        let mut ctrl_pts: Vec<Point3> = Vec::new();
+        let mut weights: Vec<f64> = Vec::new();
+        for (j, &pnt) in crv_ctrl_pts.iter().enumerate() {
+            let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+
+            // Calculate this sweep circles new controlPoint weights
+            for ii in 0..num_cir_ctrl_pts {
+                let mut weight = *cir_weights
+                    .get(ii)
+                    .ok_or_else(|| invalid(OP_REV, "sweep circle without weights"))?;
+                if is_gen_crv_rational {
+                    weight *= *gen
+                        .weights
+                        .get(j)
+                        .ok_or_else(|| invalid(OP_REV, "generator weight missing"))?;
+                }
+                weights.push(weight);
+            }
+
+            // get sweep radius for this ControlPoint
+            let mut x_vec = pnt - origin;
+            let t = x_vec.dot(axis_dir);
+            let center = origin + t * axis_dir;
+            x_vec = pnt - center;
+            let radius = x_vec.length();
+
+            // when radius is zero - make all controlPoints for this sweep circle the same
+            if radius < scaled_zero {
+                // Add this control point lNumCirCtrlPts times
+                for _ in 0..num_cir_ctrl_pts {
+                    ctrl_pts.push(pnt);
+                }
+                continue;
+            }
+
+            // generate a sweep circle from scratch (a given sweep circle returned
+            // Unported above)
+            x_vec /= radius; // Unitize.
+            let y_vec = axis_dir.cross(x_vec).unitize()?;
+            let ref_frame = Axis2Placement::new(center, x_vec, y_vec);
+            let cir = BSplineCurve::create_circle_segment(
+                3,
+                &ref_frame,
+                radius,
+                0.0,
+                angle_span_deg,
+                NurbCircleParam::Quadratic,
+            )?;
+
+            // Add sweep circle controlPoint to newSurface ControlPoint array
+            let cir_ctrl_pts = cir.polygon(&cir.natural_interval())?;
+            let take = cir_ctrl_pts
+                .get(..num_cir_ctrl_pts)
+                .ok_or_else(|| invalid(OP_REV, "sweep circle polygon too short"))?;
+            ctrl_pts.extend_from_slice(take);
+        }
+
+        // create the rotational BSplineSurface
+        let surf_form = BSplineSurfaceForm::SurfOfRevolution;
+        let uv_domain =
+            Extent2d::from_bounds(crv_ivl.min(), cir_ivl.min(), crv_ivl.max(), cir_ivl.max());
+
+        let mut new_surface = if swap_uv {
+            // UV params are already set for SwapUV - just build the BSpline
+            Self::create_canonical(&CanonicalSurfaceData {
+                u_degree: crv_deg,
+                v_degree: cir_deg,
+                control_points: &ctrl_pts,
+                form: surf_form,
+                u_multiplicities: &gen.knot_multiplicities,
+                v_multiplicities: &cir_knot_mult,
+                u_knots: &gen.knots,
+                v_knots: &cir_knots,
+                knot_type,
+                weights: Some(&weights),
+                uv_domain: Some(uv_domain),
+            })?
+        } else {
+            // SwapUV is not set - Transpose Weights and control points arrays
+            transpose(&mut ctrl_pts, num_cir_ctrl_pts);
+            transpose(&mut weights, num_cir_ctrl_pts);
+            let trans_domain = Extent2d::from_bounds(
+                uv_domain.min().y,
+                uv_domain.min().x,
+                uv_domain.max().y,
+                uv_domain.max().x,
+            );
+            // then build the BSpline
+            Self::create_canonical(&CanonicalSurfaceData {
+                u_degree: cir_deg,
+                v_degree: crv_deg,
+                control_points: &ctrl_pts,
+                form: surf_form,
+                u_multiplicities: &cir_knot_mult,
+                v_multiplicities: &gen.knot_multiplicities,
+                u_knots: &cir_knots,
+                v_knots: &gen.knots,
+                knot_type,
+                weights: Some(&weights),
+                uv_domain: Some(trans_domain),
+            })?
+        };
+
+        // set form factor
+        new_surface.set_b_spline_surface_form(BSplineSurfaceForm::SurfOfRevolution);
+        Ok(new_surface)
+    }
+
+    /// The trimmed plane of the planar ruled surface between `curve1` and `curve2`
+    /// (`CreateTrimmedPlaneFromRuled`): when both are lines spanning a rectangle, the
+    /// untrimmed bilinear surface; else a plane through the ruled surface with its
+    /// boundary as trimming curves.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when a curve has no NURB or the surfaces cannot be built or the curves
+    /// do not lie on one plane; [`SolidError::Unported`] for the non-rectangular case
+    /// (`SmSurface::Evaluate1stDerivatives`).
+    pub fn create_trimmed_plane_from_ruled(
+        curve1: &BSplineCurve,
+        curve2: &BSplineCurve,
+    ) -> Result<TrimmedPlane> {
+        let ends = curve1.ends()?;
+        let (start, end) = (ends.start, ends.end);
+        let tol = EFF_ZERO * 100.0 * (1.0 + start.max_dimension() + end.max_dimension());
+
+        if let (Some(_), Some((line_point2, line_vec2))) =
+            (curve1.is_line(5, tol)?, curve2.is_line(5, tol)?)
+        {
+            let param1 = line_closest_point(line_point2, line_vec2, start);
+            let param2 = line_closest_point(line_point2, line_vec2, end);
+            if (param1 + param2 - 1.0).abs() < tol
+                && ((param1 - 1.0).abs() < tol || (param2 - 1.0).abs() < tol)
+            {
+                // Square ruled surface - this is easy just create the nurb.
+                let plane = Self::create_bilinear_surface(
+                    start,
+                    end,
+                    line_point2 + param1 * line_vec2,
+                    line_point2 + param2 * line_vec2,
+                )?;
+                return Ok(TrimmedPlane {
+                    plane,
+                    trimming_curves: Vec::new(),
+                    trim_orientations: Vec::new(),
+                });
+            }
+        }
+
+        let ruled_surface = Self::create_ruled_surface(curve1, curve2, SurfParamType::V)?;
+
+        let domain = ruled_surface.natural_uv_domain();
+        let (pnt, du, dv) = evaluate_1st_derivatives(&ruled_surface, domain.evaluate(0.5, 0.5))?;
+        let du = du.unitize()?;
+        let dv = du.cross(dv).cross(du);
+        let dv = dv.unitize()?;
+
+        let bbox = ruled_surface
+            .calculate_bounding_box(
+                &domain,
+                &BoundingBoxRequest {
+                    normal: true,
+                    expand_by_zone_tol: true,
+                    ..BoundingBoxRequest::default()
+                },
+            )?
+            .normal
+            .ok_or_else(|| SolidError::sm_err(OP_PLANE))?;
+        let size = bbox.size();
+        let leng = size.length();
+        let tmp_domain = Extent2d::from_bounds(-leng, -leng, leng, leng);
+        let plane = new_plane(pnt, dv, du, &tmp_domain)?;
+
+        // Make sure both curves are on the plane before continuing.
+        if !curve1.is_on_plane(pnt, plane.normal, tol, None)?.on_plane {
+            return Err(SolidError::sm_err(OP_PLANE));
+        }
+        if !curve2.is_on_plane(pnt, plane.normal, tol, None)?.on_plane {
+            return Err(SolidError::sm_err(OP_PLANE));
+        }
+
+        let (trimming_curves, trim_orientations) =
+            create_natural_uv_trim_curves(&ruled_surface, &domain)?;
+        let [c0, c1, c2, c3] = plane.corners;
+        let plane = Self::create_bilinear_surface(c0, c1, c2, c3)?;
+        Ok(TrimmedPlane {
+            plane,
+            trimming_curves,
+            trim_orientations,
+        })
+    }
+
+    /// Whether the surface is point sized within `tol_3d` (`IsDegeneratePoint`):
+    /// over the natural domain through the control net's box
+    /// (`sm_IsNSrfDegenerate`), else through `SmSurface::IsDegeneratePoint`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmSurface::IsKindOf` (the `SmCrvOnSurf` test) and
+    /// `SmSurface::IsDegeneratePoint` are not ported; `SM_ERR` without NURB.
+    pub fn is_degenerate_point(&self, tol_3d: f64, uv_domain: Option<&Extent2d>) -> Result<bool> {
+        // low work - for nonNaturalUVInterval intervals pass the call
+        //  along to the general SmSurface::IsDegenerate
+        if uv_domain.is_some_and(|d| !d.are_equal(&self.natural_uv_domain(), EFF_ZERO))
+            || self.is_kind_of(CRV_ON_SURF_TYPE)?
+        {
+            return surface_is_degenerate_point(self, tol_3d, uv_domain);
+        }
+
+        // ensure existence of m_pNurb
+        let sur = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::sm_err(OP_DEGEN))?;
+
+        // pass the call along
+        is_nsrf_degenerate(sur, tol_3d)
+    }
+
+    /// Whether the control net is 2 x 2 (`IsBilinear`; not necessarily planar).
+    #[must_use]
+    pub fn is_bilinear(&self) -> bool {
+        if self.number_control_points(SurfParamType::U) != 2 {
+            return false;
+        }
+        if self.number_control_points(SurfParamType::V) != 2 {
+            return false;
+        }
+        true
+    }
+
+    /// Control point `[u_index][v_index]` in `form` and its weight
+    /// (`GetControlPoint`): Euclidean with weight `1` for
+    /// [`ControlPointForm::NonRational`], homogeneous with its weight for
+    /// [`ControlPointForm::HomogeneousRational`], Euclidean with its weight for
+    /// [`ControlPointForm::EuclideanRational`].
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an index outside the net; `SM_ERR` without NURB.
+    pub fn control_point(
+        &self,
+        form: ControlPointForm,
+        u_index: usize,
+        v_index: usize,
+    ) -> Result<(Point3, f64)> {
+        // locals
+        let mut tmp = [0.0, 0.0, 0.0, 1.0]; // Default for non-rational.
+        let pt_size = if form == ControlPointForm::NonRational {
+            3
+        } else {
+            4
+        };
+        let u_stride = pt_size; // M = 1
+        let v_stride = u_stride; // N = 1
+
+        // pass the call along
+        let vals = self.control_points_expert(
+            form,
+            &ControlPointBlock {
+                start_u: u_index,
+                end_u: u_index,
+                start_v: v_index,
+                end_v: v_index,
+                u_stride,
+                v_stride,
+            },
+        )?;
+        for (slot, v) in tmp.iter_mut().zip(&vals) {
+            *slot = *v;
+        }
+        let [x, y, z, w] = tmp;
+        Ok((Point3::new(x, y, z), w))
+    }
+
+    /// The control points of `block` in `form` (`GetControlPointsExpert`): point
+    /// `[i][j]` goes to `(i - start_u) * u_stride + (j - start_v) * v_stride` as
+    /// `x y z` ([`ControlPointForm::NonRational`], divided by the weight for a
+    /// rational surface), `wx wy wz w` ([`ControlPointForm::HomogeneousRational`]) or
+    /// `x y z w` ([`ControlPointForm::EuclideanRational`]); a missing weight is `1`.
+    /// The output ends with the last value written (empty when a range is inverted,
+    /// with only one point requested); other slots are `0`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for inverted or out-of-net index ranges, or (for more than one
+    /// point) a `v_stride` below the point size or a `u_stride` below `v_stride`
+    /// times the v count; `SM_ERR` without NURB.
+    pub fn control_points_expert(
+        &self,
+        form: ControlPointForm,
+        block: &ControlPointBlock,
+    ) -> Result<Vec<f64>> {
+        let ControlPointBlock {
+            start_u,
+            end_u,
+            start_v,
+            end_v,
+            u_stride,
+            v_stride,
+        } = *block;
+        // locals
+        let sur = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::sm_err(OP_EXPERT))?;
+        let is_rational = self.is_rational();
+        let pt_size = if form == ControlPointForm::NonRational {
+            3
+        } else {
+            4
+        };
+
+        // when fetching just one point - don't need the stride info
+        let need_stride = end_u > start_u || end_v > start_v;
+        let empty = start_u > end_u || start_v > end_v;
+        let outside = end_u > sur.n() || end_v > sur.m();
+        if need_stride {
+            // Criteria for not overwriting ourselves in the output array
+            let ok_v_stride = v_stride >= pt_size;
+            let row_size = v_stride.saturating_mul((end_v + 1).saturating_sub(start_v));
+            let ok_u_stride = u_stride >= row_size;
+
+            // check inputs - consistent indexing and strides
+            if empty || outside || !ok_u_stride || !ok_v_stride {
+                return Err(invalid(OP_EXPERT, "inconsistent input args"));
+            }
+        }
+        // nothing to copy (upstream's loops do not run)
+        if empty {
+            return Ok(Vec::new());
+        }
+        if outside {
+            // upstream reads outside the net
+            return Err(invalid(OP_EXPERT, "control point index outside the net"));
+        }
+
+        let nu = end_u - start_u;
+        let nv = end_v - start_v;
+        let len = u_stride
+            .checked_mul(nu)
+            .and_then(|a| v_stride.checked_mul(nv).and_then(|b| a.checked_add(b)))
+            .and_then(|a| a.checked_add(pt_size))
+            .ok_or_else(|| invalid(OP_EXPERT, "output too large"))?;
+        let mut out = vec![0.0; len];
+
+        // copy the requested array of control points into the requested output array
+        for (u_cnt, i_u) in (start_u..=end_u).enumerate() {
+            for (v_cnt, i_v) in (start_v..=end_v).enumerate() {
+                let cpt = sur.cpt(i_u, i_v)?;
+                let (x, y, z) = (cpt.x, cpt.y, cpt.z);
+                let w = if cpt.w == NOW { 1.0 } else { cpt.w };
+                let vals: [Option<f64>; 4] = match form {
+                    ControlPointForm::NonRational => {
+                        if is_rational {
+                            [Some(x / w), Some(y / w), Some(z / w), None]
+                        } else {
+                            [Some(x), Some(y), Some(z), None]
+                        }
+                    }
+                    ControlPointForm::HomogeneousRational => [Some(x), Some(y), Some(z), Some(w)],
+                    ControlPointForm::EuclideanRational => {
+                        [Some(x / w), Some(y / w), Some(z / w), Some(w)]
+                    }
+                };
+                let base = u_cnt * u_stride + v_cnt * v_stride;
+                for (k, v) in vals.iter().enumerate() {
+                    if let Some(v) = v {
+                        let slot = out
+                            .get_mut(base + k)
+                            .ok_or_else(|| invalid(OP_EXPERT, "output slot out of range"))?;
+                        *slot = *v;
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The largest reasonable domain for extensions (`GetMaxAnalyticDomain`): the
+    /// natural domain expanded relatively by 100 when planar, else per direction by
+    /// 100 (degree 1), 1 (degree 2) or 0.5 unless closed in that direction.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmSurface::IsPlanar` and `IsClosed` are not ported.
+    pub fn max_analytic_domain(&self) -> Result<Extent2d> {
+        let mut dom = self.natural_uv_domain();
+
+        if surface_is_planar(self)? {
+            dom.expand_relative(100.0);
+            return Ok(dom);
+        }
+
+        // Expand u and v separately.  Depends on degree.
+        let mut u_dom = dom.u_interval();
+
+        // Do not extend closed surfaces.
+        if !surface_is_closed(self, &dom, SurfParamType::U)? {
+            expand_by_degree(&mut u_dom, self.degree(SurfParamType::U));
+        }
+
+        let mut v_dom = dom.v_interval();
+        if !surface_is_closed(self, &dom, SurfParamType::V)? {
+            expand_by_degree(&mut v_dom, self.degree(SurfParamType::V));
+        }
+
+        dom = Extent2d::from_bounds(u_dom.min(), v_dom.min(), u_dom.max(), v_dom.max());
+        Ok(dom)
+    }
+
+    /// Replaces the NURB by the one of STEP canonical data (`SetCanonical`, through
+    /// [`BSplineSurface::create_canonical`] without domain); form and knot type are
+    /// kept.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`BSplineSurface::create_canonical`] (the surface is unchanged).
+    pub fn set_canonical(&mut self, data: &CanonicalSurfaceData<'_>) -> Result<()> {
+        // Create a temporary one
+        let tmp = Self::create_canonical(&CanonicalSurfaceData {
+            uv_domain: None,
+            ..*data
+        })?;
+
+        // Swap Nurbs with this
+        self.nurb = tmp.nurb;
+
+        // give analytics a chance to update their nested STEP data
+        self.rebuild_step_from_nurb_parameters()
+    }
+
+    /// Sets control point `[u_index][v_index]` (`SetControlPoint`): from Euclidean
+    /// coordinates and `weight` ([`ControlPointForm::EuclideanRational`]; all other
+    /// points get weight 1 if they had none), from Euclidean coordinates with weight 1
+    /// ([`ControlPointForm::NonRational`]) or from homogeneous coordinates and
+    /// `weight`. The weight is stored only for a rational surface, `z` only for a 3D
+    /// net.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for an index outside the net or without NURB.
+    pub fn set_control_point(
+        &mut self,
+        form: ControlPointForm,
+        u_index: usize,
+        v_index: usize,
+        control_point: Point3,
+        weight: f64,
+    ) -> Result<()> {
+        // (analytic surfaces refuse control point moves: never here)
+        let mut control_point = control_point;
+        let mut weight = weight;
+        let sur = self
+            .nurb
+            .as_mut()
+            .ok_or_else(|| SolidError::sm_err(OP_SET_CP))?;
+
+        // error check - out of bounds indices
+        if u_index > sur.n() || v_index > sur.m() {
+            return Err(SolidError::sm_err(OP_SET_CP));
+        }
+
+        // convert ControlPts to homogeneous rational form
+        if form == ControlPointForm::EuclideanRational {
+            control_point.x *= weight;
+            control_point.y *= weight;
+            control_point.z *= weight;
+
+            // make sure all the other control points are also rational
+            for i in 0..=sur.n() {
+                for j in 0..=sur.m() {
+                    let cpti = sur.cpt_mut(i, j)?;
+                    if cpti.w == NOW {
+                        cpti.w = 1.0;
+                    }
+                }
+            }
+        } else if form == ControlPointForm::NonRational {
+            weight = 1.0;
+        }
+
+        // Set the Control Point value
+        let is_rational = sur.cpt(0, 0)?.w != NOW;
+        let cpt = sur.cpt_mut(u_index, v_index)?;
+        cpt.x = control_point.x;
+        cpt.y = control_point.y;
+        if cpt.z != NOZ {
+            cpt.z = control_point.z;
+        }
+        if is_rational {
+            cpt.w = weight;
+        }
+        Ok(())
+    }
+
+    /// The part of the surface over `uv_domain` intersected with the natural domain
+    /// (`CopySubPatch`, through `N_SrfExtractPatch`, which snaps the bounds to knots
+    /// within `1e-8`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB or when the extraction fails (also for a domain disjoint
+    /// from the natural one).
+    pub fn copy_sub_patch(&self, uv_domain: &Extent2d) -> Result<Self> {
+        // locals
+        let sur = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::sm_err(OP_PATCH))?;
+
+        // Trim crUVDomain to NaturalUVDomain (a disjoint domain gives the Init state)
+        let nat_uv_domain = self.natural_uv_domain();
+        let uv = nat_uv_domain
+            .intersect(uv_domain)
+            .unwrap_or_else(|_| Extent2d::new());
+
+        // pass the call along
+        let new_sur = extract_patch(
+            sur,
+            Rectangle {
+                ul: uv.min().x,
+                ur: uv.max().x,
+                vb: uv.min().y,
+                vt: uv.max().y,
+            },
+        )
+        .map_err(SolidError::nl_ser(OP_PATCH))?;
+
+        // copy sNewSur back into a SmBSplineSurface object
+        Ok(Self::from_gw_nurb(&new_sur))
+    }
+
+    /// Splits the surface at `param` in u ([`SurfParamType::U`]) or v
+    /// ([`SurfParamType::V`]) into the parts below and above (`SplitAt`); `param`
+    /// first snaps to a knot within `100 * SM_EFF_ZERO * (1 + |param|)`.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for another direction, a parameter at or outside the ends, or without
+    /// NURB.
+    pub fn split_at(&self, param: f64, surf_param: SurfParamType) -> Result<(Self, Self)> {
+        let mut param = param;
+        let tol = EFF_ZERO * 100.0 * (1.0 + param.abs());
+
+        // If we are close to a knot then split at the knot (status ignored)
+        let knots = self
+            .knots(surf_param, None)
+            .map_or_else(|_| Vec::new(), |k| k.0);
+        for &knot in &knots {
+            if (knot - param).abs() < tol {
+                param = knot;
+            }
+        }
+
+        // locals
+        let sur = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::sm_err(OP_SPLIT))?;
+        let dir = match surf_param {
+            SurfParamType::U => Direction::U,
+            SurfParamType::V => Direction::V,
+            // NL_NO: sm_SplitSrf fails before allocating
+            _ => return Err(SolidError::sm_err(OP_SPLIT)),
+        };
+
+        // split the gw_SURFACE object
+        let (sur_l, sur_r) = split_srf(sur, param, dir).map_err(SolidError::nl_ser(OP_SPLIT))?;
+
+        // build BSplineSurfaces for each new gw_Surface object
+        Ok((Self::from_nurb(sur_l, false), Self::from_nurb(sur_r, false)))
+    }
+
+    /// Swaps the u and v parametrisations (`SwapUV`), reversing the orientation.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without NURB; the errors of
+    /// [`BSplineSurface::set_canonical`].
+    pub fn swap_uv(&mut self) -> Result<()> {
+        // get current surface description
+        let c = self.canonical()?;
+
+        // let analytic surfaces remember that they have been swapped
+        self.toggle_swap_uv_bit();
+
+        // Transpose Weights and control points arrays
+        let num_v_cpts = self.number_control_points(SurfParamType::V);
+        let mut cpts = c.control_points;
+        let mut weights = c.weights;
+        transpose(&mut cpts, num_v_cpts);
+        transpose(&mut weights, num_v_cpts);
+
+        // Transpose Surface definition
+        self.set_canonical(&CanonicalSurfaceData {
+            u_degree: c.v_degree,
+            v_degree: c.u_degree,
+            control_points: &cpts,
+            form: c.form,
+            u_multiplicities: &c.v_multiplicities,
+            v_multiplicities: &c.u_multiplicities,
+            u_knots: &c.v_knots,
+            v_knots: &c.u_knots,
+            knot_type: c.knot_type,
+            weights: Some(&weights),
+            uv_domain: None,
+        })
+    }
+
+    /// Changes the natural domain to `new_step_uv_domain` (`AdjustSTEPUVDomain`):
+    /// extends the boundary spans to its bounds where needed, then trims to it.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`BSplineSurface::expand_boundary_span`] and
+    /// [`BSplineSurface::trim_with_domain`].
+    pub fn adjust_step_uv_domain(&mut self, new_step_uv_domain: &Extent2d) -> Result<()> {
+        // Grow the surface if indicated, then trim.
+        let min_max = new_step_uv_domain.min();
+        self.expand_boundary_span(min_max.x, SurfParamType::U)?;
+        self.expand_boundary_span(min_max.y, SurfParamType::V)?;
+
+        let min_max = new_step_uv_domain.max();
+        self.expand_boundary_span(min_max.x, SurfParamType::U)?;
+        self.expand_boundary_span(min_max.y, SurfParamType::V)?;
+
+        let mut uv_domain = *new_step_uv_domain;
+
+        // change the domain - note: makes coincident geometry but the parameterization may change
+        self.trim_with_domain(&mut uv_domain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nurbs::math::CPoint;
+    use crate::nurbs::srf_basic::Surface;
+
+    /// A biquadratic 3 x 3 patch over `[0, 2] x [0, 1]`.
+    fn patch(rational: bool) -> BSplineSurface {
+        let net = (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| {
+                        let w = match (rational, i) {
+                            (false, _) => NOW,
+                            (true, 1) => 2.0,
+                            (true, _) => 1.0,
+                        };
+                        let (x, y, z) = (f64::from(i), f64::from(j), f64::from(i * j) * 0.25);
+                        if w == NOW {
+                            CPoint::new(x, y, z, NOW)
+                        } else {
+                            CPoint::new(w * x, w * y, w * z, w)
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let sur = Surface::new(
+            net,
+            2,
+            2,
+            vec![0.0, 0.0, 0.0, 2.0, 2.0, 2.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .expect("surface");
+        BSplineSurface::from_nurb(sur, false)
+    }
+
+    #[test]
+    fn transpose_matches_smtarray() {
+        let mut a = vec![1, 2, 3, 4, 5, 6]; // 2 x 3 read as 3 rows of 2 columns
+        transpose(&mut a, 3);
+        assert_eq!(a, vec![1, 4, 2, 5, 3, 6]);
+        let mut e: Vec<i32> = Vec::new();
+        transpose(&mut e, 3);
+        assert!(e.is_empty());
+    }
+
+    #[test]
+    fn control_points_and_bilinear() {
+        let s = patch(true);
+        assert!(!s.is_bilinear());
+        let (p, w) = s
+            .control_point(ControlPointForm::EuclideanRational, 1, 2)
+            .expect("cp");
+        assert_eq!((p, w), (Point3::new(1.0, 2.0, 0.5), 2.0));
+        let (p, w) = s
+            .control_point(ControlPointForm::NonRational, 0, 0)
+            .expect("cp");
+        assert_eq!((p, w), (Point3::new(0.0, 0.0, 0.0), 1.0));
+        assert!(s
+            .control_point(ControlPointForm::NonRational, 3, 0)
+            .is_err());
+        let block = ControlPointBlock {
+            start_u: 0,
+            end_u: 1,
+            start_v: 1,
+            end_v: 2,
+            u_stride: 8,
+            v_stride: 4,
+        };
+        let v = s
+            .control_points_expert(ControlPointForm::HomogeneousRational, &block)
+            .expect("expert");
+        assert_eq!(v.len(), 16);
+        assert_eq!(v.get(12..16), Some(&[2.0, 4.0, 1.0, 2.0][..]));
+    }
+
+    #[test]
+    fn set_control_point_euclidean_makes_rational() {
+        let mut s = patch(false);
+        s.set_control_point(
+            ControlPointForm::EuclideanRational,
+            1,
+            1,
+            Point3::new(1.0, 1.0, 2.0),
+            0.5,
+        )
+        .expect("set");
+        assert!(s.is_rational());
+        let (p, w) = s
+            .control_point(ControlPointForm::EuclideanRational, 1, 1)
+            .expect("cp");
+        assert_eq!((p, w), (Point3::new(1.0, 1.0, 2.0), 0.5));
+        assert!(s
+            .set_control_point(ControlPointForm::NonRational, 5, 0, Point3::ZERO, 1.0)
+            .is_err());
+    }
+
+    #[test]
+    fn swap_uv_transposes() {
+        let mut s = patch(true);
+        let before = s.control_point(ControlPointForm::EuclideanRational, 1, 2);
+        s.swap_uv().expect("swap");
+        let after = s.control_point(ControlPointForm::EuclideanRational, 2, 1);
+        assert_eq!(before.ok(), after.ok());
+        let d = s.natural_uv_domain();
+        assert_eq!((d.max().x, d.max().y), (1.0, 2.0));
+    }
+
+    #[test]
+    fn split_and_sub_patch() {
+        let s = patch(false);
+        let (l, r) = s.split_at(1.0, SurfParamType::U).expect("split");
+        assert_eq!(l.natural_uv_domain().max().x, 1.0);
+        assert_eq!(r.natural_uv_domain().min().x, 1.0);
+        assert!(s.split_at(0.0, SurfParamType::U).is_err());
+        assert!(s.split_at(1.0, SurfParamType::Both).is_err());
+        let sub = s
+            .copy_sub_patch(&Extent2d::from_bounds(0.5, 0.25, 5.0, 0.75))
+            .expect("patch");
+        let d = sub.natural_uv_domain();
+        assert_eq!(
+            (d.min().x, d.max().x, d.min().y, d.max().y),
+            (0.5, 2.0, 0.25, 0.75)
+        );
+        assert!(s
+            .copy_sub_patch(&Extent2d::from_bounds(5.0, 5.0, 6.0, 6.0))
+            .is_err());
+    }
+
+    #[test]
+    fn iso_curve_clamps_and_trims() {
+        let k = Kernel::default();
+        let s = patch(false);
+        let c = s
+            .create_iso_parametric_curve(
+                &k,
+                SurfParamType::U,
+                2.0 + 1e-9,
+                IsoCurveOptions::default(),
+            )
+            .expect("iso");
+        let ivl = c.curve.natural_interval();
+        assert_eq!((ivl.min(), ivl.max()), (0.0, 1.0));
+        assert!(s
+            .create_iso_parametric_curve(&k, SurfParamType::U, 2.1, IsoCurveOptions::default())
+            .is_err());
+        let opts = IsoCurveOptions {
+            domain: Some(Extent2d::from_bounds(0.0, 0.25, 2.0, 0.75)),
+            uv_iso_curve: false,
+        };
+        let c = s
+            .create_iso_parametric_curve(&k, SurfParamType::U, 1.0, opts)
+            .expect("iso");
+        let ivl = c.curve.natural_interval();
+        assert_eq!((ivl.min(), ivl.max()), (0.25, 0.75));
+        let opts = IsoCurveOptions {
+            domain: None,
+            uv_iso_curve: true,
+        };
+        let c = s
+            .create_iso_parametric_curve(&k, SurfParamType::U, 1.0, opts)
+            .expect("iso u");
+        assert!(c.uv_iso_curve.is_some());
+        let c = s
+            .create_iso_parametric_curve(&k, SurfParamType::V, 0.5, opts)
+            .expect("iso v");
+        assert!(c.uv_iso_curve.is_none());
+        assert!(matches!(
+            BSplineSurface::new().create_iso_parametric_curve(
+                &k,
+                SurfParamType::U,
+                0.0,
+                IsoCurveOptions::default()
+            ),
+            Err(SolidError::Upstream { code: 1006, .. })
+        ));
+    }
+
+    #[test]
+    fn revolution_of_a_line() {
+        let line = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 2.0),
+        )
+        .expect("line");
+        let s = BSplineSurface::create_surf_of_revolution(
+            &line,
+            Point3::ZERO,
+            Vec3::new(0.0, 0.0, 3.0),
+            90.0,
+            false,
+            None,
+        )
+        .expect("rev");
+        assert_eq!(s.form(), BSplineSurfaceForm::SurfOfRevolution);
+        assert_eq!(s.degree(SurfParamType::U), 2);
+        assert_eq!(s.degree(SurfParamType::V), 1);
+        let on_axis =
+            BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(0.0, 0.0, 1.0))
+                .expect("axis line");
+        assert!(BSplineSurface::create_surf_of_revolution(
+            &on_axis,
+            Point3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+            90.0,
+            true,
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn back_edges_are_unported() {
+        let s = patch(false);
+        let unported = |r: Result<()>| matches!(r, Err(SolidError::Unported { .. }));
+        assert!(unported(s.copy_and_add_analytics().map(|_| ())));
+        assert!(unported(s.max_analytic_domain().map(|_| ())));
+        assert!(unported(s.is_degenerate_point(1e-6, None).map(|_| ())));
+        assert!(matches!(
+            BSplineSurface::create_sphere_from_arcs(&[], 1e-6),
+            Err(SolidError::Upstream { code: 1001, .. })
+        ));
+    }
+
+    #[test]
+    fn trimmed_plane_from_rectangle() {
+        let c1 = BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0))
+            .expect("c1");
+        let c2 = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        )
+        .expect("c2");
+        let r = BSplineSurface::create_trimmed_plane_from_ruled(&c1, &c2);
+        // the lines run the same way: param1 = 0, param2 = 1
+        let t = r.expect("plane");
+        assert!(t.plane.is_bilinear());
+        assert!(t.trimming_curves.is_empty());
+    }
+}
