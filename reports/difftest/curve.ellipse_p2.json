@@ -54,16 +54,12 @@
       "values_compared": 340
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_in_x_-0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#6 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -82,16 +78,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_x_offset_-0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#9 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -102,16 +94,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_in_x_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#11 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -131,8 +119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "circle_circle_x_offset_-1e-05",
@@ -143,8 +131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "circle_circle_outside_-1e-05",
@@ -154,64 +142,44 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_in_x_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#16 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_out_x_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#17 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 123
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_in_y_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#18 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_x_offset_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#19 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_outside_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#20 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -222,52 +190,36 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_out_x_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#22 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_in_y_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#23 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_x_offset_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#24 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_outside_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#25 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -278,88 +230,60 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_out_x_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#27 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_in_y_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#28 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_x_offset_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#29 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_outside_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#30 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_rot30_-0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#31 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_rot30_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#32 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_rot30_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#33 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -379,8 +303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCoincidenceChecker",
-        "unit": "curve.ellipse_p1"
+        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "circle_circle_coincident",
@@ -430,16 +354,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_-0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#42 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -450,16 +370,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_-0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#44 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -495,8 +411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_-1e-05",
@@ -506,21 +422,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_in_plane_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#50 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_-1e-05",
@@ -530,16 +442,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_tangent_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#52 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -566,52 +474,36 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#56 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_in_plane_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#57 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#58 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_tangent_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#59 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -639,8 +531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_1e-05",
@@ -650,21 +542,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_in_plane_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#64 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_1e-05",
@@ -674,16 +562,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_tangent_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#66 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -710,76 +594,52 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#70 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_in_plane_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#71 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#72 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_tangent_0.001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#73 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_horizontal_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#74 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_horizontal_1.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#75 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -798,16 +658,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_axis_line",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#78 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -902,16 +758,12 @@
       "values_compared": 190
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "ellipse_2d",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#89 (upstream edge cases (source/SMLib/src/SmEllipse.cpp))",
-      "values_compared": 0
+      "values_compared": 187
     },
     {
       "max_rel_err": 0.0,
@@ -1079,8 +931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -1123,8 +975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -1206,16 +1058,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976450",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -1290,16 +1138,12 @@
       "values_compared": 167
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0033",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976460",
-      "values_compared": 0
+      "values_compared": 79
     },
     {
       "max_rel_err": 0.0,
@@ -1326,28 +1170,20 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0037",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976464",
-      "values_compared": 0
+      "values_compared": 105
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976465",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -1382,16 +1218,12 @@
       "values_compared": 67
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0043",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976470",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "deferred": {
@@ -1430,16 +1262,12 @@
       "values_compared": 208
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0048",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976475",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -1578,16 +1406,12 @@
       "values_compared": 67
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0065",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976492",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -1759,8 +1583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0087",
@@ -1850,16 +1674,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0098",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976525",
-      "values_compared": 0
+      "values_compared": 173
     },
     {
       "max_rel_err": 0.0,
@@ -1871,8 +1691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -1923,8 +1743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0106",
@@ -2362,16 +2182,12 @@
       "values_compared": 110
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0159",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976586",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -2398,16 +2214,12 @@
       "values_compared": 131
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0163",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976590",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -2442,21 +2254,17 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0168",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976595",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0169",
@@ -2687,8 +2495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -2722,16 +2530,12 @@
       "values_compared": 153
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0201",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976628",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -2766,16 +2570,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0206",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976633",
-      "values_compared": 0
+      "values_compared": 108
     },
     {
       "max_rel_err": 0.0,
@@ -2786,21 +2586,17 @@
       "values_compared": 103
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0208",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976635",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0209",
@@ -2842,16 +2638,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976641",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -2990,16 +2782,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976659",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -3122,16 +2910,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0248",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976675",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -3270,28 +3054,20 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0266",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976693",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0267",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976694",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -3391,8 +3167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0280",
@@ -3451,8 +3227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0287",
@@ -3634,16 +3410,12 @@
       "values_compared": 173
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0309",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976736",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -3663,8 +3435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0312",
@@ -3762,16 +3534,12 @@
       "values_compared": 134
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0324",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976751",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -3798,16 +3566,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0328",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976755",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -3818,16 +3582,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0330",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976757",
-      "values_compared": 0
+      "values_compared": 111
     },
     {
       "max_rel_err": 0.0,
@@ -3862,16 +3622,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0335",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976762",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -3906,16 +3662,12 @@
       "values_compared": 129
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0340",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976767",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -4063,8 +3815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0359",
@@ -4075,8 +3827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0360",
@@ -4110,16 +3862,12 @@
       "values_compared": 210
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0364",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976791",
-      "values_compared": 0
+      "values_compared": 184
     },
     {
       "max_rel_err": 0.0,
@@ -4155,8 +3903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0369",
@@ -4214,16 +3962,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0376",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976803",
-      "values_compared": 0
+      "values_compared": 114
     },
     {
       "max_rel_err": 0.0,
@@ -4438,16 +4182,12 @@
       "values_compared": 70
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976830",
-      "values_compared": 0
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -4482,16 +4222,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0408",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976835",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -4802,16 +4538,12 @@
       "values_compared": 80
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0447",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976874",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
       "max_rel_err": 0.0,
@@ -4846,16 +4578,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0452",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976879",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -5114,16 +4842,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0485",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976912",
-      "values_compared": 0
+      "values_compared": 92
     },
     {
       "max_rel_err": 0.0,
@@ -5159,8 +4883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0490",
@@ -5362,16 +5086,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0515",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976942",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -5598,16 +5318,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0544",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976971",
-      "values_compared": 0
+      "values_compared": 100
     },
     {
       "max_rel_err": 0.0,
@@ -5643,8 +5359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0549",
@@ -5703,8 +5419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0556",
@@ -5770,16 +5486,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0564",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976991",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -5790,16 +5502,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0566",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976993",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -5874,16 +5582,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0576",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977003",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -6127,8 +5831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0607",
@@ -6178,16 +5882,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0613",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977040",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -6243,8 +5943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0620",
@@ -6482,28 +6182,20 @@
       "values_compared": 105
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0649",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977076",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0650",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977077",
-      "values_compared": 0
+      "values_compared": 92
     },
     {
       "max_rel_err": 0.0,
@@ -6546,16 +6238,12 @@
       "values_compared": 177
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0656",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977083",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -6678,16 +6366,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0672",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977099",
-      "values_compared": 0
+      "values_compared": 163
     },
     {
       "max_rel_err": 0.0,
@@ -6882,28 +6566,20 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0696",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977123",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0697",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977124",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -6998,16 +6674,12 @@
       "values_compared": 159
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0709",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977136",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -7050,16 +6722,12 @@
       "values_compared": 177
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0715",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977142",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -7087,8 +6755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0719",
@@ -7154,28 +6822,20 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0727",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977154",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0728",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977155",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -7186,28 +6846,20 @@
       "values_compared": 97
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0730",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977157",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977158",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -7346,16 +6998,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977176",
-      "values_compared": 0
+      "values_compared": 142
     },
     {
       "max_rel_err": 0.0,
@@ -7510,16 +7158,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0769",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977196",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -7578,16 +7222,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0777",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977204",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -7734,16 +7374,12 @@
       "values_compared": 85
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0796",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977223",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -7755,8 +7391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0798",
@@ -7775,8 +7411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0800",
@@ -7818,21 +7454,17 @@
       "values_compared": 96
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0805",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977232",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0806",
@@ -7867,8 +7499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0810",
@@ -7919,8 +7551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0816",
@@ -7939,8 +7571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0818",
@@ -8014,16 +7646,12 @@
       "values_compared": 115
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0827",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977254",
-      "values_compared": 0
+      "values_compared": 183
     },
     {
       "max_rel_err": 0.0,
@@ -8050,16 +7678,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0831",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977258",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -8103,8 +7727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0837",
@@ -8114,16 +7738,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0838",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977265",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -8134,16 +7754,12 @@
       "values_compared": 176
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0840",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977267",
-      "values_compared": 0
+      "values_compared": 172
     },
     {
       "max_rel_err": 0.0,
@@ -8179,8 +7795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0845",
@@ -8207,8 +7823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0848",
@@ -8338,16 +7954,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0864",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977291",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -8526,16 +8138,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0887",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977314",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -8723,8 +8331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0911",
@@ -8734,16 +8342,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0912",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977339",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -8762,16 +8366,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0915",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977342",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
       "max_rel_err": 0.0,
@@ -8790,16 +8390,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0918",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977345",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -8954,16 +8550,12 @@
       "values_compared": 101
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0938",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977365",
-      "values_compared": 0
+      "values_compared": 115
     },
     {
       "max_rel_err": 0.0,
@@ -9047,8 +8639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0949",
@@ -9286,16 +8878,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0978",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977405",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -9362,16 +8950,12 @@
       "values_compared": 94
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0987",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977414",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -9398,16 +8982,12 @@
       "values_compared": 94
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0991",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977418",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -9495,8 +9075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1002",
@@ -9506,16 +9086,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977430",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -9582,16 +9158,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1012",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977439",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -9675,8 +9247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1023",
@@ -9687,8 +9259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1024",
@@ -9938,16 +9510,12 @@
       "values_compared": 70
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1055",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977482",
-      "values_compared": 0
+      "values_compared": 109
     },
     {
       "max_rel_err": 0.0,
@@ -10182,16 +9750,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1085",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977512",
-      "values_compared": 0
+      "values_compared": 174
     },
     {
       "max_rel_err": 0.0,
@@ -10359,8 +9923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1106",
@@ -10370,16 +9934,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1107",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977534",
-      "values_compared": 0
+      "values_compared": 100
     },
     {
       "max_rel_err": 0.0,
@@ -10406,16 +9966,12 @@
       "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977538",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
       "max_rel_err": 0.0,
@@ -10666,16 +10222,12 @@
       "values_compared": 172
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1143",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977570",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -10847,8 +10399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1165",
@@ -10867,8 +10419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1167",
@@ -10966,16 +10518,12 @@
       "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977606",
-      "values_compared": 0
+      "values_compared": 102
     },
     {
       "max_rel_err": 0.0,
@@ -11019,8 +10567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1185",
@@ -11047,8 +10595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1188",
@@ -11166,28 +10714,20 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1202",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977629",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977630",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -11458,16 +10998,12 @@
       "values_compared": 147
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1237",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977664",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -11574,16 +11110,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1251",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977678",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -11602,16 +11134,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1254",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977681",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -11662,16 +11190,12 @@
       "values_compared": 130
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1261",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977688",
-      "values_compared": 0
+      "values_compared": 118
     },
     {
       "max_rel_err": 0.0,
@@ -11706,16 +11230,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1266",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977693",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -11759,8 +11279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1272",
@@ -11786,16 +11306,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1275",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977702",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -11814,16 +11330,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1278",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977705",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -11874,16 +11386,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1285",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977712",
-      "values_compared": 0
+      "values_compared": 156
     },
     {
       "max_rel_err": 0.0,
@@ -12054,16 +11562,12 @@
       "values_compared": 174
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1307",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977734",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -12226,21 +11730,17 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1328",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977755",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1329",
@@ -12266,16 +11766,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1332",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977759",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -12482,16 +11978,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1358",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977785",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -12511,8 +12003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1361",
@@ -12523,8 +12015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1362",
@@ -12686,16 +12178,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1382",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977809",
-      "values_compared": 0
+      "values_compared": 142
     },
     {
       "max_rel_err": 0.0,
@@ -12730,16 +12218,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977814",
-      "values_compared": 0
+      "values_compared": 116
     },
     {
       "max_rel_err": 0.0,
@@ -12759,8 +12243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1390",
@@ -12782,16 +12266,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1392",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977819",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -12954,16 +12434,12 @@
       "values_compared": 113
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977840",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -13006,16 +12482,12 @@
       "values_compared": 67
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1419",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977846",
-      "values_compared": 0
+      "values_compared": 98
     },
     {
       "max_rel_err": 0.0,
@@ -13426,16 +12898,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1471",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977898",
-      "values_compared": 0
+      "values_compared": 104
     },
     {
       "max_rel_err": 0.0,
@@ -13646,28 +13114,20 @@
       "values_compared": 93
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1498",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977925",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977926",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -13846,16 +13306,12 @@
       "values_compared": 86
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1522",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977949",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -13970,16 +13426,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1536",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977963",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -14078,16 +13530,12 @@
       "values_compared": 125
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1549",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977976",
-      "values_compared": 0
+      "values_compared": 166
     },
     {
       "max_rel_err": 0.0,
@@ -14162,16 +13610,12 @@
       "values_compared": 173
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1559",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977986",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -14230,16 +13674,12 @@
       "values_compared": 86
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1567",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977994",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -14267,8 +13707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1571",
@@ -14351,8 +13791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1581",
@@ -14418,16 +13858,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1589",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978016",
-      "values_compared": 0
+      "values_compared": 160
     },
     {
       "max_rel_err": 0.0,
@@ -14438,16 +13874,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1591",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978018",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -14579,8 +14011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1608",
@@ -14698,16 +14130,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1622",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978049",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -14855,8 +14283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1641",
@@ -14882,16 +14310,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1644",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978071",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -14982,16 +14406,12 @@
       "values_compared": 101
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1656",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978083",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -15050,16 +14470,12 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1664",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978091",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -15174,16 +14590,12 @@
       "values_compared": 96
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1679",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978106",
-      "values_compared": 0
+      "values_compared": 118
     },
     {
       "max_rel_err": 0.0,
@@ -15218,16 +14630,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1684",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978111",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -15302,16 +14710,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1694",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978121",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -15330,16 +14734,12 @@
       "values_compared": 166
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1697",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978124",
-      "values_compared": 0
+      "values_compared": 103
     },
     {
       "max_rel_err": 0.0,
@@ -15442,16 +14842,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1710",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978137",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -15555,8 +14951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1723",
@@ -15638,16 +15034,12 @@
       "values_compared": 65
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1733",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978160",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -15658,16 +15050,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1735",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978162",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -15686,16 +15074,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1738",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978165",
-      "values_compared": 0
+      "values_compared": 101
     },
     {
       "max_rel_err": 0.0,
@@ -15798,16 +15182,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1751",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978178",
-      "values_compared": 0
+      "values_compared": 102
     },
     {
       "max_rel_err": 0.0,
@@ -15906,28 +15286,20 @@
       "values_compared": 80
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1764",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978191",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978192",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -16318,16 +15690,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1814",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978241",
-      "values_compared": 0
+      "values_compared": 86
     },
     {
       "max_rel_err": 0.0,
@@ -16346,16 +15714,12 @@
       "values_compared": 67
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1817",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978244",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -16439,8 +15803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1828",
@@ -16474,16 +15838,12 @@
       "values_compared": 252
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1832",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978259",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -16494,16 +15854,12 @@
       "values_compared": 85
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1834",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978261",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -16530,16 +15886,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1838",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978265",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -16638,16 +15990,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1851",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978278",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -16714,28 +16062,20 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1860",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978287",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1861",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978288",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -16930,16 +16270,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1886",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978313",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -17051,8 +16387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmFindCCNormalENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1900",
@@ -17102,16 +16438,12 @@
       "values_compared": 110
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1906",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978333",
-      "values_compared": 0
+      "values_compared": 138
     },
     {
       "max_rel_err": 0.0,
@@ -17218,16 +16550,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1920",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978347",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -17530,16 +16858,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1958",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978385",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -17599,8 +16923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmEllipse::ConvertTo2D",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1966",
@@ -17782,16 +17106,12 @@
       "values_compared": 94
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1988",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978415",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -17851,8 +17171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.ellipse_p1"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1996",
@@ -17887,13 +17207,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 267,
+  "cases_deferred": 97,
   "cases_failed": 0,
-  "cases_passed": 1835,
+  "cases_passed": 2005,
   "cases_total": 2102,
   "deferred_by_unit": {
-    "curve.curve_p5": 37,
-    "curve.ellipse_p1": 230
+    "curve.curve_p5": 97
   },
   "max_rel_err": 0.0,
   "pass": true,

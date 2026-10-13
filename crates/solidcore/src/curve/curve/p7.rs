@@ -1106,7 +1106,7 @@ impl Curve {
                 return Ok(out);
             }
 
-            let planar = self.is_planar(EFF_ZERO)?;
+            let planar = self.is_planar(k, EFF_ZERO)?;
             if planar.is_planar {
                 // (status ignored: a failed angle is 0)
                 let angle = planar.normal.angle_between(opt(0)?).unwrap_or(0.0);

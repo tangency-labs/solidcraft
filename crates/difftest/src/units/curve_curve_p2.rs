@@ -705,6 +705,10 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
             // not produced by this unit's cases (see curve.hyperbola's runner)
             o.extend([2.0, h.base().dim() as f64]);
         }
+        CurveKind::Ellipse(e) => {
+            // not produced by this unit's cases (see curve.ellipse_p1's runner)
+            o.extend([2.0, e.base().dim() as f64]);
+        }
         CurveKind::Hermite(h) => {
             o.extend([1.0, h.dim() as f64]);
             let a = h.evaluate(0.0, 1, false);
@@ -1018,7 +1022,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::ConvertT { t } => {
             let c = c_ref()?;
-            let a = tri!(o, c.convert_t_from_nurbs_to_step(*t));
+            let a = tri!(o, c.convert_t_from_nurbs_to_step(&Kernel::default(), *t));
             let bb = tri!(o, c.convert_t_from_step_to_nurbs(*t));
             o.extend([0.0, a, bb]);
         }
@@ -1035,7 +1039,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.extend([0.0, b(eq)]);
         }
         OpIn::Copy => {
-            let nc = tri!(o, c_ref()?.copy());
+            let nc = tri!(o, c_ref()?.copy(&Kernel::default()));
             o.push(0.0);
             state(&mut o, &nc);
         }
@@ -1060,7 +1064,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let mut c = c_ref()?.clone();
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
-            let st = match c.transform(&ax, scale.map(v3)) {
+            let st = match c.transform(&Kernel::default(), &ax, scale.map(v3)) {
                 Ok(()) => 0.0,
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
@@ -1072,7 +1076,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::EditParam { a, b: bb } => {
             let mut c = c_ref()?.clone();
-            let st = match c.edit_parameterization(&Extent1d::from_min_max(*a, *bb)) {
+            let st = match c.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)) {
                 Ok(()) => 0.0,
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
@@ -1084,7 +1088,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Reverse { a, b: bb } => {
             let mut c = c_ref()?.clone();
-            match c.reverse_parameterization(&Extent1d::from_min_max(*a, *bb)) {
+            match c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)) {
                 Ok(nv) => o.extend([0.0, nv.min(), nv.max()]),
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
@@ -1095,7 +1099,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Convert2d => {
             let mut c = c_ref()?.clone();
-            let st = match c.convert_to_2d() {
+            let st = match c.convert_to_2d(&Kernel::default()) {
                 Ok(()) => 0.0,
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
@@ -1108,12 +1112,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Analytic { a, b: bb } => {
             let r = tri!(
                 o,
-                c_ref()?.create_analytic_curve(&Extent1d::from_min_max(*a, *bb))
+                c_ref()?.create_analytic_curve(&Kernel::default(), &Extent1d::from_min_max(*a, *bb))
             );
             o.extend([0.0, b(r.is_some())]);
         }
         OpIn::StepInversion { p } => {
-            tri!(o, c_ref()?.step_inversion(v3(*p)));
+            tri!(o, c_ref()?.step_inversion(&Kernel::default(), v3(*p)));
             o.push(0.0);
         }
         OpIn::DropFast { p } => {
@@ -1137,7 +1141,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let ivl = c.natural_interval();
             let r = tri!(
                 o,
-                c.intersect_with_line(&ivl, &Line::default(), &ivl, 1e-6)
+                c.intersect_with_line(&Kernel::default(), &ivl, &Line::default(), &ivl, 1e-6)
             );
             o.extend([0.0, b(r.needs_more_intersections), r.solutions.len() as f64]);
         }
@@ -1175,7 +1179,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let mut db = DatabaseReader::new();
             db.open_for_read(text.clone().into_bytes(), FileType::Ascii);
-            match Curve::read_from_db(*curve_type, &mut db, *dim, *version) {
+            match Curve::read_from_db(&Kernel::default(), *curve_type, &mut db, *dim, *version) {
                 Ok(c) => {
                     o.extend([0.0, 1.0]);
                     state(&mut o, &c);

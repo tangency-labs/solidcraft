@@ -881,9 +881,9 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
                 o.extend([d.u_min(), d.v_min(), d.u_max(), d.v_max()]);
             }
         }
-        OpIn::Analytic { a, b } => push_flag(o, c.create_analytic_curve(&ivl(*a, *b))?.is_some()),
+        OpIn::Analytic { a, b } => push_flag(o, c.create_analytic_curve(&Kernel::default(), &ivl(*a, *b))?.is_some()),
         OpIn::Offset { tol, n, d, matched } => {
-            let (r, gap) = c.create_simple_offset(*tol, v3(*n), *d, *matched)?;
+            let (r, gap) = c.create_simple_offset(&Kernel::default(), *tol, v3(*n), *d, *matched)?;
             o.push(gap);
             push_new(o, Some(&r));
         }

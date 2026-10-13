@@ -67,7 +67,7 @@
 //!   implementation of [`FindCurveDistanceExtrema`].
 //! - **Curve kinds.** `SM_CAST_NONNULL_PTR(SmBSplineCurve, ...)` is non-null for
 //!   [`CurveKind::BSpline`] and the analytic B-spline kinds ([`CurveKind::Hyperbola`],
-//!   [`CurveKind::Parabola`], [`CurveKind::Line`]),
+//!   [`CurveKind::Ellipse`], [`CurveKind::Parabola`], [`CurveKind::Line`]),
 //!   whose NURB is decomposed exactly; the other kinds (Hermite, conic, projected) are
 //!   approximated by cubic spans over their knots.
 //! - **Undefined behaviour.** Where upstream would index past an array (a
@@ -442,13 +442,13 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the analytic conversion.
-    pub fn analytic_curve(&mut self) -> Result<Option<&Curve>> {
+    pub fn analytic_curve(&mut self, k: &Kernel) -> Result<Option<&Curve>> {
         if self.curve.is_analytic() {
             return Ok(Some(&self.curve));
         }
         if self.analytic.is_none() && !self.tried_analytic {
             // See if the curve can be represented by a line or a circle
-            self.analytic = ignored(self.curve.create_analytic_curve(&self.interval))?.flatten();
+            self.analytic = ignored(self.curve.create_analytic_curve(k, &self.interval))?.flatten();
             self.tried_analytic = true;
         }
         Ok(self.analytic.as_ref())
@@ -543,6 +543,12 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 }
                 true
             }
+            CurveKind::Ellipse(e) => {
+                if e.base().gw_nurb().is_none() {
+                    e.make_nurb_owned(k, owner)?;
+                }
+                true
+            }
             CurveKind::Parabola(p) => {
                 if p.base().gw_nurb().is_none() {
                     p.make_nurb(owner)?;
@@ -578,6 +584,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             let nurb = match self.curve.kind() {
                 CurveKind::BSpline(b) => b.gw_nurb(),
                 CurveKind::Hyperbola(h) => h.base().gw_nurb(),
+                CurveKind::Ellipse(e) => e.base().gw_nurb(),
                 CurveKind::Parabola(p) => p.base().gw_nurb(),
                 CurveKind::Line(l) => l.base().gw_nurb(),
                 CurveKind::Hermite(_)

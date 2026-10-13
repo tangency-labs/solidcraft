@@ -64,7 +64,7 @@ use crate::curve::curve::p2::{
     at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
 };
 use crate::curve::curve::p3::{local_property_analysis, PointSolveOptions};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{GlobalSolve, GlobalSolver, SolutionRequested, SolverOperation};
@@ -444,6 +444,7 @@ impl Curve {
     /// Those of the override or of [`calculate_bounding_box_base`].
     pub fn calculate_bounding_box(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         req: BoundingBoxRequest,
         expand: bool,
@@ -451,10 +452,11 @@ impl Curve {
         match self.kind() {
             CurveKind::BSpline(c) => c.calculate_bounding_box(interval, req),
             CurveKind::Hyperbola(c) => c.base().calculate_bounding_box(interval, req),
+            CurveKind::Ellipse(c) => c.base().calculate_bounding_box(interval, req),
             CurveKind::Parabola(c) => c.base().calculate_bounding_box(interval, req),
             CurveKind::Line(c) => Ok(c.calculate_bounding_box(interval, req)),
             // (its cache update is lost on this copy)
-            CurveKind::CrvOnSurf(c) => c.calculate_bounding_box_ref(interval, req, expand),
+            CurveKind::CrvOnSurf(c) => c.calculate_bounding_box_ref(k, interval, req, expand),
             CurveKind::Hermite(c) => {
                 let mut normal = Extent3d::new();
                 let mut pseudo = PseudoBox::new();
@@ -481,13 +483,13 @@ impl Curve {
     ///
     /// [`SolidError::Unported`] from [`Curve::calculate_bounding_box`] (whose other
     /// failures leave the default box, as upstream ignores the status).
-    pub fn is_planar(&self, tol: f64) -> Result<Planar> {
+    pub fn is_planar(&self, k: &Kernel, tol: f64) -> Result<Planar> {
         let req = BoundingBoxRequest {
             normal: false,
             pseudo: true,
             polar: false,
         };
-        let pseudo = ignored(self.calculate_bounding_box(&self.natural_interval(), req, true))?
+        let pseudo = ignored(self.calculate_bounding_box(k, &self.natural_interval(), req, true))?
             .and_then(|b| b.pseudo)
             .unwrap_or_else(PseudoBox::new);
         Ok(pseudo.is_planar(tol))
@@ -645,9 +647,10 @@ impl Curve {
         Ok(out)
     }
 
-    /// `GlobalPointSolveSTEP`: the line, hyperbola and parabola overrides; the base
-    /// passes the call to [`Curve::global_point_solve`]. `this` names the curve in the
-    /// solutions (the hyperbola's and parabola's name no object, see their units).
+    /// `GlobalPointSolveSTEP`: the line, hyperbola, ellipse and parabola overrides;
+    /// the base passes the call to [`Curve::global_point_solve`]. `this` names the
+    /// curve in the solutions (the hyperbola's, ellipse's and parabola's name no
+    /// object, see their units).
     ///
     /// # Errors
     ///
@@ -680,6 +683,29 @@ impl Curve {
                     target_distance,
                     requested,
                     owner,
+                )?;
+                Ok(sols
+                    .iter()
+                    .map(|s| {
+                        let mut r: Solution<O> = Solution::new();
+                        r.solution_type = s.solution_type;
+                        r.num_variables = s.num_variables;
+                        r.start = s.start;
+                        r.end = s.end;
+                        r.num_objects = s.num_objects;
+                        r.nodes = s.nodes;
+                        r
+                    })
+                    .collect())
+            }
+            CurveKind::Ellipse(e) => {
+                let sols = e.global_point_solve_step(
+                    k,
+                    op,
+                    test_point,
+                    dist_tol,
+                    target_distance,
+                    requested,
                 )?;
                 Ok(sols
                     .iter()
@@ -893,6 +919,7 @@ impl Curve {
                 let borrowed = match self.kind() {
                     CurveKind::BSpline(c) => Some(c.is_nurb_borrowed()),
                     CurveKind::Hyperbola(c) => Some(c.base().is_nurb_borrowed()),
+                    CurveKind::Ellipse(c) => Some(c.base().is_nurb_borrowed()),
                     CurveKind::Parabola(c) => Some(c.base().is_nurb_borrowed()),
                     CurveKind::Line(c) => Some(c.base.is_nurb_borrowed()),
                     _ => None,
@@ -1304,9 +1331,9 @@ impl Curve {
                 pseudo: false,
                 polar: false,
             };
-            if let Some(this_box) = ignored(self.calculate_bounding_box(interval, req, true))? {
+            if let Some(this_box) = ignored(self.calculate_bounding_box(k, interval, req, true))? {
                 if let Some(other_box) =
-                    ignored(other.calculate_bounding_box(other_interval, req, true))?
+                    ignored(other.calculate_bounding_box(k, other_interval, req, true))?
                 {
                     if let (Some(a), Some(b)) = (this_box.normal, other_box.normal) {
                         if a.are_disjoint(&b, tol) {
@@ -1777,6 +1804,14 @@ impl Curve {
                 let nurb = h.base.get_or_create_gw_nurb()?;
                 BSplineCurve::from_gw_nurb(dim, nurb)
             }
+            CurveKind::Ellipse(e) => {
+                // GetOrCreateGwNurbPointer: the virtual MakeNurb when missing
+                if e.base.gw_nurb().is_none() {
+                    ignore_status(e.make_nurb(k))?;
+                }
+                let nurb = e.base.get_or_create_gw_nurb()?;
+                BSplineCurve::from_gw_nurb(dim, nurb)
+            }
             CurveKind::Parabola(p) => {
                 let nurb = p.base_mut().get_or_create_gw_nurb()?;
                 BSplineCurve::from_gw_nurb(dim, nurb)
@@ -1793,6 +1828,7 @@ impl Curve {
                 };
                 // (upstream ignores the status and dereferences the new curve)
                 let approx = self.approximate_curve(
+                    k,
                     &breaks,
                     approx_tol_3d(k, SmallTopoType::default()),
                     &opts,
@@ -1858,8 +1894,18 @@ mod tests {
 
     #[test]
     fn planar_line_and_hermite() {
-        assert!(quarter_line().is_planar(EFF_ZERO).unwrap().is_planar);
-        assert!(hermite().is_planar(EFF_ZERO).unwrap().is_planar);
+        assert!(
+            quarter_line()
+                .is_planar(&Kernel::default(), EFF_ZERO)
+                .unwrap()
+                .is_planar
+        );
+        assert!(
+            hermite()
+                .is_planar(&Kernel::default(), EFF_ZERO)
+                .unwrap()
+                .is_planar
+        );
     }
 
     #[test]

@@ -334,6 +334,7 @@ impl CrvOnSurf {
     ///
     /// Those of the UV curve's `Copy` (owner flags 1 and 2).
     pub fn new(
+        k: &Kernel,
         uv_curve: Curve,
         surface: BSplineSurface,
         uv_domain: Option<Extent2d>,
@@ -349,7 +350,7 @@ impl CrvOnSurf {
 
         // m_lOwnerFlag 1 or 2: Copy Curve to be deleted when SmCrvOnSurf is destructed
         if owner_flag == 1 || owner_flag == 2 {
-            *c.uv_curve = c.uv_curve.copy()?;
+            *c.uv_curve = c.uv_curve.copy(k)?;
         }
 
         // m_lOwnerFlag 2: Copy Surface to be deleted when SmCrvOnSurf is destructed
@@ -369,6 +370,7 @@ impl CrvOnSurf {
     /// `InvalidInput` when the two points coincide (upstream then dereferences a
     /// null line).
     pub fn from_uv_line(
+        k: &Kernel,
         start_uv: Point2,
         end_uv: Point2,
         surface: BSplineSurface,
@@ -384,7 +386,7 @@ impl CrvOnSurf {
         )?;
 
         // set all the values - use lOwnerFlag == 0 to just store rSurface and pNewLine
-        let mut c = Self::new(Curve::from(line), surface, uv_domain, 0)?;
+        let mut c = Self::new(k, Curve::from(line), surface, uv_domain, 0)?;
 
         // adjust the lOwnerFlag - always delete m_pUVCurve
         c.owner_flag = match owner_flag {
@@ -410,13 +412,13 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// Those of the parts' `Copy`.
-    pub fn copy(&self) -> Result<Self> {
+    pub fn copy(&self, k: &Kernel) -> Result<Self> {
         // figure out what the target curve owns - those things will be deep copied
         let owns_curve = self.owner_flag == 1 || self.owner_flag == 2 || self.owner_flag == 3;
         let owns_surface = self.owner_flag == 2 || self.owner_flag == 3;
 
         let uv_curve = if owns_curve {
-            self.uv_curve.copy()?
+            self.uv_curve.copy(k)?
         } else {
             self.uv_curve.as_ref().clone()
         };
@@ -1013,6 +1015,7 @@ impl CrvOnSurf {
     /// [`SolidError::Unported`] from [`Self::knots`]. The cache keeps upstream's state.
     pub fn get_or_create_bs_approx(
         &mut self,
+        k: &Kernel,
         approx_tol: f64,
         breaks: Option<&[f64]>,
         match_parameterization: Option<bool>,
@@ -1062,7 +1065,7 @@ impl CrvOnSurf {
         };
         let approx = self
             .as_curve()
-            .approximate_curve_base(&self.breaks, approx_tol, &opts)?;
+            .approximate_curve_base(k, &self.breaks, approx_tol, &opts)?;
         if let Some(g) = approx.achieved_tol {
             self.max_gap_3d = g;
         }
@@ -1086,12 +1089,17 @@ impl CrvOnSurf {
     /// [`Self::bs_approx_max_gap_3d`]).
     pub fn approximate_curve(
         &mut self,
+        k: &Kernel,
         breaks: &[f64],
         approx_tol: f64,
         match_parameterization: bool,
     ) -> Result<(BSplineCurve, f64)> {
-        let bs =
-            self.get_or_create_bs_approx(approx_tol, Some(breaks), Some(match_parameterization))?;
+        let bs = self.get_or_create_bs_approx(
+            k,
+            approx_tol,
+            Some(breaks),
+            Some(match_parameterization),
+        )?;
         Ok((bs.copy(), self.max_gap_3d))
     }
 
@@ -1104,11 +1112,12 @@ impl CrvOnSurf {
     /// Those of the boxes; [`SolidError::Unported`] from the approximation.
     pub fn calculate_bounding_box(
         &mut self,
+        k: &Kernel,
         interval: &Extent1d,
         req: BoundingBoxRequest,
         expand: bool,
     ) -> Result<BoundingBoxes> {
-        match self.get_or_create_bs_approx(APPROX_TOL_3D, None, None) {
+        match self.get_or_create_bs_approx(k, APPROX_TOL_3D, None, None) {
             Ok(bs) => bs.calculate_bounding_box(interval, req),
             Err(e) if e.is_unported() => Err(e),
             Err(_) => calculate_bounding_box_base(&self.as_curve(), interval, req, expand),
@@ -1122,11 +1131,13 @@ impl CrvOnSurf {
     /// As [`Self::calculate_bounding_box`].
     pub fn calculate_bounding_box_ref(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         req: BoundingBoxRequest,
         expand: bool,
     ) -> Result<BoundingBoxes> {
-        self.clone().calculate_bounding_box(interval, req, expand)
+        self.clone()
+            .calculate_bounding_box(k, interval, req, expand)
     }
 
     /// `DropPoint`: with a `guess` the base-class drop; else the base-class drop
@@ -1170,7 +1181,7 @@ impl CrvOnSurf {
             );
         }
 
-        let bs = match self.get_or_create_bs_approx(APPROX_TOL_3D, None, None) {
+        let bs = match self.get_or_create_bs_approx(k, APPROX_TOL_3D, None, None) {
             Ok(bs) => bs,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => {
@@ -1238,7 +1249,7 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// Those of the UV curve's edit (the breaks are rescaled already).
-    pub fn edit_parameterization(&mut self, new_param: &Extent1d) -> Result<()> {
+    pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
         // when appropriate scale breaks
         if !self.need_breaks {
             let ivl = self.uv_curve.natural_interval();
@@ -1255,7 +1266,7 @@ impl CrvOnSurf {
         }
 
         // pass the call along to m_pUVCurve
-        self.uv_curve.edit_parameterization(new_param)
+        self.uv_curve.edit_parameterization(k, new_param)
     }
 
     /// `ReverseParameterization`: reverses the UV curve; returns the new interval of
@@ -1264,12 +1275,16 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// `SM_ERR` when nothing is owned (flag 0); those of the UV curve's reversal.
-    pub fn reverse_parameterization(&mut self, old_interval: &Extent1d) -> Result<Extent1d> {
+    pub fn reverse_parameterization(
+        &mut self,
+        k: &Kernel,
+        old_interval: &Extent1d,
+    ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if self.owner_flag == 0 {
             return Err(SolidError::sm_err(OP));
         }
-        self.uv_curve.reverse_parameterization(old_interval)
+        self.uv_curve.reverse_parameterization(k, old_interval)
     }
 
     /// `Trim`: trims the UV curve (`trim_interval` may be snapped) and drops the break
@@ -1355,7 +1370,7 @@ impl CrvOnSurf {
         // Find point on 3d curve that would drop here: Intersect it with Surface Pt/Normal.
         let line = Line::infinite(surf_pt, norm, 3, false);
         let line_dom = Extent1d::from_min_max(-1000.0, 1000.0);
-        let x = other.intersect_with_line(other_interval, &line, &line_dom, drop_tol_3d)?;
+        let x = other.intersect_with_line(k, other_interval, &line, &line_dom, drop_tol_3d)?;
 
         let mut crv_param = 0.0;
 
@@ -1567,7 +1582,7 @@ impl CrvOnSurf {
     /// Those of the reads and of the UV curve's reader; [`SolidError::Unported`] from
     /// the surface reader; [`SolidError::InvalidInput`] for an unreadable type header
     /// or a count larger than the input.
-    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
+    pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         let ascii = db.file_type() == FileType::Ascii;
         let no_stream = || SolidError::invalid_input(OP_READ, "no input stream");
 
@@ -1609,7 +1624,7 @@ impl CrvOnSurf {
         let uv_dim = header
             .dim
             .ok_or_else(|| SolidError::invalid_input(OP_READ, "UV curve dimension not read"))?;
-        let uv_curve = Curve::read_from_db(uv_type, db, uv_dim, version)?;
+        let uv_curve = Curve::read_from_db(k, uv_type, db, uv_dim, version)?;
 
         // compounding surface
         if ascii {
@@ -1720,14 +1735,15 @@ mod tests {
 
     #[test]
     fn construct_and_query() {
-        let c = CrvOnSurf::new(uv(), patch(), None, 1).unwrap();
+        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 1).unwrap();
         assert_eq!(c.owner_flag(), 1);
         assert!(c.need_breaks());
         assert!(c.is_kind_of(CrvOnSurf::TYPE) && c.is_kind_of(crate::curve::curve::p2::TYPE));
         assert_eq!(c.type_string(), "SmCrvOnSurf_TYPE");
         assert_eq!(c.natural_interval().max(), 1.0);
-        assert!(c.approx_eq(&c.copy().unwrap()).unwrap());
+        assert!(c.approx_eq(&c.copy(&Kernel::default()).unwrap()).unwrap());
         let l = CrvOnSurf::from_uv_line(
+            &Kernel::default(),
             Point2::new(0.0, 0.0),
             Point2::new(1.0, 1.0),
             patch(),
@@ -1742,7 +1758,7 @@ mod tests {
 
     #[test]
     fn evaluate_lifts_derivatives() {
-        let c = CrvOnSurf::new(uv(), patch(), None, 0).unwrap();
+        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
         let d = c.evaluate(0.3, 5, true, false).unwrap();
         assert_eq!(d.len(), 6);
         let p = c.evaluate_point(0.3).unwrap();
@@ -1759,7 +1775,7 @@ mod tests {
     #[test]
     fn cached_knots_and_edits() {
         let k = Kernel::default();
-        let mut c = CrvOnSurf::new(uv(), patch(), None, 0).unwrap();
+        let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
         assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
         c.set_breaks_cache(false, vec![0.0, 0.25, 1.0]);
         let (kn, m) = c.knots(None).unwrap();
@@ -1769,18 +1785,22 @@ mod tests {
         let (min, conts) = c.calculate_continuities(CONTINUITY_ANGLE).unwrap();
         assert_eq!(conts.len(), 3);
         assert_ne!(min, ContinuityType::Undefined);
-        c.edit_parameterization(&Extent1d::from_min_max(0.0, 2.0))
+        c.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(0.0, 2.0))
             .unwrap();
         assert_eq!(c.breaks(), &[0.0, 0.5, 2.0]);
         let mut ivl = Extent1d::from_min_max(0.5, 1.5);
         assert!(c.trim(&k, &mut ivl, TrimMode::Notify).is_err());
-        assert!(c.reverse_parameterization(&ivl).is_err());
+        assert!(c
+            .reverse_parameterization(&Kernel::default(), &ivl)
+            .is_err());
     }
 
     #[test]
     fn approximation_cache() {
-        let mut c = CrvOnSurf::new(uv(), patch(), None, 1).unwrap();
-        let (bs, gap) = c.approximate_curve(&[0.0, 1.0], 1e-6, false).unwrap();
+        let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 1).unwrap();
+        let (bs, gap) = c
+            .approximate_curve(&Kernel::default(), &[0.0, 1.0], 1e-6, false)
+            .unwrap();
         assert!(gap <= 1e-6);
         assert!(bs.number_control_points().unwrap() >= 4);
         assert!(c.bs_approx().is_some());
@@ -1792,7 +1812,9 @@ mod tests {
             polar: false,
         };
         // the default approximation matches the parameterisation: rebuilt
-        let b = c.calculate_bounding_box(&ivl, req, true).unwrap();
+        let b = c
+            .calculate_bounding_box(&Kernel::default(), &ivl, req, true)
+            .unwrap();
         assert!(b.normal.is_some());
         assert!(c.parametrization_matches());
     }
@@ -1816,6 +1838,6 @@ mod tests {
         use crate::topology::database_io::InputStream;
         let text = "0 0 1 1 SmCrvOnSurf Domain of interest \n1 SmCrvOnSurf Has breaks flag \n";
         let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(text.into()));
-        assert!(CrvOnSurf::read_from_db(&mut db, 0).is_err());
+        assert!(CrvOnSurf::read_from_db(&Kernel::default(), &mut db, 0).is_err());
     }
 }

@@ -639,7 +639,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 pseudo: *pseudo,
                 polar: *polar,
             };
-            let bx = tri!(o, c.calculate_bounding_box(&ivl_of(*ivl), req, *expand));
+            let bx = tri!(o, c.calculate_bounding_box(&Kernel::default(), &ivl_of(*ivl), req, *expand));
             o.push(0.0);
             if let Some(nb) = bx.normal {
                 o.extend((0..3).map(|i| nb.min_at(i)));
@@ -664,7 +664,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::IsPlanar { curve, tol } => {
             let c = build(curve)?;
-            let r = tri!(o, c.is_planar(*tol));
+            let r = tri!(o, c.is_planar(&Kernel::default(), *tol));
             o.extend([0.0, b(r.is_planar)]);
             pv(&mut o, r.point);
             pv(&mut o, r.normal);
@@ -778,12 +778,12 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 polar: false,
             };
             let box1 = if *pb1 {
-                tri!(o, a.calculate_bounding_box(&i1, req, true)).pseudo
+                tri!(o, a.calculate_bounding_box(&Kernel::default(), &i1, req, true)).pseudo
             } else {
                 None
             };
             let box2 = if *pb2 {
-                tri!(o, bb.calculate_bounding_box(&i2, req, true)).pseudo
+                tri!(o, bb.calculate_bounding_box(&Kernel::default(), &i2, req, true)).pseudo
             } else {
                 None
             };

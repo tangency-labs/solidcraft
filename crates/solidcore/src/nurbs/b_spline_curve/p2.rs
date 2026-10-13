@@ -85,6 +85,7 @@
 //!   matching, as upstream.
 
 use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::curve::offset_curve::OffsetCurve;
 use crate::error::{Result, SolidError};
@@ -220,7 +221,11 @@ fn curve_is_closed(curve: &BSplineCurve, interval: &Extent1d) -> Result<bool> {
 
 /// A circular arc found by `SmCurve::IsArc`: frame, radius, start and end angle
 /// (degrees).
-type ArcData = (Axis2Placement, f64, f64, f64);
+pub(crate) type ArcData = (Axis2Placement, f64, f64, f64);
+
+/// A virtual `IsArc(lNumberOfSamplePoints, dTol, ..)` of a class derived from
+/// `SmBSplineCurve`.
+pub(crate) type IsArcFn<'a> = dyn Fn(&BSplineCurve, u64, f64) -> Result<Option<ArcData>> + 'a;
 
 /// `SmCurve::IsArc(lNumberOfSamplePoints, dTol, ...)` of `curve`.
 fn curve_is_arc(_curve: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<Option<ArcData>> {
@@ -235,6 +240,7 @@ fn curve_is_arc(_curve: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<O
 /// `ApproximateCurve(ctx, {ivl.min, ivl.max}, tol, gap, approx, bMatch, FALSE)`: the
 /// approximation and its maximum gap.
 fn offset_curve_approximation(
+    k: &Kernel,
     curve: &BSplineCurve,
     interval: &Extent1d,
     normal: Vec3,
@@ -252,6 +258,7 @@ fn offset_curve_approximation(
     );
     let breaks = [interval.min(), interval.max()];
     approximate_curve(
+        k,
         &Curve::from(off),
         &breaks,
         approx_tol_3d,
@@ -264,6 +271,7 @@ fn offset_curve_approximation(
 /// `bOptMatchParameterization` in the `bOptCreateAnalytics` slot and `FALSE` for
 /// matching the parameterization; kept.
 fn approximate_curve(
+    k: &Kernel,
     curve: &Curve,
     breaks: &[f64],
     approx_tol_3d: f64,
@@ -275,7 +283,7 @@ fn approximate_curve(
         match_parameterization: false,
         just_copy_bsplines: false,
     };
-    let r = curve.approximate_curve(breaks, approx_tol_3d, &opts)?;
+    let r = curve.approximate_curve(k, breaks, approx_tol_3d, &opts)?;
     // (a degenerate offset leaves upstream's dMaxGap3d uninitialized)
     let gap = r.achieved_tol.ok_or(SolidError::InvalidInput {
         operation: OP,
@@ -291,19 +299,21 @@ fn approximate_curve(
 }
 
 /// An analytic curve [`BSplineCurve::create_analytic_curve`] makes (`SmLine`,
-/// `SmCircle`). `SmCircle` belongs to unit `curve.ellipse_p1`, which is not ported
-/// yet, so only lines are made.
+/// `SmCircle`).
 #[derive(Debug, Clone)]
 pub enum AnalyticCurve {
     /// An `SmLine`.
     Line(Line),
+    /// An `SmCircle`.
+    Circle(Box<Ellipse>),
 }
 
 impl AnalyticCurve {
     /// The point at NURB parameter `t` (`EvaluatePoint` of the analytic curve).
-    fn evaluate_point(&self, t: f64) -> Point3 {
+    fn evaluate_point(&self, t: f64) -> Result<Point3> {
         match self {
-            Self::Line(l) => l.evaluate_point(t),
+            Self::Line(l) => Ok(l.evaluate_point(t)),
+            Self::Circle(c) => c.base().evaluate_point(t),
         }
     }
 }
@@ -330,17 +340,27 @@ fn make_line(
 
 /// `new SmCircle(origin, x, y, angle_ivl, radius, dim, ctx, curve)`.
 fn make_circle(
-    _frame: &Axis2Placement,
-    _angle_ivl: &Extent1d,
-    _radius: f64,
-    _dim: u64,
-    _curve: &BSplineCurve,
+    k: &Kernel,
+    frame: &Axis2Placement,
+    angle_ivl: &Extent1d,
+    radius: f64,
+    dim: u64,
+    curve: &BSplineCurve,
 ) -> Result<AnalyticCurve> {
-    // UNPORTED(curve.ellipse_p1): SmCircle::SmCircle
-    Err(SolidError::Unported {
-        upstream: "SmCircle::SmCircle",
-        unit: "curve.ellipse_p1",
-    })
+    let c = Ellipse::new_circle(
+        k,
+        frame.origin(),
+        frame.x_axis(),
+        frame.y_axis(),
+        *angle_ivl,
+        radius,
+        &EllipseOptions {
+            dim,
+            nurb: Some(curve),
+            inside_out: false,
+        },
+    )?;
+    Ok(AnalyticCurve::Circle(Box::new(c)))
 }
 
 impl ControlPointForm {
@@ -635,10 +655,13 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB; [`SolidError::Unported`] when a circle would be built
-    /// (`SmCircle`, `curve.ellipse_p1`) and for the arc test of rational quadratics
-    /// (`SmCurve::IsArc`, `curve.curve_p5`).
-    pub fn create_analytic_curve(&self, interval: &Extent1d) -> Result<Option<AnalyticCurve>> {
+    /// `SM_ERR` without a NURB; [`SolidError::Unported`] for the arc test of rational
+    /// quadratics (`SmCurve::IsArc`, `curve.curve_p5`).
+    pub fn create_analytic_curve(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+    ) -> Result<Option<AnalyticCurve>> {
         // use midPoint to set dScaledZero
         let mid_pnt = self.evaluate_point(interval.evaluate(0.456789))?;
         let scaled_zero = EFF_ZERO * (1.0 + mid_pnt.max_dimension());
@@ -723,6 +746,7 @@ impl BSplineCurve {
                 // create SmCircle from this SmBSplineCurve
                 let angle_ivl = Extent1d::from_min_max(start_angle, end_angle);
                 analytic = Some(make_circle(
+                    k,
                     &frame,
                     &angle_ivl,
                     radius,
@@ -739,7 +763,7 @@ impl BSplineCurve {
 
         // if original and analytic given interval begin endpoints are too far apart
         let or_pnt = self.evaluate_point(interval.min())?;
-        let an_pnt = a.evaluate_point(interval.min());
+        let an_pnt = a.evaluate_point(interval.min())?;
         if or_pnt.distance(an_pnt) > scaled_zero {
             // don't return the analytic object
             return Ok(None);
@@ -747,7 +771,7 @@ impl BSplineCurve {
 
         // if original and analytic end given interval endpoints are too far apart
         let or_pnt = self.evaluate_point(interval.max())?;
-        let an_pnt = a.evaluate_point(interval.max());
+        let an_pnt = a.evaluate_point(interval.max())?;
         if or_pnt.distance(an_pnt) > scaled_zero {
             // don't return the analytic object
             return Ok(None);
@@ -1033,10 +1057,37 @@ impl BSplineCurve {
     /// offset approximation (`SmOffsetCurve`).
     pub fn create_simple_offset(
         &self,
+        k: &Kernel,
         approx_tol_3d: f64,
         offset_plane_normal: Vec3,
         offset_distance: f64,
         match_parameterization: bool,
+    ) -> Result<(Self, f64)> {
+        self.create_simple_offset_with(
+            k,
+            approx_tol_3d,
+            offset_plane_normal,
+            offset_distance,
+            match_parameterization,
+            &|c, n, tol| curve_is_arc(c, n, tol),
+        )
+    }
+
+    /// [`BSplineCurve::create_simple_offset`] run for a class derived from
+    /// `SmBSplineCurve` whose virtual `IsArc(lNumberOfSamplePoints, dTol, ..)` is
+    /// `is_arc` (frame, radius, start and end angle in degrees).
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineCurve::create_simple_offset`], and those of `is_arc`.
+    pub(crate) fn create_simple_offset_with(
+        &self,
+        k: &Kernel,
+        approx_tol_3d: f64,
+        offset_plane_normal: Vec3,
+        offset_distance: f64,
+        match_parameterization: bool,
+        is_arc: &IsArcFn<'_>,
     ) -> Result<(Self, f64)> {
         // return SM_ERR_INVALID_INPUT when length of crOffsetPlaneNormal is zero
         let normal_len_sq = offset_plane_normal.length_squared();
@@ -1052,7 +1103,7 @@ impl BSplineCurve {
 
         // do arc-offset directly
         if let Some((mut frame, mut radius, start_ang, end_ang)) =
-            curve_is_arc(self, 11, approx_tol_3d / 100.0)?
+            is_arc(self, 11, approx_tol_3d / 100.0)?
         {
             let z = frame.z_axis();
             let angle = z.angle_between(offset_plane_normal)?;
@@ -1090,6 +1141,7 @@ impl BSplineCurve {
         // Create an implicit offset and approximate it
         let ivl = self.natural_interval();
         offset_curve_approximation(
+            k,
             self,
             &ivl,
             offset_plane_normal,
@@ -1966,11 +2018,13 @@ mod tests {
     fn analytic() {
         let c = cubic();
         assert!(c
-            .create_analytic_curve(&c.natural_interval())
+            .create_analytic_curve(&Kernel::default(), &c.natural_interval())
             .unwrap()
             .is_none());
         let l = line(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
-        let Some(AnalyticCurve::Line(a)) = l.create_analytic_curve(&l.natural_interval()).unwrap()
+        let Some(AnalyticCurve::Line(a)) = l
+            .create_analytic_curve(&Kernel::default(), &l.natural_interval())
+            .unwrap()
         else {
             panic!("expected a line");
         };

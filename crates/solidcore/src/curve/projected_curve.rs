@@ -253,12 +253,12 @@ impl ProjectedCurve {
     ///
     /// When the base curve is owned, those of its [`Curve::copy`] (`SM_ERR` for a
     /// Hermite curve; upstream ignores it, see the module notes).
-    pub fn copy(&self) -> Result<Self> {
+    pub fn copy(&self, k: &Kernel) -> Result<Self> {
         let curve = if self.owns_curve == OwnsCurve::No {
             self.curve.as_ref().clone()
         } else {
             // copy the Curve
-            self.curve.copy()?
+            self.curve.copy(k)?
         };
         Ok(Self {
             curve: Box::new(curve),
@@ -390,14 +390,14 @@ impl ProjectedCurve {
     ///
     /// `SM_ERR` when the base curve is not owned; those of
     /// [`Curve::edit_parameterization`].
-    pub fn edit_parameterization(&mut self, new_param: &Extent1d) -> Result<()> {
+    pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
         // Don't own curve can not reverse parameterization
         if self.owns_curve == OwnsCurve::No {
             return Err(SolidError::sm_err(OP));
         }
 
         // pass the call along to m_cpCurve
-        self.curve.edit_parameterization(new_param)
+        self.curve.edit_parameterization(k, new_param)
     }
 
     /// `ReverseParameterization` of the base curve: the new interval.
@@ -406,14 +406,18 @@ impl ProjectedCurve {
     ///
     /// `SM_ERR` when the base curve is not owned; those of
     /// [`Curve::reverse_parameterization`].
-    pub fn reverse_parameterization(&mut self, old_interval: &Extent1d) -> Result<Extent1d> {
+    pub fn reverse_parameterization(
+        &mut self,
+        k: &Kernel,
+        old_interval: &Extent1d,
+    ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if self.owns_curve == OwnsCurve::No {
             return Err(SolidError::sm_err(OP));
         }
 
         // pass the call along to the cpCurve
-        self.curve.reverse_parameterization(old_interval)
+        self.curve.reverse_parameterization(k, old_interval)
     }
 
     /// `Trim` of the base curve; `trim_interval` may be snapped.
@@ -438,7 +442,12 @@ impl ProjectedCurve {
     ///
     /// `SM_ERR` unless the ownership flag is [`OwnsCurve::Unsure`] (upstream tests
     /// `m_bOwnsCurve < 2`); those of [`Curve::transform`].
-    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+    pub fn transform(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -453,7 +462,7 @@ impl ProjectedCurve {
         }
 
         // pass the call along to the curve
-        self.curve.transform(rotate_n_move, scale)?;
+        self.curve.transform(k, rotate_n_move, scale)?;
 
         // apply rotations and moves to points and vecs
         self.proj_point = rotate_n_move.transform_point(self.proj_point);
@@ -602,7 +611,7 @@ impl ProjectedCurve {
     ///
     /// [`SolidError::InvalidInput`] for a short binary stream or an ASCII value
     /// upstream would leave uninitialised; those of [`Curve::read_from_db`].
-    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
+    pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         let undefined = || SolidError::InvalidInput {
             operation: OP_READ,
             reason: "value not extracted from a failed ASCII stream",
@@ -654,7 +663,7 @@ impl ProjectedCurve {
         let header = db.read_type(true)?;
         let curve_type = header.type_code.ok_or_else(undefined)?;
         let curve_dim = header.dim.ok_or_else(undefined)?;
-        let curve = Curve::read_from_db(curve_type, db, curve_dim, version)?;
+        let curve = Curve::read_from_db(k, curve_type, db, curve_dim, version)?;
 
         // load the obj
         Ok(Self {
@@ -738,6 +747,7 @@ mod tests {
 
     #[test]
     fn edits_respect_ownership() {
+        let k = Kernel::default();
         let mut c = ProjectedCurve::new(
             base(),
             None,
@@ -747,12 +757,12 @@ mod tests {
             OwnsCurve::No,
         );
         assert!(c
-            .edit_parameterization(&Extent1d::from_min_max(0.0, 2.0))
+            .edit_parameterization(&k, &Extent1d::from_min_max(0.0, 2.0))
             .is_err());
         let mut a = Axis2Placement::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X, Vec3::Y);
-        assert!(c.transform(&a, None).is_err());
+        assert!(c.transform(&k, &a, None).is_err());
         a = Axis2Placement::new(Vec3::new(0.0, 0.0, 0.0), Vec3::X, Vec3::Y);
-        assert!(c.transform(&a, None).is_ok());
+        assert!(c.transform(&k, &a, None).is_ok());
         let (_, mults) = c.knots(None).expect("knots");
         assert_eq!(
             c.number_natural_knots().expect("knots"),
@@ -760,7 +770,7 @@ mod tests {
         );
         // owned Hermite base has no Copy
         c.owns_curve = OwnsCurve::Yes;
-        assert!(c.copy().is_err());
+        assert!(c.copy(&k).is_err());
     }
 
     #[test]
@@ -770,7 +780,7 @@ mod tests {
                     0 0 0\n1 0 0\n1 1 0\n0 1 0\n0 0 0\n0 0 0\n";
         let mut db = DatabaseReader::new();
         db.open_for_read(text.as_bytes().to_vec(), FileType::Ascii);
-        let c = ProjectedCurve::read_from_db(&mut db, 36).expect("read");
+        let c = ProjectedCurve::read_from_db(&Kernel::default(), &mut db, 36).expect("read");
         assert_eq!(c.proj_point(), Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(c.aux_data(), Vec3::new(4.0, 5.0, 6.0));
         assert_eq!(c.proj_type(), ProjectionType::Perspective);

@@ -59,6 +59,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, PI};
 use crate::topology::database_io::{DatabaseReader, FileType};
 
@@ -433,7 +434,12 @@ pub struct TangentFieldRecord {
 /// # Errors
 ///
 /// Those of the binary reads; [`SolidError::Unported`] for the `SmCrvOnSurf` part.
-pub fn read_from_db(db: &mut DatabaseReader, dim: u64, version: u64) -> Result<TangentFieldRecord> {
+pub fn read_from_db(
+    k: &Kernel,
+    db: &mut DatabaseReader,
+    dim: u64,
+    version: u64,
+) -> Result<TangentFieldRecord> {
     let mut rec = TangentFieldRecord {
         dir_type: 0,
         start_tangent: Vec3::UNDEF,
@@ -469,7 +475,7 @@ pub fn read_from_db(db: &mut DatabaseReader, dim: u64, version: u64) -> Result<T
     }
 
     // read the base type
-    read_crv_on_surf(db, dim, version)?;
+    read_crv_on_surf(k, db, dim, version)?;
 
     // all done
     Ok(rec)
@@ -479,8 +485,8 @@ pub fn read_from_db(db: &mut DatabaseReader, dim: u64, version: u64) -> Result<T
 
 /// `SmCrvOnSurf::ReadFromDB` into the tangent field (status ignored, as upstream; the
 /// object read is not kept: the tangent field is not a [`Curve`] kind).
-fn read_crv_on_surf(db: &mut DatabaseReader, _dim: u64, version: u64) -> Result<()> {
-    ignore_status(CrvOnSurf::read_from_db(db, version))
+fn read_crv_on_surf(k: &Kernel, db: &mut DatabaseReader, _dim: u64, version: u64) -> Result<()> {
+    ignore_status(CrvOnSurf::read_from_db(k, db, version))
 }
 
 /// `m_pSurface->GetNaturalUVDomain()`.
@@ -671,13 +677,13 @@ mod tests {
         // the SmCrvOnSurf part runs out of data: its status is ignored
         let mut db = DatabaseReader::new();
         db.open_for_read(bytes.clone(), FileType::Binary);
-        let rec = read_from_db(&mut db, 3, 30).unwrap();
+        let rec = read_from_db(&Kernel::default(), &mut db, 3, 30).unwrap();
         assert_eq!(rec.dir_type, 1);
         assert_eq!(rec.end_tangent, Vec3::new(4.0, 5.0, 6.0));
         let mut db = DatabaseReader::new();
         db.open_for_read(bytes.get(..20).unwrap().to_vec(), FileType::Binary);
         assert!(matches!(
-            read_from_db(&mut db, 3, 30),
+            read_from_db(&Kernel::default(), &mut db, 3, 30),
             Err(SolidError::InvalidInput { .. })
         ));
     }

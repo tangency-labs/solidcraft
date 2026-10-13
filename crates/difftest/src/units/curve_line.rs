@@ -993,7 +993,7 @@ fn rust_op(op: &OpIn, a: &mut Line, o: &mut Vec<f64>) -> Result<(), Fail> {
                 None => Fail::Harness(harness(err.to_string())),
             })?;
             let ei = e.base().natural_interval();
-            let r = a.intersect_with_ellipse::<i64>(&i, &e, &ei, *tol, Some(0), Some(1));
+            let r = a.intersect_with_ellipse::<i64>(&Kernel::default(), &i, &e, &ei, *tol, Some(0), Some(1));
             if let Some(r) = st(o, r)? {
                 o.push(b(r.needs_more_intersections));
                 put_sols(o, &r.solutions);

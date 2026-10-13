@@ -958,7 +958,7 @@ impl CrvInVolume {
     /// # Errors
     ///
     /// Those of the base curve's edit (the breaks are rescaled already).
-    pub fn edit_parameterization(&mut self, new_param: &Extent1d) -> Result<()> {
+    pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
         // when appropriate scale breaks
         if !self.need_breaks {
             let ivl = self.curve.natural_interval();
@@ -976,7 +976,7 @@ impl CrvInVolume {
         }
 
         // pass the call along to the curve
-        self.curve.edit_parameterization(new_param)
+        self.curve.edit_parameterization(k, new_param)
     }
 
     /// `ReverseParameterization`: reverses the base curve; returns the new interval
@@ -985,12 +985,16 @@ impl CrvInVolume {
     /// # Errors
     ///
     /// `SM_ERR` when the curve is not owned; those of the base curve's reversal.
-    pub fn reverse_parameterization(&mut self, old_interval: &Extent1d) -> Result<Extent1d> {
+    pub fn reverse_parameterization(
+        &mut self,
+        k: &Kernel,
+        old_interval: &Extent1d,
+    ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if !self.owns_curve() {
             return Err(SolidError::sm_err(OP));
         }
-        self.curve.reverse_parameterization(old_interval)
+        self.curve.reverse_parameterization(k, old_interval)
     }
 
     /// `Trim`: trims the base curve (`trim_interval` may be snapped) and drops the
@@ -1048,7 +1052,7 @@ impl CrvInVolume {
     /// Those of the reads and of the base curve's reader; [`SolidError::Unported`]
     /// from the volume reader; [`SolidError::InvalidInput`] for an unreadable type
     /// header, a count larger than the input or an unknown continuity code.
-    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
+    pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         let ascii = db.file_type() == FileType::Ascii;
         let no_stream = || SolidError::invalid_input(OP_READ, "no input stream");
 
@@ -1076,7 +1080,7 @@ impl CrvInVolume {
         let curve_dim = header
             .dim
             .ok_or_else(|| SolidError::invalid_input(OP_READ, "curve dimension not read"))?;
-        let curve = Curve::read_from_db(curve_type, db, curve_dim, version)?;
+        let curve = Curve::read_from_db(k, curve_type, db, curve_dim, version)?;
 
         // bInParamSpace value (extracted as text in either file type; the empty
         // object's TRUE stays when the extraction is skipped)
@@ -1281,7 +1285,7 @@ mod tests {
     fn edits() {
         let k = Kernel::default();
         let mut c = cached(3);
-        c.edit_parameterization(&Extent1d::from_min_max(0.0, 2.0))
+        c.edit_parameterization(&k, &Extent1d::from_min_max(0.0, 2.0))
             .unwrap();
         assert_eq!(c.breaks(), &[0.0, 0.5, 1.0, 2.0]);
         let mut ivl = Extent1d::from_min_max(0.25, 1.5);
@@ -1289,7 +1293,7 @@ mod tests {
         assert!(c.need_breaks() && c.breaks().is_empty());
         let mut d = cached(0);
         assert!(d.trim(&k, &mut ivl, TrimMode::Notify).is_err());
-        assert!(d.reverse_parameterization(&ivl).is_err());
+        assert!(d.reverse_parameterization(&k, &ivl).is_err());
         let (min, conts) = cached(3).continuities_at(&[0.0, 1.0], 0.5).unwrap();
         assert_eq!(min, ContinuityType::CInfinity);
         assert_eq!(conts.len(), 2);
@@ -1299,6 +1303,6 @@ mod tests {
     fn read_stops_at_the_volume() {
         let text = "1 Has knots flag\n Begin\nObject Type 14033\nCurve Dim 3\n";
         let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(text.into()));
-        assert!(CrvInVolume::read_from_db(&mut db, 0).is_err());
+        assert!(CrvInVolume::read_from_db(&Kernel::default(), &mut db, 0).is_err());
     }
 }

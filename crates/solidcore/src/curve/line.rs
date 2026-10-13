@@ -260,6 +260,7 @@ fn other_is_line(other: &Curve, num_samples: u64, tol: f64) -> Result<bool> {
         CurveKind::Line(_) => Ok(true),
         CurveKind::BSpline(b) => Ok(b.is_line(num_samples, tol)?.is_some()),
         CurveKind::Hyperbola(h) => Ok(h.base().is_line(num_samples, tol)?.is_some()),
+        CurveKind::Ellipse(e) => Ok(e.base().is_line(num_samples, tol)?.is_some()),
         CurveKind::Parabola(p) => Ok(p.base().is_line(num_samples, tol)?.is_some()),
         // curves that are not an SmBSplineCurve
         _ => Err(SolidError::invalid_input(
@@ -275,6 +276,7 @@ fn other_ends(other: &Curve) -> Result<Ends> {
         CurveKind::Line(l) => l.ends_copy(),
         CurveKind::BSpline(b) => b.ends(),
         CurveKind::Hyperbola(h) => h.base().ends(),
+        CurveKind::Ellipse(e) => e.base().ends(),
         CurveKind::Parabola(p) => p.base().ends(),
         // curves that are not an SmBSplineCurve
         _ => Err(SolidError::invalid_input(
@@ -1191,6 +1193,7 @@ impl Line {
     /// The errors of [`Ellipse::intersect_with_line`].
     pub fn intersect_with_ellipse<O: Copy>(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         other: &Ellipse,
         other_interval: &Extent1d,
@@ -1200,6 +1203,7 @@ impl Line {
     ) -> Result<LineLineIntersection<O>> {
         // pass the call to SmEllipse::IntersectWithLine
         let r = other.intersect_with_line::<O>(
+            k,
             other_interval,
             self,
             interval,

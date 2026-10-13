@@ -274,6 +274,7 @@ impl Curve {
         match self.kind() {
             CurveKind::BSpline(c) => c.is_line(num_samples, tol),
             CurveKind::Hyperbola(c) => c.base().is_line(num_samples, tol),
+            CurveKind::Ellipse(c) => c.base().is_line(num_samples, tol),
             CurveKind::Parabola(c) => c.base().is_line(num_samples, tol),
             CurveKind::Line(l) => Ok(Some(l.is_line())),
             CurveKind::Hermite(_)
@@ -331,6 +332,7 @@ impl Curve {
                 CurveKind::BSpline(c) => c.gw_nurb().is_some(),
                 CurveKind::Line(c) => c.base().gw_nurb().is_some(),
                 CurveKind::Hyperbola(c) => c.base().gw_nurb().is_some(),
+                CurveKind::Ellipse(c) => c.base().gw_nurb().is_some(),
                 CurveKind::Parabola(c) => c.base().gw_nurb().is_some(),
                 _ => false,
             };

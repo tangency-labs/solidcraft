@@ -457,7 +457,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             FileType::Ascii,
             InputStream::new(text.as_bytes().to_vec()),
         );
-        let c = match CrvInVolume::read_from_db(&mut db, *version as u64) {
+        let c = match CrvInVolume::read_from_db(&Kernel::default(), &mut db, *version as u64) {
             Ok(c) => c,
             Err(e) => {
                 if let Some(d) = Output::unported(&e) {
@@ -558,12 +558,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Copy => {
             let c = Curve::from(civ);
-            let d = tri!(o, c.copy());
+            let d = tri!(o, c.copy(&Kernel::default()));
             o.push(0.0);
             put_state(&mut o, civ_of(&d)?);
         }
         OpIn::EditParam { a, b: bb } => {
-            let r = civ.edit_parameterization(&Extent1d::from_min_max(*a, *bb));
+            let r = civ.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(match st_of(&r) {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
@@ -571,7 +571,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             put_state(&mut o, &civ);
         }
         OpIn::Reverse { a, b: bb } => {
-            let r = civ.reverse_parameterization(&Extent1d::from_min_max(*a, *bb));
+            let r = civ.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(match st_of(&r) {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),

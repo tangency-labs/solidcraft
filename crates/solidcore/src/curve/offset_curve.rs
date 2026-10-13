@@ -67,6 +67,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
@@ -588,7 +589,7 @@ impl OffsetCurve {
     ///
     /// A short binary read; those of [`DatabaseReader::read_type`] and
     /// [`Curve::read_from_db`] for the base curve.
-    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
+    pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         // init output object
         let mut c = Self::empty();
 
@@ -642,7 +643,7 @@ impl OffsetCurve {
         let header = db.read_type(true)?;
         let base_type = header.type_code.unwrap_or(0);
         let base_dim = header.dim.unwrap_or(0);
-        let base = Curve::read_from_db(base_type, db, base_dim, version)?;
+        let base = Curve::read_from_db(k, base_type, db, base_dim, version)?;
 
         // load the obj
         c.base = Some(Box::new(base));

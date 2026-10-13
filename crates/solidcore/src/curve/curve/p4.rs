@@ -94,6 +94,7 @@ use crate::geom::polar_box::PolarBox;
 use crate::geom::solution_array::{Solution, SolutionEnd, SolutionType};
 use crate::geom::tol::{are_same, is_zero, tol3d};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{max2, max4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 
 const OP_CHAIN: &str = "curve::curve::p4::fix_chain_curves_list";
@@ -174,6 +175,7 @@ fn ends_and_mid(curve: &Curve) -> Result<(Point3, Point3, Point3)> {
 /// `InvalidInput` when the chosen link is a curve deleted as a duplicate in the same
 /// scan (upstream dereferences `NULL`); [`SolidError::Unported`] from the evaluators.
 pub fn fix_chain_curves_list(
+    k: &Kernel,
     mut curves: Vec<Option<Curve>>,
     tol: f64,
     delete_duplicates: bool,
@@ -341,7 +343,7 @@ pub fn fix_chain_curves_list(
                 }
                 2 => {
                     let domain1 = next_crv.natural_interval();
-                    reverse_ignored(&mut next_crv, &domain1)?;
+                    reverse_ignored(k, &mut next_crv, &domain1)?;
                     chained.push(next_crv);
                     origin.push(idx);
                     end_point = tmp_end_pt;
@@ -355,7 +357,7 @@ pub fn fix_chain_curves_list(
                 }
                 _ => {
                     let domain1 = next_crv.natural_interval();
-                    reverse_ignored(&mut next_crv, &domain1)?;
+                    reverse_ignored(k, &mut next_crv, &domain1)?;
                     chained.insert(loop_start, next_crv);
                     origin.insert(loop_start, idx);
                     start_point = tmp_start_pt;
@@ -376,8 +378,8 @@ pub fn fix_chain_curves_list(
 }
 
 /// `ReverseParameterization(domain, domain)` with its status ignored.
-fn reverse_ignored(curve: &mut Curve, domain: &Extent1d) -> Result<()> {
-    ignore_status(curve.reverse_parameterization(domain))
+fn reverse_ignored(k: &Kernel, curve: &mut Curve, domain: &Extent1d) -> Result<()> {
+    ignore_status(curve.reverse_parameterization(k, domain))
 }
 
 // ---- solver helpers -----------------------------------------------------------------------
@@ -610,7 +612,10 @@ impl<'a> AnalyticOperand<'a> {
     const fn ellipse(self) -> Option<&'a Ellipse> {
         match self {
             Self::Ellipse(e) => Some(e),
-            Self::Curve(_) => None,
+            Self::Curve(c) => match c.kind() {
+                CurveKind::Ellipse(e) => Some(e),
+                _ => None,
+            },
         }
     }
 }
@@ -634,6 +639,7 @@ pub struct AnalyticIntersection<O> {
 ///
 /// Those of the line and ellipse intersectors.
 pub fn analytic_curve_intersect<O: Copy>(
+    k: &Kernel,
     this: AnalyticOperand<'_>,
     interval: &Extent1d,
     other: AnalyticOperand<'_>,
@@ -669,6 +675,7 @@ pub fn analytic_curve_intersect<O: Copy>(
         // when otherCurve is an ellipse try line/ellipse intersection
         if let Some(ellipse) = other.ellipse() {
             let r = this_line.intersect_with_ellipse(
+                k,
                 interval,
                 ellipse,
                 other_interval,
@@ -689,6 +696,7 @@ pub fn analytic_curve_intersect<O: Copy>(
         // when OtherCurve is a line - try ellipse/line intersection
         if let Some(line) = other.line() {
             let r = this_ellipse.intersect_with_line(
+                k,
                 interval,
                 line,
                 other_interval,
@@ -705,6 +713,7 @@ pub fn analytic_curve_intersect<O: Copy>(
         // when OtherCurve is an ellipse - try ellipse/ellipse intersection
         if let Some(ellipse) = other.ellipse() {
             let r = this_ellipse.intersect_with_ellipse(
+                k,
                 interval,
                 ellipse,
                 other_interval,
@@ -1008,7 +1017,7 @@ impl Curve {
         }
     }
 
-    /// `IsDegenerate` (base: [`is_degenerate_base`]; B-spline and line overrides).
+    /// `IsDegenerate` (base: [`is_degenerate_base`]; B-spline, ellipse and line overrides).
     ///
     /// # Errors
     ///
@@ -1018,6 +1027,7 @@ impl Curve {
         match self.kind() {
             CurveKind::BSpline(c) => c.is_degenerate(tol3d, interval),
             CurveKind::Hyperbola(c) => c.base().is_degenerate(tol3d, interval),
+            CurveKind::Ellipse(e) => Ok(e.is_degenerate(tol3d)),
             CurveKind::Parabola(c) => c.base().is_degenerate(tol3d, interval),
             CurveKind::Line(l) => Ok(l.is_degenerate(tol3d, interval)),
             _ => is_degenerate_base(self, tol3d, interval),
@@ -1094,6 +1104,7 @@ impl Curve {
     /// Those of [`analytic_curve_intersect`].
     pub fn analytic_curve_intersect<O: Copy>(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         other: AnalyticOperand<'_>,
         other_interval: &Extent1d,
@@ -1102,6 +1113,7 @@ impl Curve {
         other_obj: Option<O>,
     ) -> Result<AnalyticIntersection<O>> {
         analytic_curve_intersect(
+            k,
             AnalyticOperand::Curve(self),
             interval,
             other,
@@ -2029,7 +2041,7 @@ mod tests {
             Some(seg([1.0, 0.0, 0.0], [1.0, 1.0, 0.0])),
             Some(seg([5.0, 5.0, 5.0], [6.0, 5.0, 5.0])),
         ];
-        let r = fix_chain_curves_list(curves, 1e-6, true).unwrap();
+        let r = fix_chain_curves_list(&Kernel::default(), curves, 1e-6, true).unwrap();
         assert_eq!(r.chain_starts, vec![0, 3]);
         assert_eq!(r.origin, vec![0, 3, 2, 4]);
         assert_eq!(r.deleted, 0);
@@ -2041,7 +2053,7 @@ mod tests {
             Some(seg([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])),
             Some(seg([1.0, 0.0, 0.0], [0.0, 0.0, 0.0])),
         ];
-        let r = fix_chain_curves_list(curves, 1e-6, true).unwrap();
+        let r = fix_chain_curves_list(&Kernel::default(), curves, 1e-6, true).unwrap();
         assert_eq!(r.deleted, 1);
         assert_eq!(r.origin, vec![0]);
     }

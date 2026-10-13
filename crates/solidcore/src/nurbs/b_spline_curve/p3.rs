@@ -228,10 +228,23 @@ fn curve_assert_valid(
 /// computed here): `IsDegenerate` at the intersection tolerance of two zone
 /// tolerances of the curve, where a curve without edge (a B-spline here has no owner)
 /// has the system zone tolerance (`SmTol::GetZoneTol3d(const SmObject*)`).
-fn tol_is_degenerate(k: &Kernel, curve: &BSplineCurve) -> Result<bool> {
+fn tol_is_degenerate(k: &Kernel, is_degenerate: &dyn Fn(f64) -> Result<bool>) -> Result<bool> {
     let zone = zone_tol_3d(k, SmallTopoType::NormalSize);
     let xsect = xsect_tol_3d_from_zones(k, zone, zone);
-    curve.is_degenerate(xsect, None)
+    is_degenerate(xsect)
+}
+
+/// The virtual methods of a class derived from `SmBSplineCurve` that
+/// `SmBSplineCurve::AssertValid` calls on `this`.
+pub(crate) struct DerivedOverrides<'a> {
+    /// `GetDegree` (`None`: the NURB's degree, the base method).
+    pub degree: Option<usize>,
+    /// `IsAnalytic`.
+    pub analytic: bool,
+    /// `IsBounded`.
+    pub bounded: bool,
+    /// `IsDegenerate(tol)` over the natural interval.
+    pub is_degenerate: &'a dyn Fn(f64) -> Result<bool>,
 }
 
 /// `SmCurve::IsAnalytic` of a B-spline: the base `FALSE` (`SmBSplineCurve` does not
@@ -987,6 +1000,36 @@ impl BSplineCurve {
         level_given: bool,
         key: ObjectKey,
     ) -> Result<bool> {
+        let is_degenerate = |tol: f64| self.is_degenerate(tol, None);
+        self.assert_valid_with(
+            k,
+            list,
+            level_given,
+            key,
+            &DerivedOverrides {
+                degree: None,
+                analytic: curve_is_analytic(self),
+                bounded: curve_is_bounded(self),
+                is_degenerate: &is_degenerate,
+            },
+        )
+    }
+
+    /// [`BSplineCurve::assert_valid`] run for a class derived from `SmBSplineCurve`
+    /// (an ellipse, ...): the virtual methods `AssertValid` calls come from `ovr`.
+    /// The caller makes a missing NURB first (`MakeNurb` is virtual).
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineCurve::assert_valid`].
+    pub(crate) fn assert_valid_with(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        ovr: &DerivedOverrides<'_>,
+    ) -> Result<bool> {
         let mut list = list;
         let mut rtn = true;
 
@@ -1018,7 +1061,10 @@ impl BSplineCurve {
 
         /*  1 */
         // check end knots for expected multiplicity count == Degree + 1
-        let deg = self.degree()?;
+        let deg = match ovr.degree {
+            Some(d) => d,
+            None => self.degree()?,
+        };
         let ends_ok = mult(0)? == deg + 1 && mult(num_knots.wrapping_sub(1))? == deg + 1;
         rtn &= bool_report(&mut list, key, 1, ends_ok)?;
         if !rtn {
@@ -1044,7 +1090,7 @@ impl BSplineCurve {
         }
 
         // check for coincident end control points when the curve is not degenerate
-        let degenerate = tol_is_degenerate(k, self)?;
+        let degenerate = tol_is_degenerate(k, ovr.is_degenerate)?;
         let pw = cur.cpts();
         let cpt = |i: usize| {
             pw.get(i)
@@ -1095,7 +1141,7 @@ impl BSplineCurve {
 
         // Check for kinks at internal knot multiplicities; skip kink and zero
         // internal 1st derivative checks for degenerate and analytic curves.
-        let analytic = curve_is_analytic(self);
+        let analytic = ovr.analytic;
 
         // for debug - data at failing tests
         let mut min_radius = BIG_DOUBLE;
@@ -1202,7 +1248,7 @@ impl BSplineCurve {
             let size_t = domain.length();
 
             // finite curves: proportional to the average curve speed; else absolute
-            let bounded = curve_is_bounded(self);
+            let bounded = ovr.bounded;
             let tol = if bounded {
                 (size_xyz / size_t) / 10000.0
             } else {

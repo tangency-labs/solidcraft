@@ -60,8 +60,7 @@
 //!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
 //!   `CreateSphereFromArcs` `SmCurve::IsArc`
-//!   (`curve.curve_p5`); `CreateSurfOfRevolution`'s optional sweep circle an
-//!   `SmCircle` (`curve.ellipse_p1`); `CreateTrimmedPlaneFromRuled` (unless the ruled
+//!   (`curve.curve_p5`); `CreateTrimmedPlaneFromRuled` (unless the ruled
 //!   surface is a rectangle) `SmSurface::Evaluate1stDerivatives`
 //!   (`surface.surface_p1`); `IsDegeneratePoint` `SmSurface::IsKindOf`
 //!   (`surface.surface_p2`) and `SmSurface::IsDegeneratePoint`
@@ -70,6 +69,7 @@
 
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
+use crate::curve::curve::CurveKind;
 use crate::curve::iso_curve::IsoCurve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -80,7 +80,9 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
-use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm, NurbCircleParam};
+use crate::nurbs::b_spline_curve::{
+    BSplineCurve, ControlPointForm, CurveCanonical, NurbCircleParam,
+};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::geom::Rectangle;
@@ -216,13 +218,23 @@ fn curve_is_arc(_c: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<Optio
     })
 }
 
-/// The canonical data, radius and frame of an `SmCircle` sweep curve.
-fn sweep_circle(_c: &SmCurve) -> Result<()> {
-    // UNPORTED(curve.ellipse_p1): SmCircle::GetRadius
-    Err(SolidError::Unported {
-        upstream: "SmCircle::GetRadius",
-        unit: "curve.ellipse_p1",
-    })
+/// `pOptSweepCurve->SmBSplineCurve::GetCanonical(..)` and `GetNaturalInterval()` of
+/// the `SmCircle` sweep curve.
+///
+/// # Errors
+///
+/// `InvalidInput` when the sweep curve is not a circle (upstream's argument is an
+/// `SmCircle*`); those of [`BSplineCurve::canonical`].
+fn sweep_circle(c: &SmCurve) -> Result<(CurveCanonical, Extent1d)> {
+    match c.kind() {
+        CurveKind::Ellipse(e) if e.is_circle_class() => {
+            Ok((e.base().canonical()?, e.base().natural_interval()))
+        }
+        _ => Err(SolidError::invalid_input(
+            OP_REV,
+            "the sweep curve is not an SmCircle",
+        )),
+    }
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: point, `S_u`, `S_v`.
@@ -585,14 +597,14 @@ impl BSplineSurface {
     /// `axis_dir` by `angle_span_deg` (0 to 360) degrees (`CreateSurfOfRevolution`):
     /// each control point sweeps a quadratic circle segment (all equal for points on
     /// the axis). The circular direction is v, or u with `swap_uv`; an optional sweep
-    /// circle (`pOptSweepCurve`) would set its parametrisation. The form is
+    /// circle (`pOptSweepCurve`) sets its parametrisation. The form is
     /// `SM_SF_SURF_OF_REVOLUTION`.
     ///
     /// # Errors
     ///
     /// `InvalidInput` for a zero axis or an angle outside `[-360, 360]`; `SM_ERR` when
     /// every control point is on the axis or a circle or the surface cannot be built;
-    /// [`SolidError::Unported`] with a sweep circle (`SmCircle`).
+    /// `InvalidInput` for a sweep curve that is not a circle.
     pub fn create_surf_of_revolution(
         gen_curve: &BSplineCurve,
         origin: Point3,
@@ -623,7 +635,14 @@ impl BSplineSurface {
         // when given an option SweepCurve
         if let Some(sweep) = opt_sweep_curve {
             // use it to specify the sweep curve parameters
-            sweep_circle(sweep)?;
+            let (c, ivl) = sweep_circle(sweep)?;
+            cir_deg = c.degree;
+            cir_knot_mult = c.knot_multiplicities;
+            cir_knots = c.knots;
+            knot_type = c.knot_type;
+            cir_weights = c.weights;
+            num_cir_ctrl_pts = c.control_points.len();
+            cir_ivl = ivl;
         } else {
             // Rotate each control point about the axis to get a circle: find the first
             // non-degenerate one to size the circles' control points and knots

@@ -367,12 +367,12 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
             solid!(h.adjust_step_interval(&Extent1d::from_min_max(ivl[0], ivl[1]), None));
         }
         OpIn::Reverse { ivl } => {
-            let r = solid!(curve.reverse_parameterization(&Extent1d::from_min_max(ivl[0], ivl[1])));
+            let r = solid!(curve.reverse_parameterization(&solidcore::kernel::Kernel::default(), &Extent1d::from_min_max(ivl[0], ivl[1])));
             o.extend([r.min(), r.max()]);
         }
         OpIn::Transform { o: po, x, y, scale } => {
             let mv = Axis2Placement::new(v3(*po), v3(*x), v3(*y));
-            solid!(curve.transform(&mv, scale.map(v3)));
+            solid!(curve.transform(&solidcore::kernel::Kernel::default(), &mv, scale.map(v3)));
         }
         OpIn::Gps {
             ivl,
@@ -408,7 +408,7 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
             o.push(flag(solid!(curve.approx_eq(&other))));
         }
         OpIn::Copy => {
-            let c = solid!(curve.copy());
+            let c = solid!(curve.copy(&solidcore::kernel::Kernel::default()));
             o.push(flag(solid!(curve.approx_eq(&c))));
             state(&mut o, hyp_of(&c)?);
         }
@@ -439,7 +439,7 @@ fn rust_record(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
                 FileType::Ascii
             },
         );
-        match Curve::read_from_db(Hyperbola::TYPE, &mut db, *dim, *version) {
+        match Curve::read_from_db(&solidcore::kernel::Kernel::default(), Hyperbola::TYPE, &mut db, *dim, *version) {
             Ok(c) => {
                 o.extend([0.0, 1.0]);
                 state(&mut o, hyp_of(&c)?);

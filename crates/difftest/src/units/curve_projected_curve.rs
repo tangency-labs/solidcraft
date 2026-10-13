@@ -601,7 +601,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 FileType::Ascii
             },
         );
-        let c = tri!(o, ProjectedCurve::read_from_db(&mut db, d.version));
+        let c = tri!(o, ProjectedCurve::read_from_db(&Kernel::default(), &mut db, d.version));
         o.push(0.0);
         state(&mut o, &c);
         o.push(c.type_code() as f64);
@@ -677,7 +677,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::EditParam { a, b: bb } => {
             let mut c = Curve::from(pc);
-            let s = match st_of(c.edit_parameterization(&Extent1d::from_min_max(*a, *bb))) {
+            let s = match st_of(c.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb))) {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
             };
@@ -686,7 +686,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Reverse { a, b: bb } => {
             let mut c = Curve::from(pc);
-            match c.reverse_parameterization(&Extent1d::from_min_max(*a, *bb)) {
+            match c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)) {
                 Ok(nv) => o.extend([0.0, nv.min(), nv.max()]),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
@@ -720,7 +720,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let ax = Axis2Placement::new(v3(*org), v3(*x), v3(*y));
             let mut c = Curve::from(pc);
-            let s = match st_of(c.transform(&ax, scale.map(v3))) {
+            let s = match st_of(c.transform(&Kernel::default(), &ax, scale.map(v3))) {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
             };
@@ -729,7 +729,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Copy => {
             let c = Curve::from(pc.clone());
-            let nc = tri!(o, c.copy());
+            let nc = tri!(o, c.copy(&Kernel::default()));
             o.push(0.0);
             projected_state(&mut o, &nc)?;
             o.push(b(pc.owns_curve() == OwnsCurve::No));

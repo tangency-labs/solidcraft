@@ -831,7 +831,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                     None => None,
                 });
             }
-            let r = tri!(o, fix_chain_curves_list(list, *tol, *del));
+            let r = tri!(o, fix_chain_curves_list(&Kernel::default(), list, *tol, *del));
             if r.deleted > 0 {
                 return Err(harness("a duplicate was deleted (use after free upstream)"));
             }
@@ -1022,7 +1022,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let bb = tri!(o, mk(ob)?);
             let (oa, na) = as_op(&ba);
             let (obb, nb) = as_op(&bb);
-            let r = analytic_curve_intersect::<i64>(
+            let r = analytic_curve_intersect::<i64>(&Kernel::default(), 
                 oa,
                 &sub_ivl(na, *fa),
                 obb,
@@ -1639,7 +1639,7 @@ fn deletes_duplicates(op: &OpIn) -> bool {
             None => list.push(None),
         }
     }
-    fix_chain_curves_list(list, *tol, true).map_or(true, |r| r.deleted > 0)
+    fix_chain_curves_list(&Kernel::default(), list, *tol, true).map_or(true, |r| r.deleted > 0)
 }
 
 impl UnitDiff for Runner {

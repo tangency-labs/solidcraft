@@ -88,6 +88,7 @@ use crate::geom::solution_array::{Solution, SolutionEnd, SolutionObject, Solutio
 use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::geom::tree::NodeData;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{ControlPointForm, ProjectionType};
 
@@ -385,11 +386,11 @@ fn move_end_point(curve: &mut Curve, point: Point3) -> Result<()> {
 /// Those of [`fix_chain_curves_list`] and the control point counts; `InvalidInput`
 /// when an end point to move belongs to a curve that is not a B-spline;
 /// [`SolidError::Unported`] from the evaluations.
-pub fn crvs_fix_gaps(curves: Vec<Curve>, tol: f64) -> Result<FixedGaps> {
+pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGaps> {
     let mut fixed: u64 = 0;
 
     // head-tail them into chains - remove duplicate curves
-    let mut chained = fix_chain_curves_list(curves.into_iter().map(Some).collect(), tol, true)?;
+    let mut chained = fix_chain_curves_list(k, curves.into_iter().map(Some).collect(), tol, true)?;
     let mut chain_start = chained.chain_starts.clone();
     chain_start.push(chained.curves.len());
 

@@ -537,8 +537,8 @@ fn build(c: &CosIn) -> Result<solidcore::Result<CrvOnSurf>, HarnessError> {
         .domain
         .map(|[a, bb, cc, d]| Extent2d::from_bounds(a, bb, cc, d));
     let r = match &c.uv {
-        UvIn::Bspline(bs) => CrvOnSurf::new(build_uv(bs)?, srf, domain, c.owner),
-        UvIn::Line([x0, y0, x1, y1]) => CrvOnSurf::from_uv_line(
+        UvIn::Bspline(bs) => CrvOnSurf::new(&Kernel::default(), build_uv(bs)?, srf, domain, c.owner),
+        UvIn::Line([x0, y0, x1, y1]) => CrvOnSurf::from_uv_line(&Kernel::default(), 
             Point2::new(*x0, *y0),
             Point2::new(*x1, *y1),
             srf,
@@ -791,7 +791,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             }
         },
         OpIn::Copy => {
-            let r = wrap(c).copy();
+            let r = wrap(c).copy(&Kernel::default());
             o.push(st(&r)?);
             if let Ok(cp) = r {
                 let eq = cp.approx_eq(&wrap(c));
@@ -802,12 +802,12 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             }
         }
         OpIn::EditParam { a, b: bb } => {
-            let r = c.edit_parameterization(&Extent1d::from_min_max(*a, *bb));
+            let r = c.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(st(&r)?);
             put_state(o, c);
         }
         OpIn::Reverse { a, b: bb } => {
-            let r = c.reverse_parameterization(&Extent1d::from_min_max(*a, *bb));
+            let r = c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(st(&r)?);
             if let Ok(nv) = r {
                 o.extend([nv.min(), nv.max()]);
@@ -842,7 +842,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             tol,
             match_param,
         } => {
-            let r = c.approximate_curve(breaks, *tol, *match_param);
+            let r = c.approximate_curve(&Kernel::default(), breaks, *tol, *match_param);
             o.push(st(&r)?);
             match r {
                 Ok((bs, gap)) => {
@@ -858,7 +858,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             breaks,
             match_param,
         } => {
-            let r = c.get_or_create_bs_approx(*tol, breaks.as_deref(), *match_param);
+            let r = c.get_or_create_bs_approx(&Kernel::default(), *tol, breaks.as_deref(), *match_param);
             o.push(st(&r)?);
             match r {
                 Ok(bs) => {
@@ -875,7 +875,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
                 pseudo: false,
                 polar: false,
             };
-            let r = c.calculate_bounding_box(&Extent1d::from_min_max(*a, *bb), req, true);
+            let r = c.calculate_bounding_box(&Kernel::default(), &Extent1d::from_min_max(*a, *bb), req, true);
             o.push(st(&r)?);
             if let Ok(bx) = r {
                 let n = bx.normal.ok_or_else(|| harness("no normal box"))?;
@@ -967,7 +967,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             };
             let mut db =
                 DatabaseReader::with_stream(ft, InputStream::new(read_db.bytes.clone()));
-            match CrvOnSurf::read_from_db(&mut db, read_db.version) {
+            match CrvOnSurf::read_from_db(&Kernel::default(), &mut db, read_db.version) {
                 Ok(c) => {
                     o.extend([0.0, 1.0]);
                     put_state(&mut o, &c);

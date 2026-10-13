@@ -1,0 +1,1797 @@
+{
+ "cases": [
+  {
+   "name": "analytic_curves_circle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4911 (my_test_analytic_curves, my_test_analytic_curve)",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "r": 0.5
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.5,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.4938441702975689,
+       0.0,
+       0.07821723252011543
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.4755282581475768,
+       0.0,
+       0.1545084971874737
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.445503262094184,
+       0.0,
+       0.22699524986977337
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.4045084971874737,
+       0.0,
+       0.29389262614623657
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.3535533905932737,
+       0.0,
+       0.35355339059327373
+      ],
+      "tol": 1e-05,
+      "req": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_circle_b",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4911 (my_test_analytic_curve, second half)",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "r": 0.5
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.2938926261462367,
+       0.0,
+       0.4045084971874737
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.2269952498697734,
+       0.0,
+       0.4455032620941839
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.1545084971874737,
+       0.0,
+       0.47552825814757677
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.0782172325201154,
+       0.0,
+       0.4938441702975689
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.0,
+       0.0,
+       0.5
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "reverse"
+     },
+     {
+      "op": "assert"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_ellipse",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4928 (my_test_analytic_curves, my_test_analytic_curve)",
+   "inputs": {
+    "build": {
+     "ellipse_canonical": {
+      "frame": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "radii": [
+       1.0,
+       0.5
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       270
+      ]
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       2.0,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.8910065241883678,
+       0.0,
+       0.22699524986977337
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.5877852522924731,
+       0.0,
+       0.4045084971874737
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       1.156434465040231,
+       0.0,
+       0.4938441702975689
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.6909830056250527,
+       0.0,
+       0.4755282581475768
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.29289321881345254,
+       0.0,
+       0.3535533905932738
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "reverse"
+     },
+     {
+      "op": "assert"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_ellipse_b",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4928 (my_test_analytic_curve, second half)",
+   "inputs": {
+    "build": {
+     "ellipse_canonical": {
+      "frame": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "radii": [
+       1.0,
+       0.5
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       270
+      ]
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.04894348370484647,
+       0.0,
+       0.15450849718747375
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.01231165940486223,
+       0.0,
+       -0.07821723252011537
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.19098300562505244,
+       0.0,
+       -0.2938926261462365
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.546009500260453,
+       0.0,
+       -0.4455032620941839
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "gps",
+      "step": true,
+      "sop": 0,
+      "p": [
+       0.9999999999999998,
+       0.0,
+       -0.5
+      ],
+      "tol": 1e-05,
+      "req": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "cylinder_long_step_circle_inside_out_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1971 (SmCircle 0..270, bInsideOut)",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       0,
+       0,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       270
+      ],
+      "r": 0.25,
+      "inside_out": false
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.0
+      }
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.37
+      }
+     },
+     {
+      "op": "to_polar",
+      "t": {
+       "frac": 1.0
+      }
+     },
+     {
+      "op": "assert"
+     },
+     {
+      "op": "is_current"
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "reverse"
+     },
+     {
+      "op": "assert",
+      "given": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "cylinder_long_step_circle_inside_out_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1971 (SmCircle 0..270, bInsideOut)",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       0,
+       0,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       270
+      ],
+      "r": 0.25,
+      "inside_out": true
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.0
+      }
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.37
+      }
+     },
+     {
+      "op": "to_polar",
+      "t": {
+       "frac": 1.0
+      }
+     },
+     {
+      "op": "assert"
+     },
+     {
+      "op": "is_current"
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "reverse"
+     },
+     {
+      "op": "assert",
+      "given": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_circle_adjust_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1177 (CreateCanonical r=2, AdjustSTEPInterval(0,90))",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        -1
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "r": 2.0
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "polar_assert"
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       0.25,
+       0.75
+      ],
+      "mode": 1
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_circle_adjust_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1177 (CreateCanonical r=2, AdjustSTEPInterval(0,90))",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "r": 2.0
+     }
+    },
+    "ops": [
+     {
+      "op": "adjust",
+      "domain": [
+       0,
+       90
+      ]
+     },
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "polar_assert"
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       0.25,
+       0.75
+      ],
+      "mode": 1
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_quarter_circle_0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:395 (CreateCanonical r=0.5 over [0,90])",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "r": 0.5,
+      "interval": [
+       0,
+       90
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "is_arc"
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 1.0
+      }
+     },
+     {
+      "op": "gps",
+      "sop": 3,
+      "p": [
+       0.3,
+       0.3,
+       0.3
+      ],
+      "tol": 1e-06,
+      "req": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_quarter_circle_1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:395 (CreateCanonical r=0.5 over [0,90])",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "r": 0.5,
+      "interval": [
+       0,
+       90
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "is_arc"
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 1.0
+      }
+     },
+     {
+      "op": "gps",
+      "sop": 3,
+      "p": [
+       0.3,
+       0.3,
+       0.3
+      ],
+      "tol": 1e-06,
+      "req": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_quarter_circle_2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:395 (CreateCanonical r=0.5 over [0,90])",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "r": 0.5,
+      "interval": [
+       0,
+       90
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "is_arc"
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 1.0
+      }
+     },
+     {
+      "op": "gps",
+      "sop": 3,
+      "p": [
+       0.3,
+       0.3,
+       0.3
+      ],
+      "tol": 1e-06,
+      "req": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_circle_edit_param",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4345 (CreateCanonical r=1, EditParameterization)",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0.5
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "r": 1.0
+     }
+    },
+    "ops": [
+     {
+      "op": "edit_param",
+      "domain": [
+       0,
+       6.283185307179586
+      ],
+      "notify": true
+     },
+     {
+      "op": "to_step",
+      "t": {
+       "frac": 0.25
+      }
+     },
+     {
+      "op": "to_polar",
+      "t": {
+       "raw": 3.0
+      }
+     },
+     {
+      "op": "assert"
+     }
+    ]
+   }
+  },
+  {
+   "name": "torus_seam_circle_edit_param",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4423 (CreateCanonical r=4, EditParameterization)",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "r": 4.0
+     }
+    },
+    "ops": [
+     {
+      "op": "edit_param",
+      "domain": [
+       -1,
+       1
+      ],
+      "notify": true
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       0.1,
+       0.9
+      ],
+      "mode": 2
+     },
+     {
+      "op": "reverse",
+      "ivl": [
+       0.2,
+       0.6
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_copy_ctor",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:9224 (SmCircle(..., [90,180], 2), copy constructor)",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       -1,
+       0.5,
+       0.6
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       90,
+       180
+      ],
+      "r": 2.0
+     }
+    },
+    "ops": [
+     {
+      "op": "copy"
+     },
+     {
+      "op": "is_arc"
+     },
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "offset",
+      "tol": 1e-06,
+      "normal": [
+       0,
+       0,
+       1
+      ],
+      "dist": 0.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_circle_canonical_zero_radius",
+   "upstream_ref": "tests/prog_test (SmCircle::CreateCanonical non-positive radius guard)",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "r": 0.0
+     }
+    },
+    "ops": []
+   }
+  },
+  {
+   "name": "edge_circle_canonical_negative_radius",
+   "upstream_ref": "SmCircle::CreateCanonical guard",
+   "inputs": {
+    "build": {
+     "circle_canonical": {
+      "frame": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ]
+      ],
+      "r": -1.0
+     }
+    },
+    "ops": []
+   }
+  },
+  {
+   "name": "edge_circle_3pt_collinear",
+   "upstream_ref": "SmCircle 3-point constructor (smgu_CircleFrom3Points failure)",
+   "inputs": {
+    "build": {
+     "circle3": {
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        2,
+        2,
+        2
+       ]
+      ]
+     }
+    },
+    "ops": []
+   }
+  },
+  {
+   "name": "edge_circle_3pt_arc",
+   "upstream_ref": "SmCircle 3-point constructor",
+   "inputs": {
+    "build": {
+     "circle3": {
+      "points": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        0,
+        1,
+        0
+       ],
+       [
+        -1,
+        0,
+        0
+       ]
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "assert"
+     },
+     {
+      "op": "join",
+      "end": 1,
+      "other": {
+       "circle": {
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         180,
+         270
+        ],
+        "r": 1.0
+       }
+      },
+      "other_end": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_circle_3pt_closed_2d",
+   "upstream_ref": "SmCircle 3-point constructor (closed, 2D)",
+   "inputs": {
+    "build": {
+     "circle3": {
+      "points": [
+       [
+        1,
+        0,
+        5
+       ],
+       [
+        0,
+        2,
+        5
+       ],
+       [
+        -1,
+        0,
+        5
+       ]
+      ],
+      "dim": 2,
+      "closed": true
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "to_2d"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_join_quarters_full",
+   "upstream_ref": "SmEllipse::JoinWith (overlap -> whole ellipse)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       300
+      ],
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end": 1,
+      "other": {
+       "ellipse": {
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "domain": [
+         300,
+         340
+        ],
+        "radii": [
+         2,
+         1
+        ]
+       }
+      },
+      "other_end": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_join_flipped_normal",
+   "upstream_ref": "SmEllipse::JoinWith (circle, opposite normal)",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       90
+      ],
+      "r": 1.0
+     }
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end": 0,
+      "other": {
+       "circle": {
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         -1,
+         0
+        ],
+        "domain": [
+         0,
+         90
+        ],
+        "r": 1.0
+       }
+      },
+      "other_end": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_join_not_ellipse",
+   "upstream_ref": "SmEllipse::JoinWith (other not an ellipse)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       90
+      ],
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end": 0,
+      "other": "bspline_of_a",
+      "other_end": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_offset_circle_cases",
+   "upstream_ref": "SmCircle::CreateSimpleOffset (parallel, anti-parallel, negative, degenerate)",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "r": 1.0
+     }
+    },
+    "ops": [
+     {
+      "op": "offset",
+      "tol": 1e-06,
+      "normal": [
+       1,
+       0,
+       0
+      ],
+      "dist": 0.25
+     },
+     {
+      "op": "offset",
+      "tol": 1e-06,
+      "normal": [
+       -2,
+       0,
+       0
+      ],
+      "dist": -0.75
+     },
+     {
+      "op": "offset",
+      "tol": 1e-06,
+      "normal": [
+       1,
+       0,
+       0
+      ],
+      "dist": -1.0
+     },
+     {
+      "op": "offset",
+      "tol": 0.001,
+      "normal": [
+       1,
+       0,
+       0
+      ],
+      "dist": -1.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_offset_circle_degenerate",
+   "upstream_ref": "SmCircle::CreateSimpleOffset (degenerate result)",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "r": 1.0
+     }
+    },
+    "ops": [
+     {
+      "op": "offset",
+      "tol": 0.001,
+      "normal": [
+       1,
+       0,
+       0
+      ],
+      "dist": -1.0000001
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_to_2d_skewed",
+   "upstream_ref": "SmEllipse::ConvertTo2D (projected axes not perpendicular)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       1
+      ],
+      "y": [
+       0,
+       1,
+       1
+      ],
+      "domain": [
+       10,
+       200
+      ],
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "to_2d"
+     },
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "is_current"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_2d_ellipse_ctor",
+   "upstream_ref": "SmEllipse 2D construction (MakeNurb -> ConvertTo2D)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0.5
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       3,
+       1
+      ],
+      "dim": 2
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       14023,
+       0
+      ]
+     },
+     {
+      "op": "assert"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_set_radius",
+   "upstream_ref": "SmCircle::SetRadius + MakeNurb",
+   "inputs": {
+    "build": {
+     "circle": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -90,
+       90
+      ],
+      "r": 1.0
+     }
+    },
+    "ops": [
+     {
+      "op": "set_radius",
+      "r": 3.5
+     },
+     {
+      "op": "assert"
+     },
+     {
+      "op": "notify",
+      "post": true
+     },
+     {
+      "op": "make_nurb"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_trim_modes",
+   "upstream_ref": "SmEllipse::Trim (FALSE, UNSURE, TRUE, outside)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       2,
+       1
+      ],
+      "inside_out": true
+     }
+    },
+    "ops": [
+     {
+      "op": "trim",
+      "ivl": [
+       0.1,
+       0.95
+      ],
+      "mode": 2
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       -0.5,
+       1.5
+      ],
+      "mode": 1
+     },
+     {
+      "op": "trim",
+      "ivl": [
+       0.1,
+       0.95
+      ],
+      "mode": 0
+     },
+     {
+      "op": "assert"
+     }
+    ]
+   }
+  }
+ ]
+}

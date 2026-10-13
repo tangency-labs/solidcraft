@@ -371,7 +371,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Analytic => {
             let is_analytic = cc.curve().is_analytic();
-            match cc.analytic_curve() {
+            match cc.analytic_curve(&Kernel::default()) {
                 Ok(a) => {
                     o.push(0.0);
                     o.push(match a {

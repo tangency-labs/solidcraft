@@ -683,7 +683,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 match_parameterization: *match_param,
                 just_copy_bsplines: *copy,
             };
-            let r = tri!(o, c.approximate_curve(breaks, *tol, &opts));
+            let r = tri!(o, c.approximate_curve(&Kernel::default(), breaks, *tol, &opts));
             o.extend([
                 0.0,
                 b(r.achieved_tol.is_some()),

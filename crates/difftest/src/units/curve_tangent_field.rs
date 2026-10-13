@@ -383,7 +383,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         };
         let mut db = DatabaseReader::new();
         db.open_for_read(r.data(), ft);
-        return Ok(match tf::read_from_db(&mut db, r.dim, r.version) {
+        return Ok(match tf::read_from_db(&solidcore::kernel::Kernel::default(), &mut db, r.dim, r.version) {
             Ok(_) => to_output(&[0.0]),
             Err(e) => fail(&e),
         });

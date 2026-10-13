@@ -461,7 +461,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 FileType::Ascii
             },
         );
-        let c = Curve::read_from_db(ISO_CURVE_TYPE, &mut r, 3, *version)?;
+        let c = Curve::read_from_db(&solidcore::kernel::Kernel::default(), ISO_CURVE_TYPE, &mut r, 3, *version)?;
         o.push(0.0);
         state(o, &c)?;
         return Ok(());

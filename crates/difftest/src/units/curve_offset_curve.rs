@@ -362,7 +362,7 @@ fn build_offset(base: Curve, s: &SpecIn) -> Curve {
     for _ in 0..s.nrev {
         let ivl = c.natural_interval();
         // (status ignored by the shim; the offset reversal cannot fail)
-        let _ = c.reverse_parameterization(&ivl);
+        let _ = c.reverse_parameterization(&Kernel::default(), &ivl);
     }
     c
 }
@@ -463,7 +463,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
                 FileType::Ascii
             },
         );
-        let c = Curve::from(OffsetCurve::read_from_db(&mut db, *version)?);
+        let c = Curve::from(OffsetCurve::read_from_db(&Kernel::default(), &mut db, *version)?);
         o.push(0.0);
         state(o, &c)?;
         return probes(o, &c, ts);
@@ -515,7 +515,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             o.extend(all.iter().map(|&x| f64::from(x as i32)));
         }
         OpIn::Reverse { a, b: bb, probes: ts } => {
-            let ivl = c.reverse_parameterization(&Extent1d::from_min_max(*a, *bb))?;
+            let ivl = c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb))?;
             o.extend([0.0, ivl.min(), ivl.max()]);
             state(o, &c)?;
             probes(o, &c, ts)?;
@@ -547,7 +547,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             if *this {
                 o.push(b(c.approx_eq(&c)?));
             } else if *copy {
-                let cp = c.copy()?;
+                let cp = c.copy(&Kernel::default())?;
                 o.push(b(c.approx_eq(&cp)?));
                 o.push(b(cp.approx_eq(&c)?));
             } else {
@@ -563,7 +563,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             }
         }
         OpIn::Copy { probes: ts } => {
-            let cp = c.copy()?;
+            let cp = c.copy(&Kernel::default())?;
             o.push(0.0);
             state(o, &cp)?;
             probes(o, &cp, ts)?;

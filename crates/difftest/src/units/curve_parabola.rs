@@ -397,7 +397,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             let mut db = DatabaseReader::new();
             db.open_for_read(db_bytes(i)?, ft);
             let r = if via_curve {
-                Curve::read_from_db(PARABOLA_TYPE, &mut db, dim, version).and_then(|c| {
+                Curve::read_from_db(&solidcore::kernel::Kernel::default(), PARABOLA_TYPE, &mut db, dim, version).and_then(|c| {
                     match c.into_kind() {
                         CurveKind::Parabola(p) => Ok(p),
                         _ => Err(SolidError::sm_err("difftest::curve_parabola::read_db")),
@@ -418,7 +418,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         Op::Virtuals => {
             let p = arg3(args, 0)?;
             let c = Curve::from(a);
-            let r = c.step_inversion(p);
+            let r = c.step_inversion(&solidcore::kernel::Kernel::default(), p);
             out.push(0.0);
             out.push(st(&r));
             out.push(r.unwrap_or(0.0));

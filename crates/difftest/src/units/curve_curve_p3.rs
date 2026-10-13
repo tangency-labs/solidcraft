@@ -638,7 +638,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::FixGaps { curves, tol } => {
             let cs: Vec<Curve> = curves.iter().map(build).collect::<Result<_, _>>()?;
-            let r = tri!(o, crvs_fix_gaps(cs, *tol));
+            let r = tri!(o, crvs_fix_gaps(&Kernel::default(), cs, *tol));
             o.extend([0.0, r.fixed as f64, r.chained.curves.len() as f64]);
             for (c, origin) in r.chained.curves.iter().zip(&r.chained.origin) {
                 o.push(*origin as f64);
@@ -1620,7 +1620,7 @@ fn deletes_duplicates(op: &OpIn) -> bool {
     else {
         return true;
     };
-    fix_chain_curves_list(list, *tol, true).map_or(true, |r| r.deleted > 0)
+    fix_chain_curves_list(&Kernel::default(), list, *tol, true).map_or(true, |r| r.deleted > 0)
 }
 
 impl UnitDiff for Runner {
