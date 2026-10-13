@@ -48,9 +48,10 @@
 //!   (the base part of the copy constructor, with its `bSimpleMapOnly` flag, is the
 //!   volume's), and [`Transform::approx_eq`] is the member comparison
 //!   `operator==` runs after `SmVolume::operator==` (same type, equal compounding
-//!   maps) has passed. Calls the transform makes into the unported volume base
-//!   (`SmVolume::IsKindOf`, `SmVolume::ReadFromDB`, `SmVolume::EvaluatePoint`,
-//!   `SmDiscontinuities3d::Init`) return [`SolidError::Unported`].
+//!   maps) has passed. The volume base is [`crate::surface::volume::Volume`] with
+//!   kind `Transform`. Calls the transform makes into the unported part of the
+//!   volume base (`SmVolume::ReadFromDB`, `SmVolume::EvaluatePoint`, unit
+//!   `surface.volume_p2`) return [`SolidError::Unported`].
 //! - **Pseudo boxes.** `EvaluateBoundingBoxSimple` keeps upstream's in/out pointers
 //!   as `Option<&mut _>` outputs (the unbounded branch only resets intervals, so the
 //!   outputs' previous state matters). A requested output without a parameter
@@ -66,7 +67,7 @@
 //!   both cases; the volume itself (`m_apObjects[0] = this`) is passed in as the
 //!   caller's object handle.
 //! - `IsCurveInParamDomainSimple` ignores its curve upstream and takes none here;
-//!   `HasDiscontinuitiesSimple`'s optional `SmDiscontinuities3d*` becomes a flag
+//!   `HasDiscontinuitiesSimple`'s optional `SmDiscontinuities3d*` becomes an `Option`
 //!   (`bCalcGeometric` is unused upstream and dropped).
 //! - `GetToXAxis` and friends return copies; writes go through the setters.
 //! - `GetMemoryUsed`, `Dump`, `DrawAxis`, `AssertValid`, `WriteToDB` and the members
@@ -85,6 +86,7 @@ use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, Solut
 use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::INFINITE_PARAMETER;
+use crate::surface::volume::p1::{is_kind_of as volume_is_kind_of, Discontinuities3d};
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 /// `GW_MAX_DERIV`: the highest derivative `EvaluateSimple` accepts.
@@ -623,22 +625,13 @@ impl Transform {
         true
     }
 
-    /// A transform has no internal discontinuities (`HasDiscontinuitiesSimple`).
-    /// `with_disconts` is upstream's non-null `pOptDisconts`, which is reset.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] when `with_disconts` (resetting an
-    /// `SmDiscontinuities3d`).
-    pub fn has_discontinuities_simple(&self, with_disconts: bool) -> Result<bool> {
-        if with_disconts {
-            // UNPORTED(surface.volume_p1): SmDiscontinuities3d::Init
-            return Err(SolidError::Unported {
-                upstream: "SmDiscontinuities3d::Init",
-                unit: "surface.volume_p1",
-            });
+    /// A transform has no internal discontinuities (`HasDiscontinuitiesSimple`);
+    /// `disconts` (upstream's optional `pOptDisconts`) is reset.
+    pub fn has_discontinuities_simple(&self, disconts: Option<&mut Discontinuities3d>) -> bool {
+        if let Some(d) = disconts {
+            d.init();
         }
-        Ok(false)
+        false
     }
 
     /// Reads a transform from a database stream: the four matrix rows, then the
@@ -699,21 +692,11 @@ impl Transform {
         "SmTransform"
     }
 
-    /// True when a transform is a `t` (`IsKindOf`).
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] for any `t` other than [`Transform::TYPE`]: the
-    /// answer comes from `SmVolume::IsKindOf` (unit `surface.volume_p1`).
-    pub fn is_kind_of(&self, t: i64) -> Result<bool> {
-        if t == Self::TYPE {
-            return Ok(true);
-        }
-        // UNPORTED(surface.volume_p1): SmVolume::IsKindOf
-        Err(SolidError::Unported {
-            upstream: "SmVolume::IsKindOf",
-            unit: "surface.volume_p1",
-        })
+    /// True when a transform is a `t` (`IsKindOf`): `SmTransform_TYPE` or a base
+    /// class's type (`SmVolume::IsKindOf`).
+    #[must_use]
+    pub const fn is_kind_of(&self, t: i64) -> bool {
+        t == Self::TYPE || volume_is_kind_of(t)
     }
 }
 
@@ -802,13 +785,14 @@ mod tests {
         let t = Transform::IDENTITY;
         assert!(!t.is_bounded_simple());
         assert!(t.is_curve_in_param_domain_simple());
-        assert_eq!(t.has_discontinuities_simple(false), Ok(false));
-        assert!(matches!(
-            t.has_discontinuities_simple(true),
-            Err(SolidError::Unported { .. })
-        ));
-        assert_eq!(t.is_kind_of(Transform::TYPE), Ok(true));
-        assert!(t.is_kind_of(1).is_err());
+        assert!(!t.has_discontinuities_simple(None));
+        let mut d = Discontinuities3d::new();
+        d.set_unaligned();
+        assert!(!t.has_discontinuities_simple(Some(&mut d)));
+        assert_eq!(d, Discontinuities3d::new());
+        assert!(t.is_kind_of(Transform::TYPE));
+        assert!(t.is_kind_of(crate::surface::volume::p1::VOLUME_TYPE));
+        assert!(!t.is_kind_of(1));
         assert_eq!(t.type_code(), 22008);
         assert_eq!(t.type_string(), "SmTransform_TYPE");
         assert_eq!(t.class_string(), "SmTransform");

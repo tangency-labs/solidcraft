@@ -1067,9 +1067,12 @@ fn surface_natural_uv_domain<O>(_surface: &O) -> Result<crate::geom::extent2d::E
     })
 }
 
-/// `SmVolume::GetNaturalParamDomain`.
+/// `SmVolume::GetNaturalParamDomain`. The volume itself is ported
+/// (`surface::volume::Volume::natural_param_domain`), but a solution object is an
+/// opaque handle `O` with no way to reach it yet.
 fn volume_natural_param_domain<O>(_volume: &O) -> Result<crate::geom::extent3d::Extent3d> {
-    // UNPORTED(surface.volume_p1): SmVolume::GetNaturalParamDomain
+    // UNPORTED(surface.volume_p1): SmVolume::GetNaturalParamDomain (needs a handle-to-volume
+    // lookup on SolutionObject)
     Err(SolidError::Unported {
         upstream: "SmVolume::GetNaturalParamDomain",
         unit: "surface.volume_p1",

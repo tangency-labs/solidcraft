@@ -22,6 +22,7 @@ use solidcore::geom::pseudo_box::PseudoBox;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject};
 use solidcore::geom::transform::Transform;
 use solidcore::geom::vector3d::Vec3;
+use solidcore::surface::volume::Discontinuities3d;
 use solidcore::math::{EFF_ZERO, PI};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
@@ -278,10 +279,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             out.extend([d.u_min(), d.v_min(), d.w_min(), d.u_max(), d.v_max(), d.w_max()]);
             out.push(flag(a.is_bounded_simple()));
             out.push(flag(a.is_curve_in_param_domain_simple()));
-            match a.has_discontinuities_simple(false) {
-                Ok(b) => out.push(flag(b)),
-                Err(e) => return Ok(Err(e)),
-            }
+            out.push(flag(a.has_discontinuities_simple(None)));
             out.push(a.type_code() as f64);
         }
         Op::TransformVector => put_v(&mut out, a.transform_vector(w0)),
@@ -382,10 +380,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             let c = a;
             out.push(flag(a.approx_eq(&c)));
         }
-        Op::IsKindOf => match a.is_kind_of(i.n) {
-            Ok(b) => out.push(flag(b)),
-            Err(e) => return Ok(Err(e)),
-        },
+        Op::IsKindOf => out.push(flag(a.is_kind_of(i.n))),
         Op::Bbox => {
             let bx = Extent3d::from_bounds(w0.x, w0.y, w0.z, w1.x, w1.y, w1.z);
             // the shim passes a default param pseudo box whenever an output is requested
@@ -425,10 +420,10 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
                 Err(e) => return Ok(Err(e)),
             }
         }
-        Op::HasDisconts => match a.has_discontinuities_simple(true) {
-            Ok(b) => out.push(flag(b)),
-            Err(e) => return Ok(Err(e)),
-        },
+        Op::HasDisconts => {
+            let mut disconts = Discontinuities3d::new();
+            out.push(flag(a.has_discontinuities_simple(Some(&mut disconts))));
+        }
         Op::TypeStrings => {
             out.push(a.type_code() as f64);
             str_codes(&mut out, a.type_string());

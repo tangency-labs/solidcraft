@@ -30,12 +30,9 @@
 //! | `SetContext` (dropped)                         | `SetContext`                                      |
 //!
 //! Deviations:
-//! - **Volumes.** `SmVolume` (units `surface.volume_p1`, `surface.volume_p2`) is not
-//!   ported yet. [`Volume`] stands in for it: it records only the volume's type code,
-//!   and every volume query this unit makes (`GetNaturalParamDomain`, `Evaluate`,
-//!   `Map`, `EvaluatePoint`, `MapPoint`, `Transform`, `operator==`, `ReadFromDB`) and
-//!   the derivative lifts `smvol_Lift*Derivative` return [`SolidError::Unported`].
-//!   The volume unit replaces [`Volume`] with the real type.
+//! - **Volumes.** The volume is a [`Volume`] (unit `surface.volume_p1`); the
+//!   queries of unit `surface.volume_p2` it needs (`EvaluatePoint`, `ReadFromDB`)
+//!   and those of the unported volume kinds return [`SolidError::Unported`].
 //! - **Curve classification.** `GetKnots` classifies the base curve against the
 //!   volume's knot iso-planes with `SmCurveClassification` (units
 //!   `intersect.curve_class_p1`, `_p4`, `_p8`); that call returns
@@ -100,6 +97,10 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, BIG_DOUBLE, BOUNDED_INFINITE_PARAM, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::surface::volume::p1::{
+    lift_first_derivative, lift_second_derivative, lift_third_derivative,
+};
+use crate::surface::volume::{EvalOptions, Volume};
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 const OP: &str = "curve::crv_in_volume::CrvInVolume";
@@ -126,60 +127,44 @@ const fn bad(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
 
-// ---- the volume stand-in ------------------------------------------------------------
-
-/// Stand-in for an `SmVolume` until unit `surface.volume_p1` ports the volume
-/// classes: it records the volume's type code (`SmBSplineVolume_TYPE`,
-/// `SmTwistVolume_TYPE`, ...) and nothing else. Every query this unit makes on a
-/// volume returns [`SolidError::Unported`].
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Volume {
-    type_code: i64,
-}
-
-impl Volume {
-    /// A volume of type `type_code`.
-    #[must_use]
-    pub const fn new(type_code: i64) -> Self {
-        Self { type_code }
-    }
-
-    /// The volume's type code (`GetType`).
-    #[must_use]
-    pub const fn type_code(&self) -> i64 {
-        self.type_code
-    }
-}
+// ---- the volume ---------------------------------------------------------------------
 
 /// `SmVolume::GetNaturalParamDomain`.
-fn volume_natural_param_domain(_volume: &Volume) -> Result<Extent3d> {
-    // UNPORTED(surface.volume_p1): SmVolume::GetNaturalParamDomain
-    unported("SmVolume::GetNaturalParamDomain", "surface.volume_p1")
+fn volume_natural_param_domain(volume: &Volume) -> Result<Extent3d> {
+    volume.natural_param_domain()
 }
 
 /// `SmVolume::Evaluate` (parameter space to the final out-space): the
 /// `(n+1)^3` partial derivatives at `point`, from the left or right per direction.
 fn volume_evaluate(
-    _volume: &Volume,
-    _point: Point3,
-    _num_derivs: usize,
-    _from_left: [bool; 3],
-    _non_zero_tangents: bool,
+    volume: &Volume,
+    point: Point3,
+    num_derivs: usize,
+    from_left: [bool; 3],
+    non_zero_tangents: bool,
 ) -> Result<Vec<Vec3>> {
-    // UNPORTED(surface.volume_p1): SmVolume::Evaluate
-    unported("SmVolume::Evaluate", "surface.volume_p1")
+    let opts = EvalOptions {
+        from_left,
+        non_zero_tangents,
+        ..EvalOptions::default()
+    };
+    volume.evaluate(point, num_derivs, &opts)
 }
 
 /// `SmVolume::Map` (in-space to the final out-space), as [`volume_evaluate`].
 fn volume_map(
-    _volume: &Volume,
-    _point: Point3,
-    _num_derivs: usize,
-    _from_left: [bool; 3],
-    _non_zero_tangents: bool,
+    volume: &Volume,
+    point: Point3,
+    num_derivs: usize,
+    from_left: [bool; 3],
+    non_zero_tangents: bool,
 ) -> Result<Vec<Vec3>> {
-    // UNPORTED(surface.volume_p1): SmVolume::Map
-    unported("SmVolume::Map", "surface.volume_p1")
+    let opts = EvalOptions {
+        from_left,
+        non_zero_tangents,
+        ..EvalOptions::default()
+    };
+    volume.map(point, num_derivs, &opts)
 }
 
 /// `SmVolume::EvaluatePoint`.
@@ -189,25 +174,22 @@ fn volume_evaluate_point(_volume: &Volume, _point: Point3) -> Result<Point3> {
 }
 
 /// `SmVolume::MapPoint`.
-fn volume_map_point(_volume: &Volume, _point: Point3) -> Result<Point3> {
-    // UNPORTED(surface.volume_p1): SmVolume::MapPoint
-    unported("SmVolume::MapPoint", "surface.volume_p1")
+fn volume_map_point(volume: &Volume, point: Point3) -> Result<Point3> {
+    volume.map_point(point, true)
 }
 
 /// `SmVolume::Transform`.
 fn volume_transform(
-    _volume: &mut Volume,
-    _rotate_n_move: &Axis2Placement,
-    _scale: Option<Vec3>,
+    volume: &mut Volume,
+    rotate_n_move: &Axis2Placement,
+    scale: Option<Vec3>,
 ) -> Result<()> {
-    // UNPORTED(surface.volume_p1): SmVolume::Transform
-    unported("SmVolume::Transform", "surface.volume_p1")
+    volume.transform(rotate_n_move, scale)
 }
 
 /// `SmVolume::operator==`.
-fn volume_eq(_a: &Volume, _b: &Volume) -> Result<bool> {
-    // UNPORTED(surface.volume_p1): SmVolume::operator==
-    unported("SmVolume::operator==", "surface.volume_p1")
+fn volume_eq(a: &Volume, b: &Volume) -> Result<bool> {
+    a.approx_eq(b)
 }
 
 /// `SmVolume::ReadFromDB` of a volume of type `volume_type`.
@@ -218,32 +200,6 @@ fn volume_read_from_db(
 ) -> Result<Volume> {
     // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
     unported("SmVolume::ReadFromDB", "surface.volume_p2")
-}
-
-/// `smvol_LiftFirstDerivative`: the out-space first derivative of a curve through a
-/// volume from the curve's first derivative and the volume's first partials.
-fn lift_first_derivative(_c1: Vec3, _v1: [Vec3; 3]) -> Result<Vec3> {
-    // UNPORTED(surface.volume_p1): smvol_LiftFirstDerivative
-    unported("smvol_LiftFirstDerivative", "surface.volume_p1")
-}
-
-/// `smvol_LiftSecondDerivative` (first and second partials `Du Dv Dw`,
-/// `Duu Duv Duw Dvv Dvw Dww`).
-fn lift_second_derivative(_c: [Vec3; 2], _v1: [Vec3; 3], _v2: [Vec3; 6]) -> Result<Vec3> {
-    // UNPORTED(surface.volume_p1): smvol_LiftSecondDerivative
-    unported("smvol_LiftSecondDerivative", "surface.volume_p1")
-}
-
-/// `smvol_LiftThirdDerivative` (plus third partials `Duuu Duuv Duuw Duvv Duvw Duww
-/// Dvvv Dvvw Dvww Dwww`).
-fn lift_third_derivative(
-    _c: [Vec3; 3],
-    _v1: [Vec3; 3],
-    _v2: [Vec3; 6],
-    _v3: [Vec3; 10],
-) -> Result<Vec3> {
-    // UNPORTED(surface.volume_p1): smvol_LiftThirdDerivative
-    unported("smvol_LiftThirdDerivative", "surface.volume_p1")
 }
 
 /// The parameter intervals of the `SmCurveClassification` of `curve` over `interval`
@@ -609,14 +565,14 @@ impl CrvInVolume {
 
         // 1st Derivs
         if n_eval >= 1 {
-            put(1, lift_first_derivative(at(&crv, 1), v1())?);
+            put(1, lift_first_derivative(at(&crv, 1), v1()));
         }
 
         // 2nd Derivs
         if n_eval >= 2 {
             put(
                 2,
-                lift_second_derivative([at(&crv, 1), at(&crv, 2)], v1(), v2())?,
+                lift_second_derivative([at(&crv, 1), at(&crv, 2)], v1(), v2()),
             );
         }
 
@@ -636,7 +592,7 @@ impl CrvInVolume {
             ];
             put(
                 3,
-                lift_third_derivative([at(&crv, 1), at(&crv, 2), at(&crv, 3)], v1(), v2(), v3)?,
+                lift_third_derivative([at(&crv, 1), at(&crv, 2), at(&crv, 3)], v1(), v2(), v3),
             );
         }
 
@@ -1301,9 +1257,8 @@ mod tests {
     use super::*;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+    use crate::surface::volume::VolumeKind;
     use crate::topology::database_io::InputStream;
-
-    const TWIST: i64 = 22011;
 
     /// A clamped cubic with one interior knot at 0.5 on `[0, 1]`.
     fn base() -> Curve {
@@ -1320,7 +1275,7 @@ mod tests {
     }
 
     fn civ(owner: u64) -> CrvInVolume {
-        CrvInVolume::new(base(), true, Volume::new(TWIST), 0, owner)
+        CrvInVolume::new(base(), true, Volume::new(VolumeKind::Twist), 0, owner)
     }
 
     fn cached(owner: u64) -> CrvInVolume {
@@ -1340,10 +1295,10 @@ mod tests {
 
     #[test]
     fn construct_and_flags() {
-        let c = CrvInVolume::new(base(), false, Volume::new(TWIST), 3, 0);
+        let c = CrvInVolume::new(base(), false, Volume::new(VolumeKind::Twist), 3, 0);
         assert_eq!(c.owner_flag(), 3);
         assert!(c.owns_curve() && c.owns_volume());
-        let c = CrvInVolume::new(base(), false, Volume::new(TWIST), 1, 4);
+        let c = CrvInVolume::new(base(), false, Volume::new(VolumeKind::Twist), 1, 4);
         assert_eq!(c.owner_flag(), 5);
         assert!(!c.owns_curve() && !c.owns_volume());
         assert_eq!(c.copy().owner_flag(), 0);

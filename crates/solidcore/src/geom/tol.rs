@@ -41,6 +41,7 @@
 //! | [`scaled_zero`], [`scaled_zero_sq`], [`scaled_zero_sqrt`] | `SmTol::GetScaledZero()`, `GetScaledZeroSq()`, `GetScaledZeroSqrt()` |
 //! | [`ScaledZero`] (`f64`, [`Vec2`], [`Vec3`], [`Extent1d`], `Extent2d`, [`Extent3d`], `PseudoBox`) | `SmTol::GetScaledZero(const double)`, `(const SmVector2d&)`, `(const SmVector3d&)`, `(const SmExtent1d&)`, `(const SmExtent2d&)` (impl in `geom::extent2d`), `(const SmExtent3d&)`, `(const SmPseudoBox&)` (impl in `geom::pseudo_box`) |
 //! | [`scaled_zero_of_equations`]           | `SmTol::GetScaledZero(const SmEvalNFunctionsObject&)` |
+//! | [`scaled_zero_of_volume`]              | `SmTol::GetScaledZero(const SmVolume&)`        |
 //! | [`map_to_1d`]                          | `SmTol::MapTo1d(SmTol3d&, SmVector3d&, const SmExtent1d&)` |
 //! | [`scaled_zero_sq_of`], [`scaled_zero_sqrt_of`] | unary `GetScaledZeroSq<cA>`, `GetScaledZeroSqrt<cA>` |
 //! | [`scaled_zero2`], [`scaled_zero_sq2`], [`scaled_zero_sqrt2`] | binary `GetScaledZero<cA,cB>`, `...Sq`, `...Sqrt` |
@@ -103,6 +104,7 @@ use crate::kernel::{Kernel, Tolerances};
 use crate::math::{
     max2, max3, max4, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
 };
+use crate::surface::volume::Volume;
 
 // UNPORTED(topology.brep_p1): SmTol::GetModelSizeEstimate(const SmBrep&),
 // SmTol::SetModelSizeEstimate(SmBrep&, double), SmTol::GetZoneTol3d(const SmBrep*),
@@ -128,7 +130,6 @@ use crate::math::{
 // UNPORTED(surface.surface_p1): SmTol::MapTo2d(const SmTol3d&, const SmVector2d&, [const
 // SmVector2d&,] const SmSurface&) and SmTol::GetScaledZero(const SmSurface&) need
 // SmSurface::Evaluate1stDerivatives / GetNaturalUVDomain / ApproximateSize.
-// UNPORTED(surface.volume_p1): SmTol::GetScaledZero(const SmVolume&) needs SmVolume.
 // UNPORTED(intersect.curve_class_p1): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of
 // SmCurveClassification / SmCurveInterval and SmTol::GetScaledZero(const
 // SmCurveInterval&) need the classification classes.
@@ -665,6 +666,25 @@ pub fn scaled_zero_of_equations<E: EvalNFunctions + ?Sized>(equations: &E) -> f6
     tol3d(equations.scaled_zero())
 }
 
+/// `SmTol::GetScaledZero(const SmVolume&)`: `100 * SM_EFF_ZERO` for an unbounded
+/// parameter domain; a bounded one needs the out-space bounding box.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the volume, and for a bounded domain
+/// (`SmVolume::EvaluateBoundingBox`, unit `surface.volume_p2`).
+pub fn scaled_zero_of_volume(volume: &Volume) -> Result<f64> {
+    let param_domain = volume.natural_param_domain()?;
+    if param_domain.is_bounded() {
+        // UNPORTED(surface.volume_p2): SmVolume::EvaluateBoundingBox
+        return Err(SolidError::Unported {
+            upstream: "SmVolume::EvaluateBoundingBox",
+            unit: "surface.volume_p2",
+        });
+    }
+    Ok(tol3d(100.0 * EFF_ZERO))
+}
+
 /// Square of the scaled zero of `a` (unary `SmTol::GetScaledZeroSq<cA>`).
 #[must_use]
 pub fn scaled_zero_sq_of<A: ScaledZero + ?Sized>(a: &A) -> f64 {
@@ -939,6 +959,19 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scaled_zero_of_unbounded_volume() {
+        use crate::geom::transform::Transform;
+        use crate::surface::volume::VolumeKind;
+        let v = Volume::new(VolumeKind::Transform(Transform::IDENTITY));
+        assert_eq!(scaled_zero_of_volume(&v), Ok(100.0 * EFF_ZERO));
+        let t = Volume::new(VolumeKind::Twist);
+        assert!(matches!(
+            scaled_zero_of_volume(&t),
+            Err(SolidError::Unported { .. })
+        ));
+    }
     use crate::kernel::KernelOptions;
 
     fn kernel(model: f64, ratio: f64) -> Kernel {

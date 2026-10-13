@@ -6,3 +6,5 @@
 //! `SmSphere`, `SmTorus`, `SmBSplineSurface`, `SmSurfOfExtrusion`,
 //! `SmSurfOfRevolution`, `SmOffsetSurface`, `SmBlendSurface`, ...) in `source/SMLib`,
 //! and `SM_API/SmApiSurfaces`.
+
+pub mod volume;

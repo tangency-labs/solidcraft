@@ -14,16 +14,17 @@
 //! `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust error upstream cannot
 //! produce) and the rest as `out`.
 //!
-//! Deferred cases: everything that reaches the volume (`SmVolume`, units
-//! `surface.volume_p1` / `_p2`: evaluation, uncached breaks, continuities at interior
-//! breaks, equality of equal curves, non-identity transforms, reading the volume) —
-//! the Rust side has no volume yet. Every run has at least [`MIN_GENERATED`] generated
-//! cases; generated inputs the ffi wrapper rejects are redrawn.
+//! Deferred cases: what reaches the unported parts: the curve classification of
+//! uncached breaks (`intersect.curve_class_*`) and the volume's `EvaluatePoint` /
+//! `ReadFromDB` (`surface.volume_p2`). Every run has at least [`MIN_GENERATED`]
+//! generated cases; generated inputs the ffi wrapper rejects are redrawn.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::curve::crv_in_volume::{continuity_from_code, CrvInVolume, Volume};
+use solidcore::curve::crv_in_volume::{continuity_from_code, CrvInVolume};
+use solidcore::geom::transform::Transform;
+use solidcore::surface::volume::{Volume, VolumeKind};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::geom::axis2_placement::Axis2Placement;
@@ -43,9 +44,6 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
-
-/// `SmTransform_TYPE`: the type of the volume both sides use.
-const TRANSFORM_TYPE: i64 = 22008;
 
 /// `curve.crv_in_volume` runner.
 pub struct Runner;
@@ -345,7 +343,7 @@ fn build(c: &CivIn) -> Result<CrvInVolume, HarnessError> {
     let mut civ = CrvInVolume::new(
         build_curve(&c.curve)?,
         c.in_param,
-        Volume::new(TRANSFORM_TYPE),
+        Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
         c.copy,
         c.owner,
     );
