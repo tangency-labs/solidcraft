@@ -10,7 +10,7 @@
 //! | [`BSplineSurface::copy_and_add_analytics`]        | `CopyAndAddAnalytics`            |
 //! | [`BSplineSurface::create_iso_parametric_curve`], [`IsoCurveOptions`], [`IsoParametricCurve`] | `CreateIsoParametricCurve` |
 //! | [`BSplineSurface::create_sphere_from_arcs`], [`SphereFromArcs`] | `CreateSphereFromArcs`   |
-//! | [`BSplineSurface::create_surf_of_revolution`]     | `CreateSurfOfRevolution`         |
+//! | [`BSplineSurface::create_surf_of_revolution`], [`BSplineSurface::create_surf_of_revolution_with_line_vector`] | `CreateSurfOfRevolution` |
 //! | [`BSplineSurface::create_trimmed_plane_from_ruled`], [`TrimmedPlane`] | `CreateTrimmedPlaneFromRuled` |
 //! | [`BSplineSurface::is_degenerate_point`]           | `IsDegeneratePoint`              |
 //! | [`BSplineSurface::is_bilinear`]                   | `IsBilinear`                     |
@@ -31,9 +31,11 @@
 //! - **Surface type.** Only the plain B-spline is ported, so `GetType()` is always
 //!   `SmBSplineSurface_TYPE` here: `SetControlPoint`'s refusal for analytic surfaces
 //!   and `CopyAndAddAnalytics`' "copy an analytic as is" branch are never taken. The
-//!   generator of `CreateSurfOfRevolution` is a plain [`BSplineCurve`], never an
-//!   `SmLine` (a separate type here, `crate::curve::line`), so its arc length
-//!   reparametrisation of cylinders is never taken either.
+//!   generator of `CreateSurfOfRevolution` is a [`BSplineCurve`]; an `SmLine`
+//!   generator (a separate type here, `crate::curve::line`) passes its line vector to
+//!   [`BSplineSurface::create_surf_of_revolution_with_line_vector`], which takes
+//!   upstream's arc length reparametrisation of the sweep circle for cylinders
+//!   (`GetType() == SmLine_TYPE` and the line vector parallel to the axis).
 //! - **Missing NURB.** Where upstream dereferences the `NULL` NURB of a surface built
 //!   by `SmBSplineSurface()` (`GetControlPointsExpert`, `SetControlPoint`,
 //!   `CopySubPatch`, `SplitAt`) the port returns `SM_ERR`
@@ -626,6 +628,37 @@ impl BSplineSurface {
         swap_uv: bool,
         opt_sweep_curve: Option<&SmCurve>,
     ) -> Result<Self> {
+        Self::create_surf_of_revolution_with_line_vector(
+            gen_curve,
+            None,
+            origin,
+            axis_dir,
+            angle_span_deg,
+            swap_uv,
+            opt_sweep_curve,
+        )
+    }
+
+    /// [`Self::create_surf_of_revolution`] of a generator that may be an `SmLine`
+    /// (`CreateSurfOfRevolution` with `pGenCurve->GetType() == SmLine_TYPE`):
+    /// `gen_line_vector` is the line's `GetLineVector()` (`None` for any other
+    /// generator). When it is parallel to the axis within `0.001` degrees (a
+    /// cylinder) and no sweep curve is given, the sweep circle is reparametrised with
+    /// arc length.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::create_surf_of_revolution`] and of the circle's arc length
+    /// reparametrisation.
+    pub fn create_surf_of_revolution_with_line_vector(
+        gen_curve: &BSplineCurve,
+        gen_line_vector: Option<Vec3>,
+        origin: Point3,
+        axis_dir: Vec3,
+        angle_span_deg: f64,
+        swap_uv: bool,
+        opt_sweep_curve: Option<&SmCurve>,
+    ) -> Result<Self> {
         // unitized rotation axis
         let axis_dir = axis_dir.unitize()?;
 
@@ -679,7 +712,7 @@ impl BSplineSurface {
                 let x_unit = x_vec / radius;
                 let y_vec = axis_dir.cross(x_unit);
                 let ref_frame = Axis2Placement::new(center, x_unit, y_vec);
-                let cir = BSplineCurve::create_circle_segment(
+                let mut cir = BSplineCurve::create_circle_segment(
                     3,
                     &ref_frame,
                     radius,
@@ -687,8 +720,13 @@ impl BSplineSurface {
                     angle_span_deg,
                     NurbCircleParam::Quadratic,
                 )?;
-                // (a generator SmLine parallel to the axis would be reparametrised
-                // with arc length here; a BSplineCurve never is one)
+
+                // If we have a cylinder, reparametrize it with arc length
+                if let Some(line_vec) = gen_line_vector {
+                    if line_vec.is_parallel_to(axis_dir, 0.001) {
+                        cir.reparametrize_with_arc_length()?;
+                    }
+                }
 
                 // get the sweep circle parameters
                 let c = cir.canonical()?;

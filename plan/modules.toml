@@ -1579,10 +1579,10 @@ soft_depends_on = ["curve.curve_p4", "curve.curve_p5", "curve.curve_p6", "curve.
 est_lines = 1522
 layer = 23
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "31 fns; largest: SmSurfOfRevolution::IntersectWithPlane, sm_TestForIsoCircles, SmSurfOfRevolution::CreateIsoParametricCurve, SmSurfOfRevolution::EvaluateSTEP; cycle back-edges (call into later units; stub or co-port): surface.cone_p1(6), surface.sphere(3), surface.torus(3), surface.surface_p1(2), surface.plane_p1(1), surface.plane_p2(1), surface.surface_p5(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 807 cases (207 fixture + 600 generated), 776 bit-identical (max_rel_err 0), 0 failed, 31 deferred: surface.surface_p1 31 (IntersectWithPlane of a planar generator: SmPlane wired, the plane's pseudo box needs SmSurface::GetFace for the zone tolerance; the body below it waits on SmPlane::TrimCurveToPlaneDomain, surface.plane_p2). Perturbation: 776/776 detected. Co-ports CreateCanonical/MakeNurb (_p2) and MakeNurbWithSweepParams (_p3). The 4 UNPORTED(surface.surf_of_revolution_p1) stubs in line/ellipse/hyperbola/parabola MakeNurb stay: an owner ObjectRef cannot reach the surface (see findings.md). 31 fns; largest: SmSurfOfRevolution::IntersectWithPlane, sm_TestForIsoCircles, SmSurfOfRevolution::CreateIsoParametricCurve, SmSurfOfRevolution::EvaluateSTEP; cycle back-edges (call into later units; stub or co-port): surface.cone_p1(6), surface.sphere(3), surface.torus(3), surface.surface_p1(2), surface.plane_p1(1), surface.plane_p2(1), surface.surface_p5(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_p9"
@@ -1680,7 +1680,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "12 fns; largest: SmSurfOfRevolution::IntersectWithSurfOfRevolution, SmSurfOfRevolution::DropPointFast, SmSurfOfRevolution::RebuildSTEPFromNURBParameters, SmSurfOfRevolution::ConvertUVFromSTEPToNURBS; cycle back-edges (call into later units; stub or co-port): surface.surface_p5(2), surface.surface_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "CO-PORTED in surface.surf_of_revolution_p1 (PR #15): SmSurfOfRevolution::MakeNurbWithSweepParams lives in surface::surf_of_revolution::p1 (make_nurb_with_sweep_params), covered by the p1 difftest runner. Do not re-port. Its owner-driven generator reparameterisation is not wired (see findings.md, surface.surf_of_revolution_p1). 12 fns; largest: SmSurfOfRevolution::IntersectWithSurfOfRevolution, SmSurfOfRevolution::DropPointFast, SmSurfOfRevolution::RebuildSTEPFromNURBParameters, SmSurfOfRevolution::ConvertUVFromSTEPToNURBS; cycle back-edges (call into later units; stub or co-port): surface.surface_p5(2), surface.surface_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_cache_p2"
@@ -1750,7 +1750,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "8 fns; largest: SmSurfOfRevolution::CreateOffsetSurface, SmSurfOfRevolution::IsNurbSurfaceSurfOfRevolution, SmSurfOfRevolution::TrimWithDomain, SmSurfOfRevolution::STEPInversion; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "CO-PORTED in surface.surf_of_revolution_p1 (PR #15): SmSurfOfRevolution::CreateCanonical and ::MakeNurb live in surface::surf_of_revolution::p1 (SurfOfRevolution::create_canonical / make_nurb), covered by the p1 difftest runner. Do not re-port; move or extend them there. 8 fns; largest: SmSurfOfRevolution::CreateOffsetSurface, SmSurfOfRevolution::IsNurbSurfaceSurfOfRevolution, SmSurfOfRevolution::TrimWithDomain, SmSurfOfRevolution::STEPInversion; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_cache_p3"

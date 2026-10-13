@@ -1969,9 +1969,15 @@ impl Ellipse {
     }
 }
 
-/// `SmPolarConversion::SetUpPolarConversion(cpQuadCircle, TRUE, ..)` of `pc` for the
-/// ellipse `e` (whose own table is `pc`, taken out for the call).
-fn set_up_polar_conversion(pc: &mut PolarConversion, e: &mut Ellipse, k: &Kernel) -> Result<()> {
+/// `SmPolarConversion::SetUpPolarConversion(cpQuadCircle, .., ..)` of `pc` for the
+/// ellipse `e`: the ellipse's own table (taken out for the call), or the table of a
+/// surface of revolution that owns the circle
+/// ([`crate::surface::surf_of_revolution::SurfOfRevolution`]).
+pub(crate) fn set_up_polar_conversion(
+    pc: &mut PolarConversion,
+    e: &mut Ellipse,
+    k: &Kernel,
+) -> Result<()> {
     // init state
     pc.possible = false;
 
