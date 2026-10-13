@@ -175,7 +175,7 @@ fn curve_length(curve: &Curve, interval: &Extent1d, _tol: f64) -> Result<f64> {
 /// `SmCurve::LocalPropertyAnalysis(crInterval, eProp, dGuess, cpdValue, cpVectors,
 /// rbFoundSolution, rSolution)`: whether a solution was found (written into
 /// `solution`).
-fn local_property_analysis<O: Copy>(
+pub(crate) fn local_property_analysis<O: Copy>(
     _curve: &Curve,
     _interval: &Extent1d,
     _property: CurvePropertyType,

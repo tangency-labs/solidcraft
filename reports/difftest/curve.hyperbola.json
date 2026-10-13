@@ -34,16 +34,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#4 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -62,16 +58,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#7 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -90,16 +82,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#10 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -118,16 +106,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#13 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -146,16 +130,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#16 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -174,16 +154,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#19 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -202,16 +178,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#22 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -230,16 +202,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#25 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -258,16 +226,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#28 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -286,16 +250,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#31 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -314,16 +274,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "adjusted_gps_intersect_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.hyperbola/cases.json#34 (upstream tests/prog_test/src/smCurveTest.cpp:4953 (my_test_analytic_curves: SmHyperbola::CreateCanonical, my_test_analytic_curve))",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -986,16 +942,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0055",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828243",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -1078,16 +1030,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0066",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828254",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -1278,16 +1226,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828278",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -1450,16 +1394,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828299",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -1702,16 +1642,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0142",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828330",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -2010,16 +1946,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0180",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828368",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "deferred": {
@@ -2074,16 +2006,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0187",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828375",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -2610,16 +2538,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0253",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828441",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -3026,16 +2950,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828492",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -3842,16 +3762,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828591",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -4546,16 +4462,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0490",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828678",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -4966,16 +4878,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0542",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828730",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -5874,16 +5782,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0654",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828842",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -5998,16 +5902,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0669",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828857",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -6666,16 +6566,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0751",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828939",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -6906,16 +6802,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0780",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396828968",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -7382,16 +7274,12 @@
       "values_compared": 26
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0839",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829027",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -7638,16 +7526,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0870",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829058",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -7906,16 +7790,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0902",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829090",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -8246,16 +8126,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0944",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829132",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -8814,16 +8690,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829202",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -8842,16 +8714,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829205",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -9118,16 +8986,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1051",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829239",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -9202,16 +9066,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1061",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829249",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -9566,16 +9426,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829294",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "deferred": {
@@ -9794,16 +9650,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1133",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829321",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -9930,16 +9782,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1149",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829337",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -10142,16 +9990,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1175",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829363",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -10250,16 +10094,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829376",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -10918,28 +10758,20 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829459",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1272",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829460",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -11014,16 +10846,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1282",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829470",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -11130,16 +10958,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1296",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829484",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -11570,16 +11394,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1350",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829538",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -12526,16 +12346,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1468",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829656",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -12774,16 +12590,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1498",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829686",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -12826,16 +12638,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1504",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829692",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "deferred": {
@@ -12978,16 +12786,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1522",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829710",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -13382,16 +13186,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1572",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829760",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -13810,16 +13610,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1625",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829813",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -13910,16 +13706,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1637",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829825",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -14026,16 +13818,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1651",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829839",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14070,16 +13858,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1656",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829844",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14154,16 +13938,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829854",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14182,16 +13962,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1669",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829857",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14286,16 +14062,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1681",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829869",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -14594,16 +14366,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1719",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829907",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14646,16 +14414,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1725",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829913",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -14938,16 +14702,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1761",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829949",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -15102,16 +14862,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1781",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829969",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -15130,16 +14886,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1784",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396829972",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -15410,16 +15162,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1818",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830006",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -15742,16 +15490,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1859",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830047",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -16114,16 +15858,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1904",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830092",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -16222,16 +15962,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1917",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830105",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -16250,16 +15986,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1920",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830108",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -16342,16 +16074,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1931",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830119",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -16370,16 +16098,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1934",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830122",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -16614,16 +16338,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalPointSolve",
-        "unit": "curve.curve_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1964",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13534398185396830152",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -16907,12 +16627,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 102,
+  "cases_deferred": 32,
   "cases_failed": 0,
-  "cases_passed": 1960,
+  "cases_passed": 2030,
   "cases_total": 2062,
   "deferred_by_unit": {
-    "curve.curve_p1": 70,
     "curve.curve_p5": 32
   },
   "max_rel_err": 0.0,

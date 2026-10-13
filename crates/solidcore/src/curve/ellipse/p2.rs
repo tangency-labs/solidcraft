@@ -80,9 +80,14 @@
 //!   that [`SolidError::Unported`] is always propagated. Upstream outputs written
 //!   before a failing status (partial solution arrays) are not returned.
 //! - **Back-edges.** `SmCurve::LocalPropertyAnalysis` (`curve.curve_p5`),
-//!   `SmCurve::GlobalPointSolve` (`curve.curve_p1`, also for the line of
-//!   `IntersectWithLine`) and `SmCurve::GlobalCoincidenceChecker` (`curve.curve_p6`)
-//!   return [`SolidError::Unported`]. `SmCurve::LocalCurveSolve` (unit
+//!   `SmCurve::GlobalPointSolve` of the ellipse and
+//!   `SmCurve::GlobalCoincidenceChecker` (`curve.curve_p6`) return
+//!   [`SolidError::Unported`]. The global point solve is ported
+//!   ([`curve_base::Curve::global_point_solve`]) but needs the ellipse as a curve
+//!   kind (its `DropPointFast` override, its cache), which is unit
+//!   `curve.ellipse_p1`'s (`SmEllipse` joins [`curve_base::CurveKind`] there). The
+//!   line's `GlobalPointSolve(SM_SO_INTERSECT)` of `IntersectWithLine` is the line's
+//!   `DropPointFast`, which handles every intersection. `SmCurve::LocalCurveSolve` (unit
 //!   `curve.curve_p3`) evaluates the ellipse through its B-spline base and the line
 //!   through [`curve_base::Curve`] (its Newton equations, `SmFindCCNormalENFO`, are
 //!   unit `curve.curve_p5`). `ConvertToNURBSParameter` always reports an exact
@@ -155,33 +160,34 @@ fn local_point_inversion(
 }
 
 /// `SmCurve::GlobalPointSolve(Interval, SM_SO_INTERSECT, Point, dTol, NULL, NULL,
-/// SM_SR_ALL, rSolutions)` of the ellipse `curve`.
+/// SM_SR_ALL, rSolutions)` of the ellipse `curve`. The solve is ported
+/// (`Curve::global_point_solve`, unit `curve.curve_p1`); running it on an ellipse
+/// needs `SmEllipse` as a curve kind (its `DropPointFast` override and cache), which
+/// unit `curve.ellipse_p1` adds.
 fn ellipse_global_point_solve<O: Copy>(
     _curve: &Ellipse,
     _interval: &Extent1d,
     _point: Point3,
     _tol: f64,
 ) -> Result<Vec<Solution<O>>> {
-    // UNPORTED(curve.curve_p1): SmCurve::GlobalPointSolve
+    // UNPORTED(curve.ellipse_p1): SmCurve::GlobalPointSolve on SmEllipse (CurveKind::Ellipse)
     Err(SolidError::Unported {
         upstream: "SmCurve::GlobalPointSolve",
-        unit: "curve.curve_p1",
+        unit: "curve.ellipse_p1",
     })
 }
 
 /// `SmCurve::GlobalPointSolve(Interval, SM_SO_INTERSECT, Point, dTol, NULL, NULL,
-/// SM_SR_ALL, rSolutions)` of the line `line`.
+/// SM_SR_ALL, rSolutions)` of the line `line`: for `SM_SO_INTERSECT` the solve
+/// returns the line's `DropPointFast` (which never fails for that operation; its
+/// solutions name no object here).
 fn line_global_point_solve<O: Copy>(
-    _line: &Line,
-    _interval: &Extent1d,
-    _point: Point3,
-    _tol: f64,
+    line: &Line,
+    interval: &Extent1d,
+    point: Point3,
+    tol: f64,
 ) -> Result<Vec<Solution<O>>> {
-    // UNPORTED(curve.curve_p1): SmCurve::GlobalPointSolve
-    Err(SolidError::Unported {
-        upstream: "SmCurve::GlobalPointSolve",
-        unit: "curve.curve_p1",
-    })
+    line.drop_point_fast(interval, SolverOperation::Intersect, point, tol, None, None)
 }
 
 /// `SmCurve::LocalCurveSolve(Interval, Other, OtherInterval, SM_SO_MINIMIZE, dTol,
@@ -1497,7 +1503,7 @@ impl Ellipse {
     /// # Errors
     ///
     /// The errors of the plane and circle intersections; [`SolidError::Unported`]
-    /// from the general point solver (`curve.curve_p1`), the local curve solver
+    /// from the general point solver (on an ellipse, `curve.ellipse_p1`), the local curve solver
     /// (its Newton equations, `curve.curve_p5`) and the coincidence checker (`curve.curve_p6`).
     pub fn intersect_with_ellipse<O: Copy>(
         &self,
@@ -1717,7 +1723,8 @@ impl Ellipse {
     ///
     /// `SM_ERR` from the plane intersection of a line parallel to the plane or a zero
     /// line vector; [`SolidError::Unported`] from the general point solver
-    /// (`curve.curve_p1`) and the local curve solver (its Newton equations, `curve.curve_p5`).
+    /// (on the ellipse, `curve.ellipse_p1`) and the local curve solver (its Newton
+    /// equations, `curve.curve_p5`).
     pub fn intersect_with_line<O: Copy>(
         &self,
         interval: &Extent1d,

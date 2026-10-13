@@ -1,0 +1,1027 @@
+{
+ "cases": [
+  {
+   "name": "degenerate_hermite_approximate",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d1": [
+       0,
+       0,
+       0
+      ],
+      "p2": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d2": [
+       0,
+       0,
+       0
+      ]
+     }
+    },
+    "breaks": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "tol": 0.001,
+    "analytics": true,
+    "match_param": false,
+    "copy": false
+   }
+  },
+  {
+   "name": "degenerate_hermite_bisect",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d1": [
+       0,
+       0,
+       0
+      ],
+      "p2": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d2": [
+       0,
+       0,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "max3d": 0.0
+   }
+  },
+  {
+   "name": "degenerate_hermite_maximize",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d1": [
+       0,
+       0,
+       0
+      ],
+      "p2": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d2": [
+       0,
+       0,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "degenerate_hermite_at_distance",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d1": [
+       0,
+       0,
+       0
+      ],
+      "p2": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "d2": [
+       0,
+       0,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "closed_hermite_sop3",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 3,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "closed_hermite_sop4",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "closed_hermite_sop5",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "closed_hermite_sop0",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "closed_hermite_approximate_match",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "breaks": [
+     0.0,
+     1.0
+    ],
+    "tol": 0.0001,
+    "analytics": true,
+    "match_param": true,
+    "copy": false
+   }
+  },
+  {
+   "name": "quarter_circle_just_copy",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 2.0,
+      "a0": 0.0,
+      "a1": 90.0
+     }
+    },
+    "breaks": [
+     0.0,
+     1.0
+    ],
+    "tol": 0.001,
+    "analytics": true,
+    "match_param": false,
+    "copy": true
+   }
+  },
+  {
+   "name": "quarter_circle_approximate_analytic",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 2.0,
+      "a0": 0.0,
+      "a1": 90.0
+     }
+    },
+    "breaks": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "tol": 1e-06,
+    "analytics": true,
+    "match_param": false,
+    "copy": false
+   }
+  },
+  {
+   "name": "quarter_circle_bisect_angle",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 2.0,
+      "a0": 0.0,
+      "a1": 90.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 5.0,
+    "max3d": 0.0
+   }
+  },
+  {
+   "name": "line_tessellate_override",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     0.0,
+     3.0
+    ],
+    "chord": 0.01,
+    "angle": 5.0,
+    "minseg": 3
+   }
+  },
+  {
+   "name": "line_bisect_max3d",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     0.5,
+     2.5
+    ],
+    "chord": 0.0,
+    "angle": 5.0,
+    "max3d": 1.0
+   }
+  },
+  {
+   "name": "line_at_distance",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "ivl": [
+     0.0,
+     3.0
+    ],
+    "sop": 6,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-05,
+    "target": 3.0,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "line_just_copy",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "breaks": [
+     0.0,
+     3.0
+    ],
+    "tol": 0.001,
+    "analytics": false,
+    "match_param": false,
+    "copy": true
+   }
+  },
+  {
+   "name": "span_short_forced_pass",
+   "inputs": {
+    "op": "span",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "lt": 0.5,
+    "lp": [
+     0,
+     0,
+     0
+    ],
+    "ld": [
+     1,
+     0,
+     0
+    ],
+    "ct": 0.5000000000001,
+    "cp": [
+     0,
+     0,
+     0
+    ],
+    "cd": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-09,
+    "match_param": false
+   }
+  },
+  {
+   "name": "classify_point_solution",
+   "inputs": {
+    "op": "classify",
+    "c1": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "c2": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "sol": {
+     "range": false,
+     "v0": 0.0,
+     "s": [
+      0.2,
+      1.0
+     ],
+     "v1": 0.0,
+     "e": [
+      0.3,
+      1.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "refine_only_points",
+   "inputs": {
+    "op": "refine",
+    "c1": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "c2": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "sols": [
+     {
+      "range": false,
+      "v0": 0.1,
+      "s": [
+       0.2,
+       1.0
+      ],
+      "v1": 0.1,
+      "e": [
+       0.3,
+       1.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "refine_range_one_variable",
+   "inputs": {
+    "op": "refine",
+    "c1": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "c2": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "sols": [
+     {
+      "range": true,
+      "nvar": 1,
+      "v0": 0.1,
+      "s": [
+       0.2,
+       1.0
+      ],
+      "v1": 0.1,
+      "e": [
+       0.3,
+       1.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "refine_range_null_object",
+   "inputs": {
+    "op": "refine",
+    "c1": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "c2": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "sols": [
+     {
+      "range": true,
+      "o": [
+       1,
+       0
+      ],
+      "v0": 0.1,
+      "s": [
+       0.2,
+       1.0
+      ],
+      "v1": 0.1,
+      "e": [
+       0.3,
+       1.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "refine_range_tight_ends",
+   "inputs": {
+    "op": "refine",
+    "c1": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       10,
+       10,
+       0
+      ],
+      "p2": [
+       0,
+       0,
+       0
+      ],
+      "d2": [
+       10,
+       -10,
+       0
+      ]
+     }
+    },
+    "c2": {
+     "line": {
+      "p": [
+       1,
+       1,
+       1
+      ],
+      "v": [
+       1,
+       2,
+       2
+      ],
+      "domain": [
+       0.0,
+       3.0
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "sols": [
+     {
+      "range": true,
+      "v0": 1e-09,
+      "s": [
+       0.2,
+       1.0
+      ],
+      "v1": 0.0,
+      "e": [
+       0.3,
+       1.5
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

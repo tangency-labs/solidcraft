@@ -56,15 +56,16 @@
 //!   which always propagates. `STEPInversion` ignores the status of
 //!   `SmCurve::EvaluateSTEPPoint` (unit `curve.curve_p5`), which returns
 //!   [`SolidError::Unported`] until that unit is ported.
-//! - **Back-edges.** `GlobalPointSolveSTEP` calls `SmCurve::GlobalPointSolve` (unit
-//!   `curve.curve_p1`) after adjusting the interval and returns
-//!   [`SolidError::Unported`] until that unit is ported.
+//! - **Global solve.** `GlobalPointSolveSTEP` runs `SmCurve::GlobalPointSolve` on a
+//!   [`Curve`] made of a copy of the hyperbola (taking the [`Kernel`] for the
+//!   curve cache); its solutions name no object.
 //! - **Not ported here.** The constructor's out-of-range domain warning (a message
 //!   only). `CreateCanonical`, `GetCanonical`, `GetMemoryUsed`, `WriteToDB` and
 //!   `Dump` are unreachable from the in-scope entry points
 //!   (`harness/callgraph/unused_functions.txt`); the field accessors
 //!   ([`Hyperbola::position`], ...) give the canonical data.
 
+use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{self as curve_base, at, HYPERBOLA_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result, SolidError};
@@ -74,9 +75,10 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{line_line_closest_point, point_project_to_plane};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::ObjectRef;
-use crate::geom::solution_array::Solution;
+use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
 use crate::geom::tol::{are_same, is_zero};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
@@ -120,6 +122,22 @@ pub struct Hyperbola {
 impl From<Hyperbola> for Curve {
     fn from(c: Hyperbola) -> Self {
         Self::new(CurveKind::Hyperbola(c))
+    }
+}
+
+/// The handle of the hyperbola in its own global solve: a curve with the given
+/// natural interval (the solver's duplicate test reads it). The solutions returned
+/// name no object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SelfHandle(Extent1d);
+
+impl SolutionObject for SelfHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        Some(self.0)
     }
 }
 
@@ -383,15 +401,18 @@ impl Hyperbola {
 
     /// Extrema of the distance from `test_point` to the curve over `interval` (an
     /// analytic domain, which first becomes the curve's: `AdjustSTEPInterval`), as
-    /// analytic parameters (`GlobalPointSolveSTEP`). `owner` is the curve's owner.
+    /// analytic parameters (`GlobalPointSolveSTEP`): `SmCurve::GlobalPointSolve`
+    /// ([`Curve::global_point_solve`]) over the natural interval, each solution's
+    /// point inverted back to the analytic parameter. `owner` is the curve's owner;
+    /// the solutions name no object (the curve has no handle here).
     ///
     /// # Errors
     ///
-    /// Those of [`Hyperbola::adjust_step_interval`]; then
-    /// [`SolidError::Unported`]: the solve is `SmCurve::GlobalPointSolve` (unit
-    /// `curve.curve_p1`).
+    /// Those of [`Hyperbola::adjust_step_interval`], the global solve, the
+    /// evaluations and [`Hyperbola::step_inversion`].
     pub fn global_point_solve_step(
         &mut self,
+        k: &Kernel,
         interval: &Extent1d,
         operation: SolverOperation,
         test_point: Point3,
@@ -400,7 +421,6 @@ impl Hyperbola {
         requested: SolutionRequested,
         owner: Option<ObjectRef>,
     ) -> Result<Vec<Solution<ObjectRef>>> {
-        let _ = (operation, distance_tol, target_distance, requested);
         self.adjust_step_interval(interval, owner)?;
 
         let center = self.position.origin();
@@ -408,11 +428,38 @@ impl Hyperbola {
         // Project the point onto the plane which Ellipse is on (unused upstream)
         let _proj_point = point_project_to_plane(test_point, center, z_axis);
 
-        // UNPORTED(curve.curve_p1): SmCurve::GlobalPointSolve
-        Err(SolidError::Unported {
-            upstream: "SmCurve::GlobalPointSolve",
-            unit: "curve.curve_p1",
-        })
+        let curve = Curve::from(self.clone());
+        let ivl = curve.natural_interval();
+        let opts = GlobalPointSolveOptions {
+            target_distance,
+            handle: Some(SelfHandle(ivl)),
+            ..GlobalPointSolveOptions::default()
+        };
+        let sols = curve.global_point_solve(
+            k,
+            &ivl,
+            operation,
+            test_point,
+            distance_tol,
+            requested,
+            &opts,
+        )?;
+
+        let mut out = Vec::with_capacity(sols.len());
+        for sol in sols.as_slice() {
+            let point_on_curve = curve.evaluate_point(sol.start.parameters[0])?;
+            let (angle_param, _) = self.step_inversion(point_on_curve, false)?;
+            let mut r: Solution<ObjectRef> = Solution::new();
+            r.solution_type = sol.solution_type;
+            r.num_variables = sol.num_variables;
+            r.start = sol.start;
+            r.end = sol.end;
+            r.num_objects = sol.num_objects; // (objects: this curve, not named here)
+            r.nodes = sol.nodes;
+            r.start.parameters[0] = angle_param;
+            out.push(r);
+        }
+        Ok(out)
     }
 
     // ---- editing ----------------------------------------------------------------------
@@ -798,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn unported_paths() {
+    fn unported_paths_and_step_solve() {
         let mut h = canonical();
         let p = h.evaluate_step(0.0, 0).unwrap()[0];
         assert!(matches!(
@@ -810,18 +857,21 @@ mod tests {
             h.step_inversion(far, true).unwrap().1,
             Some(CurveLocation::Exterior)
         );
-        assert!(matches!(
-            h.global_point_solve_step(
-                &Extent1d::from_min_max(-1.0, 1.0),
-                SolverOperation::Intersect,
-                p,
-                1e-6,
-                None,
-                SolutionRequested::All,
-                None,
-            ),
-            Err(SolidError::Unported { .. })
-        ));
+        let r = h.global_point_solve_step(
+            &Kernel::default(),
+            &Extent1d::from_min_max(-1.0, 1.0),
+            SolverOperation::Intersect,
+            p,
+            1e-6,
+            None,
+            SolutionRequested::All,
+            None,
+        );
+        // the point on the curve at analytic parameter 0
+        let sols = r.unwrap();
+        assert_eq!(sols.len(), 1);
+        assert!(sols[0].start.parameters[0].abs() < 1e-9);
+        assert!(sols[0].start.solution_value < 1e-9);
         let owner = ObjectRef {
             type_code: SURF_OF_EXTRUSION_TYPE,
             key: crate::geom::attribute::ObjectKey(0),

@@ -7,6 +7,7 @@
 //! lives in its own submodule and adds methods to [`Curve`] (or generic functions
 //! over [`CurveEvaluate`]).
 
+pub mod p1;
 pub mod p2;
 pub mod p3;
 pub mod p4;

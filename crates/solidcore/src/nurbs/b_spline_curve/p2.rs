@@ -78,11 +78,13 @@
 //!   ([`crate::curve::curve::p4::is_closed_base`]); `CreateAnalyticCurve` builds
 //!   `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`); `CreateSimpleOffset` calls `SmCurve::IsArc`
-//!   (`curve.curve_p5`) and approximates an [`OffsetCurve`] with
-//!   `SmCurve::ApproximateCurve` (`curve.curve_p1`). Those calls return
-//!   [`SolidError::Unported`] until the units are ported.
+//!   (`curve.curve_p5`); those calls return [`SolidError::Unported`] until the
+//!   units are ported. It approximates an [`OffsetCurve`] with
+//!   `SmCurve::ApproximateCurve` ([`Curve::approximate_curve`]), passing the
+//!   caller's `bOptMatchParameterization` as `bOptCreateAnalytics` and `FALSE` for
+//!   matching, as upstream.
 
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::curve::offset_curve::OffsetCurve;
 use crate::error::{Result, SolidError};
@@ -249,22 +251,43 @@ fn offset_curve_approximation(
         false,
     );
     let breaks = [interval.min(), interval.max()];
-    approximate_curve(&off, &breaks, approx_tol_3d, match_parameterization)
+    approximate_curve(
+        &Curve::from(off),
+        &breaks,
+        approx_tol_3d,
+        match_parameterization,
+    )
 }
 
 /// `SmCurve::ApproximateCurve(ctx, breaks, tol, gap, approx, bMatch, FALSE)` of
-/// `curve`: the approximation and its maximum gap.
+/// `curve`: the approximation and its maximum gap. Upstream passes the caller's
+/// `bOptMatchParameterization` in the `bOptCreateAnalytics` slot and `FALSE` for
+/// matching the parameterization; kept.
 fn approximate_curve(
-    _curve: &OffsetCurve,
-    _breaks: &[f64],
-    _approx_tol_3d: f64,
-    _match_parameterization: bool,
+    curve: &Curve,
+    breaks: &[f64],
+    approx_tol_3d: f64,
+    match_parameterization: bool,
 ) -> Result<(BSplineCurve, f64)> {
-    // UNPORTED(curve.curve_p1): SmCurve::ApproximateCurve
-    Err(SolidError::Unported {
-        upstream: "SmCurve::ApproximateCurve",
-        unit: "curve.curve_p1",
-    })
+    const OP: &str = "nurbs::b_spline_curve::p2::approximate_curve";
+    let opts = crate::curve::curve::p1::ApproximateCurveOptions {
+        create_analytics: match_parameterization,
+        match_parameterization: false,
+        just_copy_bsplines: false,
+    };
+    let r = curve.approximate_curve(breaks, approx_tol_3d, &opts)?;
+    // (a degenerate offset leaves upstream's dMaxGap3d uninitialized)
+    let gap = r.achieved_tol.ok_or(SolidError::InvalidInput {
+        operation: OP,
+        reason: "maximum gap never written (degenerate offset curve)",
+    })?;
+    match r.curve.into_kind() {
+        CurveKind::BSpline(c) => Ok((c, gap)),
+        _ => Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "approximation is not a B-spline",
+        }),
+    }
 }
 
 /// An analytic curve [`BSplineCurve::create_analytic_curve`] makes (`SmLine`,

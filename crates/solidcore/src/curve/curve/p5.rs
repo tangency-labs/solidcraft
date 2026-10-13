@@ -1,13 +1,16 @@
 //! `SmCurve`, part 5 (so far only functions co-ported ahead of the unit): the
-//! base-class `IsLine`, sampling a curve for a straight, constant-speed line, and the
-//! linearity test `IsLinear`.
+//! base-class `IsLine`, sampling a curve for a straight, constant-speed line, with its
+//! dispatch over the curve kinds, the linearity test `IsLinear`, and building the
+//! curve cache of `CacheMakeOrValidate`.
 //!
 //! Upstream: `source/SMLib/src/SmCurve.cpp`, `source/SMLib/inc/SmCurve.h`.
 //!
 //! | Rust                               | Upstream                                    |
 //! |------------------------------------|---------------------------------------------|
 //! | [`is_line_base`]                   | `SmCurve::IsLine` (the base-class body)     |
+//! | [`Curve::is_line`]                 | `IsLine` (virtual: base, B-spline and line) |
 //! | [`Curve::is_linear`], [`Linearity`] | `SmCurve::IsLinear`                        |
+//! | [`make_curve_cache`]               | `SmCurve::CacheMakeOrValidate` (building a new cache) |
 //!
 //! Deviations:
 //! - **Co-port.** Unit `curve.curve_p5` owns these functions. Unit
@@ -16,8 +19,20 @@
 //!   `SmBSplineCurve::IsLine`). It is written for the only kind that reaches the base
 //!   class so far, [`BSplineCurve`] (whose `IsLine` override defers to it). Unit
 //!   `curve.curve_p3` ported `IsLinear` (non-virtual) because
-//!   `SmCurve::ComputeCrvsNormal` calls it on every input curve. The rest of the unit
-//!   (the [`Curve`] dispatch of `IsLine` included) is not ported yet.
+//!   `SmCurve::ComputeCrvsNormal` calls it on every input curve. Unit `curve.curve_p1`
+//!   ported the [`Curve`] dispatch of `IsLine` (`SmCurve::TessellateByBisection` calls
+//!   it on every curve; the base body is written once more over [`Curve`] for the
+//!   kinds without an override) and the new-cache branch of `CacheMakeOrValidate`
+//!   ([`make_curve_cache`]: `SmCurve::GlobalPointSolve` gets the curve's cache through
+//!   `SmCacheMgr::GetOrCreateObjectCache`). The rest of the unit is not ported yet;
+//!   its porter should route [`crate::geom::a_object::get_or_create_object_cache`]'s
+//!   `CacheMaker::Curve` through [`make_curve_cache`].
+//! - **Caches.** Upstream keeps the cache on the curve and reuses it until the curve
+//!   changes; [`make_curve_cache`] builds a fresh one for the caller. The build is
+//!   deterministic, so a cache built per call holds the same spans and tree.
+//!   `cpOldCache` (an existing cache) is the caller's to reuse; the `SM_OC_CURVE`
+//!   type check and the context check have no counterpart (a [`Curve`] always has
+//!   the kernel's context).
 //! - **Out-params.** `rLinePoint` / `rLineVector` are returned with the flag as
 //!   `Some((point, vector))`; `IsLinear`'s optional outputs are the fields of
 //!   [`Linearity`] (`want_deviation` stands for a non-`NULL` `pOptActualDeviation`).
@@ -27,10 +42,12 @@
 //!   propagated.
 
 use crate::curve::curve::p2::{Curve, CurveKind, BSPLINE_CURVE_TYPE};
+use crate::curve::curve_cache::{CurveCache, CurveCacheOptions};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 
@@ -110,6 +127,153 @@ pub fn is_line_base(
 
     // Looks like a line.
     Ok(Some((start_pt, base_vec)))
+}
+
+/// `SmCurve::IsLine` (the base-class body) for any [`Curve`]: as [`is_line_base`],
+/// through the curve's virtual queries.
+///
+/// # Errors
+///
+/// Those of the degree, control point count and rationality queries;
+/// [`SolidError::Unported`] from the evaluations.
+fn curve_is_line_base(curve: &Curve, num_samples: u64, tol: f64) -> Result<Option<(Point3, Vec3)>> {
+    let num_samples = num_samples.max(3);
+
+    // locals
+    let domain = curve.natural_interval();
+    // (GetEnds has no status upstream)
+    let (start_pt, end_pt) = match ignored(curve.ends())? {
+        Some(e) => (e.start, e.end),
+        None => (Vec3::UNDEF, Vec3::UNDEF),
+    };
+
+    let base_vec = end_pt - start_pt;
+    if base_vec.length_squared() < tol * tol {
+        return Ok(None);
+    }
+
+    // A quick check:
+    if curve.degree()? == 1 && curve.number_control_points()? == 2 && !curve.is_rational()? {
+        return Ok(Some((start_pt, base_vec)));
+    }
+
+    let num_spans = (num_samples - 1) as f64;
+
+    // standard step vector: total base vector divided by number of spans
+    let standard_vec = base_vec / num_spans;
+
+    let mut pt1 = start_pt;
+    let mut pt_vec = [Vec3::UNDEF; 2];
+    for ii in 1..num_samples {
+        let pt0 = pt1;
+
+        let t = if ii == num_samples - 1 {
+            domain.max()
+        } else {
+            domain.evaluate(ii as f64 / num_spans)
+        };
+
+        // exact tangent values (status ignored)
+        if let Some(v) = ignored(curve.evaluate(t, 1, false, false))? {
+            for (d, s) in pt_vec.iter_mut().zip(v) {
+                *d = s;
+            }
+        }
+        pt1 = pt_vec[0];
+        let test_vec = pt1 - pt0;
+        let error = test_vec - standard_vec;
+        if error.length_squared() > tol * tol {
+            return Ok(None);
+        }
+
+        // Check angle.
+        if !pt_vec[1].is_parallel_to(base_vec, 1.0) {
+            return Ok(None);
+        }
+    }
+
+    // Looks like a line.
+    Ok(Some((start_pt, base_vec)))
+}
+
+/// `SmCurve::CacheMakeOrValidate` building a new cache: the curve's [`CurveCache`]
+/// over its natural interval, a full tree with chord height tolerance
+/// `ApproximateLength(5) / min(250, 30 * spans)`, angle tolerance 15 degrees,
+/// propagated parent data and minimum parametric ratio `0.0001`, tessellated.
+/// `handle` is the curve's handle in the caller's object space (the tree's owner
+/// object).
+///
+/// # Errors
+///
+/// Those of the length and knot count queries and of [`CurveCache::tessellate`]
+/// (upstream then has no cache).
+pub fn make_curve_cache<O: Copy + PartialEq>(
+    k: &Kernel,
+    curve: &Curve,
+    handle: Option<O>,
+) -> Result<CurveCache<O>> {
+    // cast Object to SmCurve and get its interval
+    let ivl = curve.natural_interval();
+
+    // pick dChordHeightTol and dAngularTol tessellation control parameter values
+
+    // get an Idea of the curve's size.
+    let length = curve.approximate_length(&ivl, 5, false)?.0;
+    // (int arithmetic: GetNumberNaturalKnots() - 1, then 30 * NumberOfSpans)
+    let number_of_spans = curve.number_natural_knots()? as i64 - 1;
+    let chord_factor = 250.min(30 * number_of_spans) as f64; // 0.004 of length may be too tight
+
+    // set chordHeight tolerance based on curve size
+    let chord_height_tol = length / chord_factor;
+
+    // set angular tolerance
+    let angular_tol_deg = 15.0; // 15 degrees might be ok
+
+    // construct new CurveCache Object
+    let mut cache = CurveCache::new(
+        curve.clone(),
+        ivl,
+        CurveCacheOptions {
+            make_full_tree: true,
+            chord_height_tolerance: chord_height_tol,
+            angle_tol_deg: angular_tol_deg,
+            off_axis_tolerance: 0.0,
+            min_segments: 0,
+            compute_aux_tree_data: true,
+            max_3d_distance: 0.0,
+            min_parametric_ratio: 0.0001,
+        },
+    );
+    cache.set_curve_handle(handle);
+
+    // build the CruveCache's curve subdivision tree
+    cache.tessellate(k)?;
+    Ok(cache)
+}
+
+impl Curve {
+    /// `IsLine(lNumSamples, dTol, ..)`: the line point and vector when the curve is a
+    /// straight, constant-speed line ([`BSplineCurve::is_line`] for B-splines and
+    /// hyperbolas, always for a line, else the base body sampling `num_samples`
+    /// points as [`is_line_base`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the overrides and of the curve queries; [`SolidError::Unported`] from
+    /// the evaluations.
+    pub fn is_line(&self, num_samples: u64, tol: f64) -> Result<Option<(Point3, Vec3)>> {
+        match self.kind() {
+            CurveKind::BSpline(c) => c.is_line(num_samples, tol),
+            CurveKind::Hyperbola(c) => c.base().is_line(num_samples, tol),
+            CurveKind::Line(l) => Ok(Some(l.is_line())),
+            CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Projected(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => curve_is_line_base(self, num_samples, tol),
+        }
+    }
 }
 
 /// Result of [`Curve::is_linear`] (`SmCurve::IsLinear`).

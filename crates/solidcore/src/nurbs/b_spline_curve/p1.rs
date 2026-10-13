@@ -108,8 +108,9 @@
 //! - **Back-edges.** `CalculateContinuities` calls `SmCurve::EvaluateContinuity`
 //!   and `Tessellate` calls `SmCurve::ApproximateLength` (both in
 //!   [`crate::curve::curve::p2`]) and `SmCurve::TessellateByBisection`
-//!   (`curve.curve_p1`), which returns [`SolidError::Unported`] until that unit is
-//!   ported. `IsKindOf` adds `SmBSplineCurve_TYPE` to `SmCurve::IsKindOf`.
+//!   ([`crate::curve::curve::Curve::tessellate_by_bisection`], run on a
+//!   [`crate::curve::curve::Curve`] made of a copy of the B-spline).
+//!   `IsKindOf` adds `SmBSplineCurve_TYPE` to `SmCurve::IsKindOf`.
 
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::error::{Result, SolidError};
@@ -387,19 +388,21 @@ fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize)
     Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
 }
 
-/// `SmCurve::TessellateByBisection` of `curve`.
+/// `SmCurve::TessellateByBisection` of `curve` (through the [`crate::curve::curve::Curve`]
+/// dispatch of its virtual queries, all B-spline overrides).
 fn tessellate_by_bisection(
-    _curve: &BSplineCurve,
-    _interval: &Extent1d,
-    _chord_height_tol: f64,
-    _angle_tol_deg: f64,
-    _max_length: f64,
+    curve: &BSplineCurve,
+    interval: &Extent1d,
+    chord_height_tol: f64,
+    angle_tol_deg: f64,
+    max_length: f64,
 ) -> Result<Tessellation> {
-    // UNPORTED(curve.curve_p1): SmCurve::TessellateByBisection
-    Err(SolidError::Unported {
-        upstream: "SmCurve::TessellateByBisection",
-        unit: "curve.curve_p1",
-    })
+    crate::curve::curve::Curve::from(curve.clone()).tessellate_by_bisection(
+        interval,
+        chord_height_tol,
+        angle_tol_deg,
+        max_length,
+    )
 }
 
 impl BSplineCurve {
@@ -993,8 +996,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from `SmCurve::TessellateByBisection`
-    /// (`curve.curve_p1`), which is not ported yet.
+    /// Those of `SmCurve::TessellateByBisection`
+    /// ([`crate::curve::curve::Curve::tessellate_by_bisection`]).
     pub fn tessellate(
         &self,
         interval: &Extent1d,
@@ -1807,13 +1810,9 @@ mod tests {
         assert_eq!(conts.len(), 3);
         assert_eq!(conts[0], ContinuityType::Discontinuous);
         assert_eq!(conts[1], min_c);
-        assert!(matches!(
-            c.tessellate(&c.natural_interval(), 0.1, 10.0, 0),
-            Err(SolidError::Unported {
-                unit: "curve.curve_p1",
-                ..
-            })
-        ));
+        let t = c.tessellate(&c.natural_interval(), 0.1, 10.0, 0).unwrap();
+        assert_eq!(t.parameters.first().copied(), Some(0.0));
+        assert_eq!(t.parameters.last().copied(), Some(1.0));
     }
 
     #[test]

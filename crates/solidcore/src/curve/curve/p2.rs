@@ -56,7 +56,7 @@
 //! | [`test_step`], [`TessStepResult`]                 | `sm_TestStep`, `SmTessStepTestResultType`        |
 //! | [`find_test_params`]                              | `sm_FindTestParams` (static)                     |
 //! | [`CcGlobalSolver`]                                | `SmCCGlobalSolver` (constructor, `BranchMayContainAnswers`) |
-//! | [`CpGlobalSolver`]                                | `SmCPGlobalSolver` (constructor, `BranchMayContainAnswers`) |
+//! | [`CpGlobalSolver`]                                | `SmCPGlobalSolver` (constructor, `BranchMayContainAnswers`; `LocalSolve` is unit `curve.curve_p1`) |
 //! | [`CurvePropertyGs`], [`CurvePropertyType`]        | `SmCurvePropertyGS` (constructor, `FindBestSubdivisionNode`, `BranchMayContainAnswers`), `SmCurvePropertyType` |
 //! | [`CciGlobalSolver`]                               | `SmCCIGlobalSolver` (constructor)                |
 //! | [`LengthIntegrand`]                               | `SmLengthIFEO` (constructor, `Evaluate`)         |
@@ -110,7 +110,8 @@
 //!   end parameter is then the start parameter).
 //! - **Solvers.** The four curve solvers are structs holding a [`GlobalSolver`] and
 //!   implementing [`GlobalSolve`]. Their `LocalSolve` overrides belong to units
-//!   `curve.curve_p9` (`SmCCGlobalSolver`), `curve.curve_p1` (`SmCPGlobalSolver`),
+//!   `curve.curve_p9` (`SmCCGlobalSolver`), `curve.curve_p1` (`SmCPGlobalSolver`,
+//!   ported there; the solver carries its curve, [`CpGlobalSolver::curve`]),
 //!   `curve.curve_p3` (`SmCurvePropertyGS`, ported there; the solver carries the
 //!   curve it evaluates, [`CurvePropertyGs::curve`], since a tree's owner object is
 //!   only the caller's handle) and `curve.curve_p7`
@@ -2813,6 +2814,10 @@ pub struct CpGlobalSolver<'t, O> {
     pub base: GlobalSolver<'t, O>,
     /// `m_crInterval`: the curve interval to query.
     pub interval: Extent1d,
+    /// The curve the curve tree decomposes (upstream reads it back from the tree's
+    /// curve cache, `GetOwner()->GetCurve()`); `None` until set with
+    /// [`CpGlobalSolver::with_curve`].
+    pub curve: Option<&'t Curve>,
 }
 
 impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
@@ -2822,7 +2827,16 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         Self {
             base: GlobalSolver::with_trees(point_tree, curve_tree, 1),
             interval,
+            curve: None,
         }
+    }
+
+    /// The solver with the curve its curve tree decomposes (needed by
+    /// `LocalSolve`).
+    #[must_use]
+    pub const fn with_curve(mut self, curve: &'t Curve) -> Self {
+        self.curve = Some(curve);
+        self
     }
 
     /// `SmCPGlobalSolver::BranchMayContainAnswers`: the base test, except for
@@ -2893,12 +2907,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CpGlobalSolver<'t, O> {
         self.may_contain_answers(branch)
     }
 
-    fn local_solve(&mut self, _branch: &Branch) -> Result<bool> {
-        // UNPORTED(curve.curve_p1): SmCPGlobalSolver::LocalSolve
-        Err(SolidError::Unported {
-            upstream: "SmCPGlobalSolver::LocalSolve",
-            unit: "curve.curve_p1",
-        })
+    fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
+        self.local_solve_branch(branch)
     }
 }
 

@@ -387,7 +387,9 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
             let CurveKind::Hyperbola(h) = curve.kind_mut() else {
                 return Err(harness("not a hyperbola"));
             };
+            let k = solidcore::kernel::Kernel::default();
             let sols = solid!(h.global_point_solve_step(
+                &k,
                 &Extent1d::from_min_max(ivl[0], ivl[1]),
                 sop,
                 v3(*p),
@@ -397,6 +399,9 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
                 None,
             ));
             o.push(sols.len() as f64);
+            for s in &sols {
+                o.push(s.start.parameters[0]);
+            }
         }
         OpIn::Eq { other } => {
             let other = Curve::from(build(other));
