@@ -1792,7 +1792,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "23 fns; largest: SmSurface::EvaluateNormal, SmSurface::FindDegenParamForDirection, SmSurface::LocalCurveSolve, SmSurface::IsClosed; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(26), intersect.adv_surface_intersector(1), intersect.surface_intersector_p5(1), topology.face_p4(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "CO-PORTED in intersect.surface_intersector_p1 (PR #33): SmSurface::IsClosed (default tolerance, no continuity; SmPlane override) -> private helper surface_is_closed in intersect::surface_intersector::p1; replace it with the real Surface::is_closed. 23 fns; largest: SmSurface::EvaluateNormal, SmSurface::FindDegenParamForDirection, SmSurface::LocalCurveSolve, SmSurface::IsClosed; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(26), intersect.adv_surface_intersector(1), intersect.surface_intersector_p5(1), topology.face_p4(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "intersect.surface_tracer"
@@ -1904,7 +1904,7 @@ tests = ["SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_exten
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "75 fns; largest: SmSurface::CacheMakeOrValidate, SmSurface::IsDegenerateCurve, SmSurface::CreateSilhouetteCurves, SmSurface::IsDegeneratePoint; cycle back-edges (call into later units; stub or co-port): surface.offset_surface(3), mass.integrator(2), surface.srf_in_volume(2), intersect.surface_silhouette(1), intersect.surface_tracer(1), topology.face_p4(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit"
+notes = "CO-PORTED in intersect.surface_intersector_p1 (PR #33): SmSurface::EvaluateDirectionalDerivs, SmSurface::Evaluate1stDerivatives (one-line Evaluate wrappers) -> private helpers in intersect::surface_intersector::p1. 75 fns; largest: SmSurface::CacheMakeOrValidate, SmSurface::IsDegenerateCurve, SmSurface::CreateSilhouetteCurves, SmSurface::IsDegeneratePoint; cycle back-edges (call into later units; stub or co-port): surface.offset_surface(3), mass.integrator(2), surface.srf_in_volume(2), intersect.surface_silhouette(1), intersect.surface_tracer(1), topology.face_p4(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_p6"
@@ -2125,10 +2125,10 @@ soft_depends_on = ["curve.curve_p2", "curve.curve_p3", "curve.curve_p4", "curve.
 est_lines = 1816
 layer = 32
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "40 fns; largest: SmSurfaceIntersector::TestSpanAccuracy, sm_IsPointOnCurve, SmSurfaceIntersector::AddStartPoint, SmSurfaceIntersector::RefinePoint; cycle back-edges (call into later units; stub or co-port): blend.fillet_executive_p1(1), blend.fillet_intersector(1), intersect.adv_surface_intersector(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 1510 cases (10 inline edge cases + 1500 generated programs over planes, open/rational/closed-tube B-spline surfaces, self-intersection, sub/cut/disjoint/degenerate/fillet domains, scales 1e-6..1e5), 1406 pass bit-identical (max_rel_err 0), 104 deferred (surface.surface_p3 44, surface.surface_p11 36, surface.surface_p7 14, surface.surface_p5 6, surface.surface_p1 4); --perturb SENSITIVE 1406/1406. Co-ports SmSurface::IsClosed (C0 path) + EvaluateDirectionalDerivs/Evaluate1stDerivatives as private helpers (see surface.surface_p7/_p1 notes). EvaluateLawPoint has no cases (needs SmFilletLaw, SmOffsetSurface). Wired SmTsectPnt into Surface::point_based_surface_intersect (surface.surface_p2). 40 fns; largest: SmSurfaceIntersector::TestSpanAccuracy, sm_IsPointOnCurve, SmSurfaceIntersector::AddStartPoint, SmSurfaceIntersector::RefinePoint; cycle back-edges (call into later units; stub or co-port): blend.fillet_executive_p1(1), blend.fillet_intersector(1), intersect.adv_surface_intersector(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "intersect.topology_solver_p1"

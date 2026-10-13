@@ -739,6 +739,17 @@ by area within each severity.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput` where upstream would read past the arrays.
 
+### Intersection
+
+#### UB-74. `PointBasedSurfaceIntersect` writes past its 20-point array
+- **Location:** `source/SMLib/src/SmSurface.cpp:30588` `SmSurface::PointBasedSurfaceIntersect` (UV point version).
+- **What happens:** The points go into `SmTsectPnt saTsectPnts[20]`; the size limit and the equal-length check of the two point arrays are `SM_ASSERT`s only, so 20 or more points write past the stack array, and a shorter second array is read past its end.
+- **Trigger:** 20 point pairs, or two UV point arrays of different lengths.
+- **How found:** read during porting (`intersect.surface_intersector_p1`).
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** `Surface::point_based_surface_intersect` returns `InvalidInput` for those inputs.
+
 ## Hang
 
 #### HANG-1. `SmExtent1d::PeriodicWrap` steps one period per iteration
@@ -1327,6 +1338,44 @@ by area within each severity.
 - **Confirmed:** yes (fixtures `conts_*_rep` of `surface.b_spline_volume_n_lib`).
 - **Severity:** wrong result.
 - **Rust port:** Ported as written.
+
+### Intersection
+
+#### WR-50. `AddStartPoint` "replaces" a bounded start point by assigning a local pointer
+- **Location:** `source/SMLib/src/SmSurfaceIntersector.cpp:3901` `SmSurfaceIntersector::AddStartPoint`.
+- **What happens:** For a bounded/exact start point pair whose stored point is the bounded one, the "replace pTSP with rStartTSP" branch only sets the loop variable `pTSP = &rStartTSP` and reports a match. The exact candidate is dropped and the bounded point stays in `m_vStartPoints`, the opposite of what the comment (and the function header) describe.
+- **Trigger:** A bounded start point already in the list, then an exact one within `2 * m_dThisApproxTol3d` with a matching curve tangent.
+- **How found:** read during porting.
+- **Confirmed:** no (the branch needs `smsurf_EvaluateNormalSection`, which the Rust side does not have yet, so those difftest cases are deferred).
+- **Severity:** wrong result.
+- **Rust port:** Faithful (the candidate is not added).
+
+#### WR-51. `IsPointOnStartPoint` compares squared distances with a length tolerance
+- **Location:** `source/SMLib/src/SmSurfaceIntersector.cpp:7515` `SmSurfaceIntersector::IsPointOnStartPoint`.
+- **What happens:** `DistanceBetweenSquared(...) < m_dThisApproxTol3d`: the effective tolerance is `sqrt(tol)`, far looser than intended for small tolerances (and tighter above 1).
+- **Trigger:** Any call; e.g. `tol = 1e-6` accepts points 1e-3 apart.
+- **How found:** read during porting.
+- **Confirmed:** yes (`intersect.surface_intersector_p1` difftest, `edge_start_points` and generated `on_start` ops agree with the squared test).
+- **Severity:** wrong result.
+- **Rust port:** Faithful.
+
+#### WR-52. `SER` inside `SmBoolean` functions reports a failure as `TRUE`
+- **Location:** `source/SMLib/src/SmSurfaceIntersector.cpp:4195` `sm_IsPointOnCurve` and `:7376`, `:7391` `SmSurfaceIntersector::IsPointOnCurve`.
+- **What happens:** `SER(status)` returns the non-zero `SmStatus` from a function returning `SmBoolean`, so a failing point solve, curve evaluation or curve drop makes the point count as "on the curve".
+- **Trigger:** A curve whose `EvaluatePoint` or `DropPoint` fails, or a failing Hermite point solve.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Faithful (`Ok(true)` on such an error).
+
+#### WR-53. `TestSpanAccuracy` compares a tangent length with an angle tolerance
+- **Location:** `source/SMLib/src/SmSurfaceIntersector.cpp:3448` `SmSurfaceIntersector::TestSpanAccuracy` (upstream's own `GWC_NEEDS_WORK` note).
+- **What happens:** `rNextTSP.CrvDeriv().Length() < m_dSteppingParallelTolRadians` (`SM_EFF_ZERO`): a length is tested against a radian tolerance, so the check only catches (near) zero tangents.
+- **Trigger:** A next point with a tangent shorter than `1e-12`.
+- **How found:** read during porting.
+- **Confirmed:** yes (`intersect.surface_intersector_p1` difftest, `edge_span_angle`).
+- **Severity:** wrong result (unit mix-up).
+- **Rust port:** Faithful.
 
 ## Docs
 
