@@ -60,6 +60,7 @@ use crate::nurbs::crv_fit::p2::{func_interp_given_params, knots_derivs};
 use crate::nurbs::crv_tool::p2::make_compatible;
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{dist_cpt_cpt, dist_pt_pt, transform_matrix_from_axes, Frame};
+use crate::nurbs::index::{at, at2, oob, put};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{CPoint, MODEL_TOL};
 use crate::nurbs::srf_adv::p2::{eval_pt_normal_deriv, extend_by_dist_at_depth, SrfContinuity};
@@ -81,36 +82,6 @@ const OP_MAXD: &str = "nurbs::srf_adv::p1::offset_get_max_deriv";
 const OP_UNB: &str = "nurbs::srf_adv::p1::eval_pt_derivs_unbounded";
 const OP_SPINE: &str = "nurbs::srf_adv::p1::create_skin_spine";
 const OP_VFIELD: &str = "nurbs::srf_adv::p1::cross_boundary_derivs_vector_field";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (upstream would access outside its arrays)",
-    }
-}
-
-/// `v[i]`.
-fn at<T: Copy>(v: &[T], i: usize, op: &'static str) -> Result<T> {
-    v.get(i).copied().ok_or_else(|| oob(op))
-}
-
-/// `v[i] = x`.
-fn put<T>(v: &mut [T], i: usize, x: T, op: &'static str) -> Result<()> {
-    *v.get_mut(i).ok_or_else(|| oob(op))? = x;
-    Ok(())
-}
-
-/// `d[i][j]`.
-fn at2<T: Copy>(d: &[Vec<T>], i: usize, j: usize, op: &'static str) -> Result<T> {
-    d.get(i)
-        .and_then(|r| r.get(j))
-        .copied()
-        .ok_or_else(|| oob(op))
-}
 
 // ---- N_SrfExtendByDist ----------------------------------------------------------------
 
@@ -527,7 +498,6 @@ enum SpineData {
 ///
 /// [`WEIGHT_MIN`]: crate::nurbs::srf_basic::WEIGHT_MIN
 /// [`WEIGHT_MAX`]: crate::nurbs::srf_basic::WEIGHT_MAX
-#[allow(clippy::too_many_lines)]
 pub fn create_skin_spine(
     profiles: &mut [Curve],
     spine: &Curve,
@@ -542,17 +512,17 @@ pub fn create_skin_spine(
     match opts.derivs {
         SkinDerivs::None => {
             if deg > k {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
         }
         SkinDerivs::Ends => {
             if deg < 2 || deg > k + 2 {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
         }
         SkinDerivs::All => {
             if !(2..=3).contains(&deg) {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
         }
     }
@@ -626,7 +596,7 @@ pub fn create_skin_spine(
     let udir = match opts.dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
     };
     let nc = first.n();
     let deg_c = first.degree();
@@ -870,10 +840,10 @@ pub fn cross_boundary_derivs_vector_field(
     let uk = cur.knots();
     let vk = vfield.knots();
     if uk.len() != vk.len() {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if uk.iter().zip(vk).any(|(a, b)| a != b) {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     let pw = cur.cpts();

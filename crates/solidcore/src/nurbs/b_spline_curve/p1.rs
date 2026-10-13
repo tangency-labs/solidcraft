@@ -555,10 +555,17 @@ impl BSplineCurve {
     }
 
     /// The NURB for read-only callers (`GetOrCreateGwNurbPointer` through a const
-    /// cast).
-    fn nurb_ref(&self) -> Result<&Curve> {
+    /// cast), or `SM_ERR` without one (upstream dereferences `NULL`).
+    pub(super) fn nurb_ref(&self) -> Result<&Curve> {
         self.nurb
             .as_ref()
+            .ok_or_else(|| SolidError::sm_err(OP_NURB))
+    }
+
+    /// The NURB for editing, or `SM_ERR` without one (upstream dereferences `NULL`).
+    pub(super) fn nurb_ref_mut(&mut self) -> Result<&mut Curve> {
+        self.nurb
+            .as_mut()
             .ok_or_else(|| SolidError::sm_err(OP_NURB))
     }
 

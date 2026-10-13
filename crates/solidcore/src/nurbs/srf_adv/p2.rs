@@ -8,7 +8,7 @@
 //! | [`extend_by_dist_at_depth`]                  | `ST_surxsdr`             |
 //! | [`SrfContinuity`]                            | `NL_G1`, `NL_G2`, `NL_CMAX`, `NL_G1R` |
 //! | [`MAX_EXTEND_DEPTH`]                         | recursion limit of `ST_surxsdr` |
-//! | [`KNOT_SNAP_TOL`]                            | `KN_TOL` (file-private)  |
+//! | [`KNOT_TOL`] (defined in `p3`)               | `KN_TOL` (file-private)  |
 //! | [`eval_pt_normal_deriv`], [`NormalDerivs`]   | `N_SrfEvalPtNormalDeriv` |
 //!
 //! Deviations:
@@ -53,13 +53,10 @@ use crate::nurbs::geom::{cpt_reflect, normalize, pt_along_vector, Plane};
 use crate::nurbs::index::{get, oob, set, storage, sx, ux};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{float_op_is_bad, CPoint, FloatOp, MatrixType, RealMatrix, MODEL_TOL};
+use crate::nurbs::srf_adv::p3::KNOT_TOL;
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 use crate::nurbs::srf_tool::p1::{extract_iso_crv, insert_knot};
 use crate::nurbs::srf_tool::p2::remove_knot_conditional;
-
-/// Upstream `KN_TOL`: a reflection parameter closer than `KN_TOL * (U[r] - U[0])` to
-/// an interior knot is snapped to it.
-pub const KNOT_SNAP_TOL: f64 = 1.0e-6;
 
 /// Recursion limit of [`extend_by_dist_at_depth`] (upstream: `depth > 10` fails).
 pub const MAX_EXTEND_DEPTH: usize = 10;
@@ -141,10 +138,6 @@ fn pascal(i: isize, j: isize, op: &'static str) -> Result<f64> {
         .and_then(|i| PASCAL_TRI.get(i))
         .ok_or_else(|| oob(op))?;
     Ok(get(row, j, op)? as f64)
-}
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
 }
 
 /// `w[j][i]` from `w[i][j]`.
@@ -279,7 +272,7 @@ pub fn extend_by_dist_at_depth(
         }
     }
     if kk == 0 {
-        return Err(nlib(OP, NlibCode::Numerical));
+        return Err(SolidError::nlib(OP, NlibCode::Numerical));
     }
     ext /= kk as f64;
 
@@ -314,7 +307,7 @@ pub fn extend_by_dist_at_depth(
             jj = ii;
         }
     }
-    if d1 < KNOT_SNAP_TOL * (ker - ke0) {
+    if d1 < KNOT_TOL * (ker - ke0) {
         refl = get(ke, jj, OP)?;
     }
 
@@ -622,7 +615,7 @@ pub fn extend_by_dist_at_depth(
                     for jj in 0..pq {
                         let w = get(row, jj, OP)?.w;
                         if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                            return Err(nlib(OP, NlibCode::Weight));
+                            return Err(SolidError::nlib(OP, NlibCode::Weight));
                         }
                     }
                 }
@@ -664,7 +657,7 @@ pub fn extend_by_dist_at_depth(
                     for jj in 1..=pq {
                         let w = get(row, kby + jj, OP)?.w;
                         if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                            return Err(nlib(OP, NlibCode::Weight));
+                            return Err(SolidError::nlib(OP, NlibCode::Weight));
                         }
                     }
                 }
@@ -928,7 +921,7 @@ pub fn eval_pt_normal_deriv(
     // Derivatives of |S_u x S_v|.
     let sm = s.dot(s).sqrt();
     if float_op_is_bad(1.0, sm, FloatOp::Division) {
-        return Err(nlib(OP, NlibCode::Numerical));
+        return Err(SolidError::nlib(OP, NlibCode::Numerical));
     }
     let os = 1.0 / sm;
     let mut mlt = os;

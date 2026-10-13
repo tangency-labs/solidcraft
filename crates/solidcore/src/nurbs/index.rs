@@ -1,6 +1,6 @@
 //! Bounds-checked access with upstream's signed `NL_INDEX` arithmetic, shared by the
 //! NLib ports that keep upstream's index loops (`nurbs::funcs_adv`,
-//! `nurbs::crv_nurb`).
+//! `nurbs::crv_nurb`, `nurbs::srf_adv`, ...).
 //!
 //! Upstream: no counterpart. NLib indexes raw C arrays with signed `NL_INDEX` values
 //! (`a[i]`, `a[i][j]`) and allocates them with `N_AllocReal1dArray(hi)` and friends
@@ -14,6 +14,8 @@
 //! | `get2`, `set2`        | `a[i][j]`, `a[i][j] = v` (fixed-size rows) |
 //! | `storage`             | `N_AllocReal1dArray(hi)` and friends      |
 //! | `sx`, `ux`            | `NL_INDEX` <-> array length conversions   |
+//! | `at`, `put`           | `a[i]`, `a[i] = v` with a `usize` index    |
+//! | `at2`, `put2`         | `a[i][j]`, `a[i][j] = v` (`Vec` rows, `usize`) |
 
 use crate::error::{Result, SolidError};
 
@@ -85,6 +87,31 @@ pub(crate) fn set2<T, const N: usize>(
         .and_then(|i| a.get_mut(i))
         .ok_or_else(|| oob(op))?;
     set(row, j, v, op)
+}
+
+/// `a[i]` with an unsigned index.
+#[inline]
+pub(crate) fn at<T: Copy>(a: &[T], i: usize, op: &'static str) -> Result<T> {
+    a.get(i).copied().ok_or_else(|| oob(op))
+}
+
+/// `a[i] = v` with an unsigned index.
+#[inline]
+pub(crate) fn put<T>(a: &mut [T], i: usize, v: T, op: &'static str) -> Result<()> {
+    *a.get_mut(i).ok_or_else(|| oob(op))? = v;
+    Ok(())
+}
+
+/// `a[i][j]` of `Vec` rows with unsigned indices.
+#[inline]
+pub(crate) fn at2<T: Copy>(a: &[Vec<T>], i: usize, j: usize, op: &'static str) -> Result<T> {
+    at(a.get(i).ok_or_else(|| oob(op))?, j, op)
+}
+
+/// `a[i][j] = v` of `Vec` rows with unsigned indices.
+#[inline]
+pub(crate) fn put2<T>(a: &mut [Vec<T>], i: usize, j: usize, v: T, op: &'static str) -> Result<()> {
+    put(a.get_mut(i).ok_or_else(|| oob(op))?, j, v, op)
 }
 
 /// Zero-filled storage for `hi + 1` entries (`N_AllocReal1dArray(hi)` and friends).

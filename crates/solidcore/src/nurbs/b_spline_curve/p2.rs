@@ -99,7 +99,6 @@ use crate::nurbs::b_spline_curve::p1::{
     KnotType, NurbCircleParam,
 };
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -110,9 +109,14 @@ use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 const CRV_ON_SURF_TYPE: i64 = BSplineCurve::TYPE - 33 + 48;
 
 const OP_BBOX: &str = "nurbs::b_spline_curve::p2::BSplineCurve::calculate_bounding_box";
+const OP_ANALYTIC: &str = "nurbs::b_spline_curve::p2::BSplineCurve::create_analytic_curve";
+const OP_REPEATED: &str =
+    "nurbs::b_spline_curve::p2::BSplineCurve::has_repeated_end_control_points";
+const OP_IS_LINE: &str = "nurbs::b_spline_curve::p2::BSplineCurve::is_line";
+const OP_UNIQUE: &str = "nurbs::b_spline_curve::p2::BSplineCurve::number_of_unique_knots";
+const OP_MATCH: &str = "nurbs::b_spline_curve::p2::BSplineCurve::match_weights";
 const OP_JOIN: &str = "nurbs::b_spline_curve::p2::BSplineCurve::create_by_joining";
 const OP_OFFSET: &str = "nurbs::b_spline_curve::p2::BSplineCurve::create_simple_offset";
-const OP_NURB: &str = "nurbs::b_spline_curve::p2::BSplineCurve::nurb";
 const OP_C0: &str = "nurbs::b_spline_curve::p2::BSplineCurve::is_piecewise_c0";
 const OP_EXPERT: &str = "nurbs::b_spline_curve::p2::BSplineCurve::control_points_expert";
 const OP_POLYGON: &str = "nurbs::b_spline_curve::p2::BSplineCurve::polygon";
@@ -327,20 +331,6 @@ fn form_from_code(code: u64) -> Option<BSplineCurveForm> {
 }
 
 impl BSplineCurve {
-    /// The NURB, or `SM_ERR` without one (upstream dereferences `NULL`).
-    fn nurb_p2(&self) -> Result<&Curve> {
-        self.nurb
-            .as_ref()
-            .ok_or_else(|| SolidError::sm_err(OP_NURB))
-    }
-
-    /// The NURB for editing, or `SM_ERR` without one.
-    fn nurb_p2_mut(&mut self) -> Result<&mut Curve> {
-        self.nurb
-            .as_mut()
-            .ok_or_else(|| SolidError::sm_err(OP_NURB))
-    }
-
     /// Whether the curve has the form the general intersector makes: degree 3 and
     /// piecewise C0 (`IsIntersectorApprox`).
     ///
@@ -377,7 +367,7 @@ impl BSplineCurve {
 
         // locals
         let natural_interval = self.natural_interval();
-        let cur = self.nurb_p2()?;
+        let cur = self.nurb_ref()?;
         let pw = cur.cpts();
         let p = cur.degree();
         let n = cur.n();
@@ -673,7 +663,7 @@ impl BSplineCurve {
                         let knot = knots
                             .get(i)
                             .copied()
-                            .ok_or_else(|| invalid(OP_NURB, "knot index out of range"))?;
+                            .ok_or_else(|| invalid(OP_ANALYTIC, "knot index out of range"))?;
                         // (status ignored upstream)
                         let _ = c.insert_one_knot(knot, 1);
                     }
@@ -1074,7 +1064,7 @@ impl BSplineCurve {
         let at = |i: usize| {
             pw.get(i)
                 .copied()
-                .ok_or_else(|| invalid(OP_NURB, "control point index out of range"))
+                .ok_or_else(|| invalid(OP_REPEATED, "control point index out of range"))
         };
         let start_cpt_dist = dist_cpt_cpt(at(0)?, at(1)?);
         let end_cpt_dist = dist_cpt_cpt(at(i_n - 1)?, at(i_n)?);
@@ -1092,7 +1082,7 @@ impl BSplineCurve {
     ///
     /// `SM_ERR` without a NURB.
     pub fn canonical(&self) -> Result<CurveCanonical> {
-        let degree = self.nurb_p2()?.degree();
+        let degree = self.nurb_ref()?.degree();
         let (knots, knot_multiplicities) = self.knots(None)?;
         let (control_points, weights) = self.control_polygon()?;
         Ok(CurveCanonical {
@@ -1138,7 +1128,7 @@ impl BSplineCurve {
 
         // Return False for a zero-length line; a closed curve is not a line either.
         let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
-            return Err(invalid(OP_NURB, "empty control polygon"));
+            return Err(invalid(OP_IS_LINE, "empty control polygon"));
         };
         let end_vec = vec_of(last);
         let start_vec = vec_of(first);
@@ -1234,7 +1224,7 @@ impl BSplineCurve {
         }
 
         // ensure existence of m_pNurb (a plain B-spline cannot make one)
-        let cur = self.nurb_p2()?;
+        let cur = self.nurb_ref()?;
 
         // pass the call along
         is_ncrv_degenerate(cur, tol3d)
@@ -1258,7 +1248,7 @@ impl BSplineCurve {
         end: usize,
         stride: usize,
     ) -> Result<Vec<f64>> {
-        let cur = self.nurb_p2()?;
+        let cur = self.nurb_ref()?;
         let is_rational = self.is_rational()?;
         let dim = self.dim;
         let min_stride = dim.saturating_add(u64::from(form != ControlPointForm::NonRational));
@@ -1364,14 +1354,14 @@ impl BSplineCurve {
     ///
     /// `SM_ERR` without a NURB.
     pub fn number_of_unique_knots(&self) -> Result<usize> {
-        let cur = self.nurb_p2()?;
+        let cur = self.nurb_ref()?;
         let u = cur.knots();
         let p = cur.degree();
         // Copy unique knots and compute multiplicities
         let mut count = 0usize;
         for j in p..cur.m().saturating_sub(p) {
             let (Some(&a), Some(&b)) = (u.get(j), u.get(j + 1)) else {
-                return Err(invalid(OP_NURB, "knot index out of range"));
+                return Err(invalid(OP_UNIQUE, "knot index out of range"));
             };
             if !is_zero(a - b) {
                 count += 1;
@@ -1391,7 +1381,7 @@ impl BSplineCurve {
     /// `SM_EFF_ZERO`); `SM_ERR` without a NURB or when a span cannot be found.
     pub fn polygon(&self, interval: &Extent1d) -> Result<Vec<Point3>> {
         let natural_interval = self.natural_interval();
-        let cur = self.nurb_p2()?;
+        let cur = self.nurb_ref()?;
         let n = cur.n();
         let p = cur.degree();
 
@@ -1441,9 +1431,9 @@ impl BSplineCurve {
     /// `SM_ERR` for a different number of control points or a curve without NURB.
     pub fn match_weights(&mut self, other: &Self) -> Result<()> {
         let other_pts = other.control_points()?;
-        let our_pts = self.nurb_p2_mut()?.cpts_mut();
+        let our_pts = self.nurb_ref_mut()?.cpts_mut();
         if other_pts.len() != our_pts.len() {
-            return Err(SolidError::sm_err(OP_NURB));
+            return Err(SolidError::sm_err(OP_MATCH));
         }
 
         for (ours, theirs) in our_pts.iter_mut().zip(other_pts) {
@@ -1477,7 +1467,7 @@ impl BSplineCurve {
 
         let increment = new_degree - degree;
         let cur = self
-            .nurb_p2()?
+            .nurb_ref()?
             .elevate_degree(increment)
             .map_err(SolidError::nl_ser(OP_ELEVATE))?;
 
@@ -1498,7 +1488,7 @@ impl BSplineCurve {
         let t_new_max = 1.0 - (old_interval.min() - ivl.min()) / (ivl.max() - ivl.min());
         let t_new_min = 1.0 - (old_interval.max() - ivl.min()) / (ivl.max() - ivl.min());
 
-        self.nurb_p2_mut()?
+        self.nurb_ref_mut()?
             .reverse()
             .map_err(SolidError::nl_ser(OP_REVERSE))?;
 
@@ -1547,7 +1537,7 @@ impl BSplineCurve {
         point: Point3,
         weight: f64,
     ) -> Result<()> {
-        let pw = self.nurb_p2_mut()?.cpts_mut();
+        let pw = self.nurb_ref_mut()?.cpts_mut();
         if index >= pw.len() {
             return Err(SolidError::sm_err(OP_SET_CP));
         }
@@ -1770,6 +1760,7 @@ impl BSplineCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nurbs::crv_basic::Curve;
 
     fn line(a: Point3, b: Point3) -> BSplineCurve {
         BSplineCurve::create_line_segment(3, a, b).unwrap()

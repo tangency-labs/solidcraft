@@ -50,6 +50,7 @@ use crate::nurbs::crv_fit::p2::{calc_matrix, cpts_with_matrix, deriv_matrix, Mat
 use crate::nurbs::crv_tool::p2::make_compatible_knot_tol_traced;
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{cpts_are_colinear, dist_cpolygon, dist_pt_pt, ColinearDim};
+use crate::nurbs::index;
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{CPoint, MODEL_TOL};
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_TOL};
@@ -172,10 +173,7 @@ impl Ends {
 type Net = Vec<Vec<CPoint>>;
 
 fn oob() -> SolidError {
-    SolidError::InvalidInput {
-        operation: OP,
-        reason: "index out of range (upstream would access outside its arrays)",
-    }
+    index::oob(OP)
 }
 
 fn bad_input() -> SolidError {
@@ -220,11 +218,6 @@ fn crv(cur: &[Curve], i: usize) -> Result<&Curve> {
 /// `(n, m, Pw)` of a surface (`N_SrfGetCPts`).
 fn srf_cpts(s: &Surface) -> (usize, usize, Net) {
     (s.n(), s.m(), s.cpts())
-}
-
-/// `N_CPtsAreColinear` with the default `NL_MTOL`.
-fn colinear(a: CPoint, b: CPoint, c: CPoint, dim: ColinearDim) -> bool {
-    cpts_are_colinear(a, b, c, dim)
 }
 
 /// Upstream's weight adjustment of a derivative row or column (`N_AdjustWeightScale`
@@ -487,10 +480,10 @@ pub fn create_skin_srf_boundary_continuity(
             for r in rail.iter().flatten() {
                 let rw = r.cpts();
                 let nr = r.n();
-                if colinear(origin, at(rw, 0)?, at(rw, 1)?, ColinearDim::Three) {
+                if cpts_are_colinear(origin, at(rw, 0)?, at(rw, 1)?, ColinearDim::Three) {
                     trl = true;
                 }
-                if colinear(at(rw, dec1(nr)?)?, at(rw, nr)?, origin, ColinearDim::Three) {
+                if cpts_are_colinear(at(rw, dec1(nr)?)?, at(rw, nr)?, origin, ColinearDim::Three) {
                     trl = true;
                 }
             }
@@ -597,19 +590,35 @@ pub fn create_skin_srf_boundary_continuity(
                     if dir == Direction::U {
                         if let Some(d) = d0 {
                             let ms = d.m();
-                            if !colinear(at2(&sul, 0, 0)?, at2(&sul, 1, 0)?, at(r0w, 1)?, four) {
+                            if !cpts_are_colinear(
+                                at2(&sul, 0, 0)?,
+                                at2(&sul, 1, 0)?,
+                                at(r0w, 1)?,
+                                four,
+                            ) {
                                 return Err(bad_input());
                             }
-                            if !colinear(at2(&sul, 0, ms)?, at2(&sul, 1, ms)?, at(r1w, 1)?, four) {
+                            if !cpts_are_colinear(
+                                at2(&sul, 0, ms)?,
+                                at2(&sul, 1, ms)?,
+                                at(r1w, 1)?,
+                                four,
+                            ) {
                                 return Err(bad_input());
                             }
                         }
                         if let Some(d) = d1 {
                             let ms = d.m();
-                            if !colinear(r0l, at2(&sur_r, 0, 0)?, at2(&sur_r, 1, 0)?, four) {
+                            if !cpts_are_colinear(r0l, at2(&sur_r, 0, 0)?, at2(&sur_r, 1, 0)?, four)
+                            {
                                 return Err(bad_input());
                             }
-                            if !colinear(r1l, at2(&sur_r, 0, ms)?, at2(&sur_r, 1, ms)?, four) {
+                            if !cpts_are_colinear(
+                                r1l,
+                                at2(&sur_r, 0, ms)?,
+                                at2(&sur_r, 1, ms)?,
+                                four,
+                            ) {
                                 return Err(bad_input());
                             }
                         }
@@ -617,19 +626,29 @@ pub fn create_skin_srf_boundary_continuity(
                     if dir == Direction::V {
                         if let Some(d) = d0 {
                             let ns = d.n();
-                            if !colinear(at2(&svb, 0, 0)?, at2(&svb, 0, 1)?, at(r0w, 1)?, four) {
+                            if !cpts_are_colinear(
+                                at2(&svb, 0, 0)?,
+                                at2(&svb, 0, 1)?,
+                                at(r0w, 1)?,
+                                four,
+                            ) {
                                 return Err(bad_input());
                             }
-                            if !colinear(at2(&svb, ns, 0)?, at2(&svb, ns, 1)?, at(r1w, 1)?, four) {
+                            if !cpts_are_colinear(
+                                at2(&svb, ns, 0)?,
+                                at2(&svb, ns, 1)?,
+                                at(r1w, 1)?,
+                                four,
+                            ) {
                                 return Err(bad_input());
                             }
                         }
                         if let Some(d) = d1 {
                             let ns = d.n();
-                            if !colinear(r0l, at2(&svt, 0, 0)?, at2(&svt, 0, 1)?, four) {
+                            if !cpts_are_colinear(r0l, at2(&svt, 0, 0)?, at2(&svt, 0, 1)?, four) {
                                 return Err(bad_input());
                             }
-                            if !colinear(r1l, at2(&svt, ns, 0)?, at2(&svt, ns, 1)?, four) {
+                            if !cpts_are_colinear(r1l, at2(&svt, ns, 0)?, at2(&svt, ns, 1)?, four) {
                                 return Err(bad_input());
                             }
                         }
@@ -645,20 +664,20 @@ pub fn create_skin_srf_boundary_continuity(
                         if let Some(d) = d0.filter(|_| !c1(0)) {
                             let e = if first { 0 } else { d.m() };
                             let (a, b) = (at2(&sul, 1, e)?, at2(&sul, 0, e)?);
-                            if !colinear(r_start, a, b, three) {
+                            if !cpts_are_colinear(r_start, a, b, three) {
                                 return Err(bad_input());
                             }
-                            if !colinear(r_start, a, b, four) {
+                            if !cpts_are_colinear(r_start, a, b, four) {
                                 adjust_rows(&mut sul, r_start, a, b, 0, e)?;
                             }
                         }
                         if let Some(d) = d1.filter(|_| !c1(1)) {
                             let e = if first { 0 } else { d.m() };
                             let (a, b) = (at2(&sur_r, 0, e)?, at2(&sur_r, 1, e)?);
-                            if !colinear(r_end, a, b, three) {
+                            if !cpts_are_colinear(r_end, a, b, three) {
                                 return Err(bad_input());
                             }
-                            if !colinear(r_end, a, b, four) {
+                            if !cpts_are_colinear(r_end, a, b, four) {
                                 adjust_rows(&mut sur_r, r_end, a, b, 1, e)?;
                             }
                         }
@@ -667,20 +686,20 @@ pub fn create_skin_srf_boundary_continuity(
                         if let Some(d) = d0.filter(|_| !c1(0)) {
                             let e = if first { 0 } else { d.n() };
                             let (a, b) = (at2(&svb, e, 1)?, at2(&svb, e, 0)?);
-                            if !colinear(r_start, a, b, three) {
+                            if !cpts_are_colinear(r_start, a, b, three) {
                                 return Err(bad_input());
                             }
-                            if !colinear(r_start, a, b, four) {
+                            if !cpts_are_colinear(r_start, a, b, four) {
                                 adjust_cols(&mut svb, r_start, a, b, 0, e)?;
                             }
                         }
                         if let Some(d) = d1.filter(|_| !c1(1)) {
                             let e = if first { 0 } else { d.n() };
                             let (a, b) = (at2(&svt, e, 0)?, at2(&svt, e, 1)?);
-                            if !colinear(r_end, a, b, three) {
+                            if !cpts_are_colinear(r_end, a, b, three) {
                                 return Err(bad_input());
                             }
-                            if !colinear(r_end, a, b, four) {
+                            if !cpts_are_colinear(r_end, a, b, four) {
                                 adjust_cols(&mut svt, r_end, a, b, 1, e)?;
                             }
                         }

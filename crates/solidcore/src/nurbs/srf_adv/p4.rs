@@ -17,6 +17,7 @@
 //! | [`approx_cross_boundary_derivs`]       | `N_ApproxCrossBoundaryDerivs`    |
 //! | [`create_coons_boundary_crvs`], [`CoonsBoundary`] | `N_CreateCoonsBoundaryCrvs` |
 //! | [`create_cross_boundary_deriv_crv`]    | `N_CreateCrossBoundaryDerivCrv`  |
+//! | [`Mat3`]                               | `NL_RMATRIX` (3x3)               |
 //!
 //! Deviations:
 //! - Out-params become return values (new curves, surfaces, vectors and matrices);
@@ -66,6 +67,7 @@ use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{
     dist_pt_pt, isect_line_line, normalize, pt_along_vector, vectors_angle, LineSeg, PI,
 };
+use crate::nurbs::index::{at, at2, oob, put, put2};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{combine2_pts, float_op_is_bad, CPoint, FloatOp, MODEL_TOL};
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_TOL};
@@ -86,43 +88,11 @@ const OP_CROSS: &str = "nurbs::srf_adv::p4::create_cross_boundary_deriv_crv";
 /// A 3x3 matrix `RM[i][j]` (upstream `NL_RMATRIX` of size 3x3), rows first.
 pub type Mat3 = [[f64; 3]; 3];
 
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
-fn oob(operation: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation,
-        reason: "index out of range (upstream would access outside its arrays)",
-    }
-}
-
 fn bare(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
         operation,
         reason: BARE_FLAG_REASON,
     }
-}
-
-/// `v[i]`.
-fn at<T: Copy>(v: &[T], i: usize, op: &'static str) -> Result<T> {
-    v.get(i).copied().ok_or_else(|| oob(op))
-}
-
-/// `v[i] = x`.
-fn put<T>(v: &mut [T], i: usize, x: T, op: &'static str) -> Result<()> {
-    *v.get_mut(i).ok_or_else(|| oob(op))? = x;
-    Ok(())
-}
-
-/// `w[i][j]`.
-fn at2<T: Copy>(w: &[Vec<T>], i: usize, j: usize, op: &'static str) -> Result<T> {
-    at(w.get(i).ok_or_else(|| oob(op))?, j, op)
-}
-
-/// `w[i][j] = x`.
-fn put2<T>(w: &mut [Vec<T>], i: usize, j: usize, x: T, op: &'static str) -> Result<()> {
-    put(w.get_mut(i).ok_or_else(|| oob(op))?, j, x, op)
 }
 
 /// `CD[1]` of `cur` at `u` (`N_CrvDerivs` with `der = 1`), with `CD[0]`.
@@ -394,7 +364,7 @@ pub fn merge_knot_vectors(
     let s = |j: usize| at(sk, j, OP);
 
     if (r(0)? - s(0)?).abs() > PTOL || (r(mr)? - s(ms)?).abs() > PTOL {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     let tol = PTOL * (r(mr)? - r(0)?);
@@ -756,20 +726,20 @@ pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f
         let ls1 = LineSeg::new(a_s, q - p, false);
         let ls2 = LineSeg::new(ps, qs - ps, false);
         bs = isect_line_line(ls1, ls2)?
-            .ok_or_else(|| nlib(OP, NlibCode::Geometry))?
+            .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
             .p;
     }
 
     let ls1 = LineSeg::new(qs, rs - qs, false);
     let ls2 = LineSeg::new(Vec3::ZERO, bs - Vec3::ZERO, false);
     let ds = isect_line_line(ls1, ls2)?
-        .ok_or_else(|| nlib(OP, NlibCode::Geometry))?
+        .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
         .p;
 
     let d1 = dist_pt_pt(qs, ds);
     let d2 = dist_pt_pt(qs, rs);
     if float_op_is_bad(d1, d2, FloatOp::Division) {
-        return Err(nlib(OP, NlibCode::Geometry));
+        return Err(SolidError::nlib(OP, NlibCode::Geometry));
     }
     Ok((wr, d1 / d2))
 }
@@ -802,7 +772,7 @@ pub fn approx_cross_boundary_derivs(
 
     // Check if angular tolerance is maintained.
     if der_p.is_rational() {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     let mut repeat = false;
@@ -854,7 +824,7 @@ pub fn approx_cross_boundary_derivs(
             let d = (sne * p as f64 * a) / (b + sne * c);
             ts = at(up, p, OP)? + d;
             if ts > at(up, p + 1, OP)? {
-                return Err(nlib(OP, NlibCode::Knot));
+                return Err(SolidError::nlib(OP, NlibCode::Knot));
             }
             mx_ += 1;
         }
@@ -867,7 +837,7 @@ pub fn approx_cross_boundary_derivs(
             let d = (sne * p as f64 * a) / (b + sne * c);
             te = at(up, n + 1, OP)? - d;
             if te < at(up, n, OP)? {
-                return Err(nlib(OP, NlibCode::Knot));
+                return Err(SolidError::nlib(OP, NlibCode::Knot));
             }
             mx_ += 1;
         }
@@ -996,7 +966,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
         &bnd.top_deriv,
     ];
     if all.iter().any(|c| c.is_rational()) {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
 
     let one_3 = 1.0 / 3.0;
@@ -1006,7 +976,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
     for c in [&bnd.top, &bnd.bottom_deriv, &bnd.top_deriv] {
         let (d1, d2) = c.param_bounds();
         if us != d1 || ue != d2 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
     }
     let du = ue - us;
@@ -1015,7 +985,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
     for c in [&bnd.right, &bnd.left_deriv, &bnd.right_deriv] {
         let (d1, d2) = c.param_bounds();
         if vs != d1 || ve != d2 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
     }
     let dv = ve - vs;
@@ -1058,10 +1028,10 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
             let da = (a - cd1).length();
             let db = (b - cd2).length();
             if da > MODEL_TOL {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
             if db > MODEL_TOL {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
         }
     }
@@ -1072,7 +1042,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
         let (_, cd2) = first_derivs(c2, t2, OP)?;
         let mag = (cd1 - cd2).length();
         if cpf && mag > twist_tol {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         Ok(combine2_pts(0.5, cd1, 0.5, cd2))
     };
@@ -1245,7 +1215,7 @@ pub fn create_cross_boundary_deriv_crv(
         let ls1 = LineSeg::new(p1, v1, false);
         let ls2 = LineSeg::new(p2, v2, false);
         Ok(isect_line_line(ls1, ls2)?
-            .ok_or_else(|| nlib(OP, NlibCode::Geometry))?
+            .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
             .p)
     };
     // Signed coordinates at one end.
