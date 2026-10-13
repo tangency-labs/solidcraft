@@ -49,6 +49,16 @@ jobs:
       - run: rustup target add wasm32-unknown-unknown
       - run: cargo check -p solidcore --target wasm32-unknown-unknown
 
+  # Same packaging check the release workflow runs before publishing (no secrets).
+  publish-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: cargo publish -p solidcore --locked --dry-run
+
   deny:
     runs-on: ubuntu-latest
     steps:

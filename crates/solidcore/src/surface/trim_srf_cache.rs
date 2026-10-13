@@ -450,6 +450,18 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
             self.base.have_t_surface_cache = true;
 
             // Classify every TrimSurfCache Node not on a boundary as INSIDE or OUTSIDE
+            //
+            // DISPATCH GAP: SmTrimSrfCache::PointClassify via MarkFaceContainment must
+            // dispatch to the trimmed override. Upstream (SmTrimSrfCache.cpp:343) calls
+            // the virtual `MarkFaceContainment`, whose `PointClassify` resolves to
+            // `SmTrimSrfCache::PointClassify` (SmTrimSrfCache.cpp:1048, ported here as
+            // `TrimSrfCache::point_classify`). `SurfaceCache::mark_face_containment`
+            // calls the base `SurfaceCache::point_classify` instead (surface_cache/p1.rs,
+            // always `SM_ERR`). No UNPORTED marker: the override is owned by this unit
+            // (surface.trim_srf_cache, per harness/callgraph/units.json) and is already
+            // ported; what is missing is the dispatch (e.g. a classifier argument to
+            // `mark_face_containment`). Unreachable today: the face path errors with
+            // `Unported` before this point. See plan/findings.md.
             self.base.mark_face_containment(k)?;
             // set a permament value into m_bFaceContainment
             self.base.face_containment_done = FaceContainment::Done;
@@ -1004,8 +1016,11 @@ fn surface_singularities(_surface: &Surface) -> Result<u64> {
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: point, `dS/du`, `dS/dv`.
+///
+/// When wiring, keep upstream's flag arguments exactly: `(uv, TRUE, TRUE, ..)`
+/// (`SmTrimSrfCache.cpp:856`).
 fn evaluate_1st_derivatives(_surface: &Surface, _uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    // UNPORTED(surface.surface_p1): SmSurface::Evaluate1stDerivatives
+    // UNPORTED(surface.surface_p1): SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)
     Err(SolidError::unported(
         "SmSurface::Evaluate1stDerivatives",
         "surface.surface_p1",
@@ -1029,13 +1044,16 @@ fn face_zone_tol_3d<O>(_face: O) -> Result<f64> {
 
 /// `SmFace::PointClassify(uv, tol, FALSE, TRUE, sPC)` into a fresh
 /// `SmPointClassification`: its class and object.
+///
+/// When wiring, keep upstream's flag arguments exactly: `(.., FALSE, TRUE, ..)`
+/// (`SmTrimSrfCache.cpp:91` and `:1089`).
 fn face_point_classify<O>(
     _face: O,
     _uv: Point2,
     _src_zone_tol_3d: f64,
 ) -> Result<(i32, Option<O>)> {
     // UNPORTED(intersect.point_class): SmPointClassification::SmPointClassification
-    // UNPORTED(query.face_p2): SmFace::PointClassify
+    // UNPORTED(query.face_p2): SmFace::PointClassify(uv, tol, FALSE, TRUE, sPC)
     Err(SolidError::unported(
         "SmPointClassification::SmPointClassification",
         "intersect.point_class",
@@ -1058,8 +1076,11 @@ fn set_face_brep_editing_enabled<O>(_face: O, _editing: bool) -> Result<()> {
 }
 
 /// `SmFace::CreateUVTrimCurves(TRUE, NULL, NULL, ..)`.
+///
+/// When wiring, keep upstream's arguments exactly: `(TRUE, NULL, NULL, ..)`
+/// (`SmTrimSrfCache.cpp:209`).
 fn face_create_uv_trim_curves<O>(_face: O) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves
+    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves(TRUE, NULL, NULL, ..)
     Err(SolidError::unported(
         "SmFace::CreateUVTrimCurves",
         "topology.face_p3",

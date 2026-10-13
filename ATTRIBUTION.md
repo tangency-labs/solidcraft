@@ -49,4 +49,4 @@ No GPL/LGPL code is used anywhere in solidcore.
 
 Every ported Rust file begins with a header naming the upstream source file(s) it
 derives from and a table mapping its Rust items to upstream names (see
-[`AGENTS.md`](AGENTS.md#file-header)).
+[`AGENTS.md`](https://github.com/bherbruck/solidcore/blob/main/AGENTS.md#file-header)).

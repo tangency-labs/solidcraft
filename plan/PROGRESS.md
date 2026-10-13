@@ -2,18 +2,19 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**111 / 261 units ported** (83 green, 28 partial), **141,627 / 387,903 upstream lines (36.5%)**. 1 claimed, 0 blocked, 149 todo.
+**111 / 261 units ported** (83 green, 28 partial), **141,627 / 387,903 upstream lines (36.5%)**. 4 claimed, 0 blocked, 146 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready to claim · ⏳ waiting on dependencies · ⛔ blocked.
 
 ## Ready to claim now
 
-- [ ] ▶️ `curve.curve_p9` (1783 lines) — ready
-- [ ] ▶️ `surface.plane_p1` (1934 lines) — ready
-- [ ] ▶️ `surface.surf_of_revolution_p1` (1522 lines) — ready
+_None: every todo unit waits on a claimed or todo dependency._
 
 ## In progress
 
+- [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
+- [ ] 🔨 `surface.plane_p1` (1934 lines) — in progress: #14 @bherbruck (ready for review)
+- [ ] 🔨 `surface.surf_of_revolution_p1` (1522 lines) — in progress: #15 @bherbruck (ready for review)
 - [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (ready for review)
 
 ## By module
@@ -127,7 +128,7 @@ Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on
 - [x] ✅ `curve.composite_curve_p1` (1700 lines) — green, 3093 cases
 - [x] ✅ `curve.composite_curve_p2` (1345 lines) — green, 661 cases
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
-- [ ] ▶️ `curve.curve_p9` (1783 lines) — ready
+- [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
 
 ### surface (7/40)
 
@@ -137,8 +138,8 @@ Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on
 - [ ] 🟡 `surface.surface_p2` (2398 lines) — partial, 869 cases
 - [ ] 🟡 `surface.curve_bounded_surface` (324 lines) — partial, 535 cases
 - [ ] 🟡 `surface.surface_cache_p1` (1944 lines) — partial, 872 cases
-- [ ] ▶️ `surface.plane_p1` (1934 lines) — ready
-- [ ] ▶️ `surface.surf_of_revolution_p1` (1522 lines) — ready
+- [ ] 🔨 `surface.plane_p1` (1934 lines) — in progress: #14 @bherbruck (ready for review)
+- [ ] 🔨 `surface.surf_of_revolution_p1` (1522 lines) — in progress: #15 @bherbruck (ready for review)
 - [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (ready for review)
 - [ ] 🟡 `surface.trim_srf_cache` (966 lines) — partial, 620 cases
 - [ ] ⏳ `surface.b_spline_volume_n_lib` (310 lines) — waiting

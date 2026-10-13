@@ -373,7 +373,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             }
             let n = tree(rd, &srf)?;
             rd.flag()?;
-            rd.domain()?;
+            // Face extent: unordered (negative-area) bounds are valid input; upstream
+            // resets them to the curve box, so only finiteness is checked here.
+            rd.finites(4)?;
             let k = rd.index(8)?;
             for _ in 0..k {
                 curve_2d(rd)?;

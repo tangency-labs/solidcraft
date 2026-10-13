@@ -1,21 +1,38 @@
 #!/usr/bin/env bash
 # Build the upstream SMLib/SM_API C++ reference kernel (and its test apps)
-# into <repo>/bin/cpp. See plan/baseline.md.
+# into $OUT: $SOLIDCORE_CPP_DIR if set (the same override solidcore-ffi honours),
+# else <repo>/bin/cpp. See plan/baseline.md.
 #
 # Usage: harness/cpp/build.sh [--no-tests] [--jobs N] [--clean]
 #
-# Outputs:
-#   bin/cpp/build/                 CMake/ninja build tree
-#   bin/cpp/compile_commands.json  copied right after configure
-#   bin/cpp/lib/libSMLib.a         static libs (link order: SM_API then SMLib)
-#   bin/cpp/lib/libSM_API.a
-#   bin/cpp/tests/SM_API_test_app, bin/cpp/tests/prog_test_app
+# Run it from the main tree; git worktrees reuse that build by exporting
+# SOLIDCORE_CPP_DIR=<main tree>/bin/cpp. Running it from a worktree with that override
+# is also safe: the CMake build tree is keyed by this harness's source path, so each
+# source tree gets its own build dir and CMake never sees a mismatched source.
+#
+# Outputs (in $OUT):
+#   build-<hash>/              CMake/ninja build tree; <hash> = first 8 hex of the
+#                              sha256 of this harness's absolute path. A legacy
+#                              build/ whose CMake source is this harness is reused.
+#   compile_commands.json      copied right after configure
+#   ffi.env                    settings for crates/solidcore-ffi/build.rs
+#   lib/libSMLib.a             static libs (link order: SM_API then SMLib)
+#   lib/libSM_API.a
+#   tests/SM_API_test_app, tests/prog_test_app
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${SOLIDCORE_CPP_DIR:-$ROOT/bin/cpp}"   # same override solidcore-ffi honours
-BUILD="$OUT/build"
+# One CMake build tree per source tree (see header). Installed libs, ffi.env and
+# compile_commands.json stay at fixed paths in $OUT so solidcore-ffi finds them.
+SRC_KEY="$(printf '%s' "$HERE" | sha256sum | cut -c1-8)"
+BUILD="$OUT/build-$SRC_KEY"
+LEGACY="$OUT/build"
+if [ ! -d "$BUILD" ] && [ -f "$LEGACY/CMakeCache.txt" ] \
+  && grep -qxF "CMAKE_HOME_DIRECTORY:INTERNAL=$HERE" "$LEGACY/CMakeCache.txt"; then
+  BUILD="$LEGACY"
+fi
 JOBS=6
 TESTS=ON
 CLEAN=0

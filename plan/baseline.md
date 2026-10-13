@@ -36,7 +36,7 @@ Outputs (all under gitignored `bin/cpp/`):
 
 | Path | What |
 |---|---|
-| `bin/cpp/build/` | CMake/Ninja build tree |
+| `bin/cpp/build-<hash>/` | CMake/Ninja build tree, one per source tree (`<hash>` = 8 hex of sha256 of the harness path; a legacy `bin/cpp/build/` for the same source is reused) |
 | `bin/cpp/compile_commands.json` | copied **immediately after configure**, before compiling |
 | `bin/cpp/ffi.env` | generated settings for `crates/solidcore-ffi/build.rs` (include dirs, defines, flags, `LIBS=SM_API SMLib`, `SYSLIBS=pthread` = no TBB) |
 | `bin/cpp/lib/libSMLib.a` (~296 MB with -g), `bin/cpp/lib/libSM_API.a` | static libs; link order `SM_API` then `SMLib`, then `stdc++ m pthread` |

@@ -2539,3 +2539,24 @@ fixtures use Surface.sms and offset_nurb.sms from the allowed upstream corpus.
 The C++ shim deliberately excludes classifying a surface without a face: upstream
 would dereference null. FFI regression tests reject this path, truncated/trailing
 records, invalid counts and non-finite coordinates before entering C++.
+
+### surface.trim_srf_cache: review follow-ups (2026-10-13)
+
+- **Test gap closed.** The generator's negative-area face extents for
+  `ImplantEdgeuse` were rejected by the FFI validator (`rd.domain()` requires ordered
+  bounds) and silently redrawn, so C++ never saw them. The validator now only checks
+  finiteness; difftest is 620 cases, 462 bit-identical, 0 failed, 158 deferred
+  (surface.surface_cache_p3 100, surface.surface_p1 32, surface.surface_p3 26);
+  `--perturb` detects 462/462.
+- **MarkFaceContainment dispatch gap (no UNPORTED marker possible).**
+  `TrimSrfCache::build_tree` calls `SurfaceCache::mark_face_containment`, which uses
+  the base `SurfaceCache::point_classify` (always `SM_ERR`). Upstream
+  (`SmTrimSrfCache.cpp:343`) reaches the virtual override `SmTrimSrfCache::PointClassify`
+  (`:1048`). That override belongs to surface.trim_srf_cache itself
+  (`harness/callgraph/units.json`) and is already ported as
+  `TrimSrfCache::point_classify`, so an `UNPORTED(<unit>)` marker would point at the
+  wrong porter. The call site carries a `DISPATCH GAP` comment instead. It is
+  unreachable today (the face path returns `Unported` earlier, at
+  `CreateUVTrimCurves`), but whoever wires topology.face_p3 / topology.face_p4 here
+  must make `mark_face_containment` dispatch to the trimmed override (e.g. take a
+  classifier argument) before any face-backed case can pass.

@@ -77,6 +77,9 @@ nice -n 10 cargo test -p solidcore                     # every cargo/C++ command
 
 - C++ builds: `nice -n 10 harness/cpp/build.sh --jobs 6`. Only rebuild if `bin/cpp/lib`
   is missing or the harness changed; one shared build serves all worktrees (below).
+- Run `build.sh` from the main tree; worktrees reuse that build by exporting
+  `SOLIDCORE_CPP_DIR=$HOME/github/solidcore/bin/cpp` (the CMake build dir is keyed by
+  source tree, so a worktree run gets its own build dir but installs to the same `lib/`).
 - Before claiming a unit, check load: `cut -d' ' -f1 /proc/loadavg`. If > 24, do not
   claim; finish or wait.
 - After merging, delete your worktree's `bin/` (each worktree has its own cargo target).
