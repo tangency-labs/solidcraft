@@ -238,9 +238,6 @@ pub const TYPE_STRING: &str = "SmCurve_TYPE";
 /// `SmCurve::GetClassString`.
 pub const CLASS_STRING: &str = "SmCurve";
 
-/// `SM_ERR_NULL_POINTER`.
-const SM_ERR_NULL_POINTER: i32 = 1006;
-
 /// `SmCurve::IsKindOf`: `SmCurve_TYPE` or a base type of `SmCurve`.
 #[must_use]
 pub const fn is_kind_of(t: i64) -> bool {
@@ -1758,15 +1755,10 @@ pub fn pop_stack(stack: &mut Vec<f64>) -> Result<(f64, [Vec3; 2])> {
 ///
 /// `SM_ERR` when the stack holds fewer than 7 values.
 pub fn stack_look(stack: &[f64]) -> Result<(f64, [Vec3; 2])> {
-    let n = stack.len();
-    let Some(v) = n.checked_sub(7).and_then(|s| stack.get(s..)) else {
+    let Some(&[t, x0, y0, z0, x1, y1, z1]) = stack.last_chunk() else {
         return Err(SolidError::sm_err(OP_STACK));
     };
-    let g = |i: usize| v.get(i).copied().unwrap_or(0.0);
-    Ok((
-        g(0),
-        [Vec3::new(g(1), g(2), g(3)), Vec3::new(g(4), g(5), g(6))],
-    ))
+    Ok((t, [Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1)]))
 }
 
 /// `sm_AddToCurve`: appends the cubic Bezier span of the Hermite data
@@ -2800,11 +2792,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let mut swap = false;
         let curve_node = self.base.branch_node(branch, 0)?;
         let tree = self.base.tree(0)?;
-        let null = || SolidError::Upstream {
-            operation: OP_GS,
-            code: SM_ERR_NULL_POINTER,
-            entity: None,
-        };
+        let null = || SolidError::null_pointer(OP_GS);
         let node1 = tree.node(curve_node.child1.ok_or_else(null)?)?;
         let node2 = tree.node(curve_node.child2.ok_or_else(null)?)?;
         let sph1 = node1.bbox.sphere_bound();

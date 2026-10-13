@@ -128,9 +128,6 @@ use crate::nurbs::srf_common::ruled_srf;
 use crate::nurbs::srf_tool::p3::{join, make_compatible as make_surfaces_compatible};
 use crate::nurbs::srf_tool::p4::make_compatible_uv;
 
-/// `SM_ERR_NULL_POINTER` (upstream `NER`).
-pub const SM_ERR_NULL_POINTER: i32 = 1006;
-
 /// Largest number of distance halvings of one side of
 /// [`BSplineSurface::create_extended_surface_dir`] (upstream has no bound and loops
 /// forever for a zero or NaN distance; halving a positive distance reaches zero after
@@ -164,15 +161,6 @@ const OP_EVAL_POINT: &str = "nurbs::b_spline_surface_n_lib::p1::BSplineSurface::
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
-}
-
-/// `SM_ERR_NULL_POINTER` (upstream `NER`).
-fn ner(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR_NULL_POINTER,
-        entity: None,
-    }
 }
 
 /// The NLib direction flag of a surface parameter (`SM_SP_U` is `NL_UDIR`, anything
@@ -995,7 +983,10 @@ impl BSplineSurface {
         approx_tol_3d: f64,
         param_type: OffsetParamType,
     ) -> Result<BSplineSurface> {
-        let nl_surf_p = self.nurb.as_ref().ok_or_else(|| ner(OP_OFFSET))?;
+        let nl_surf_p = self
+            .nurb
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(OP_OFFSET))?;
 
         // cubic degree
         let ln_deg = 3;
@@ -1567,7 +1558,10 @@ impl BSplineSurface {
         let max = trim_domain.max();
         let r = Rectangle::new(min.x, max.x, min.y, max.y);
 
-        let sur_p = self.nurb.as_mut().ok_or_else(|| ner(OP_REPARAM))?;
+        let sur_p = self
+            .nurb
+            .as_mut()
+            .ok_or_else(|| SolidError::null_pointer(OP_REPARAM))?;
         sur_p.reparam_to_interval(r, Direction::UV)?;
         Ok(())
     }
@@ -1800,6 +1794,7 @@ fn extend_side(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_NULL_POINTER;
     use crate::nurbs::math::NOW;
 
     fn plane_surface() -> BSplineSurface {

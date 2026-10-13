@@ -9,6 +9,7 @@
 //! |----------------------|---------------------------------|
 //! | [`Surface::offset`]  | `N_SrfOffset`                   |
 //! | `SLM`, `TOTAL_MAX`   | `slm`, `totalmax` (file statics) |
+//! | `UNIT_SQUARE`        | `NL_UNITSQUARE`                 |
 //!
 //! Deviations:
 //! - The output surface `surQ` and the memory stacks become the return value; errors
@@ -414,7 +415,7 @@ impl Surface {
 
                 if del >= SLM {
                     *npij = SLM as isize;
-                    Self::offset_patch_net(patch, d, pu, qu)?;
+                    patch.offset_patch_net(d, pu, qu)?;
 
                     let al = patch.average_len();
                     let mut del = (al.area / tol).sqrt();
@@ -496,8 +497,8 @@ impl Surface {
         }
 
         // Compute parameters.
-        let mut u: Vec<f64> = sample_params(up, p, rp, &nu, mu)?;
-        let mut v: Vec<f64> = sample_params(vp, q, sp, &nv, mv)?;
+        let mut u = sample_params(up, p, rp, &nu, mu)?;
+        let mut v = sample_params(vp, q, sp, &nv, mv)?;
 
         // Sample surface.
         let g = grid_pts_normals(self, &u, &v, Side::Left, Side::Left)?;
@@ -575,9 +576,9 @@ impl Surface {
         Ok(sur_q)
     }
 
-    /// The `del >= slm` branch of `N_SrfOffset` on one unit-square Bezier patch:
+    /// The `del >= slm` branch of `N_SrfOffset` on this unit-square Bezier patch:
     /// moves every control point along the unit normal at its uniform parameter.
-    fn offset_patch_net(patch: &mut Surface, d: f64, p: usize, q: usize) -> Result<()> {
+    fn offset_patch_net(&mut self, d: f64, p: usize, q: usize) -> Result<()> {
         let uinc = 1.0 / p as f64;
         let vinc = 1.0 / q as f64;
 
@@ -592,11 +593,10 @@ impl Surface {
                 if vl > 1.0 {
                     vl = 1.0;
                 }
-                *n = match patch.eval_pt_deriv_normal_fast(ul, vl, Side::Left, Side::Left) {
+                *n = match self.eval_pt_deriv_normal_fast(ul, vl, Side::Left, Side::Left) {
                     Ok(e) => e.n,
                     Err(_) => {
-                        patch
-                            .eval_pt_normal_at_pole(ul, vl, Side::Left, Side::Left)?
+                        self.eval_pt_normal_at_pole(ul, vl, Side::Left, Side::Left)?
                             .n
                     }
                 };
@@ -605,7 +605,7 @@ impl Surface {
 
         for (ii, row) in nrm.iter().enumerate() {
             for (jj, &n) in row.iter().enumerate() {
-                let pw = patch.cpt_mut(ii, jj)?;
+                let pw = self.cpt_mut(ii, jj)?;
                 let (a, h) = pw.to_euclid_and_w();
                 let a = pt_along_vector(a, d, n);
                 *pw = CPoint::weighted(a, h);

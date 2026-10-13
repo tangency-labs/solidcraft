@@ -62,6 +62,7 @@
 //! - `WriteToDB`, `GetMemoryUsed`, `GetRootCurve` and `Dump` are not part of this
 //!   unit.
 
+use crate::curve::curve::p2::{self as curve_p2, CONIC_TYPE};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -72,17 +73,14 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
-/// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
-
 /// Operation path of [`Conic::intersect_implicit_conic`].
-const OP_INTERSECT_IMPLICIT: &str = "curve::conic::intersect_implicit_conic";
+const OP_INTERSECT_IMPLICIT: &str = "curve::conic::Conic::intersect_implicit_conic";
 
 /// Operation path of [`Conic::read_from_db`].
-const OP_READ: &str = "curve::conic::read_from_db";
+const OP_READ: &str = "curve::conic::Conic::read_from_db";
 
 /// Operation path of [`Conic::evaluate`].
-const OP_EVALUATE: &str = "curve::conic::evaluate";
+const OP_EVALUATE: &str = "curve::conic::Conic::evaluate";
 
 /// The kind of a [`Conic`] (`SmConicType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -163,7 +161,7 @@ impl Default for Conic {
 
 impl Conic {
     /// `SmConic_TYPE` (`CURV_BASE_TYPE + 20`).
-    pub const TYPE: i64 = CURV_BASE_TYPE + 20;
+    pub const TYPE: i64 = CONIC_TYPE;
 
     /// A conic of `conic_type` with constants `a`, `b`, unrotated at the origin.
     #[must_use]
@@ -890,7 +888,7 @@ impl Conic {
     /// True for `SmConic_TYPE` and its base types (`IsKindOf`).
     #[must_use]
     pub const fn is_kind_of(&self, t: i64) -> bool {
-        t == Self::TYPE || crate::curve::curve::p2::is_kind_of(t)
+        t == Self::TYPE || curve_p2::is_kind_of(t)
     }
 }
 

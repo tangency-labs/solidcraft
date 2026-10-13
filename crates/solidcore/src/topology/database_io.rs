@@ -70,9 +70,6 @@ pub const MAX_LINE: usize = 256;
 /// Default database version of a new reader (`m_lVersion(30)`).
 pub const DEFAULT_VERSION: u64 = 30;
 
-/// `SM_ERR_NULL_POINTER`: a read on a reader without a stream (upstream `NER`).
-pub const SM_ERR_NULL_POINTER: i32 = 1006;
-
 /// Database encoding (upstream `SmFileType`); the discriminant is the upstream value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileType {
@@ -649,15 +646,6 @@ fn short_read(operation: &'static str) -> SolidError {
     }
 }
 
-/// Error for a read on a reader without a stream (upstream `NER` on `m_pStreamIn`).
-fn no_stream(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR_NULL_POINTER,
-        entity: None,
-    }
-}
-
 impl DatabaseReader {
     /// A reader without a stream, file type [`FileType::Unknown`] (upstream default
     /// constructor).
@@ -809,7 +797,10 @@ impl DatabaseReader {
 
     /// Reads exactly `N` raw bytes.
     fn read_raw<const N: usize>(&mut self, operation: &'static str) -> Result<[u8; N]> {
-        let s = self.stream.as_mut().ok_or_else(|| no_stream(operation))?;
+        let s = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| SolidError::null_pointer(operation))?;
         let bytes = s.read_bytes(N);
         <[u8; N]>::try_from(bytes).map_err(|_| short_read(operation))
     }
@@ -820,7 +811,10 @@ impl DatabaseReader {
         n: usize,
         operation: &'static str,
     ) -> Result<Vec<[u8; N]>> {
-        let s = self.stream.as_mut().ok_or_else(|| no_stream(operation))?;
+        let s = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| SolidError::null_pointer(operation))?;
         let total = n.checked_mul(N).ok_or_else(|| short_read(operation))?;
         let bytes = s.read_bytes(total);
         if bytes.len() != total {
@@ -958,7 +952,10 @@ impl DatabaseReader {
     pub fn read_type(&mut self, with_dim: bool) -> Result<TypeHeader> {
         const OP: &str = "topology::database_io::DatabaseReader::read_type";
         if self.file_type == FileType::Ascii {
-            let s = self.stream.as_mut().ok_or_else(|| no_stream(OP))?;
+            let s = self
+                .stream
+                .as_mut()
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
             // `char sBuff[SM_MAXSIZE]`: words longer than 255 bytes are split.
             let _ = s.extract_word_limited(MAX_LINE);
             let _ = s.extract_word_limited(MAX_LINE);

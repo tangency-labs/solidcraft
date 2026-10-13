@@ -9,6 +9,7 @@
 //! | [`SolidError::InvalidInput`]| `SM_ERR_INVALID_INPUT`                           |
 //! | [`SolidError::Upstream`]    | any other `SM_ERR_*` code, carried numerically   |
 //! | [`SM_ERR`], [`SM_ERR_WARNING`], [`SolidError::sm_err`] | `SM_ERR`, `SM_ERR_WARNING`, `SE(SM_ERR)` |
+//! | [`SM_ERR_NULL_POINTER`], [`SolidError::null_pointer`] | `SM_ERR_NULL_POINTER`, `NER(...)` on `NULL` |
 //! | [`SolidError::Nlib`], [`SolidError::nlib`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`) |
 //! | [`SolidError::Unported`]    | (none: call into a unit not ported yet)          |
 //! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
@@ -211,6 +212,10 @@ impl NlibCode {
 /// [`SolidError::Upstream`].
 pub const SM_ERR: i32 = 1001;
 
+/// Upstream `SmStatus` value `SM_ERR_NULL_POINTER`, as carried by
+/// [`SolidError::Upstream`].
+pub const SM_ERR_NULL_POINTER: i32 = 1006;
+
 /// Upstream `SmStatus` value `SM_ERR_WARNING`, as carried by [`SolidError::Upstream`].
 pub const SM_ERR_WARNING: i32 = 1023;
 
@@ -226,6 +231,17 @@ impl SolidError {
         Self::Upstream {
             operation,
             code: SM_ERR,
+            entity: None,
+        }
+    }
+
+    /// [`SolidError::Upstream`] with code [`SM_ERR_NULL_POINTER`] and no entity
+    /// (upstream `NER(ptr)` on a `NULL` pointer).
+    #[must_use]
+    pub const fn null_pointer(operation: &'static str) -> Self {
+        Self::Upstream {
+            operation,
+            code: SM_ERR_NULL_POINTER,
             entity: None,
         }
     }

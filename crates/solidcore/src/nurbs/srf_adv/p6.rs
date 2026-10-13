@@ -42,6 +42,7 @@ use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{
     normalize, project_pt_plane, pt_along_vector, transform_matrix_from_axes, Frame, Plane,
 };
+use crate::nurbs::index::{at, oob, put};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{combine2_pts, solve_quadratic, CPoint, QuadraticRoots, MODEL_TOL};
 use crate::nurbs::srf_basic::{Direction, Surface};
@@ -65,22 +66,6 @@ const OP_FILL: &str = "nurbs::srf_adv::p6::fill_n_sided_hole";
 const MAXPTS: usize = 1000;
 /// Upstream `lto` of `N_FillNSidedHole`: the relative arc length tolerance.
 const LTO: f64 = 0.05;
-
-fn oob(op: &'static str) -> SolidError {
-    SolidError::InvalidInput {
-        operation: op,
-        reason: "index out of range (upstream would access outside its arrays)",
-    }
-}
-
-fn nlib(op: &'static str, code: NlibCode) -> SolidError {
-    SolidError::nlib(op, code)
-}
-
-/// `v[i]`.
-fn at<T: Copy>(v: &[T], i: usize, op: &'static str) -> Result<T> {
-    v.get(i).copied().ok_or_else(|| oob(op))
-}
 
 /// `&v[i]`.
 fn rf<'a, T>(v: &'a [T], i: usize, op: &'static str) -> Result<&'a T> {
@@ -225,7 +210,7 @@ pub fn create_sweep_scale(
     let seg_pbnds: Vec<LinearSeg> = if pt == 1 {
         // Error check: curT better be linear.
         if !cur_t.is_line(MODEL_TOL) {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         let (start, end) = cur_t.param_bounds();
         match cur_s {
@@ -666,19 +651,19 @@ impl Net {
         }
         let res = make_compatible_adj_knots(&mut cc, PTOL);
         let mut it = cc.into_iter();
-        let mut put = |v: &mut Vec<Curve>, j: usize| -> Result<()> {
+        let mut store = |v: &mut Vec<Curve>, j: usize| -> Result<()> {
             if let Some(c) = it.next() {
-                *mt(v, j, OP)? = c;
+                put(v, j, c, OP)?;
             }
             Ok(())
         };
-        put(&mut self.cur_r, a)?;
-        put(&mut self.cur_i, i)?;
-        put(&mut self.cur_l, b)?;
-        put(&mut self.der_r, a)?;
-        put(&mut self.bdr_l, i)?;
-        put(&mut self.bdr_r, i)?;
-        put(&mut self.der_l, b)?;
+        store(&mut self.cur_r, a)?;
+        store(&mut self.cur_i, i)?;
+        store(&mut self.cur_l, b)?;
+        store(&mut self.der_r, a)?;
+        store(&mut self.bdr_l, i)?;
+        store(&mut self.bdr_r, i)?;
+        store(&mut self.der_l, b)?;
         res
     }
 }
@@ -707,8 +692,8 @@ fn end_factors(
 /// knots the product may rescale in place, as upstream).
 fn rescale(cfn: &mut CurveFunction, fu: [f64; 2], c: &mut Curve) -> Result<Curve> {
     let v = cfn.values_mut();
-    *mt(v, 0, OP_FILL)? = fu[0];
-    *mt(v, 1, OP_FILL)? = fu[1];
+    put(v, 0, fu[0], OP_FILL)?;
+    put(v, 1, fu[1], OP_FILL)?;
     cfn.multiply_crv(c)
 }
 
@@ -784,7 +769,7 @@ pub fn fill_n_sided_hole(
 
     // Check input.
     if cur.len() < 3 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     let k = cur.len() - 1;
     if let Some(d) = der.as_deref() {
@@ -802,14 +787,14 @@ pub fn fill_n_sided_hole(
     for i in 0..=k {
         let c = mt(cur, i, OP)?;
         if c.is_rational() {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
         if !c.is_3d() {
             c.to_3d();
         }
         if let Some(d) = der_at(&der, i) {
             if d.is_rational() {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nlib(OP, NlibCode::Input));
             }
         }
     }
@@ -822,10 +807,10 @@ pub fn fill_n_sided_hole(
                 let res = make_compatible_adj_knots(&mut cc, PTOL);
                 let mut it = cc.into_iter();
                 if let Some(c) = it.next() {
-                    *mt(cur, i, OP)? = c;
+                    put(cur, i, c, OP)?;
                 }
                 if let (Some(c), Some(ds)) = (it.next(), der.as_deref_mut()) {
-                    *mt(ds, i, OP)? = Some(c);
+                    put(ds, i, Some(c), OP)?;
                 }
                 res?;
             }
@@ -841,7 +826,7 @@ pub fn fill_n_sided_hole(
         let mr = cb.eval(first_knot(cb, OP)?, Side::Left)?;
         let a = ml - mr;
         if a.length() > MODEL_TOL {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nlib(OP, NlibCode::Input));
         }
     }
 
@@ -1023,7 +1008,7 @@ pub fn fill_n_sided_hole(
         let fac = match solve_quadratic(alf, bet, gam)? {
             QuadraticRoots::Two(_, r2) => r2,
             QuadraticRoots::None | QuadraticRoots::One(_) => {
-                return Err(nlib(OP, NlibCode::Geometry));
+                return Err(SolidError::nlib(OP, NlibCode::Geometry));
             }
         };
         let fac = fac / 3.0;
@@ -1106,8 +1091,8 @@ pub fn fill_n_sided_hole(
             (rf(&net.cur_l, i, OP)?, u0),
             (rf(&net.cur_i, a, OP)?, u0),
         )?;
-        let c = rescale(&mut cfn, fu, mt(&mut net.der_r, a, OP)?)?;
-        *mt(&mut net.der_r, a, OP)? = c;
+        let slot = mt(&mut net.der_r, a, OP)?;
+        *slot = rescale(&mut cfn, fu, slot)?;
 
         let fu = end_factors(
             rf(&net.der_l, i, OP)?,
@@ -1116,8 +1101,8 @@ pub fn fill_n_sided_hole(
             (rf(&net.cur_r, a, OP)?, v0),
             (rf(&net.cur_i, i, OP)?, v0),
         )?;
-        let c = rescale(&mut cfn, fu, mt(&mut net.der_l, i, OP)?)?;
-        *mt(&mut net.der_l, i, OP)? = c;
+        let slot = mt(&mut net.der_l, i, OP)?;
+        *slot = rescale(&mut cfn, fu, slot)?;
 
         let fu = end_factors(
             rf(&net.bdr_r, i, OP)?,
@@ -1126,8 +1111,8 @@ pub fn fill_n_sided_hole(
             (rf(&net.cur_l, i, OP)?, ur),
             (rf(&net.cur_i, a, OP)?, ur),
         )?;
-        let c = rescale(&mut cfn, fu, mt(&mut net.bdr_r, i, OP)?)?;
-        *mt(&mut net.bdr_r, i, OP)? = c;
+        let slot = mt(&mut net.bdr_r, i, OP)?;
+        *slot = rescale(&mut cfn, fu, slot)?;
 
         let fu = end_factors(
             rf(&net.bdr_l, a, OP)?,
@@ -1136,8 +1121,8 @@ pub fn fill_n_sided_hole(
             (rf(&net.cur_r, a, OP)?, vs),
             (rf(&net.cur_i, i, OP)?, vs),
         )?;
-        let c = rescale(&mut cfn, fu, mt(&mut net.bdr_l, a, OP)?)?;
-        *mt(&mut net.bdr_l, a, OP)? = c;
+        let slot = mt(&mut net.bdr_l, a, OP)?;
+        *slot = rescale(&mut cfn, fu, slot)?;
     }
 
     // Approximate cross-boundary derivatives to ensure twist compatibility.
@@ -1229,14 +1214,14 @@ pub fn fill_n_sided_hole(
             top,
             top_deriv,
         } = bnd;
-        *mt(&mut net.cur_r, a, OP)? = left;
-        *mt(&mut net.der_r, a, OP)? = left_deriv;
-        *mt(&mut net.cur_i, i, OP)? = right;
-        *mt(&mut net.bdr_r, i, OP)? = right_deriv;
-        *mt(&mut net.cur_l, i, OP)? = bottom;
-        *mt(&mut net.der_l, i, OP)? = bottom_deriv;
-        *mt(&mut net.cur_i, a, OP)? = top;
-        *mt(&mut net.bdr_l, a, OP)? = top_deriv;
+        put(&mut net.cur_r, a, left, OP)?;
+        put(&mut net.der_r, a, left_deriv, OP)?;
+        put(&mut net.cur_i, i, right, OP)?;
+        put(&mut net.bdr_r, i, right_deriv, OP)?;
+        put(&mut net.cur_l, i, bottom, OP)?;
+        put(&mut net.der_l, i, bottom_deriv, OP)?;
+        put(&mut net.cur_i, a, top, OP)?;
+        put(&mut net.bdr_l, a, top_deriv, OP)?;
         sur_a.push(res?);
     }
 
@@ -1266,11 +1251,11 @@ pub fn fill_n_sided_hole(
         let xr = rf(&knm, 1, OP)?;
         if !xl.is_empty() {
             let s = insert_knots(rf(&sur_a, i, OP)?, xl, Direction::V)?;
-            *mt(&mut sur_a, i, OP)? = s;
+            put(&mut sur_a, i, s, OP)?;
         }
         if !xr.is_empty() {
             let s = insert_knots(rf(&sur_a, b, OP)?, xr, Direction::U)?;
-            *mt(&mut sur_a, b, OP)? = s;
+            put(&mut sur_a, b, s, OP)?;
         }
     }
 
