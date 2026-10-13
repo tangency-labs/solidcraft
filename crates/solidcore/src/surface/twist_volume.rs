@@ -258,7 +258,7 @@ impl TwistVolume {
     /// decides.
     #[must_use]
     pub fn members_eq(&self, other: &Self) -> bool {
-        let _period_eq = is_zero(self.twist_period_dist - other.twist_period_dist);
+        // (upstream's period comparison is overwritten before it is read)
         is_zero(self.period_min_dist - other.period_min_dist)
     }
 
@@ -746,15 +746,14 @@ impl TwistVolume {
     }
 
     /// Reads a twist volume from a database stream: the period and the minimum
-    /// distance, then the volume base data (`ReadFromDB`). `version` is the
-    /// database version the base read needs.
+    /// distance, then the volume base data (`ReadFromDB`). The database version
+    /// is for that base read (unused until it is ported).
     ///
     /// # Errors
     ///
     /// A failed binary read; [`SolidError::Unported`] for the base-class read
     /// (`SmVolume::ReadFromDB`, unit `surface.volume_p2`).
-    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Volume> {
-        let _ = version;
+    pub fn read_from_db(db: &mut DatabaseReader, _version: u64) -> Result<Volume> {
         // a new SmTwistVolume() (period 0, minimum SM_UNDEF_DOUBLE)
         let mut twist = Self::new();
         if db.file_type() == FileType::Ascii {
