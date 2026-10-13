@@ -65,7 +65,7 @@
 //! Deviations:
 //! - **Object model.** `SmCurve` is abstract; its derived classes become the
 //!   [`CurveKind`] variants. The ported kinds are [`BSplineCurve`],
-//!   [`HermiteCurve`], [`Conic`], [`IsoCurve`], [`ProjectedCurve`], [`OffsetCurve`] and
+//!   [`HermiteCurve`], [`Conic`], [`IsoCurve`], [`ProjectedCurve`], [`OffsetCurve`], [`CrvInVolume`] and
 //!   [`Hyperbola`] (whose variant runs the B-spline methods on its base where it does
 //!   not override them); the other analytic and generated curves (`SmLine`,
 //!   `SmEllipse`, ...) join the enum in their own units. Each virtual method is
@@ -137,6 +137,7 @@
 //!   those calls return [`SolidError::Unported`].
 
 use crate::curve::conic::Conic;
+use crate::curve::crv_in_volume::CrvInVolume;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::hyperbola::Hyperbola;
 use crate::curve::iso_curve::IsoCurve;
@@ -490,6 +491,8 @@ pub enum CurveKind {
     Offset(OffsetCurve),
     /// `SmConic`.
     Conic(Conic),
+    /// `SmCrvInVolume`.
+    CrvInVolume(Box<CrvInVolume>),
 }
 
 /// A curve (`SmCurve`): its concrete kind and the object owning it (`m_pOwner`:
@@ -531,6 +534,12 @@ impl From<Conic> for Curve {
 impl From<IsoCurve> for Curve {
     fn from(c: IsoCurve) -> Self {
         Self::new(CurveKind::Iso(c))
+    }
+}
+
+impl From<CrvInVolume> for Curve {
+    fn from(c: CrvInVolume) -> Self {
+        Self::new(CurveKind::CrvInVolume(Box::new(c)))
     }
 }
 
@@ -605,6 +614,7 @@ impl Curve {
             CurveKind::Projected(_) => ProjectedCurve::TYPE,
             CurveKind::Iso(_) => IsoCurve::TYPE,
             CurveKind::Offset(_) => OffsetCurve::TYPE,
+            CurveKind::CrvInVolume(_) => CrvInVolume::TYPE,
         }
     }
 
@@ -619,6 +629,7 @@ impl Curve {
             CurveKind::Projected(_) => "SmProjectedCurve_TYPE",
             CurveKind::Iso(_) => "SmIsoCurve_TYPE",
             CurveKind::Offset(_) => "SmOffsetCurve_TYPE",
+            CurveKind::CrvInVolume(_) => "SmCrvInVolume_TYPE",
         }
     }
 
@@ -633,6 +644,7 @@ impl Curve {
             CurveKind::Projected(_) => "SmProjectedCurve",
             CurveKind::Iso(_) => "SmIsoCurve",
             CurveKind::Offset(_) => "SmOffsetCurve",
+            CurveKind::CrvInVolume(_) => "SmCrvInVolume",
         }
     }
 
@@ -647,22 +659,27 @@ impl Curve {
 
     /// `operator==`: same object, or same type and dimension and (per kind) the same
     /// data.
-    #[must_use]
-    pub fn approx_eq(&self, other: &Self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from [`CrvInVolume::approx_eq`] (the volume
+    /// comparison).
+    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
-            return true;
+            return Ok(true);
         }
         match (&self.kind, &other.kind) {
-            (CurveKind::BSpline(a), CurveKind::BSpline(b)) => a.approx_eq(b),
-            (CurveKind::Hermite(a), CurveKind::Hermite(b)) => a.approx_eq(b),
-            (CurveKind::Hyperbola(a), CurveKind::Hyperbola(b)) => a.approx_eq(b),
-            (CurveKind::Conic(a), CurveKind::Conic(b)) => a.approx_eq(b),
+            (CurveKind::BSpline(a), CurveKind::BSpline(b)) => Ok(a.approx_eq(b)),
+            (CurveKind::Hermite(a), CurveKind::Hermite(b)) => Ok(a.approx_eq(b)),
+            (CurveKind::Hyperbola(a), CurveKind::Hyperbola(b)) => Ok(a.approx_eq(b)),
+            (CurveKind::Conic(a), CurveKind::Conic(b)) => Ok(a.approx_eq(b)),
             (CurveKind::Projected(a), CurveKind::Projected(b)) => a.approx_eq(b),
-            (CurveKind::Iso(a), CurveKind::Iso(b)) => a.approx_eq(b),
+            (CurveKind::Iso(a), CurveKind::Iso(b)) => Ok(a.approx_eq(b)),
             (CurveKind::Offset(a), CurveKind::Offset(b)) => a.approx_eq(b),
+            (CurveKind::CrvInVolume(a), CurveKind::CrvInVolume(b)) => a.approx_eq(b),
             // GetType() differs
-            _ => false,
+            _ => Ok(false),
         }
     }
 
@@ -679,6 +696,7 @@ impl Curve {
             CurveKind::Projected(c) => c.dim(),
             CurveKind::Iso(c) => c.dim(),
             CurveKind::Offset(c) => c.dim(),
+            CurveKind::CrvInVolume(c) => c.dim(),
         }
     }
 
@@ -695,7 +713,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Ok(3),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Ok(3),
         }
     }
 
@@ -711,6 +730,7 @@ impl Curve {
             CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Ok(2),
             CurveKind::Offset(c) => c.number_natural_knots(),
             CurveKind::Projected(c) => c.number_natural_knots(),
+            CurveKind::CrvInVolume(c) => c.number_natural_knots_ref(),
         }
     }
 
@@ -727,7 +747,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Ok(0),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Ok(0),
         }
     }
 
@@ -742,6 +763,7 @@ impl Curve {
             CurveKind::Projected(c) => c.natural_interval(),
             CurveKind::Iso(c) => c.natural_interval(),
             CurveKind::Offset(c) => c.natural_interval(),
+            CurveKind::CrvInVolume(c) => c.natural_interval(),
         }
     }
 
@@ -755,7 +777,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => false,
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => false,
         }
     }
 
@@ -771,6 +794,7 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_) => true,
             CurveKind::Projected(c) => c.is_bounded(),
+            CurveKind::CrvInVolume(c) => c.is_bounded(),
         }
     }
 
@@ -787,7 +811,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Ok(false),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Ok(false),
         }
     }
 
@@ -804,7 +829,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Ok(false),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Ok(false),
         }
     }
 
@@ -909,6 +935,7 @@ impl Curve {
             CurveKind::Projected(c) => c.evaluate(t, num_derivs, from_left, non_zero_tangents),
             CurveKind::Iso(c) => c.evaluate(t, num_derivs, from_left, non_zero_tangents),
             CurveKind::Offset(c) => c.evaluate(t, num_derivs, from_left, non_zero_tangents),
+            CurveKind::CrvInVolume(c) => c.evaluate(t, num_derivs, from_left, non_zero_tangents),
         }
     }
 
@@ -926,6 +953,7 @@ impl Curve {
             CurveKind::Projected(c) => c.evaluate_point(t),
             CurveKind::Iso(c) => c.evaluate_point(t),
             CurveKind::Offset(c) => c.evaluate_point(t),
+            CurveKind::CrvInVolume(c) => c.evaluate_point(t),
         }
     }
 
@@ -947,6 +975,7 @@ impl Curve {
             CurveKind::Projected(c) => c.calculate_continuities(angle_tol),
             CurveKind::Iso(c) => c.calculate_continuities(),
             CurveKind::Offset(c) => c.calculate_continuities(angle_tol),
+            CurveKind::CrvInVolume(c) => c.calculate_continuities_ref(angle_tol),
         }
     }
 
@@ -971,6 +1000,7 @@ impl Curve {
             CurveKind::Projected(c) => c.knots(interval),
             CurveKind::Iso(c) => c.knots(interval),
             CurveKind::Offset(c) => c.knots(interval),
+            CurveKind::CrvInVolume(c) => c.knots_ref(interval),
         }
     }
 
@@ -989,6 +1019,7 @@ impl Curve {
             CurveKind::Projected(c) => base_ends(c),
             CurveKind::Iso(c) => base_ends(c),
             CurveKind::Offset(c) => base_ends(c),
+            CurveKind::CrvInVolume(c) => base_ends(c.as_ref()),
         }
     }
 
@@ -1039,7 +1070,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Err(base_err()),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Err(base_err()),
         }
     }
 
@@ -1087,7 +1119,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Err(base_err()),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Err(base_err()),
         }
     }
 
@@ -1106,6 +1139,7 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_) => Err(base_err()),
             CurveKind::Projected(c) => c.edit_parameterization(new_param),
+            CurveKind::CrvInVolume(c) => c.edit_parameterization(new_param),
         }
     }
 
@@ -1122,6 +1156,7 @@ impl Curve {
             CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
             CurveKind::Projected(c) => c.reverse_parameterization(old_interval),
             CurveKind::Offset(c) => Ok(c.reverse_parameterization(old_interval)),
+            CurveKind::CrvInVolume(c) => c.reverse_parameterization(old_interval),
         }
     }
 
@@ -1139,6 +1174,7 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_) => Err(base_err()),
             CurveKind::Projected(c) => c.transform(rotate_n_move, scale),
+            CurveKind::CrvInVolume(c) => c.transform(rotate_n_move, scale),
         }
     }
 
@@ -1154,6 +1190,7 @@ impl Curve {
             CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
             CurveKind::Projected(c) => c.trim(k, trim_interval, mode),
             CurveKind::Offset(c) => c.trim(trim_interval, mode == TrimMode::IntervalOnly),
+            CurveKind::CrvInVolume(c) => c.trim(k, trim_interval, mode),
         }
     }
 
@@ -1169,6 +1206,7 @@ impl Curve {
             CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
             CurveKind::Projected(c) => c.copy().map(Self::from),
             CurveKind::Offset(c) => Ok(Self::from(c.copy())),
+            CurveKind::CrvInVolume(c) => Ok(Self::from(c.copy())),
         }
     }
 
@@ -1192,7 +1230,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Projected(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Ok(None),
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_) => Ok(None),
         }
     }
 
@@ -1388,8 +1427,7 @@ impl Curve {
             CONIC_TYPE => Conic::read_from_db(db).map(Self::from),
             // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::ReadFromDB
             CRV_ON_SURF_TYPE => unported("SmCrvOnSurf::ReadFromDB", "curve.crv_on_surf"),
-            // UNPORTED(curve.crv_in_volume): SmCrvInVolume::ReadFromDB
-            CRV_IN_VOLUME_TYPE => unported("SmCrvInVolume::ReadFromDB", "curve.crv_in_volume"),
+            CRV_IN_VOLUME_TYPE => CrvInVolume::read_from_db(db, version).map(Self::from),
             TANGENT_FIELD_TYPE => {
                 // SmTangentField::ReadFromDB; its SmCrvOnSurf part is unported (no early
                 // return: the nesting level must be left below)
@@ -3313,7 +3351,7 @@ mod tests {
         assert_eq!(h.number_natural_knots().unwrap(), 2);
         assert!(!h.is_rational().unwrap());
         let b = cubic();
-        assert!(b.approx_eq(&b.clone()) && !b.approx_eq(&h));
+        assert!(b.approx_eq(&b.clone()).unwrap() && !b.approx_eq(&h).unwrap());
         assert!(h.copy().is_err() && b.copy().is_ok());
     }
 

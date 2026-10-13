@@ -319,8 +319,8 @@ impl<'a, S> TangentField<'a, S> {
         // CO-PORT(curve.crv_on_surf): SmCrvOnSurf::operator==
         // (SmCurve::operator==: same type, both of dimension 3)
         let mut rtn = true;
-        rtn &=
-            core::ptr::eq(self.uv_curve, other.uv_curve) || self.uv_curve.approx_eq(other.uv_curve);
+        rtn &= core::ptr::eq(self.uv_curve, other.uv_curve)
+            || self.uv_curve.approx_eq(other.uv_curve)?;
         rtn &=
             core::ptr::eq(self.surface, other.surface) || surface_eq(self.surface, other.surface)?;
         rtn &= self.uv_domain.are_same(&other.uv_domain);

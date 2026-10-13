@@ -400,11 +400,11 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
         }
         OpIn::Eq { other } => {
             let other = Curve::from(build(other));
-            o.push(flag(curve.approx_eq(&other)));
+            o.push(flag(solid!(curve.approx_eq(&other))));
         }
         OpIn::Copy => {
             let c = solid!(curve.copy());
-            o.push(flag(curve.approx_eq(&c)));
+            o.push(flag(solid!(curve.approx_eq(&c))));
             state(&mut o, hyp_of(&c)?);
         }
         OpIn::ReadDb { .. } => return Err(harness("read_db is not a member op")),

@@ -1,0 +1,1413 @@
+//! Curves in volumes: a curve mapped through a (compound) volume, from the volume's
+//! parameter space or in-space to its final out-space (the generated curve
+//! `SmCrvInVolume`).
+//!
+//! Upstream: `source/SMLib/src/SmCrvInVolume.cpp`, `source/SMLib/inc/SmCrvInVolume.h`.
+//!
+//! | Rust                                           | Upstream                                          |
+//! |------------------------------------------------|---------------------------------------------------|
+//! | [`CrvInVolume`]                                | `SmCrvInVolume`                                   |
+//! | [`CrvInVolume::new`]                           | `SmCrvInVolume(SmCurve&, SmBoolean, SmVolume&, ULONG, ULONG, const SmContext*)` |
+//! | [`CrvInVolume::copy`], `Clone`                 | copy constructor, `Copy`                          |
+//! | `Drop` (implicit)                              | `~SmCrvInVolume`                                  |
+//! | [`CrvInVolume::approx_eq`]                     | `operator==`                                      |
+//! | [`CrvInVolume::TYPE`], [`CrvInVolume::type_code`], [`CrvInVolume::type_string`], [`CrvInVolume::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
+//! | [`CrvInVolume::is_kind_of`]                    | `IsKindOf`                                        |
+//! | [`CrvInVolume::natural_interval`]              | `GetNaturalInterval`                              |
+//! | [`CrvInVolume::owns_curve`], [`CrvInVolume::owns_volume`] | `OwnsCurve`, `OwnsVolume`              |
+//! | [`CrvInVolume::is_analytic`], [`CrvInVolume::is_bounded`] | `IsAnalytic`, `IsBounded`              |
+//! | [`CrvInVolume::evaluate`]                      | `Evaluate`                                        |
+//! | [`CrvInVolume::evaluate_point`]                | `EvaluatePoint`                                   |
+//! | [`CrvInVolume::calculate_continuities`]        | `CalculateContinuities`                           |
+//! | [`CrvInVolume::knots`], [`CrvInVolume::knots_ref`] | `GetKnots`                                    |
+//! | [`CrvInVolume::generate_mults`]                | `GenerateMults`                                   |
+//! | [`CrvInVolume::number_natural_knots`]          | `GetNumberNaturalKnots`                           |
+//! | [`CrvInVolume::edit_parameterization`]         | `EditParameterization`                            |
+//! | [`CrvInVolume::reverse_parameterization`]      | `ReverseParameterization`                         |
+//! | [`CrvInVolume::trim`]                          | `Trim`                                            |
+//! | [`CrvInVolume::transform`]                     | `Transform`                                       |
+//! | [`CrvInVolume::read_from_db`]                  | `ReadFromDB`                                      |
+//! | `SetContext` (dropped)                         | `SetContext`                                      |
+//!
+//! Deviations:
+//! - **Volumes.** `SmVolume` (units `surface.volume_p1`, `surface.volume_p2`) is not
+//!   ported yet. [`Volume`] stands in for it: it records only the volume's type code,
+//!   and every volume query this unit makes (`GetNaturalParamDomain`, `Evaluate`,
+//!   `Map`, `EvaluatePoint`, `MapPoint`, `Transform`, `operator==`, `ReadFromDB`) and
+//!   the derivative lifts `smvol_Lift*Derivative` return [`SolidError::Unported`].
+//!   The volume unit replaces [`Volume`] with the real type.
+//! - **Curve classification.** `GetKnots` classifies the base curve against the
+//!   volume's knot iso-planes with `SmCurveClassification` (units
+//!   `intersect.curve_class_p1`, `_p4`, `_p8`); that call returns
+//!   [`SolidError::Unported`].
+//! - **Ownership.** The base curve and the volume are held by value. Upstream either
+//!   shares them with the caller or owns (and maybe copies) them, as the copy and
+//!   owner flags say; here the copy flags only set the owner bits (the value moved
+//!   in is already this object's copy) and the owner flag is kept as data: it
+//!   decides [`CrvInVolume::owns_curve`], [`CrvInVolume::owns_volume`] and whether
+//!   `Trim` / `ReverseParameterization` are allowed, as upstream. The copy
+//!   constructor clones both parts (upstream copies owned parts and shares the
+//!   rest; the result is the same geometry) and recomputes the owner flag as
+//!   upstream. The owner links of the contained objects (`SetOwner(this)`) and the
+//!   notifications (`Notify`) are not modelled; `SetContext` and the `SmContext`
+//!   arguments (they only choose where upstream allocates) are dropped.
+//! - **Equality.** Upstream first compares the curve and volume pointers; held by
+//!   value, the parts are always compared by value (the volume through the unported
+//!   `SmVolume::operator==`), after the parameter-space flag and the curves, in
+//!   upstream's order. `m_bInParamSpace` is a `bool` (upstream any nonzero
+//!   `SmBoolean` is true in every test this unit makes).
+//! - **Break cache.** `GetKnots` caches the breaks through a `const_cast`: here
+//!   [`CrvInVolume::knots`] takes `&mut self` and stores them;
+//!   [`CrvInVolume::knots_ref`] (used by the `&self` methods and the [`Curve`]
+//!   dispatch) computes the same answer without storing it. A later call therefore
+//!   recomputes instead of reading the cache. [`CrvInVolume::set_breaks_cache`]
+//!   loads the cache as `ReadFromDB` does.
+//! - **Out-params.** Outputs are return values; upstream appends to the caller's
+//!   arrays (`GetKnots` on the cached path with an interval) or resizes them in
+//!   place (`GenerateMults`), here they start empty. `GenerateMults` reports an
+//!   error without the partly filled multiplicities; `GetKnots` ignores its status
+//!   as upstream and keeps them.
+//! - **Undefined behaviour.** Where upstream reads outside its arrays (`GetKnots`
+//!   with an empty knot list or no classification interval, `GenerateMults` with
+//!   more knots matched than continuities, `CalculateContinuities` without breaks)
+//!   the port returns [`SolidError::InvalidInput`]. `CalculateContinuities` ignores
+//!   `GetKnots`' and `EvaluateContinuity`'s statuses upstream (leaving an
+//!   uninitialised continuity on failure); the port propagates a failed
+//!   evaluation. `Evaluate` leaves derivatives the volume could not provide as the
+//!   caller had them; the port returns [`Vec3::UNDEF`] there.
+//! - **`ReadFromDB`** always builds a new object (the "fill the curve passed in"
+//!   branch and its `IsKindOf` check have no counterpart; `lType`, `lDim` and the
+//!   context are unused). A type header whose ASCII extraction was skipped (the
+//!   stream had already failed) leaves upstream's variable uninitialised; the port
+//!   returns [`SolidError::InvalidInput`]. Counts are bounded by the bytes left
+//!   (`plan/findings.md`, "header-declared sizes").
+//! - **Not in this unit.** `EvaluateVolume`, `MakeExactBSplineIfPossible`,
+//!   `CreateMirrorCurve`, `SetBaseCurve`, `SetVolume`, `SetOwnerFlag`, `MakeOwner`,
+//!   `GetMemoryUsed`, `WriteToDB`, `Dump`, `AssertValid` and `GetRootCurve` belong
+//!   to other units or are out of scope; the base constructor `SmCurve(ULONG)`
+//!   (unit `curve.curve_p5`) only sets the dimension, 3.
+
+use crate::curve::curve::p2::{
+    evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate, CRV_IN_VOLUME_TYPE,
+};
+use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p2::ContinuityType;
+use crate::geom::tol::is_zero_to_tol;
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
+use crate::math::{max2, BIG_DOUBLE, BOUNDED_INFINITE_PARAM, EFF_ZERO};
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::topology::database_io::{DatabaseReader, FileType};
+
+const OP: &str = "curve::crv_in_volume::CrvInVolume";
+const OP_KNOTS: &str = "curve::crv_in_volume::CrvInVolume::knots";
+const OP_MULTS: &str = "curve::crv_in_volume::CrvInVolume::generate_mults";
+const OP_CONTS: &str = "curve::crv_in_volume::CrvInVolume::calculate_continuities";
+const OP_READ: &str = "curve::crv_in_volume::CrvInVolume::read_from_db";
+
+/// `MAX_DERIVS` of `Evaluate`: the volume lifts go up to third derivatives.
+const MAX_DERIVS: usize = 3;
+
+/// `SM_CONTINUITY_ANGLE` (degrees): the default G1 angle tolerance.
+pub const CONTINUITY_ANGLE: f64 = 0.5;
+
+const fn unported<T>(upstream: &'static str, unit: &'static str) -> Result<T> {
+    Err(SolidError::Unported { upstream, unit })
+}
+
+const fn is_unported(e: &SolidError) -> bool {
+    matches!(e, SolidError::Unported { .. })
+}
+
+const fn bad(operation: &'static str, reason: &'static str) -> SolidError {
+    SolidError::InvalidInput { operation, reason }
+}
+
+// ---- the volume stand-in ------------------------------------------------------------
+
+/// Stand-in for an `SmVolume` until unit `surface.volume_p1` ports the volume
+/// classes: it records the volume's type code (`SmBSplineVolume_TYPE`,
+/// `SmTwistVolume_TYPE`, ...) and nothing else. Every query this unit makes on a
+/// volume returns [`SolidError::Unported`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Volume {
+    type_code: i64,
+}
+
+impl Volume {
+    /// A volume of type `type_code`.
+    #[must_use]
+    pub const fn new(type_code: i64) -> Self {
+        Self { type_code }
+    }
+
+    /// The volume's type code (`GetType`).
+    #[must_use]
+    pub const fn type_code(&self) -> i64 {
+        self.type_code
+    }
+}
+
+/// `SmVolume::GetNaturalParamDomain`.
+fn volume_natural_param_domain(_volume: &Volume) -> Result<Extent3d> {
+    // UNPORTED(surface.volume_p1): SmVolume::GetNaturalParamDomain
+    unported("SmVolume::GetNaturalParamDomain", "surface.volume_p1")
+}
+
+/// `SmVolume::Evaluate` (parameter space to the final out-space): the
+/// `(n+1)^3` partial derivatives at `point`, from the left or right per direction.
+fn volume_evaluate(
+    _volume: &Volume,
+    _point: Point3,
+    _num_derivs: usize,
+    _from_left: [bool; 3],
+    _non_zero_tangents: bool,
+) -> Result<Vec<Vec3>> {
+    // UNPORTED(surface.volume_p1): SmVolume::Evaluate
+    unported("SmVolume::Evaluate", "surface.volume_p1")
+}
+
+/// `SmVolume::Map` (in-space to the final out-space), as [`volume_evaluate`].
+fn volume_map(
+    _volume: &Volume,
+    _point: Point3,
+    _num_derivs: usize,
+    _from_left: [bool; 3],
+    _non_zero_tangents: bool,
+) -> Result<Vec<Vec3>> {
+    // UNPORTED(surface.volume_p1): SmVolume::Map
+    unported("SmVolume::Map", "surface.volume_p1")
+}
+
+/// `SmVolume::EvaluatePoint`.
+fn volume_evaluate_point(_volume: &Volume, _point: Point3) -> Result<Point3> {
+    // UNPORTED(surface.volume_p2): SmVolume::EvaluatePoint
+    unported("SmVolume::EvaluatePoint", "surface.volume_p2")
+}
+
+/// `SmVolume::MapPoint`.
+fn volume_map_point(_volume: &Volume, _point: Point3) -> Result<Point3> {
+    // UNPORTED(surface.volume_p1): SmVolume::MapPoint
+    unported("SmVolume::MapPoint", "surface.volume_p1")
+}
+
+/// `SmVolume::Transform`.
+fn volume_transform(
+    _volume: &mut Volume,
+    _rotate_n_move: &Axis2Placement,
+    _scale: Option<Vec3>,
+) -> Result<()> {
+    // UNPORTED(surface.volume_p1): SmVolume::Transform
+    unported("SmVolume::Transform", "surface.volume_p1")
+}
+
+/// `SmVolume::operator==`.
+fn volume_eq(_a: &Volume, _b: &Volume) -> Result<bool> {
+    // UNPORTED(surface.volume_p1): SmVolume::operator==
+    unported("SmVolume::operator==", "surface.volume_p1")
+}
+
+/// `SmVolume::ReadFromDB` of a volume of type `volume_type`.
+fn volume_read_from_db(
+    _volume_type: i64,
+    _db: &mut DatabaseReader,
+    _version: u64,
+) -> Result<Volume> {
+    // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
+    unported("SmVolume::ReadFromDB", "surface.volume_p2")
+}
+
+/// `smvol_LiftFirstDerivative`: the out-space first derivative of a curve through a
+/// volume from the curve's first derivative and the volume's first partials.
+fn lift_first_derivative(_c1: Vec3, _v1: [Vec3; 3]) -> Result<Vec3> {
+    // UNPORTED(surface.volume_p1): smvol_LiftFirstDerivative
+    unported("smvol_LiftFirstDerivative", "surface.volume_p1")
+}
+
+/// `smvol_LiftSecondDerivative` (first and second partials `Du Dv Dw`,
+/// `Duu Duv Duw Dvv Dvw Dww`).
+fn lift_second_derivative(_c: [Vec3; 2], _v1: [Vec3; 3], _v2: [Vec3; 6]) -> Result<Vec3> {
+    // UNPORTED(surface.volume_p1): smvol_LiftSecondDerivative
+    unported("smvol_LiftSecondDerivative", "surface.volume_p1")
+}
+
+/// `smvol_LiftThirdDerivative` (plus third partials `Duuu Duuv Duuw Duvv Duvw Duww
+/// Dvvv Dvvw Dvww Dwww`).
+fn lift_third_derivative(
+    _c: [Vec3; 3],
+    _v1: [Vec3; 3],
+    _v2: [Vec3; 6],
+    _v3: [Vec3; 10],
+) -> Result<Vec3> {
+    // UNPORTED(surface.volume_p1): smvol_LiftThirdDerivative
+    unported("smvol_LiftThirdDerivative", "surface.volume_p1")
+}
+
+/// The parameter intervals of the `SmCurveClassification` of `curve` over `interval`
+/// (tolerance `tol`) against the volume's discontinuity iso-planes
+/// (`Intersect3DDiscontinuities`), in order.
+fn classify_against_volume(
+    _curve: &Curve,
+    _interval: &Extent1d,
+    _tol: f64,
+    _volume: &Volume,
+    _in_param_space: bool,
+) -> Result<Vec<Extent1d>> {
+    // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
+    // UNPORTED(intersect.curve_class_p8): SmCurveClassification::Intersect3DDiscontinuities
+    // UNPORTED(intersect.curve_class_p1): SmCurveClassification::GetSize, SmCurveClassification::GetAt
+    unported(
+        "SmCurveClassification::SmCurveClassification",
+        "intersect.curve_class_p4",
+    )
+}
+
+// ---- continuity codes ---------------------------------------------------------------
+
+/// The `SmContinuityType` of integer `code` (the C cast in `ReadFromDB`); `None`
+/// outside the enum.
+#[must_use]
+pub const fn continuity_from_code(code: i64) -> Option<ContinuityType> {
+    Some(match code {
+        0 => ContinuityType::Undefined,
+        1 => ContinuityType::Discontinuous,
+        2 => ContinuityType::C0,
+        3 => ContinuityType::G1,
+        4 => ContinuityType::G1R,
+        5 => ContinuityType::G1G2,
+        6 => ContinuityType::G1G2G3,
+        7 => ContinuityType::C1,
+        8 => ContinuityType::C1G2,
+        9 => ContinuityType::C1G2G3,
+        10 => ContinuityType::C1C2,
+        11 => ContinuityType::C1C2G3,
+        12 => ContinuityType::C1C2C3,
+        13 => ContinuityType::CInfinity,
+        _ => return None,
+    })
+}
+
+// ---- the curve ----------------------------------------------------------------------
+
+/// A curve mapped through a volume (`SmCrvInVolume`): the base curve lives in the
+/// volume's parameter space or in-space and is mapped to the volume's final
+/// out-space. Its "knots" are the base curve's knots plus the parameters where the
+/// base curve crosses the volume's discontinuity iso-planes, cached once computed.
+#[derive(Debug, Clone)]
+pub struct CrvInVolume {
+    /// `m_pCurve`: the base curve.
+    curve: Curve,
+    /// `m_bInParamSpace`: the base curve is in the volume's parameter space (else
+    /// in its in-space).
+    in_param_space: bool,
+    /// `m_pVolume`: the mapping volume.
+    volume: Volume,
+    /// `m_bNeedBreaks`: the break cache is not computed.
+    need_breaks: bool,
+    /// `m_sBreaks`: cached breaks (curve knots plus volume crossings).
+    breaks: Vec<f64>,
+    /// `m_sConts`: continuity at each cached break.
+    conts: Vec<ContinuityType>,
+    /// `m_lOwnerFlag`: bit 1 owns the curve, bit 2 owns the volume (only the values
+    /// 1 and 3, and 2 and 3, count as owning).
+    owner_flag: u64,
+}
+
+impl CrvInVolume {
+    /// `SmCrvInVolume_TYPE`.
+    pub const TYPE: i64 = CRV_IN_VOLUME_TYPE;
+
+    /// A curve in `volume` (the constructor). `copy_flag` bit 1 (curve) and bit 2
+    /// (volume) ask for copies, which upstream then owns: here they set those owner
+    /// bits (the parts are held by value). `owner_flag` is the initial owner flag.
+    #[must_use]
+    pub const fn new(
+        curve: Curve,
+        in_param_space: bool,
+        volume: Volume,
+        copy_flag: u64,
+        owner_flag: u64,
+    ) -> Self {
+        let mut owner_flag = owner_flag;
+        // When Curve is to be copied - copy it
+        if copy_flag == 1 || copy_flag == 3 {
+            owner_flag |= 1;
+        }
+        // when Volume is to be copied - copy it
+        if copy_flag == 2 || copy_flag == 3 {
+            owner_flag |= 2;
+        }
+        Self {
+            curve,
+            in_param_space,
+            volume,
+            need_breaks: true,
+            breaks: Vec::new(),
+            conts: Vec::new(),
+            owner_flag,
+        }
+    }
+
+    /// The copy constructor (`Copy`): copies both parts, keeps the break cache when
+    /// it is current, and sets the owner flag to 3, 1, 2 or 0 from what this object
+    /// owns.
+    #[must_use]
+    pub fn copy(&self) -> Self {
+        let owns_curve = self.owns_curve();
+        let owns_volume = self.owns_volume();
+        let owner_flag = if owns_curve && owns_volume {
+            3
+        } else if owns_curve {
+            1
+        } else if owns_volume {
+            2
+        } else {
+            0
+        };
+        let (breaks, conts) = if self.need_breaks {
+            (Vec::new(), Vec::new())
+        } else {
+            (self.breaks.clone(), self.conts.clone())
+        };
+        Self {
+            curve: self.curve.clone(),
+            in_param_space: self.in_param_space,
+            volume: self.volume.clone(),
+            need_breaks: self.need_breaks,
+            breaks,
+            conts,
+            owner_flag,
+        }
+    }
+
+    // ---- simple access --------------------------------------------------------------
+
+    /// The base curve (`GetCurve`).
+    #[must_use]
+    pub const fn curve(&self) -> &Curve {
+        &self.curve
+    }
+
+    /// The mapping volume (`GetVolume`).
+    #[must_use]
+    pub const fn volume(&self) -> &Volume {
+        &self.volume
+    }
+
+    /// Whether the base curve is in the volume's parameter space (`GetInParamSpace`).
+    #[must_use]
+    pub const fn in_param_space(&self) -> bool {
+        self.in_param_space
+    }
+
+    /// The owner flag (`m_lOwnerFlag`).
+    #[must_use]
+    pub const fn owner_flag(&self) -> u64 {
+        self.owner_flag
+    }
+
+    /// Whether the break cache still has to be computed (`m_bNeedBreaks`).
+    #[must_use]
+    pub const fn need_breaks(&self) -> bool {
+        self.need_breaks
+    }
+
+    /// The cached breaks (`m_sBreaks`).
+    #[must_use]
+    pub fn breaks(&self) -> &[f64] {
+        &self.breaks
+    }
+
+    /// The cached continuities (`m_sConts`).
+    #[must_use]
+    pub fn conts(&self) -> &[ContinuityType] {
+        &self.conts
+    }
+
+    /// Loads the break cache, as `ReadFromDB` does: `need_breaks`, the breaks and
+    /// their continuities (upstream reads the same count of each; any lengths are
+    /// accepted here, [`Self::generate_mults`] checks them).
+    pub fn set_breaks_cache(
+        &mut self,
+        need_breaks: bool,
+        breaks: Vec<f64>,
+        conts: Vec<ContinuityType>,
+    ) {
+        self.need_breaks = need_breaks;
+        self.breaks = breaks;
+        self.conts = conts;
+    }
+
+    /// `OwnsCurve`: owner flag 1 or 3.
+    #[must_use]
+    pub const fn owns_curve(&self) -> bool {
+        self.owner_flag == 1 || self.owner_flag == 3
+    }
+
+    /// `OwnsVolume`: owner flag 2 or 3.
+    #[must_use]
+    pub const fn owns_volume(&self) -> bool {
+        self.owner_flag == 2 || self.owner_flag == 3
+    }
+
+    /// `IsAnalytic`: never.
+    #[must_use]
+    pub const fn is_analytic(&self) -> bool {
+        false
+    }
+
+    /// `IsBounded`: the base curve's.
+    #[must_use]
+    pub fn is_bounded(&self) -> bool {
+        self.curve.is_bounded()
+    }
+
+    /// `GetNaturalInterval`: the base curve's.
+    #[must_use]
+    pub fn natural_interval(&self) -> Extent1d {
+        self.curve.natural_interval()
+    }
+
+    /// Image-space dimension (`GetDim`): always 3.
+    #[must_use]
+    pub const fn dim(&self) -> u64 {
+        3
+    }
+
+    /// `GetType`.
+    #[must_use]
+    pub const fn type_code(&self) -> i64 {
+        Self::TYPE
+    }
+
+    /// `GetTypeString`.
+    #[must_use]
+    pub const fn type_string(&self) -> &'static str {
+        "SmCrvInVolume_TYPE"
+    }
+
+    /// `GetClassString`.
+    #[must_use]
+    pub const fn class_string(&self) -> &'static str {
+        "SmCrvInVolume"
+    }
+
+    /// `IsKindOf`: `SmCrvInVolume_TYPE` or a base type.
+    #[must_use]
+    pub const fn is_kind_of(&self, t: i64) -> bool {
+        t == Self::TYPE || curve_is_kind_of(t)
+    }
+
+    /// `operator==`: same parameter-space flag, equal base curves and equal volumes
+    /// (`SmCurve::operator==` holds: same type, dimension 3).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the volume comparison (reached only when the
+    /// flags and curves agree).
+    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
+        // low work
+        if core::ptr::eq(self, other) {
+            return Ok(true);
+        }
+        // check equivalence of these objects
+        Ok(self.in_param_space == other.in_param_space
+            && self.curve.approx_eq(&other.curve)?
+            && volume_eq(&self.volume, &other.volume)?)
+    }
+
+    // ---- evaluation -----------------------------------------------------------------
+
+    /// The volume's partial derivatives `0..=n` at the base curve point `crv[0]`,
+    /// each direction evaluated from `from_left` where the curve tangent `crv[1]`
+    /// points forward along it, else from the other side.
+    fn volume_derivs(
+        &self,
+        crv: &[Vec3],
+        n: usize,
+        from_left: bool,
+        non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        let p = at(crv, 0);
+        let t = at(crv, 1);
+        let sides = [
+            if t.x > 0.0 { from_left } else { !from_left },
+            if t.y > 0.0 { from_left } else { !from_left },
+            if t.z > 0.0 { from_left } else { !from_left },
+        ];
+        if self.in_param_space {
+            // Volume Evaluate - from Param to compounded last OutSpace
+            volume_evaluate(&self.volume, p, n, sides, non_zero_tangents)
+        } else {
+            // Volume map - from InSpace to compounded last OutSpace
+            volume_map(&self.volume, p, n, sides, non_zero_tangents)
+        }
+    }
+
+    /// Position and derivatives `0..=num_derivs` at `t` (`Evaluate`): the base curve
+    /// evaluated (up to third derivatives) and lifted through the volume. When the
+    /// volume cannot give that many derivatives, fewer are tried; derivatives above
+    /// the third are zero.
+    ///
+    /// # Errors
+    ///
+    /// Those of the base curve's evaluation; the volume's last failure;
+    /// [`SolidError::Unported`] from the volume.
+    pub fn evaluate(
+        &self,
+        t: f64,
+        num_derivs: usize,
+        from_left: bool,
+        non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        // limit the number of derivatives to 3
+        let mut n_eval = num_derivs.min(MAX_DERIVS);
+
+        // Curve eval - get param point
+        let crv = self
+            .curve
+            .evaluate(t, n_eval, from_left, non_zero_tangents)?;
+
+        // Volume Evaluate / Map - with fewer derivatives while the volume can't
+        let mut vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
+        while let Err(e) = &vol {
+            if is_unported(e) || n_eval == 0 {
+                break;
+            }
+            n_eval -= 1;
+            vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
+        }
+        let vol = vol?;
+
+        // For subscripting into the volume pt/deriv array
+        let ss = |u: usize, v: usize, w: usize| at(&vol, (u * (n_eval + 1) + v) * (n_eval + 1) + w);
+
+        let mut out = vec![Vec3::UNDEF; num_derivs + 1];
+        let mut put = |i: usize, v: Vec3| {
+            if let Some(o) = out.get_mut(i) {
+                *o = v;
+            }
+        };
+
+        // Position
+        put(0, at(&vol, 0));
+
+        let v1 = || [ss(1, 0, 0), ss(0, 1, 0), ss(0, 0, 1)];
+        let v2 = || {
+            [
+                ss(2, 0, 0),
+                ss(1, 1, 0),
+                ss(1, 0, 1),
+                ss(0, 2, 0),
+                ss(0, 1, 1),
+                ss(0, 0, 2),
+            ]
+        };
+
+        // 1st Derivs
+        if n_eval >= 1 {
+            put(1, lift_first_derivative(at(&crv, 1), v1())?);
+        }
+
+        // 2nd Derivs
+        if n_eval >= 2 {
+            put(
+                2,
+                lift_second_derivative([at(&crv, 1), at(&crv, 2)], v1(), v2())?,
+            );
+        }
+
+        // 3rd Derivs
+        if n_eval >= 3 {
+            let v3 = [
+                ss(3, 0, 0),
+                ss(2, 1, 0),
+                ss(2, 0, 1),
+                ss(1, 2, 0),
+                ss(1, 1, 1),
+                ss(1, 0, 2),
+                ss(0, 3, 0),
+                ss(0, 2, 1),
+                ss(0, 1, 2),
+                ss(0, 0, 3),
+            ];
+            put(
+                3,
+                lift_third_derivative([at(&crv, 1), at(&crv, 2), at(&crv, 3)], v1(), v2(), v3)?,
+            );
+        }
+
+        // If too many requested, fill with zeros.
+        for ii in MAX_DERIVS + 1..=num_derivs {
+            put(ii, Vec3::new(0.0, 0.0, 0.0));
+        }
+
+        Ok(out)
+    }
+
+    /// The point at `t` (`EvaluatePoint`). Upstream maps the base curve point
+    /// through `MapPoint` first in either case, then evaluates or maps it.
+    ///
+    /// # Errors
+    ///
+    /// Those of the base curve's evaluation; [`SolidError::Unported`] from the volume.
+    pub fn evaluate_point(&self, t: f64) -> Result<Point3> {
+        // Curve eval - Get ParamSpace point
+        let p = self.curve.evaluate_point(t)?;
+
+        // volume eval
+        volume_map_point(&self.volume, p)?;
+
+        if self.in_param_space {
+            // Volume Evaluate - from Param to compounded last OutSpace
+            volume_evaluate_point(&self.volume, p)
+        } else {
+            // Volume map - from InSpace to compounded last OutSpace
+            volume_map_point(&self.volume, p)
+        }
+    }
+
+    // ---- breaks ---------------------------------------------------------------------
+
+    /// The cached breaks inside `interval` (`ContainsValue`, no tolerance) or all of
+    /// them, with their multiplicities from [`Self::generate_mults`] (status
+    /// ignored, as upstream: none when its state check fails, else partly filled).
+    fn cached_knots(&self, interval: Option<&Extent1d>) -> (Vec<f64>, Vec<usize>) {
+        let knots: Vec<f64> = match interval {
+            None => self.breaks.clone(),
+            Some(ivl) => self
+                .breaks
+                .iter()
+                .copied()
+                .filter(|&b| ivl.contains_value(b, 0.0))
+                .collect(),
+        };
+        // GenerateMults sizes the output only after its state check
+        let mut mults = if self.need_breaks || self.breaks.len() != self.conts.len() {
+            Vec::new()
+        } else {
+            vec![0; knots.len()]
+        };
+        let _ = self.fill_mults(&knots, &mut mults);
+        (knots, mults)
+    }
+
+    /// The uncached breaks: the base curve's knots with multiplicities adjusted to
+    /// a cubic, plus every classification boundary not already a knot (as a C1
+    /// knot, multiplicity 2). Returns the breaks, multiplicities and the UVW
+    /// tolerance.
+    fn compute_breaks(&self) -> Result<(Vec<f64>, Vec<usize>, f64)> {
+        // pick a UVWSpace tolerance
+        let volume_param_size = volume_natural_param_domain(&self.volume)?
+            .approximate_unbounded(None, BOUNDED_INFINITE_PARAM)
+            .max_dimension();
+        let curve_param_size = self
+            .curve
+            .natural_interval()
+            .approximate_unbounded(0.0, BOUNDED_INFINITE_PARAM)
+            .length();
+        let tol_uvw = EFF_ZERO * (1.0 + max2(volume_param_size, curve_param_size));
+
+        // get the Curve knots and multiplicities for the natural curve (status ignored)
+        let (mut knots, mut mults) = match self.curve.knots(None) {
+            Ok(km) => km,
+            Err(e) if is_unported(&e) => return Err(e),
+            Err(_) => (Vec::new(), Vec::new()),
+        };
+
+        // modify the multiplicity list to act as if Curve is a degree 3 BSpline
+        let crv_degree = self.curve.degree()?;
+        if crv_degree != 3 {
+            for m in &mut mults {
+                *m = if crv_degree < *m + 3 {
+                    *m + 3 - crv_degree
+                } else {
+                    1
+                };
+            }
+        }
+
+        // classify the BaseCurve against the volume knot isoParameter lines
+        let classes = classify_against_volume(
+            &self.curve,
+            &self.curve.natural_interval(),
+            tol_uvw,
+            &self.volume,
+            self.in_param_space,
+        )?;
+
+        // add the classification boundaries uniquely and in order to the knots and mults
+        let cnt = classes.len();
+        let short = || bad(OP_KNOTS, "no base curve knots or classification intervals");
+        let mut uvw_knot = *knots.first().ok_or_else(short)?;
+        let mut jj = 0usize;
+        for ii in 0..=cnt {
+            let class_bndry = if ii < cnt {
+                classes.get(ii).ok_or_else(short)?.min()
+            } else {
+                classes.get(ii.wrapping_sub(1)).ok_or_else(short)?.max()
+            };
+
+            // check the next UVWKnots until we get one bigger or equal to class_bndry
+            while class_bndry > uvw_knot + tol_uvw {
+                jj += 1;
+                uvw_knot = if jj == knots.len() {
+                    BIG_DOUBLE
+                } else {
+                    *knots.get(jj).ok_or_else(short)?
+                };
+            }
+
+            // when class_bndry value is already in knots - move onto next ClassKnot
+            if class_bndry > uvw_knot - tol_uvw {
+                continue;
+            }
+
+            // add class boundary as if it were a C1 knot into the curve
+            if jj > knots.len() {
+                return Err(short());
+            }
+            knots.insert(jj, class_bndry);
+            mults.insert(jj.min(mults.len()), 2);
+
+            // skip to next UVWKnot and continue
+            jj += 1;
+            if jj >= knots.len() {
+                jj = knots.len() - 1;
+            }
+            uvw_knot = *knots.get(jj).ok_or_else(short)?;
+        }
+        Ok((knots, mults, tol_uvw))
+    }
+
+    /// The continuity of each break from its multiplicity on a cubic (the ends are
+    /// discontinuous).
+    fn conts_of(mults: &[usize]) -> Vec<ContinuityType> {
+        let cnt = mults.len();
+        mults
+            .iter()
+            .enumerate()
+            .map(|(ii, &m)| {
+                if ii == 0 || ii == cnt - 1 {
+                    ContinuityType::Discontinuous
+                } else {
+                    match m {
+                        0 => ContinuityType::CInfinity,
+                        1 => ContinuityType::C1C2,
+                        2 => ContinuityType::C1,
+                        3 => ContinuityType::C0,
+                        _ => ContinuityType::Discontinuous,
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Drops the breaks (and multiplicities) outside `interval` (with `tol`) when the
+    /// first or last break lies outside it.
+    fn cull(
+        knots: &mut Vec<f64>,
+        mults: &mut Vec<usize>,
+        interval: Option<&Extent1d>,
+        tol: f64,
+    ) -> Result<()> {
+        let Some(ivl) = interval else {
+            return Ok(());
+        };
+        let short = || bad(OP_KNOTS, "no breaks to cull");
+        let first = *knots.first().ok_or_else(short)?;
+        let last = *knots.last().ok_or_else(short)?;
+        if !(first < ivl.min() - tol || last > ivl.max() + tol) {
+            return Ok(());
+        }
+        let min = ivl.min();
+        let max = ivl.max();
+        let mut jj = 0usize;
+        for ii in 0..knots.len() {
+            let class_bndry = *knots.get(ii).ok_or_else(short)?;
+            if min > class_bndry + tol {
+                // below the interval: don't increment jj
+            } else if max < class_bndry - tol {
+                break;
+            } else {
+                // when needed - compress output arrays
+                if ii != jj {
+                    if let Some(k) = knots.get_mut(jj) {
+                        *k = class_bndry;
+                    }
+                    let m = mults.get(ii).copied().unwrap_or(0);
+                    if let Some(d) = mults.get_mut(jj) {
+                        *d = m;
+                    }
+                }
+                jj += 1;
+            }
+        }
+        knots.truncate(jj);
+        mults.truncate(jj);
+        Ok(())
+    }
+
+    /// The breaks ("knots") and their effective multiplicities, optionally limited
+    /// to `interval` (`GetKnots`), computing and caching them when needed.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the volume and the curve classification;
+    /// [`SolidError::InvalidInput`] where upstream would read outside its arrays.
+    pub fn knots(&mut self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+        // low work - Knots and Conts already cached
+        if !self.need_breaks {
+            return Ok(self.cached_knots(interval));
+        }
+        let (mut knots, mut mults, tol) = self.compute_breaks()?;
+
+        // cache the knots
+        self.breaks.clone_from(&knots);
+        self.need_breaks = false;
+        self.conts = Self::conts_of(&mults);
+
+        // when given an interval - cull unwanted output values
+        Self::cull(&mut knots, &mut mults, interval, tol)?;
+        Ok((knots, mults))
+    }
+
+    /// [`Self::knots`] without storing the cache (for `&self` callers): the same
+    /// answer as upstream's first call.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::knots`].
+    pub fn knots_ref(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+        if !self.need_breaks {
+            return Ok(self.cached_knots(interval));
+        }
+        let (mut knots, mut mults, tol) = self.compute_breaks()?;
+        Self::cull(&mut knots, &mut mults, interval, tol)?;
+        Ok((knots, mults))
+    }
+
+    /// Fills `mults` (one per knot, zero-initialised) from the cached continuities.
+    fn fill_mults(&self, knots: &[f64], mults: &mut [usize]) -> Result<()> {
+        // check state - cached breaks and conts are current
+        if self.need_breaks || self.breaks.len() != self.conts.len() {
+            return Err(SolidError::sm_err(OP_MULTS));
+        }
+
+        let mut bi = 0usize;
+        for (ii, &param) in knots.iter().enumerate() {
+            let mut found = false;
+
+            // find the corresponding break value
+            while let Some(&brk) = self.breaks.get(bi) {
+                // when break matches current knot
+                if is_zero_to_tol(param - brk, EFF_ZERO) {
+                    found = true;
+                    break;
+                } else if brk > param {
+                    // given knot value is not a discontinuity
+                    if let Some(m) = mults.get_mut(ii) {
+                        *m = 0;
+                    }
+                    break;
+                }
+                bi += 1;
+            }
+
+            // error condition - ran out of breaks to search
+            if bi >= self.breaks.len() {
+                return Err(SolidError::sm_err(OP_MULTS));
+            }
+
+            // when a match was not found move onto the next Knot
+            if !found {
+                continue;
+            }
+
+            // check cache currency (upstream indexes the continuities by the knot index)
+            let cont = *self
+                .conts
+                .get(ii)
+                .ok_or_else(|| bad(OP_MULTS, "more knots matched than continuities"))?;
+            if cont == ContinuityType::Undefined {
+                return Err(SolidError::sm_err(OP_MULTS));
+            }
+
+            // set an effective multiplicity
+            let m = match cont {
+                ContinuityType::Discontinuous => 3,
+                c if c as i32 <= ContinuityType::G1G2G3 as i32 => 2,
+                c if c as i32 <= ContinuityType::C1C2G3 as i32 => 1,
+                _ => 0,
+            };
+            if let Some(d) = mults.get_mut(ii) {
+                *d = m;
+            }
+        }
+        Ok(())
+    }
+
+    /// The effective multiplicities of `knots` (ascending; expected among the cached
+    /// breaks) from the cached continuities, as if the curve were a cubic
+    /// (`GenerateMults`): 3 for a discontinuity, 2 up to G1-G2-G3, 1 up to
+    /// C1-C2-G3, else 0; 0 for a knot that is not a break.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the cache is not current, a knot lies past the last break or a
+    /// continuity is undefined; [`SolidError::InvalidInput`] when a matched knot's
+    /// index has no continuity (upstream reads past the array).
+    pub fn generate_mults(&self, knots: &[f64]) -> Result<Vec<usize>> {
+        let mut mults = vec![0; knots.len()];
+        self.fill_mults(knots, &mut mults)?;
+        Ok(mults)
+    }
+
+    /// The sum of the break multiplicities (`GetNumberNaturalKnots`), caching the
+    /// breaks. `GetKnots`' status is ignored upstream; here only an error before
+    /// any break is known is reported.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::knots`].
+    pub fn number_natural_knots(&mut self) -> Result<usize> {
+        let (_, mults) = self.knots(None)?;
+        Ok(mults.iter().sum())
+    }
+
+    /// [`Self::number_natural_knots`] without storing the cache.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::knots_ref`].
+    pub fn number_natural_knots_ref(&self) -> Result<usize> {
+        let (_, mults) = self.knots_ref(None)?;
+        Ok(mults.iter().sum())
+    }
+
+    /// The continuities at `breaks`: the ends discontinuous, each interior break
+    /// evaluated from both sides with `angle_tol`; and their minimum over the
+    /// interior (`CInfinity` without interior breaks).
+    fn continuities_at(
+        &self,
+        breaks: &[f64],
+        angle_tol: f64,
+    ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
+        let n = breaks.len();
+        if n == 0 {
+            return Err(bad(OP_CONTS, "no breaks"));
+        }
+        let mut min_cont = ContinuityType::CInfinity;
+        let mut conts = vec![ContinuityType::Undefined; n];
+        if let Some(c) = conts.first_mut() {
+            *c = ContinuityType::Discontinuous;
+        }
+        if let Some(c) = conts.last_mut() {
+            *c = ContinuityType::Discontinuous;
+        }
+        for ii in 1..n - 1 {
+            let t = *breaks.get(ii).ok_or_else(|| bad(OP_CONTS, "no breaks"))?;
+            // evaluate geometric continuities
+            let c = evaluate_continuity(self, t, true, self, t, false, angle_tol)?.continuity;
+            if let Some(d) = conts.get_mut(ii) {
+                *d = c;
+            }
+            // save min continuity
+            if min_cont as i32 > c as i32 {
+                min_cont = c;
+            }
+        }
+        Ok((min_cont, conts))
+    }
+
+    /// The minimum interior continuity and the continuity at every break
+    /// (`CalculateContinuities`), caching the breaks.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::knots`] and of the evaluations;
+    /// [`SolidError::InvalidInput`] without breaks.
+    pub fn calculate_continuities(
+        &mut self,
+        angle_tol: f64,
+    ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
+        let (breaks, _) = self.knots(None)?;
+        self.continuities_at(&breaks, angle_tol)
+    }
+
+    /// [`Self::calculate_continuities`] without storing the cache.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::calculate_continuities`].
+    pub fn calculate_continuities_ref(
+        &self,
+        angle_tol: f64,
+    ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
+        let (breaks, _) = self.knots_ref(None)?;
+        self.continuities_at(&breaks, angle_tol)
+    }
+
+    // ---- editing --------------------------------------------------------------------
+
+    /// `EditParameterization`: rescales the cached breaks to `new_param` (or drops
+    /// the cache when either interval has zero length), then reparameterises the
+    /// base curve.
+    ///
+    /// # Errors
+    ///
+    /// Those of the base curve's edit (the breaks are rescaled already).
+    pub fn edit_parameterization(&mut self, new_param: &Extent1d) -> Result<()> {
+        // when appropriate scale breaks
+        if !self.need_breaks {
+            let ivl = self.curve.natural_interval();
+            if ivl.length() > EFF_ZERO && new_param.length() > EFF_ZERO {
+                // for every break
+                for b in &mut self.breaks {
+                    *b = ((*b - ivl.min()) / ivl.length()) * new_param.length() + new_param.min();
+                }
+            } else {
+                // working with zero length intervals
+                self.breaks.clear();
+                self.conts.clear();
+                self.need_breaks = true;
+            }
+        }
+
+        // pass the call along to the curve
+        self.curve.edit_parameterization(new_param)
+    }
+
+    /// `ReverseParameterization`: reverses the base curve; returns the new interval
+    /// of `old_interval`. The break cache is kept, as upstream.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the curve is not owned; those of the base curve's reversal.
+    pub fn reverse_parameterization(&mut self, old_interval: &Extent1d) -> Result<Extent1d> {
+        // Don't own curve can not reverse parameterization
+        if !self.owns_curve() {
+            return Err(SolidError::sm_err(OP));
+        }
+        self.curve.reverse_parameterization(old_interval)
+    }
+
+    /// `Trim`: trims the base curve (`trim_interval` may be snapped) and drops the
+    /// break cache.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the curve is not owned; those of the base curve's trim.
+    pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
+        // Don't own curve can not trim the curve
+        if !self.owns_curve() {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // pass the call along to the Curve
+        self.curve.trim(k, trim_interval, mode)?;
+
+        // clear the knots
+        if !self.need_breaks {
+            self.breaks.clear();
+            self.conts.clear();
+            self.need_breaks = true;
+        }
+        Ok(())
+    }
+
+    /// `Transform`: compounds the rotate-and-move (after the optional scale) onto
+    /// the volume; nothing for the identity.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the volume.
+    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        let identity_scale = Vec3::new(1.0, 1.0, 1.0);
+
+        // no work - identity transform
+        if rotate_n_move.is_identity(EFF_ZERO) && scale.is_none_or(|s| s.approx_eq(identity_scale))
+        {
+            return Ok(());
+        }
+
+        // compound the Transform onto the contained volume
+        volume_transform(&mut self.volume, rotate_n_move, scale)
+    }
+
+    // ---- persistence ----------------------------------------------------------------
+
+    /// Reads a curve in volume from `db` (database version `version`) (`ReadFromDB`):
+    /// the cache flag, the base curve (type header and data), the parameter-space
+    /// flag, the volume (type header and data) and, when cached, the breaks and
+    /// their continuities. The new object owns both parts (owner flag 3).
+    ///
+    /// # Errors
+    ///
+    /// Those of the reads and of the base curve's reader; [`SolidError::Unported`]
+    /// from the volume reader; [`SolidError::InvalidInput`] for an unreadable type
+    /// header, a count larger than the input or an unknown continuity code.
+    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
+        let ascii = db.file_type() == FileType::Ascii;
+        let no_stream = || bad(OP_READ, "no input stream");
+
+        // cache flag
+        let need_knots = if ascii {
+            let v = db
+                .in_stream_mut()
+                .ok_or_else(no_stream)?
+                .extract_int()
+                .ok_or_else(|| bad(OP_READ, "cache flag not read"))?;
+            db.go_to_next_line();
+            v != 0
+        } else {
+            db.read_boolean()? != 0
+        };
+
+        // nested curve
+        if ascii {
+            db.go_to_next_line();
+        }
+        let header = db.read_type(true)?;
+        let curve_type = header
+            .type_code
+            .ok_or_else(|| bad(OP_READ, "curve type not read"))?;
+        let curve_dim = header
+            .dim
+            .ok_or_else(|| bad(OP_READ, "curve dimension not read"))?;
+        let curve = Curve::read_from_db(curve_type, db, curve_dim, version)?;
+
+        // bInParamSpace value (extracted as text in either file type; the empty
+        // object's TRUE stays when the extraction is skipped)
+        let in_param_space = db
+            .in_stream_mut()
+            .ok_or_else(no_stream)?
+            .extract_int()
+            .is_none_or(|v| v != 0);
+        db.go_to_next_line();
+
+        // compounding volume
+        if ascii {
+            db.go_to_next_line();
+        }
+        let volume_type = db
+            .read_type(false)?
+            .type_code
+            .ok_or_else(|| bad(OP_READ, "volume type not read"))?;
+        let volume = volume_read_from_db(volume_type, db, version)?;
+
+        // when appropriate - knots
+        let mut breaks = Vec::new();
+        let mut conts = Vec::new();
+        if !need_knots {
+            let count = if ascii {
+                let n = db
+                    .in_stream_mut()
+                    .ok_or_else(no_stream)?
+                    .extract_ulong()
+                    .ok_or_else(|| bad(OP_READ, "break count not read"))?;
+                db.go_to_next_line();
+                n
+            } else {
+                db.read_ulong()?
+            };
+            let count =
+                usize::try_from(count).map_err(|_| bad(OP_READ, "break count too large"))?;
+            db.ensure_available(count, if ascii { 1 } else { 8 }, OP_READ)?;
+
+            // read every knot
+            if ascii {
+                let s = db.in_stream_mut().ok_or_else(no_stream)?;
+                for _ in 0..count {
+                    breaks.push(s.extract_double().unwrap_or(0.0));
+                }
+                if count > 0 {
+                    db.go_to_next_line();
+                }
+            } else {
+                breaks = db.read_doubles(count)?;
+            }
+
+            // read every Continuity
+            let mut codes = Vec::with_capacity(count);
+            if ascii {
+                let s = db.in_stream_mut().ok_or_else(no_stream)?;
+                for _ in 0..count {
+                    codes.push(s.extract_ulong().unwrap_or(0) as i64);
+                }
+                if count > 0 {
+                    db.go_to_next_line();
+                }
+            } else {
+                for _ in 0..count {
+                    codes.push(db.read_ulong()? as i64);
+                }
+            }
+            for c in codes {
+                conts.push(
+                    continuity_from_code(c)
+                        .ok_or_else(|| bad(OP_READ, "unknown continuity code"))?,
+                );
+            }
+        }
+
+        // load obj
+        Ok(Self {
+            curve,
+            in_param_space,
+            volume,
+            need_breaks: need_knots,
+            breaks,
+            conts,
+            owner_flag: 3,
+        })
+    }
+}
+
+/// Entry `i` of an evaluation, or `UNDEF` (an unwritten `SmVector3d`).
+fn at(v: &[Vec3], i: usize) -> Vec3 {
+    v.get(i).copied().unwrap_or(Vec3::UNDEF)
+}
+
+impl CurveEvaluate for CrvInVolume {
+    fn dim(&self) -> u64 {
+        Self::dim(self)
+    }
+
+    fn natural_interval(&self) -> Extent1d {
+        Self::natural_interval(self)
+    }
+
+    fn evaluate(
+        &self,
+        t: f64,
+        num_derivs: usize,
+        from_left: bool,
+        non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        Self::evaluate(self, t, num_derivs, from_left, non_zero_tangents)
+    }
+
+    fn evaluate_point(&self, t: f64) -> Result<Point3> {
+        Self::evaluate_point(self, t)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+    use crate::topology::database_io::InputStream;
+
+    const TWIST: i64 = 22011;
+
+    /// A clamped cubic with one interior knot at 0.5 on `[0, 1]`.
+    fn base() -> Curve {
+        let mut cur = allocate_nurb_curve(4, 3, 8).unwrap();
+        for (i, p) in cur.cpts_mut().iter_mut().enumerate() {
+            p.x = i as f64;
+            p.y = (i * i) as f64 * 0.1;
+            p.z = 0.0;
+            p.w = -f64::MAX;
+        }
+        cur.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0]);
+        Curve::from(BSplineCurve::from_nurb(cur, 3, false))
+    }
+
+    fn civ(owner: u64) -> CrvInVolume {
+        CrvInVolume::new(base(), true, Volume::new(TWIST), 0, owner)
+    }
+
+    fn cached(owner: u64) -> CrvInVolume {
+        let mut c = civ(owner);
+        c.set_breaks_cache(
+            false,
+            vec![0.0, 0.25, 0.5, 1.0],
+            vec![
+                ContinuityType::Discontinuous,
+                ContinuityType::C1,
+                ContinuityType::G1,
+                ContinuityType::Discontinuous,
+            ],
+        );
+        c
+    }
+
+    #[test]
+    fn construct_and_flags() {
+        let c = CrvInVolume::new(base(), false, Volume::new(TWIST), 3, 0);
+        assert_eq!(c.owner_flag(), 3);
+        assert!(c.owns_curve() && c.owns_volume());
+        let c = CrvInVolume::new(base(), false, Volume::new(TWIST), 1, 4);
+        assert_eq!(c.owner_flag(), 5);
+        assert!(!c.owns_curve() && !c.owns_volume());
+        assert_eq!(c.copy().owner_flag(), 0);
+        assert!(c.need_breaks());
+        assert!(c.is_kind_of(CrvInVolume::TYPE) && c.is_kind_of(crate::curve::curve::p2::TYPE));
+        assert_eq!(c.natural_interval().max(), 1.0);
+        assert_eq!(c.type_string(), "SmCrvInVolume_TYPE");
+    }
+
+    #[test]
+    fn generate_mults_from_cache() {
+        let c = cached(3);
+        assert_eq!(
+            c.generate_mults(&[0.0, 0.25, 0.5, 1.0]).unwrap(),
+            vec![3, 1, 2, 3]
+        );
+        // a knot that is not a break gets 0; conts indexed by the knot index
+        assert_eq!(c.generate_mults(&[0.1, 0.5]).unwrap(), vec![0, 1]);
+        // past the last break
+        assert!(c.generate_mults(&[2.0]).is_err());
+        let (k, m) = c
+            .knots_ref(Some(&Extent1d::from_min_max(0.2, 0.6)))
+            .unwrap();
+        assert_eq!(k, vec![0.25, 0.5]);
+        assert_eq!(m, vec![3, 1]);
+        assert_eq!(c.number_natural_knots_ref().unwrap(), 9);
+    }
+
+    #[test]
+    fn uncached_knots_and_eval_are_unported() {
+        let mut c = civ(3);
+        assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
+        assert!(matches!(
+            c.evaluate(0.5, 2, true, true),
+            Err(SolidError::Unported { .. })
+        ));
+        assert!(matches!(
+            c.evaluate_point(0.5),
+            Err(SolidError::Unported { .. })
+        ));
+    }
+
+    #[test]
+    fn edits() {
+        let k = Kernel::default();
+        let mut c = cached(3);
+        c.edit_parameterization(&Extent1d::from_min_max(0.0, 2.0))
+            .unwrap();
+        assert_eq!(c.breaks(), &[0.0, 0.5, 1.0, 2.0]);
+        let mut ivl = Extent1d::from_min_max(0.25, 1.5);
+        c.trim(&k, &mut ivl, TrimMode::Notify).unwrap();
+        assert!(c.need_breaks() && c.breaks().is_empty());
+        let mut d = cached(0);
+        assert!(d.trim(&k, &mut ivl, TrimMode::Notify).is_err());
+        assert!(d.reverse_parameterization(&ivl).is_err());
+        let (min, conts) = cached(3).continuities_at(&[0.0, 1.0], 0.5).unwrap();
+        assert_eq!(min, ContinuityType::CInfinity);
+        assert_eq!(conts.len(), 2);
+    }
+
+    #[test]
+    fn read_stops_at_the_volume() {
+        let text = "1 Has knots flag\n Begin\nObject Type 14033\nCurve Dim 3\n";
+        let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(text.into()));
+        assert!(CrvInVolume::read_from_db(&mut db, 0).is_err());
+    }
+}

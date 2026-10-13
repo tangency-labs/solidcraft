@@ -505,14 +505,14 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             o.extend(conts.iter().map(|&x| f64::from(x as u8)));
         }
         OpIn::Eq { other } => match other {
-            OtherIn::Itself => o.push(flag(c.approx_eq(&c))),
+            OtherIn::Itself => o.push(flag(c.approx_eq(&c)?)),
             OtherIn::Own(b) => {
                 let b = Curve::from(build(b)?);
-                o.extend([flag(c.approx_eq(&b)), flag(b.approx_eq(&c))]);
+                o.extend([flag(c.approx_eq(&b)?), flag(b.approx_eq(&c)?)]);
             }
             OtherIn::SameSurface(p) => {
                 let b = Curve::from(make(iso.surface().clone(), p)?);
-                o.extend([flag(c.approx_eq(&b)), flag(b.approx_eq(&c))]);
+                o.extend([flag(c.approx_eq(&b)?), flag(b.approx_eq(&c)?)]);
             }
         },
         OpIn::IsKindOf { t } => o.push(flag(c.is_kind_of(*t))),

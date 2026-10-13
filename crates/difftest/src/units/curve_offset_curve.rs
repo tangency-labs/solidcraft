@@ -545,11 +545,11 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
         OpIn::Eq { this, copy, other } => {
             o.push(0.0);
             if *this {
-                o.push(b(c.approx_eq(&c)));
+                o.push(b(c.approx_eq(&c)?));
             } else if *copy {
                 let cp = c.copy()?;
-                o.push(b(c.approx_eq(&cp)));
-                o.push(b(cp.approx_eq(&c)));
+                o.push(b(c.approx_eq(&cp)?));
+                o.push(b(cp.approx_eq(&c)?));
             } else {
                 let s = other.as_ref().ok_or(SolidError::InvalidInput {
                     operation: "difftest",
@@ -558,8 +558,8 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
                 let mut s = s.clone();
                 s.owns = false;
                 let c2 = build_offset(under, &s);
-                o.push(b(c.approx_eq(&c2)));
-                o.push(b(c2.approx_eq(&c)));
+                o.push(b(c.approx_eq(&c2)?));
+                o.push(b(c2.approx_eq(&c)?));
             }
         }
         OpIn::Copy { probes: ts } => {

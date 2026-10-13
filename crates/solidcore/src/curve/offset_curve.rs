@@ -216,29 +216,32 @@ impl OffsetCurve {
 
     /// `operator==`: same dimension, equal base curves, normals and intervals, offset
     /// distances within the scaled zero and the same reversal flag.
-    #[must_use]
-    pub fn approx_eq(&self, other: &Self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::approx_eq`] on the base curves.
+    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
-            return true;
+            return Ok(true);
         }
 
         // first check the base (SmCurve::operator==: same type, same dimension)
         if self.dim != other.dim {
-            return false;
+            return Ok(false);
         }
 
         // check equivalence of these objects
         let bases = match (&self.base, &other.base) {
             (None, None) => true,
-            (Some(a), Some(b)) => a.approx_eq(b),
+            (Some(a), Some(b)) => a.approx_eq(b)?,
             _ => false,
         };
-        bases
+        Ok(bases
             && self.normal.approx_eq(other.normal)
             && is_zero(self.distance - other.distance)
             && self.interval.are_same(&other.interval)
-            && self.reversed == other.reversed
+            && self.reversed == other.reversed)
     }
 
     /// The natural interval (`GetNaturalInterval`): the curve interval.
@@ -746,8 +749,8 @@ mod tests {
     fn equality_copy_and_types() {
         let a = offset(0.5);
         let b = a.copy();
-        assert!(a.approx_eq(&b));
-        assert!(!a.approx_eq(&offset(0.6)));
+        assert!(a.approx_eq(&b).unwrap());
+        assert!(!a.approx_eq(&offset(0.6)).unwrap());
         assert!(a.is_kind_of(OffsetCurve::TYPE));
         assert!(a.is_kind_of(crate::curve::curve::p2::TYPE));
         assert!(!a.is_kind_of(HermiteCurve::TYPE));

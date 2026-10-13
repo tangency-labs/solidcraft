@@ -733,16 +733,21 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(0.0);
             projected_state(&mut o, &nc)?;
             o.push(b(pc.owns_curve() == OwnsCurve::No));
-            o.push(b(nc.approx_eq(&c)));
+            let eq = tri!(o, nc.approx_eq(&c));
+            o.push(b(eq));
         }
         OpIn::Equal { other } => {
             let c = Curve::from(pc.clone());
             o.push(0.0);
             match other {
-                None => o.push(b(c.approx_eq(&c))),
+                None => {
+                    let eq = tri!(o, c.approx_eq(&c));
+                    o.push(b(eq));
+                }
                 Some(oi) => {
                     let (p2, _) = build(oi)?;
-                    o.push(b(c.approx_eq(&Curve::from(p2))));
+                    let eq = tri!(o, c.approx_eq(&Curve::from(p2)));
+                    o.push(b(eq));
                 }
             }
         }

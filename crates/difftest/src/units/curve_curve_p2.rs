@@ -725,7 +725,7 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
             }
         }
         // the shim reports another type as -1
-        CurveKind::Projected(_) | CurveKind::Offset(_) => o.push(-1.0),
+        CurveKind::Projected(_) | CurveKind::Offset(_) | CurveKind::CrvInVolume(_) => o.push(-1.0),
     }
 }
 
@@ -1019,8 +1019,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Equal { other } => {
             let c = c_ref()?;
             let eq = match other {
-                None => c.approx_eq(c),
-                Some(x) => c.approx_eq(&build(x)?),
+                None => tri!(o, c.approx_eq(c)),
+                Some(x) => tri!(o, c.approx_eq(&build(x)?)),
             };
             o.extend([0.0, b(eq)]);
         }
