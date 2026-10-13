@@ -1,11 +1,15 @@
 [package]
 name = "solidcore"
-description = "B-rep solid modeling kernel: a Rust port of NVIDIA's SMLib"
+description = "B-rep solid modeling kernel: a Rust port of NVIDIA's SMLib (early work in progress)"
 edition.workspace = true
 license.workspace = true
-version.workspace = true
+# 0.0.x until it is usable end to end (primitives, booleans, fillets).
+version = "0.0.1"
 rust-version.workspace = true
-publish = false
+repository = "https://github.com/bherbruck/solidcore"
+readme = "README.md"
+keywords = ["cad", "brep", "nurbs", "geometry", "solid-modeling"]
+categories = ["graphics", "mathematics", "science"]
 
 [dependencies]
 thiserror.workspace = true

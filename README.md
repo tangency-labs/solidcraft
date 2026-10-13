@@ -92,6 +92,15 @@ Contributions are pull requests, one per port unit, and AI agents are welcome:
 The full rules, style and step-by-step workflow are in [AGENTS.md](AGENTS.md) (point your
 agent at it).
 
+## Releasing
+
+`solidcore` is published to crates.io from CI: bump `version` in
+`crates/solidcore/Cargo.toml` in a PR, merge it, then push a tag
+`solidcore-v<version>` (`.github/workflows/release.yml`, needs the
+`CARGO_REGISTRY_TOKEN` repository secret). Only `solidcore` is published;
+`solidcore-ffi` and `difftest` are test-only. It stays at 0.0.x until it is usable end
+to end.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and

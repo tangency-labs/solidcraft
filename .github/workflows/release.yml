@@ -1,0 +1,34 @@
+name: Release solidcore
+
+# Publishes the solidcore crate to crates.io when a tag "solidcore-v<version>" is pushed,
+# e.g. `git tag solidcore-v0.0.1 && git push origin solidcore-v0.0.1`.
+# Needs the repository secret CARGO_REGISTRY_TOKEN (crates.io token, scope publish-update).
+on:
+  push:
+    tags: ["solidcore-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches crate version
+        run: |
+          want="${GITHUB_REF_NAME#solidcore-v}"
+          have="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="solidcore"))')"
+          echo "tag $want, crates/solidcore/Cargo.toml $have"
+          test "$want" = "$have"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: cargo test -p solidcore
+      - run: rustup target add wasm32-unknown-unknown && cargo check -p solidcore --target wasm32-unknown-unknown
+      - name: Publish
+        run: cargo publish -p solidcore
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
