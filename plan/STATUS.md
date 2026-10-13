@@ -12,9 +12,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **66** (78,832 lines): `geom.extent3d`, `geom.vector2d`, `nlib.knots`, `nlib.math`, `topology.database_io`, `geom.tol`, `nlib.geom`, `geom.assert_array`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.periodic_extent1d`, `geom.vector3d`, `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.polynomial`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box`, `nlib.crv_basic`, `geom.pseudo_box`, `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_fit_p2`, `nlib.crv_nurb`, `nlib.funcs_adv`, `nlib.srf_fit`, `nlib.crv_fit_p3`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv`, `topology.topology`, `nlib.crv_adv_p1`, `nlib.crv_common`, `nlib.spiral`, `nlib.crv_adv_p2`, `nlib.srf_common`, `nlib.crv_approx`, `nlib.crv_offset`, `nlib.srf_nurb`, `nlib.srf_tool_p2`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_srf`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nlib.srf_tool_p4`, `curve.conic`, `curve.projected_curve`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_adv_p6`, `nlib.srf_offset` |
-| Partial | **18** (22,103 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1` |
-| Ported (green + partial) | 84 units, 100,935 upstream lines (26.0%); about 104,600 Rust lines in `crates/solidcore/src` |
-| Claimed | 6 (6,008 lines): `curve.crv_in_volume`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2` |
+| Partial | **19** (22,413 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve` |
+| Ported (green + partial) | 85 units, 101,245 upstream lines (26.1%); about 104,600 Rust lines in `crates/solidcore/src` |
+| Claimed | 5 (5,698 lines): `curve.crv_in_volume`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2` |
 | Blocked | 0 |
 | Todo | 170 (280,960 lines) |
 
@@ -132,11 +132,12 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `curve.hyperbola` | `curve::hyperbola` | 2062 cases (62 fixture: smCurveTest.cpp my_test_analytic_curves hyperbola (CreateCanonical, AdjustSTEPInterval(-1,2), evaluation, GlobalPointSolveSTEP, ReverseParameterization), the smSurfaceTest.cpp extrusion-generator hyperbola, edge cases, ReadFromDB records + 2000 generated), 1960 bit-identical; `--perturb` SENSITIVE | 102 (`curve.curve_p1` 70: `SmCurve::GlobalPointSolve`; `curve.curve_p5` 32: `SmCurve::EvaluateSTEPPoint` in classifying `STEPInversion`) |
 | `curve.curve_cache` | `curve::curve_cache` | 638 cases (38 fixture: lines, cubics, C0 quadratic, closed, degenerate, 2D, rational arc and Hermite curves through `Tessellate` with every option, sub/beyond/disjoint/reversed intervals, `GetAnalyticCurve`, type queries + 600 generated), 635 bit-identical | 3 (`curve.curve_p5` 2: `SmCurve::IsArc`; `curve.line` 1: `SmLine` in `GetAnalyticCurve`) |
 | `curve.tangent_field` | `curve::tangent_field` | 655 cases, 389 bit-identical | 266 (`surface.surface_p2` 143, `surface.surface_p7` 110, `surface.surface_p1` 11, `curve.crv_on_surf` 2) |
+| `curve.iso_curve` | `curve::iso_curve` | 2874 cases (874 fixture: iso curves of Surface.sms / offset_nurb.sms / DropCurveSurface.sms, bilinear and NURB-less edge cases, ReadFromDB streams + 2000 generated), 2234 bit-identical; `--perturb` SENSITIVE | 640 (`nurbs.b_spline_surface_n_lib_p2` 355, `surface.surface_p6` 120, `surface.surface_p2` 101, `curve.line` 64) |
 
 ## Ready set
 
 empty: every todo unit still waits on a claimed or todo dependency. Claimed and in
-progress: `curve.crv_in_volume`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2`. New curve classes become `CurveKind` variants of
+progress: `curve.crv_in_volume`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2`. New curve classes become `CurveKind` variants of
 `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a merge that adds a
 variant must also extend the exhaustive matches in `curve::curve_cache`.
 
