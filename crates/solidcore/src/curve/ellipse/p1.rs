@@ -103,13 +103,14 @@ use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
 use crate::geom::tol::{are_same, are_same_to_tol, is_zero_to_tol, tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min3, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::math::{max2, min3, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::p2::ArcData;
 use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::crv_basic::ConicType;
 use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc};
+use crate::nurbs::index::at;
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
@@ -128,14 +129,6 @@ const OP_OFFSET: &str = "curve::ellipse::p1::Ellipse::create_simple_offset";
 
 /// `SmCircle_TYPE` (`CURV_BASE_TYPE + 21`), the class type of a circle.
 pub const CIRCLE_CLASS_TYPE: i64 = CIRCLE_TYPE;
-
-/// An index into a table that upstream reads unchecked.
-fn table<T: Copy>(v: &[T], i: usize, operation: &'static str) -> Result<T> {
-    v.get(i).copied().ok_or(SolidError::invalid_input(
-        operation,
-        "polar conversion table is shorter than upstream reads",
-    ))
-}
 
 /// The handle of the ellipse in its own global solve: a curve with the given natural
 /// interval (the solver's duplicate test reads it). The solutions returned name no
@@ -269,20 +262,19 @@ impl PolarConversion {
             let angles = &self.angles;
             let last = knots.len().wrapping_sub(1);
             let last_angle = angles.len().wrapping_sub(1);
-            let scaled_zero = (table(knots, last, OP_TO_POLAR)? - table(knots, 0, OP_TO_POLAR)?)
-                / 360.0
-                * EFF_ZERO_DEG;
+            let scaled_zero =
+                (at(knots, last, OP_TO_POLAR)? - at(knots, 0, OP_TO_POLAR)?) / 360.0 * EFF_ZERO_DEG;
             let same = |a: f64, b: f64, tol: f64| are_same_to_tol(a, b, tol);
 
             // when values are at opposing ends - move the end angle
             let move_down = if inside_out {
-                same(nurbs_param, table(knots, last, OP_TO_POLAR)?, scaled_zero)
-                    && same(polar_deg, table(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
+                same(nurbs_param, at(knots, last, OP_TO_POLAR)?, scaled_zero)
+                    && same(polar_deg, at(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
             } else {
-                same(nurbs_param, table(knots, 0, OP_TO_POLAR)?, scaled_zero)
+                same(nurbs_param, at(knots, 0, OP_TO_POLAR)?, scaled_zero)
                     && same(
                         polar_deg,
-                        table(angles, last_angle, OP_TO_POLAR)?,
+                        at(angles, last_angle, OP_TO_POLAR)?,
                         EFF_ZERO_DEG,
                     )
             };
@@ -291,15 +283,15 @@ impl PolarConversion {
                 polar_deg -= 360.0;
             } else {
                 let move_up = if inside_out {
-                    same(nurbs_param, table(knots, 0, OP_TO_POLAR)?, scaled_zero)
+                    same(nurbs_param, at(knots, 0, OP_TO_POLAR)?, scaled_zero)
                         && same(
                             polar_deg,
-                            table(angles, last_angle, OP_TO_POLAR)?,
+                            at(angles, last_angle, OP_TO_POLAR)?,
                             EFF_ZERO_DEG,
                         )
                 } else {
-                    same(nurbs_param, table(knots, last, OP_TO_POLAR)?, scaled_zero)
-                        && same(polar_deg, table(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
+                    same(nurbs_param, at(knots, last, OP_TO_POLAR)?, scaled_zero)
+                        && same(polar_deg, at(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
                 };
                 if move_up {
                     // increment, rather than PolarParam = maxAngle, to preserve tolerances
@@ -360,8 +352,8 @@ impl PolarConversion {
 
         let mut ii = 0;
         while ii < cnt && rtn {
-            let a = table(&natural_knots, ii, OP_IS_CURRENT)?;
-            let b = table(&self.natural_knots, ii, OP_IS_CURRENT)?;
+            let a = at(&natural_knots, ii, OP_IS_CURRENT)?;
+            let b = at(&self.natural_knots, ii, OP_IS_CURRENT)?;
             rtn &= report(
                 &mut list,
                 key,
@@ -385,12 +377,12 @@ impl PolarConversion {
             let mut ii = 0;
             while ii < cnt && rtn {
                 // Get CCW angle to vec = (thisKnotPoint - Origin) (status ignored)
-                let knot = table(&natural_knots, ii, OP_IS_CURRENT)?;
+                let knot = at(&natural_knots, ii, OP_IS_CURRENT)?;
                 let point = ignored(curve.base.evaluate_point(knot))?.unwrap_or(Vec3::UNDEF);
 
                 // convert point to polar param (deg)
                 let angle_deg = curve.step_inversion(k, point, false, 0.0).0;
-                let stored = table(&self.angles, ii, OP_IS_CURRENT)?;
+                let stored = at(&self.angles, ii, OP_IS_CURRENT)?;
 
                 // computed angles must match angles in storage
                 let ok = are_same_to_tol(angle_deg, stored, angle_tol)
@@ -405,12 +397,12 @@ impl PolarConversion {
 
                 // angles must increase or decrease monotonically
                 if ii == 1 {
-                    let d = table(&self.angles, ii, OP_IS_CURRENT)?
-                        - table(&self.angles, ii - 1, OP_IS_CURRENT)?;
+                    let d = at(&self.angles, ii, OP_IS_CURRENT)?
+                        - at(&self.angles, ii - 1, OP_IS_CURRENT)?;
                     angle_dir = if d > 0.0 { 1.0 } else { -1.0 };
                 } else if ii > 1 {
-                    let d = table(&self.angles, ii, OP_IS_CURRENT)?
-                        - table(&self.angles, ii - 1, OP_IS_CURRENT)?;
+                    let d = at(&self.angles, ii, OP_IS_CURRENT)?
+                        - at(&self.angles, ii - 1, OP_IS_CURRENT)?;
                     let this_dir = if d > 0.0 { 1.0 } else { -1.0 };
                     rtn &= report(
                         &mut list,
@@ -1147,16 +1139,12 @@ impl Ellipse {
 
         // read the base type (status ignored upstream); its 2D fix-up of a 3D record
         // calls the ellipse's ConvertTo2D, so it is done here
-        match BSplineCurve::read_from_db(db, 3, version) {
-            Ok(b) => {
-                let read_dim = b.dim;
-                e.base = b;
-                if dim == 2 && read_dim == 3 {
-                    ignore_status(e.convert_to_2d(k))?;
-                }
+        if let Some(b) = ignored(BSplineCurve::read_from_db(db, 3, version))? {
+            let read_dim = b.dim;
+            e.base = b;
+            if dim == 2 && read_dim == 3 {
+                ignore_status(e.convert_to_2d(k))?;
             }
-            Err(err @ SolidError::Unported { .. }) => return Err(err),
-            Err(_) => {}
         }
 
         // all done
@@ -1218,14 +1206,11 @@ impl Ellipse {
                     "extremal radius quadratic without two roots",
                 ));
             }
+            // upstream also computes ThetaY (from the second root, plus PI when below
+            // ThetaX) but uses ThetaX for both vectors
             let theta_x_rad = sols.first().copied().unwrap_or(0.0).atan();
-            let mut theta_y_rad = sols.get(1).copied().unwrap_or(0.0).atan();
-            if theta_y_rad < theta_x_rad {
-                theta_y_rad += PI;
-            }
-            let _ = theta_y_rad;
 
-            // get max vectors for each angle (upstream uses ThetaX for both)
+            // get max vectors for each angle
             let v = rx * theta_x_rad.cos() * x_axis + ry * theta_x_rad.sin() * y_axis;
             let w = rx * theta_x_rad.cos() * x_axis + ry * theta_x_rad.sin() * y_axis;
             (v, w)
@@ -1691,17 +1676,20 @@ impl Ellipse {
         let ends = |c: &BSplineCurve| -> Result<(Point3, Point3)> {
             Ok(ignored(c.ends())?.map_or((Vec3::UNDEF, Vec3::UNDEF), |e| (e.start, e.end)))
         };
-        let (mut this_common, mut this_end) = ends(&self.base)?;
-        let (mut other_common, mut other_end) = ends(&other_ell.base)?;
+        let (this_start, this_stop) = ends(&self.base)?;
+        let (other_start, other_stop) = ends(&other_ell.base)?;
 
         // Sort out which are the common point vs. the new end points.
-        if join_end_this == 1 {
-            core::mem::swap(&mut this_common, &mut this_end);
-        }
-        if join_end_other == 1 {
-            core::mem::swap(&mut other_common, &mut other_end);
-        }
-        let _ = this_end;
+        let this_common = if join_end_this == 1 {
+            this_stop
+        } else {
+            this_start
+        };
+        let (other_common, other_end) = if join_end_other == 1 {
+            (other_stop, other_start)
+        } else {
+            (other_start, other_stop)
+        };
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {

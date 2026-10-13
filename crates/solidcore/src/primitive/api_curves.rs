@@ -43,7 +43,7 @@ use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::vector3d::{Point3, Vec3};
+use crate::geom::vector3d::{is_valid_double, Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::{
@@ -63,14 +63,6 @@ const OP_HELIX: &str = "primitive::api_curves::create_helix";
 const OP_RECTANGLE: &str = "primitive::api_curves::create_rectangle";
 const OP_POLYGON: &str = "primitive::api_curves::create_regular_polygon";
 const OP_CURVE: &str = "primitive::api_curves::create_curve";
-
-/// `SM_IS_VALID_DOUBLE(a)`: not NaN, finite and within `±SM_BIG_DOUBLE / 100`.
-fn is_valid_double(a: f64) -> bool {
-    // `(a) == (a)` is `!a.is_nan()`.
-    !a.is_nan()
-        && (-f64::MAX..=f64::MAX).contains(&a)
-        && ((-BIG_DOUBLE / 100.0)..=(BIG_DOUBLE / 100.0)).contains(&a)
-}
 
 /// `RANGE_ER(low, mid, high)`: `mid` within `[low, high]` (NaN fails).
 fn in_range(low: f64, mid: f64, high: f64) -> bool {

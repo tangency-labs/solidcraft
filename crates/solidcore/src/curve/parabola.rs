@@ -68,6 +68,7 @@
 //! - `GetMemoryUsed`, `WriteToDB` and `Dump` are not part of this unit.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
+use crate::curve::curve::p2::PARABOLA_TYPE;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -82,9 +83,6 @@ use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, INFINITE_PARAMETER_SQRT};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::topology::database_io::{DatabaseReader, FileType};
-
-/// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
 
 /// `SmSurfOfRevolution_TYPE`.
 const SURF_OF_REVOLUTION_TYPE: i64 = 15020;
@@ -179,7 +177,7 @@ impl SolutionObject for SelfHandle {
 
 impl Parabola {
     /// `SmParabola_TYPE` (`CURV_BASE_TYPE + 23`).
-    pub const TYPE: i64 = CURV_BASE_TYPE + 23;
+    pub const TYPE: i64 = PARABOLA_TYPE;
 
     // ---- construction -----------------------------------------------------------------
 

@@ -15,7 +15,8 @@
 //! | [`Transform::transform_vector`] | `SmTransform::TransformVector`              |
 //! | [`EFF_ZERO`] etc.            | `SM_EFF_ZERO` etc.                             |
 //! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
-//! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max` |
+//! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`], [`min4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max`, `smos_4Min` |
+//! | [`rad_to_deg`]               | `SM_RAD2DEG`                                   |
 //!
 //! ## Why not `glam`/`nalgebra`
 //!
@@ -131,6 +132,18 @@ pub fn min3(a: f64, b: f64, c: f64) -> f64 {
 #[must_use]
 pub fn max4(a: f64, b: f64, c: f64, d: f64) -> f64 {
     max2(max2(a, b), max2(c, d))
+}
+
+/// `smos_4Min(a, b, c, d)` = `smos_Min(smos_Min(a, b), smos_Min(c, d))`.
+#[must_use]
+pub fn min4(a: f64, b: f64, c: f64, d: f64) -> f64 {
+    min2(min2(a, b), min2(c, d))
+}
+
+/// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`: radians to degrees.
+#[must_use]
+pub fn rad_to_deg(a: f64) -> f64 {
+    a * (180.0 / PI)
 }
 
 /// An affine 3D transform stored as upstream's row-vector 4×4 matrix

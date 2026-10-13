@@ -68,7 +68,7 @@ use crate::geom::geom_utility::p1::{
 use crate::geom::matrix::Matrix;
 use crate::geom::tol::{in_tol, is_zero, tol3d, ZONE_TOL_3D};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
-use crate::math::{max2, max3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, max3, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// Upstream `SM_ERR` (generic error status).
 const SM_ERR: i32 = 1001;
@@ -80,11 +80,6 @@ fn sm_err(operation: &'static str) -> SolidError {
         code: SM_ERR,
         entity: None,
     }
-}
-
-/// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`.
-fn rad_to_deg(a: f64) -> f64 {
-    a * (180.0 / PI)
 }
 
 // ---- types ---------------------------------------------------------------------------

@@ -89,7 +89,7 @@ use crate::geom::polynomial::{solve_quadratic, Roots};
 use crate::geom::tol::{are_same_to_tol, is_zero};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
-use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
@@ -106,11 +106,6 @@ fn zero_vec_er(v: Vec3, operation: &'static str) -> Result<()> {
     } else {
         Err(invalid(operation, "zero-length vector"))
     }
-}
-
-/// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`.
-fn rad_to_deg(a: f64) -> f64 {
-    a * (180.0 / PI)
 }
 
 // ---- static helpers ------------------------------------------------------------------

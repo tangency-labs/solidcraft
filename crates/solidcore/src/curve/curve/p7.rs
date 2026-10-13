@@ -44,10 +44,10 @@
 //!   `evaluate_geometric_partial`).
 
 use crate::curve::curve::p2::{
-    evaluate_continuity, CciGlobalSolver, Curve, CurvePropertyGs, CurvePropertyType,
+    at, evaluate_continuity, CciGlobalSolver, Curve, CurvePropertyGs, CurvePropertyType,
 };
-use crate::curve::curve::p3::{eval_n, local_curve_intersect, PointSolveOptions};
-use crate::curve::curve::p4::filter_solution;
+use crate::curve::curve::p3::{eval_n, local_curve_intersect, set_param, PointSolveOptions};
+use crate::curve::curve::p4::{filter_solution, point_or_undef};
 use crate::curve::curve::p5::{find_additional_cc_tangent_guess, make_curve_cache};
 use crate::curve::curve_cache::BezierSpan;
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
@@ -63,14 +63,12 @@ use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation,
 };
 use crate::geom::pseudo_box::{Projection, PseudoBox};
-use crate::geom::solution_array::{
-    Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
-};
+use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType, SortKey};
 use crate::geom::tol::{are_same, is_zero, ANG_TOL_DEG};
 use crate::geom::tree::{NodeData, Tree, TreeNode};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, rad_to_deg, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::ProjectionType;
 
 const OP_CCI: &str = "curve::curve::p7::CciGlobalSolver::local_solve_branch";
@@ -78,23 +76,6 @@ const OP_GPA: &str = "curve::curve::p7::Curve::global_property_analysis";
 
 /// Number of comb samples of `GlobalPropertyAnalysis`.
 const COMB_COUNT: usize = 150;
-
-/// `SM_RAD2DEG`.
-fn rad_to_deg(a: f64) -> f64 {
-    a * (180.0 / PI)
-}
-
-/// Sets parameter `i` of a solution end.
-fn set_param(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
-    *end.param_mut(i)? = v;
-    Ok(())
-}
-
-/// `EvaluatePoint` whose status upstream ignores: [`Vec3::UNDEF`] (an uninitialised
-/// point) on failure; [`SolidError::Unported`] is propagated.
-fn point_or_undef(curve: &Curve, t: f64) -> Result<Point3> {
-    Ok(ignored(curve.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
-}
 
 /// `pBox->ProjectToPlane(*pBox, ...)`: the box projected in place (status ignored;
 /// a failed projection leaves what it wrote).
@@ -158,7 +139,6 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
     /// node, curve, kernel or projection vector, a node that is not a leaf span or
     /// an unsupported projection type; those of the evaluations, solvers and
     /// filters ([`SolidError::Unported`] from unported callees).
-    #[allow(clippy::too_many_lines)]
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
         // init output
         let needs_more_subdivision = false;
@@ -877,11 +857,11 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         let mut guess1: Vec<f64> = Vec::with_capacity(10);
         let mut guess2: Vec<f64> = Vec::with_capacity(10);
         if only_one_intersection_possible {
-            let (t1, t2) = match line_line_closest_point(line_pt1, line_vec1, line_pt2, line_vec2) {
-                Ok(t) => t,
-                Err(e) if e.is_unported() => return Err(e),
-                Err(_) => (0.5, 0.5), // Just take a midpoint if this fails
-            };
+            // Just take a midpoint if this fails
+            let (t1, t2) = ignored(line_line_closest_point(
+                line_pt1, line_vec1, line_pt2, line_vec2,
+            ))?
+            .unwrap_or((0.5, 0.5));
             let norm_ivl = Extent1d::from_min_max(0.0, 1.0);
             guess1.push(ivl1.evaluate(norm_ivl.clamp_value(t1)));
             guess2.push(ivl2.evaluate(norm_ivl.clamp_value(t2)));
@@ -997,12 +977,7 @@ fn evaluate_geometric_partial(curve: &Curve, t: f64) -> Result<[Vec3; 4]> {
     }
     // failed past the tangent: [2] and [3] were zeroed, [2] set when the tangent
     // is not zero (the two-vector prefix of the same computation)
-    geom = [
-        vals.first().copied().unwrap_or(Vec3::UNDEF),
-        vals.get(1).copied().unwrap_or(Vec3::UNDEF),
-        Vec3::ZERO,
-        Vec3::ZERO,
-    ];
+    geom = [at(&vals, 0), at(&vals, 1), Vec3::ZERO, Vec3::ZERO];
     if let Some(v) = ignored(frenet_from_derivatives(&vals, 2))? {
         fill(&mut geom, v);
     }
@@ -1062,7 +1037,6 @@ impl Curve {
     /// `SM_ERR_NULL_POINTER` when the cache cannot be built; `InvalidInput` for a
     /// missing property value or vector; those of the global solve and of the
     /// evaluations ([`SolidError::Unported`] from unported callees).
-    #[allow(clippy::too_many_lines)]
     pub fn global_property_analysis<O: SolutionObject>(
         &self,
         k: &Kernel,

@@ -104,7 +104,7 @@ const OP_DIST_AT: &str = "curve::curve::p4::CpDistAtEnfo::evaluate";
 
 /// `EvaluatePoint` whose status upstream ignores: [`Vec3::UNDEF`] (a never-written
 /// `SmPoint3d`) on failure; [`SolidError::Unported`] is propagated.
-fn point_or_undef<C: CurveEvaluate + ?Sized>(curve: &C, t: f64) -> Result<Point3> {
+pub(crate) fn point_or_undef<C: CurveEvaluate + ?Sized>(curve: &C, t: f64) -> Result<Point3> {
     Ok(ignored(curve.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
 }
 

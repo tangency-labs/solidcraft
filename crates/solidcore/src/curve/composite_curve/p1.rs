@@ -101,7 +101,9 @@
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p2::{Curve, CurveEvaluate, CurveKind, COMPOSITE_CURVE_TYPE};
+use crate::curve::curve::p2::{
+    at, Curve, CurveEvaluate, CurveKind, COMPOSITE_CURVE_TYPE, CURV_BASE_TYPE,
+};
 use crate::curve::curve::p3::compute_crvs_normal;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::{ignored, Result, SolidError};
@@ -143,9 +145,6 @@ const OP_BUILD: &str = "curve::composite_curve::p1::CompositeCurve::build_compos
 const OP_CORNER: &str = "curve::composite_curve::p1::create_corner";
 
 // ---- type codes -----------------------------------------------------------------------
-
-/// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
 
 /// `SmCompositeCurve_TYPE` (`CURV_BASE_TYPE + 32`).
 pub const TYPE: i64 = COMPOSITE_CURVE_TYPE;
@@ -213,7 +212,6 @@ impl OffsetMapAttribute {
     /// `SmOffsetMapAttribute(lAttributeID, bCornerOffset, bLeftHandOffset,
     /// lCompositeIndex, lCurve, lOtherCurve, pOrigCurve, dApproxErr)`.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         attribute_id: u64,
         corner_offset: bool,
@@ -1576,7 +1574,6 @@ fn extension_params(p1: Point3, v1: Vec3, p2: Point3, v2: Vec3) -> Result<(f64, 
 /// Those of the closest points (parallel extensions), the lines, the frame and
 /// angle of the fillet, the arc and the trims; `InvalidInput` when a chamfer
 /// intersection is missing; [`SolidError::Unported`] from the intersections.
-#[allow(clippy::too_many_arguments)]
 pub fn create_corner(
     k: &Kernel,
     vertex_point: Point3,
@@ -1759,8 +1756,8 @@ pub fn curve_classify(
         let mid = ivl.evaluate(0.5);
         let pv_this = ignored(trimmed_offset.evaluate(mid, 1, false, true))?.unwrap_or_default();
         let pv_orig = ignored(orig.evaluate(mid, 1, false, true))?.unwrap_or_default();
-        let d_this = pv_this.get(1).copied().unwrap_or(Vec3::UNDEF);
-        let d_orig = pv_orig.get(1).copied().unwrap_or(Vec3::UNDEF);
+        let d_this = at(&pv_this, 1);
+        let d_orig = at(&pv_orig, 1);
         if d_this.dot(d_orig) < 0.0 {
             return Ok(false);
         }

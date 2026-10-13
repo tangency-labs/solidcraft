@@ -144,7 +144,7 @@ fn deg_to_rad(a: f64) -> f64 {
 }
 
 /// `SM_IS_VALID_DOUBLE(a)`: not NaN, finite and within `±SM_BIG_DOUBLE / 100`.
-fn is_valid_double(a: f64) -> bool {
+pub(crate) fn is_valid_double(a: f64) -> bool {
     // `(a) == (a)` is `!a.is_nan()`.
     !a.is_nan()
         && (-f64::MAX..=f64::MAX).contains(&a)

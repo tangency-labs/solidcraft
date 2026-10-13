@@ -102,7 +102,8 @@ use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::sqrt as sm_sqrt;
 use crate::kernel::{Kernel, Tolerances};
 use crate::math::{
-    max2, max3, max4, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
+    max2, max3, max4, rad_to_deg, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ,
+    EFF_ZERO_SQRT, PI,
 };
 use crate::surface::volume::Volume;
 
@@ -572,11 +573,6 @@ pub fn are_parallel(v1: Vec3, v2: Vec3, override_ang_tol_rad: Option<f64>) -> bo
 pub fn are_perpendicular(v1: Vec3, v2: Vec3, override_ang_tol_rad: Option<f64>) -> bool {
     let ang = override_ang_tol_rad.unwrap_or_else(ang_tol_rad);
     v1.is_perpendicular_to(v2, rad_to_deg(ang))
-}
-
-/// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`.
-fn rad_to_deg(a: f64) -> f64 {
-    a * (180.0 / PI)
 }
 
 // ---- parameter-space mapping ------------------------------------------------------

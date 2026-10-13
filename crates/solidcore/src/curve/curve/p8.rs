@@ -47,8 +47,8 @@
 //!   range solution to the next when the classification is skipped.
 
 use crate::curve::curve::p1::refine_cc_solutions;
-use crate::curve::curve::p2::{CciGlobalSolver, Curve};
-use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
+use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
+use crate::curve::curve::p4::{analytic_curve_intersect, point_or_undef, AnalyticOperand};
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
@@ -61,9 +61,8 @@ use crate::geom::solution_array::{
 };
 use crate::geom::tol::{are_same, scaled_zero2};
 use crate::geom::tree::Tree;
-use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, min4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::ProjectionType;
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
@@ -99,17 +98,6 @@ impl<O> Default for CurveIntersectOptions<O> {
 fn is_between(c: f64, a: f64, b: f64) -> bool {
     let z = scaled_zero2(&a, &b);
     ((a + z) < c && c < (b - z)) || ((b + z) < c && c < (a - z))
-}
-
-/// `smos_4Min(a, b, c, d)`.
-fn min4(a: f64, b: f64, c: f64, d: f64) -> f64 {
-    min2(min2(a, b), min2(c, d))
-}
-
-/// `EvaluatePoint` whose status upstream ignores: [`Vec3::UNDEF`] (an uninitialised
-/// point) on failure; [`SolidError::Unported`] is propagated.
-fn point_or_undef(curve: &Curve, t: f64) -> Result<Point3> {
-    Ok(ignored(curve.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
 }
 
 /// Solution `i` (a copy), `InvalidInput` past the size.
@@ -205,7 +193,6 @@ impl Curve {
     /// coincidence check, the drops, the gap measure and the evaluations upstream
     /// checks; [`SolidError::Unported`] from unported callees (unit
     /// `curve.curve_p5`).
-    #[allow(clippy::too_many_lines)]
     pub fn global_curve_intersect<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -431,8 +418,8 @@ impl Curve {
                         // get the curve/curve intersection point positions and tangents
                         let pv1 = self.evaluate(sol2.start.parameters[0], 1, true, true)?;
                         let pv2 = other.evaluate(sol2.start.parameters[1], 1, true, true)?;
-                        let t1 = pv1.get(1).copied().unwrap_or(Vec3::UNDEF);
-                        let t2 = pv2.get(1).copied().unwrap_or(Vec3::UNDEF);
+                        let t1 = at(&pv1, 1);
+                        let t2 = at(&pv2, 1);
 
                         // get angle between curve tangents
                         // If this or other are degenerate, the angle fails
@@ -762,7 +749,6 @@ impl Curve {
     /// close points combine unless across a seam; overlapping ranges combine; ranges
     /// separated by an opening combine when the curves stay within tolerance of each
     /// other through it.
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn decide_combine<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -907,8 +893,8 @@ impl Curve {
                 // with self intersection the orientation must be opposite
                 let pv1 = self.evaluate(interval1.evaluate(0.45), 1, true, true)?;
                 let pv2 = other.evaluate(dropped.parameter, 1, true, true)?;
-                let t1 = pv1.get(1).copied().unwrap_or(Vec3::UNDEF);
-                let t2 = pv2.get(1).copied().unwrap_or(Vec3::UNDEF);
+                let t1 = at(&pv1, 1);
+                let t2 = at(&pv2, 1);
                 if t1.dot(t2) > 0.0 {
                     return Ok(false); // same orientation can not be self intersection
                 }
@@ -1406,6 +1392,7 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::geom::solution_array::ObjectKind;
+    use crate::geom::vector3d::Vec3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 

@@ -195,7 +195,7 @@ use crate::topology::database_io::DatabaseReader;
 // ---- type codes ---------------------------------------------------------------------
 
 /// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
+pub(crate) const CURV_BASE_TYPE: i64 = 14000;
 
 /// `SmCurve_TYPE` (`CURV_BASE_TYPE + 1`).
 pub const TYPE: i64 = CURV_BASE_TYPE + 1;

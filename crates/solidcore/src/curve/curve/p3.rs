@@ -141,7 +141,7 @@ fn set_min_max(ivl: &mut Extent1d, min: f64, max: f64) {
 }
 
 /// `m_vStart[i] = v` / `m_vEnd[i] = v`.
-fn set_param(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
+pub(crate) fn set_param(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
     *end.param_mut(i)? = v;
     Ok(())
 }
