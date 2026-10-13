@@ -1420,6 +1420,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.uv_domain
     }
 
+    /// Replaces the domain the cache covers (upstream assigns `m_sUVDomain`, e.g.
+    /// `SmTrimSrfCache::BuildTree` reducing it to the face domain); the boundary
+    /// bounding planes keep the domain they were made with, as upstream.
+    pub fn set_uv_domain(&mut self, uv_domain: Extent2d) {
+        self.uv_domain = uv_domain;
+    }
+
     /// The tessellation controls.
     #[must_use]
     pub const fn options(&self) -> &SurfaceCacheOptions {
