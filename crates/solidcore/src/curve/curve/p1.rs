@@ -419,6 +419,17 @@ impl Curve {
                     achieved_tol: Some(gap),
                 })
             }
+            // the SmCompositeCurve override (breaks and flags unused)
+            CurveKind::Composite(c) => {
+                let a = c.approximate_curve(k, approx_tol_3d)?;
+                let curve = a.curve.ok_or_else(|| {
+                    SolidError::invalid_input(OP_APPROX, "composite approximation is not valid")
+                })?;
+                Ok(CurveApproximation {
+                    curve: Curve::from(curve),
+                    achieved_tol: Some(a.max_gap),
+                })
+            }
             _ => self.approximate_curve_base(k, breaks, approx_tol_3d, opts),
         }
     }
@@ -1967,7 +1978,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => {
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => {
                 self.tessellate_base(interval, chord_height_tol, angle_tol_deg, min_segments)
             }
         }

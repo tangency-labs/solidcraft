@@ -567,7 +567,8 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => false,
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => false,
         };
 
         // ordered leaf Beziers each passing the tessellation tests
@@ -593,7 +594,8 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 | CurveKind::Iso(_)
                 | CurveKind::Offset(_)
                 | CurveKind::CrvInVolume(_)
-                | CurveKind::CrvOnSurf(_) => None,
+                | CurveKind::CrvOnSurf(_)
+                | CurveKind::Composite(_) => None,
             };
             create_bezier_segment_block(nurb, &self.curve)?
         };

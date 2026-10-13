@@ -709,6 +709,10 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
             // not produced by this unit's cases (see curve.ellipse_p1's runner)
             o.extend([2.0, e.base().dim() as f64]);
         }
+        CurveKind::Composite(x) => {
+            // not produced by this unit's cases (see curve.composite_curve_p1's runner)
+            o.extend([2.0, x.dim() as f64]);
+        }
         CurveKind::Hermite(h) => {
             o.extend([1.0, h.dim() as f64]);
             let a = h.evaluate(0.0, 1, false);

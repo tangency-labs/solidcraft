@@ -472,6 +472,7 @@ impl Curve {
                     polar: req.polar.then_some(polar),
                 })
             }
+            CurveKind::Composite(c) => c.calculate_bounding_box(k, interval, req, expand),
             _ => calculate_bounding_box_base(self, interval, req, expand),
         }
     }

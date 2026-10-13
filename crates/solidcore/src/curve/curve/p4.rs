@@ -1013,6 +1013,7 @@ impl Curve {
     pub fn is_closed(&self, interval: &Extent1d, tol: f64) -> Result<bool> {
         match self.kind() {
             CurveKind::Line(l) => Ok(l.is_closed(interval, tol)),
+            CurveKind::Composite(c) => Ok(c.is_closed()),
             _ => is_closed_base(self, interval, tol),
         }
     }

@@ -70,8 +70,9 @@
 //!   `SmBSplineCurve`: the variant runs the B-spline methods on its base where it does
 //!   not override them) and [`Line`] (`SmLine`, derived from
 //!   `SmBSplineCurve`: the inherited B-spline queries run on its B-spline part, made
-//!   with its NURB, see [`crate::curve::line`]); the other analytic and generated
-//!   curves (`SmEllipse`,
+//!   with its NURB, see [`crate::curve::line`]) and [`CompositeCurve`]
+//!   (`SmCompositeCurve`, see [`crate::curve::composite_curve`]); the other analytic and
+//!   generated curves (`SmEllipse`,
 //!   ...) join the enum in their own units. Each virtual method is
 //!   one `match`: a kind that overrides it calls its own method, the others run the
 //!   base-class body ported here (the `SmCurve.h` inline defaults: `SM_ERR`,
@@ -146,6 +147,7 @@
 //!   `ReadFromDB` of the analytic and generated curve types needs their units;
 //!   those calls return [`SolidError::Unported`].
 
+use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::Conic;
 use crate::curve::crv_in_volume::CrvInVolume;
 use crate::curve::crv_on_surf::CrvOnSurf;
@@ -511,6 +513,8 @@ pub enum CurveKind {
     Ellipse(Ellipse),
     /// `SmParabola` (an `SmBSplineCurve`).
     Parabola(Parabola),
+    /// `SmCompositeCurve`.
+    Composite(CompositeCurve),
 }
 
 /// A curve (`SmCurve`): its concrete kind and the object owning it (`m_pOwner`:
@@ -558,6 +562,12 @@ impl From<Line> for Curve {
 impl From<Parabola> for Curve {
     fn from(c: Parabola) -> Self {
         Self::new(CurveKind::Parabola(c))
+    }
+}
+
+impl From<CompositeCurve> for Curve {
+    fn from(c: CompositeCurve) -> Self {
+        Self::new(CurveKind::Composite(c))
     }
 }
 
@@ -649,6 +659,7 @@ impl Curve {
     #[must_use]
     pub const fn type_code(&self) -> i64 {
         match &self.kind {
+            CurveKind::Composite(_) => COMPOSITE_CURVE_TYPE,
             CurveKind::BSpline(_) => BSplineCurve::TYPE,
             CurveKind::Hermite(_) => HermiteCurve::TYPE,
             CurveKind::Hyperbola(_) => Hyperbola::TYPE,
@@ -668,6 +679,7 @@ impl Curve {
     #[must_use]
     pub const fn type_string(&self) -> &'static str {
         match &self.kind {
+            CurveKind::Composite(_) => crate::curve::composite_curve::p1::TYPE_STRING,
             CurveKind::BSpline(_) => "SmBSplineCurve_TYPE",
             CurveKind::Hermite(_) => "SmHermiteCurve_TYPE",
             CurveKind::Hyperbola(_) => "SmHyperbola_TYPE",
@@ -687,6 +699,7 @@ impl Curve {
     #[must_use]
     pub const fn class_string(&self) -> &'static str {
         match &self.kind {
+            CurveKind::Composite(_) => crate::curve::composite_curve::p1::CLASS_STRING,
             CurveKind::BSpline(_) => "SmBSplineCurve",
             CurveKind::Hermite(_) => "SmHermiteCurve",
             CurveKind::Hyperbola(_) => "SmHyperbola",
@@ -741,6 +754,7 @@ impl Curve {
                 Ok(a.type_code() == b.type_code() && a.approx_eq(b))
             }
             (CurveKind::Parabola(a), CurveKind::Parabola(b)) => Ok(a.approx_eq(b)),
+            (CurveKind::Composite(a), CurveKind::Composite(b)) => a.approx_eq(b),
             // GetType() differs
             _ => Ok(false),
         }
@@ -752,6 +766,7 @@ impl Curve {
     #[must_use]
     pub const fn dim(&self) -> u64 {
         match &self.kind {
+            CurveKind::Composite(c) => c.dim(),
             CurveKind::BSpline(c) => c.dim(),
             CurveKind::Hermite(c) => c.dim(),
             CurveKind::Hyperbola(c) => c.base().dim(),
@@ -784,7 +799,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Ok(3),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Ok(3),
             CurveKind::Line(c) => Ok(c.degree()),
         }
     }
@@ -800,7 +816,10 @@ impl Curve {
             CurveKind::Hyperbola(c) => c.base().number_natural_knots(),
             CurveKind::Ellipse(c) => c.base().number_natural_knots(),
             CurveKind::Parabola(c) => c.base().number_natural_knots(),
-            CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Ok(2),
+            CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Composite(_) => Ok(2),
             CurveKind::Offset(c) => c.number_natural_knots(),
             CurveKind::Projected(c) => c.number_natural_knots(),
             CurveKind::CrvInVolume(c) => c.number_natural_knots_ref(),
@@ -826,7 +845,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Ok(0),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Ok(0),
             CurveKind::Line(c) => c.base_with_nurb()?.number_control_points(),
         }
     }
@@ -835,6 +855,7 @@ impl Curve {
     #[must_use]
     pub fn natural_interval(&self) -> Extent1d {
         match &self.kind {
+            CurveKind::Composite(c) => c.natural_interval(),
             CurveKind::BSpline(c) => c.natural_interval(),
             CurveKind::Hermite(c) => c.natural_interval(),
             CurveKind::Hyperbola(c) => c.base().natural_interval(),
@@ -866,7 +887,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => false,
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => false,
         }
     }
 
@@ -883,7 +905,8 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
-            | CurveKind::Ellipse(_) => true,
+            | CurveKind::Ellipse(_)
+            | CurveKind::Composite(_) => true,
             CurveKind::Projected(c) => c.is_bounded(),
             CurveKind::CrvInVolume(c) => c.is_bounded(),
             CurveKind::CrvOnSurf(c) => c.is_bounded(),
@@ -907,7 +930,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Ok(false),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Ok(false),
             CurveKind::Line(c) => c.base_with_nurb()?.is_rational(),
         }
     }
@@ -929,7 +953,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Ok(false),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Ok(false),
             CurveKind::Line(c) => c.base_with_nurb()?.has_repeated_end_control_points(tol),
         }
     }
@@ -1025,6 +1050,7 @@ impl Curve {
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
         match &self.kind {
+            CurveKind::Composite(_) => Err(base_err()),
             CurveKind::BSpline(c) => c.evaluate(t, num_derivs, from_left, non_zero_tangents),
             CurveKind::Hermite(c) => Ok(c.evaluate(t, num_derivs, non_zero_tangents)),
             CurveKind::Hyperbola(c) => {
@@ -1055,6 +1081,7 @@ impl Curve {
     /// Those of the kind's evaluator.
     pub fn evaluate_point(&self, t: f64) -> Result<Point3> {
         match &self.kind {
+            CurveKind::Composite(_) => Err(base_err()),
             CurveKind::BSpline(c) => c.evaluate_point(t),
             CurveKind::Hermite(c) => Ok(c.evaluate_point(t)),
             CurveKind::Hyperbola(c) => c.base().evaluate_point(t),
@@ -1081,6 +1108,7 @@ impl Curve {
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         match &self.kind {
+            CurveKind::Composite(_) => Err(base_err()),
             CurveKind::BSpline(c) => c.calculate_continuities(angle_tol),
             CurveKind::Hyperbola(c) => c.base().calculate_continuities(angle_tol),
             CurveKind::Ellipse(c) => c.base().calculate_continuities(angle_tol),
@@ -1104,6 +1132,7 @@ impl Curve {
     /// `SM_ERR` for a B-spline without NURB.
     pub fn knots(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
         match &self.kind {
+            CurveKind::Composite(c) => c.knots(interval),
             CurveKind::BSpline(c) => c.knots(interval),
             CurveKind::Hyperbola(c) => c.base().knots(interval),
             CurveKind::Ellipse(c) => c.base().knots(interval),
@@ -1133,6 +1162,7 @@ impl Curve {
     /// `SM_ERR` for a B-spline without NURB.
     pub fn ends(&self) -> Result<Ends> {
         match &self.kind {
+            CurveKind::Composite(c) => base_ends(c),
             CurveKind::BSpline(c) => c.ends(),
             CurveKind::Hyperbola(c) => c.base().ends(),
             CurveKind::Ellipse(c) => c.base().ends(),
@@ -1213,7 +1243,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Err(base_err()),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Err(base_err()),
         }
     }
 
@@ -1309,7 +1340,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Err(base_err()),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Err(base_err()),
             CurveKind::Line(c) => c.convert_to_2d_owned(self.owner),
         }
     }
@@ -1329,7 +1361,8 @@ impl Curve {
             CurveKind::Hermite(_)
             | CurveKind::Conic(_)
             | CurveKind::Iso(_)
-            | CurveKind::Offset(_) => Err(base_err()),
+            | CurveKind::Offset(_)
+            | CurveKind::Composite(_) => Err(base_err()),
             CurveKind::Projected(c) => c.edit_parameterization(k, new_param),
             CurveKind::CrvInVolume(c) => c.edit_parameterization(k, new_param),
             CurveKind::CrvOnSurf(c) => c.edit_parameterization(k, new_param),
@@ -1354,7 +1387,10 @@ impl Curve {
             CurveKind::Hyperbola(c) => c.reverse_parameterization(old_interval, owner),
             CurveKind::Ellipse(c) => c.reverse_parameterization(k, old_interval, owner),
             CurveKind::Parabola(c) => c.reverse_parameterization(old_interval, owner),
-            CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
+            CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Composite(_) => Err(base_err()),
             CurveKind::Projected(c) => c.reverse_parameterization(k, old_interval),
             CurveKind::Offset(c) => Ok(c.reverse_parameterization(old_interval)),
             CurveKind::CrvInVolume(c) => c.reverse_parameterization(k, old_interval),
@@ -1375,6 +1411,7 @@ impl Curve {
         scale: Option<Vec3>,
     ) -> Result<()> {
         match &mut self.kind {
+            CurveKind::Composite(c) => c.transform(k, rotate_n_move, scale),
             CurveKind::BSpline(c) => c.transform(rotate_n_move, scale),
             CurveKind::Hyperbola(c) => c.transform(rotate_n_move, scale),
             CurveKind::Ellipse(c) => c.transform(k, rotate_n_move, scale),
@@ -1401,7 +1438,10 @@ impl Curve {
             CurveKind::Hyperbola(c) => c.base.trim(k, trim_interval, mode),
             CurveKind::Ellipse(c) => c.trim(k, trim_interval, mode),
             CurveKind::Parabola(c) => c.base_mut().trim(k, trim_interval, mode),
-            CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
+            CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Composite(_) => Err(base_err()),
             CurveKind::Projected(c) => c.trim(k, trim_interval, mode),
             CurveKind::Offset(c) => c.trim(trim_interval, mode == TrimMode::IntervalOnly),
             CurveKind::CrvInVolume(c) => c.trim(k, trim_interval, mode),
@@ -1417,6 +1457,7 @@ impl Curve {
     /// `SM_ERR` for kinds without `Copy` (Hermite curves).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
         match &self.kind {
+            CurveKind::Composite(c) => c.copy(k).map(Self::from),
             CurveKind::BSpline(c) => Ok(Self::from(c.copy())),
             CurveKind::Ellipse(c) => c.copy(k).map(Self::from),
             CurveKind::Hyperbola(c) => Ok(Self::from(c.copy())),
@@ -1465,7 +1506,8 @@ impl Curve {
             | CurveKind::Iso(_)
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
-            | CurveKind::CrvOnSurf(_) => Ok(None),
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Composite(_) => Ok(None),
         }
     }
 

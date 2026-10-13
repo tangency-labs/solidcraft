@@ -5,6 +5,7 @@
 //! `SmHyperbola`, `SmBSplineCurve`, `SmOffsetCurve`, `SmCompositeCurve`, `SmIsoCurve`,
 //! `SmProjectedCurve`, `SmCurveClass` in `source/SMLib`, and `SM_API/SmApiCurves`.
 
+pub mod composite_curve;
 pub mod conic;
 pub mod crv_in_volume;
 pub mod crv_on_surf;
