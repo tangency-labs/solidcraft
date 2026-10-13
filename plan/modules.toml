@@ -1375,9 +1375,9 @@ depends_on = ["curve.curve_cache", "curve.curve_p2", "curve.curve_p3", "curve.cu
 est_lines = 2398
 layer = 21
 tests = ["SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-surface.surface_p2-a1"
+claimed_at = "2026-10-13T06:03:03Z"
 notes = "91 fns; largest: SmDerivSurfDefinition::CreateCrossSectionCurves, smsurf_EvaluateGeometric, smsurf_DropVectors, sm_CCLocalSolve; cycle back-edges (call into later units; stub or co-port): intersect.curve_class_p1(5), intersect.point_class(3), intersect.surface_intersector_p1(3), intersect.adv_surface_intersector(2), surface.cone_p1(2), surface.surface_cache_p1(2), topology.trimming_tools(2), intersect.curve_class_p2(1), intersect.curve_class_p8(1), intersect.surface_intersector_p4(1), intersect.surface_intersector_p5(1), surface.curve_bounded_surface(1), surface.offset_surface(1), surface.plane_p2(1), surface.sphere(1), surface.srf_in_volume(1), surface.surf_of_extrusion_p2(1), surface.surf_of_revolution_p3(1), surface.surface_p1(1), surface.torus(1); unit-SCC #22 (220 units); 320 upstream test entry points reach this unit"
 
 [[unit]]
