@@ -1,0 +1,10531 @@
+{
+ "cases": [
+  {
+   "name": "DropCurveCurve_read_db_dim3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_read_db_dim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "DropCurveCurve_c0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "DropCurveCurve_intersector",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "DropCurveCurve_unique",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "DropCurveCurve_bbox_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 84.5781217619809,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_bbox_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 17.761405570015988,
+    "b": 56.6673415805272,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_bbox_normal_only",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 56.6673415805272,
+    "normal": true,
+    "pseudo": false,
+    "polar": false
+   }
+  },
+  {
+   "name": "DropCurveCurve_polygon_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 0.0,
+    "b": 84.5781217619809
+   }
+  },
+  {
+   "name": "DropCurveCurve_polygon_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 17.761405570015988,
+    "b": 56.6673415805272
+   }
+  },
+  {
+   "name": "DropCurveCurve_polygon_outside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -42.28906088099045,
+    "b": 56.6673415805272
+   }
+  },
+  {
+   "name": "DropCurveCurve_reverse_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 0.0,
+    "b": 84.5781217619809
+   }
+  },
+  {
+   "name": "DropCurveCurve_reverse_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 17.761405570015988,
+    "b": 56.6673415805272
+   }
+  },
+  {
+   "name": "DropCurveCurve_elevate_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 2
+   }
+  },
+  {
+   "name": "DropCurveCurve_elevate_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_elevate_lower",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 0
+   }
+  },
+  {
+   "name": "DropCurveCurve_is_line",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "is_line",
+    "ns": 10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_expert_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 1,
+    "stride": 3
+   }
+  },
+  {
+   "name": "DropCurveCurve_expert_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 1,
+    "end": 1,
+    "stride": 4
+   }
+  },
+  {
+   "name": "DropCurveCurve_expert_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 1,
+    "stride": 5
+   }
+  },
+  {
+   "name": "DropCurveCurve_expert_bad_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 2,
+    "stride": 3
+   }
+  },
+  {
+   "name": "DropCurveCurve_set_cp_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 0,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_set_cp_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 1,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_set_cp_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 1,
+    "index": 0,
+    "p": [
+     3.0,
+     1.0,
+     -1.0
+    ],
+    "w": 0.5
+   }
+  },
+  {
+   "name": "DropCurveCurve_set_cp_bad_index",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 2,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "w": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_adjust_extend",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -8.45781217619809,
+    "b": 101.49374611437707
+   }
+  },
+  {
+   "name": "DropCurveCurve_adjust_trim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 17.761405570015988,
+    "b": 56.6673415805272
+   }
+  },
+  {
+   "name": "DropCurveCurve_adjust_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 0.0,
+    "b": 84.5781217619809
+   }
+  },
+  {
+   "name": "DropCurveCurve_repeated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_degenerate",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "DropCurveCurve_degenerate_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09,
+    "ivl": [
+     17.761405570015988,
+     56.6673415805272
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_max_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "max_domain"
+   }
+  },
+  {
+   "name": "DropCurveCurve_analytic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "analytic",
+    "a": 0.0,
+    "b": 84.5781217619809
+   }
+  },
+  {
+   "name": "DropCurveCurve_match_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_read_db_dim3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_read_db_dim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "closedCurve_c0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "closedCurve_intersector",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "closedCurve_unique",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "closedCurve_bbox_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 7.0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "closedCurve_bbox_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 1.47,
+    "b": 4.69,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "closedCurve_bbox_normal_only",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 4.69,
+    "normal": true,
+    "pseudo": false,
+    "polar": false
+   }
+  },
+  {
+   "name": "closedCurve_polygon_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 0.0,
+    "b": 7.0
+   }
+  },
+  {
+   "name": "closedCurve_polygon_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 1.47,
+    "b": 4.69
+   }
+  },
+  {
+   "name": "closedCurve_polygon_outside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -3.5,
+    "b": 4.69
+   }
+  },
+  {
+   "name": "closedCurve_reverse_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 0.0,
+    "b": 7.0
+   }
+  },
+  {
+   "name": "closedCurve_reverse_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 1.47,
+    "b": 4.69
+   }
+  },
+  {
+   "name": "closedCurve_elevate_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 4
+   }
+  },
+  {
+   "name": "closedCurve_elevate_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 3
+   }
+  },
+  {
+   "name": "closedCurve_elevate_lower",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 2
+   }
+  },
+  {
+   "name": "closedCurve_is_line",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "is_line",
+    "ns": 10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_expert_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 5,
+    "stride": 3
+   }
+  },
+  {
+   "name": "closedCurve_expert_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 1,
+    "end": 4,
+    "stride": 4
+   }
+  },
+  {
+   "name": "closedCurve_expert_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 9,
+    "stride": 5
+   }
+  },
+  {
+   "name": "closedCurve_expert_bad_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 10,
+    "stride": 3
+   }
+  },
+  {
+   "name": "closedCurve_set_cp_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 4,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "closedCurve_set_cp_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 9,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "closedCurve_set_cp_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 1,
+    "index": 0,
+    "p": [
+     3.0,
+     1.0,
+     -1.0
+    ],
+    "w": 0.5
+   }
+  },
+  {
+   "name": "closedCurve_set_cp_bad_index",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 10,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "w": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_adjust_extend",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -0.7000000000000001,
+    "b": 8.4
+   }
+  },
+  {
+   "name": "closedCurve_adjust_trim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 1.47,
+    "b": 4.69
+   }
+  },
+  {
+   "name": "closedCurve_adjust_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 0.0,
+    "b": 7.0
+   }
+  },
+  {
+   "name": "closedCurve_repeated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_degenerate",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "closedCurve_degenerate_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09,
+    "ivl": [
+     1.47,
+     4.69
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_max_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "max_domain"
+   }
+  },
+  {
+   "name": "closedCurve_analytic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "analytic",
+    "a": 0.0,
+    "b": 7.0
+   }
+  },
+  {
+   "name": "closedCurve_match_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_read_db_dim3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_read_db_dim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "crvToOffset_c0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "crvToOffset_intersector",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "crvToOffset_unique",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "crvToOffset_bbox_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": -47.0,
+    "b": 0.0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "crvToOffset_bbox_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": -37.13,
+    "b": -15.509999999999998,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "crvToOffset_bbox_normal_only",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": -47.0,
+    "b": -15.509999999999998,
+    "normal": true,
+    "pseudo": false,
+    "polar": false
+   }
+  },
+  {
+   "name": "crvToOffset_polygon_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -47.0,
+    "b": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_polygon_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -37.13,
+    "b": -15.509999999999998
+   }
+  },
+  {
+   "name": "crvToOffset_polygon_outside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -70.5,
+    "b": -15.509999999999998
+   }
+  },
+  {
+   "name": "crvToOffset_reverse_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": -47.0,
+    "b": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_reverse_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": -37.13,
+    "b": -15.509999999999998
+   }
+  },
+  {
+   "name": "crvToOffset_elevate_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 3
+   }
+  },
+  {
+   "name": "crvToOffset_elevate_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 2
+   }
+  },
+  {
+   "name": "crvToOffset_elevate_lower",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 1
+   }
+  },
+  {
+   "name": "crvToOffset_is_line",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "is_line",
+    "ns": 10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_expert_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 5,
+    "stride": 3
+   }
+  },
+  {
+   "name": "crvToOffset_expert_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 1,
+    "end": 4,
+    "stride": 4
+   }
+  },
+  {
+   "name": "crvToOffset_expert_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 94,
+    "stride": 5
+   }
+  },
+  {
+   "name": "crvToOffset_expert_bad_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 95,
+    "stride": 3
+   }
+  },
+  {
+   "name": "crvToOffset_set_cp_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 47,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "crvToOffset_set_cp_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 94,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "crvToOffset_set_cp_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 1,
+    "index": 0,
+    "p": [
+     3.0,
+     1.0,
+     -1.0
+    ],
+    "w": 0.5
+   }
+  },
+  {
+   "name": "crvToOffset_set_cp_bad_index",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 95,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "w": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_adjust_extend",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -51.7,
+    "b": 9.4
+   }
+  },
+  {
+   "name": "crvToOffset_adjust_trim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -37.13,
+    "b": -15.509999999999998
+   }
+  },
+  {
+   "name": "crvToOffset_adjust_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -47.0,
+    "b": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_repeated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_degenerate",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "crvToOffset_degenerate_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09,
+    "ivl": [
+     -37.13,
+     -15.509999999999998
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_max_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "max_domain"
+   }
+  },
+  {
+   "name": "crvToOffset_analytic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "analytic",
+    "a": -47.0,
+    "b": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_match_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_read_db_dim3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_read_db_dim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "crvTrim1_c0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "crvTrim1_intersector",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "crvTrim1_unique",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "crvTrim1_bbox_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 19.32551897378436,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "crvTrim1_bbox_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 4.058358984494715,
+    "b": 12.948097712435521,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "crvTrim1_bbox_normal_only",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 12.948097712435521,
+    "normal": true,
+    "pseudo": false,
+    "polar": false
+   }
+  },
+  {
+   "name": "crvTrim1_polygon_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 0.0,
+    "b": 19.32551897378436
+   }
+  },
+  {
+   "name": "crvTrim1_polygon_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 4.058358984494715,
+    "b": 12.948097712435521
+   }
+  },
+  {
+   "name": "crvTrim1_polygon_outside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -9.66275948689218,
+    "b": 12.948097712435521
+   }
+  },
+  {
+   "name": "crvTrim1_reverse_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 0.0,
+    "b": 19.32551897378436
+   }
+  },
+  {
+   "name": "crvTrim1_reverse_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 4.058358984494715,
+    "b": 12.948097712435521
+   }
+  },
+  {
+   "name": "crvTrim1_elevate_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 4
+   }
+  },
+  {
+   "name": "crvTrim1_elevate_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 3
+   }
+  },
+  {
+   "name": "crvTrim1_elevate_lower",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 2
+   }
+  },
+  {
+   "name": "crvTrim1_is_line",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "is_line",
+    "ns": 10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_expert_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 5,
+    "stride": 3
+   }
+  },
+  {
+   "name": "crvTrim1_expert_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 1,
+    "end": 4,
+    "stride": 4
+   }
+  },
+  {
+   "name": "crvTrim1_expert_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 6,
+    "stride": 5
+   }
+  },
+  {
+   "name": "crvTrim1_expert_bad_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 7,
+    "stride": 3
+   }
+  },
+  {
+   "name": "crvTrim1_set_cp_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 3,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "crvTrim1_set_cp_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 6,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "crvTrim1_set_cp_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 1,
+    "index": 0,
+    "p": [
+     3.0,
+     1.0,
+     -1.0
+    ],
+    "w": 0.5
+   }
+  },
+  {
+   "name": "crvTrim1_set_cp_bad_index",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 7,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "w": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_adjust_extend",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -1.932551897378436,
+    "b": 23.190622768541232
+   }
+  },
+  {
+   "name": "crvTrim1_adjust_trim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 4.058358984494715,
+    "b": 12.948097712435521
+   }
+  },
+  {
+   "name": "crvTrim1_adjust_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 0.0,
+    "b": 19.32551897378436
+   }
+  },
+  {
+   "name": "crvTrim1_repeated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim1_degenerate",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim1_degenerate_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09,
+    "ivl": [
+     4.058358984494715,
+     12.948097712435521
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_max_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "max_domain"
+   }
+  },
+  {
+   "name": "crvTrim1_analytic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "analytic",
+    "a": 0.0,
+    "b": 19.32551897378436
+   }
+  },
+  {
+   "name": "crvTrim1_match_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_read_db_dim3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_read_db_dim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "crvTrim2_c0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "crvTrim2_intersector",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "crvTrim2_unique",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "crvTrim2_bbox_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 2.0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "crvTrim2_bbox_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.42,
+    "b": 1.34,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "crvTrim2_bbox_normal_only",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 1.34,
+    "normal": true,
+    "pseudo": false,
+    "polar": false
+   }
+  },
+  {
+   "name": "crvTrim2_polygon_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 0.0,
+    "b": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_polygon_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 0.42,
+    "b": 1.34
+   }
+  },
+  {
+   "name": "crvTrim2_polygon_outside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -1.0,
+    "b": 1.34
+   }
+  },
+  {
+   "name": "crvTrim2_reverse_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 0.0,
+    "b": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_reverse_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 0.42,
+    "b": 1.34
+   }
+  },
+  {
+   "name": "crvTrim2_elevate_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 4
+   }
+  },
+  {
+   "name": "crvTrim2_elevate_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 3
+   }
+  },
+  {
+   "name": "crvTrim2_elevate_lower",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 2
+   }
+  },
+  {
+   "name": "crvTrim2_is_line",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "is_line",
+    "ns": 10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_expert_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 4,
+    "stride": 3
+   }
+  },
+  {
+   "name": "crvTrim2_expert_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 1,
+    "end": 4,
+    "stride": 4
+   }
+  },
+  {
+   "name": "crvTrim2_expert_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 4,
+    "stride": 5
+   }
+  },
+  {
+   "name": "crvTrim2_expert_bad_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 5,
+    "stride": 3
+   }
+  },
+  {
+   "name": "crvTrim2_set_cp_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 2,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_set_cp_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 4,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_set_cp_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 1,
+    "index": 0,
+    "p": [
+     3.0,
+     1.0,
+     -1.0
+    ],
+    "w": 0.5
+   }
+  },
+  {
+   "name": "crvTrim2_set_cp_bad_index",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "w": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_adjust_extend",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -0.2,
+    "b": 2.4
+   }
+  },
+  {
+   "name": "crvTrim2_adjust_trim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 0.42,
+    "b": 1.34
+   }
+  },
+  {
+   "name": "crvTrim2_adjust_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 0.0,
+    "b": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_repeated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim2_degenerate",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim2_degenerate_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09,
+    "ivl": [
+     0.42,
+     1.34
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_max_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "max_domain"
+   }
+  },
+  {
+   "name": "crvTrim2_analytic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "analytic",
+    "a": 0.0,
+    "b": 2.0
+   }
+  },
+  {
+   "name": "crvTrim2_match_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_read_db_dim3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_read_db_dim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "file": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_canonical",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "curve0_c0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "curve0_intersector",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "curve0_unique",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "curve0_bbox_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 199.08395241590102,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "curve0_bbox_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 41.80763000733921,
+    "b": 133.3862481186537,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "curve0_bbox_normal_only",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "b_box",
+    "a": 0.0,
+    "b": 133.3862481186537,
+    "normal": true,
+    "pseudo": false,
+    "polar": false
+   }
+  },
+  {
+   "name": "curve0_polygon_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 0.0,
+    "b": 199.08395241590102
+   }
+  },
+  {
+   "name": "curve0_polygon_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": 41.80763000733921,
+    "b": 133.3862481186537
+   }
+  },
+  {
+   "name": "curve0_polygon_outside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "polygon",
+    "a": -99.54197620795051,
+    "b": 133.3862481186537
+   }
+  },
+  {
+   "name": "curve0_reverse_full",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 0.0,
+    "b": 199.08395241590102
+   }
+  },
+  {
+   "name": "curve0_reverse_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "reverse",
+    "a": 41.80763000733921,
+    "b": 133.3862481186537
+   }
+  },
+  {
+   "name": "curve0_elevate_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 5
+   }
+  },
+  {
+   "name": "curve0_elevate_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 4
+   }
+  },
+  {
+   "name": "curve0_elevate_lower",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "elevate",
+    "deg": 3
+   }
+  },
+  {
+   "name": "curve0_is_line",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "is_line",
+    "ns": 10,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_expert_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 5,
+    "stride": 3
+   }
+  },
+  {
+   "name": "curve0_expert_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 1,
+    "end": 4,
+    "stride": 4
+   }
+  },
+  {
+   "name": "curve0_expert_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 40,
+    "stride": 5
+   }
+  },
+  {
+   "name": "curve0_expert_bad_end",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 1389,
+    "stride": 3
+   }
+  },
+  {
+   "name": "curve0_set_cp_er",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 694,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "curve0_set_cp_nr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 1388,
+    "p": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "w": 2.0
+   }
+  },
+  {
+   "name": "curve0_set_cp_hr",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 1,
+    "index": 0,
+    "p": [
+     3.0,
+     1.0,
+     -1.0
+    ],
+    "w": 0.5
+   }
+  },
+  {
+   "name": "curve0_set_cp_bad_index",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "set_cp",
+    "form": 0,
+    "index": 1389,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "w": 1.0
+   }
+  },
+  {
+   "name": "curve0_adjust_extend",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": -19.908395241590103,
+    "b": 238.90074289908122
+   }
+  },
+  {
+   "name": "curve0_adjust_trim",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 41.80763000733921,
+    "b": 133.3862481186537
+   }
+  },
+  {
+   "name": "curve0_adjust_same",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "adjust",
+    "a": 0.0,
+    "b": 199.08395241590102
+   }
+  },
+  {
+   "name": "curve0_repeated",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "curve0_degenerate",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "curve0_degenerate_sub",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "degenerate",
+    "tol": 1e-09,
+    "ivl": [
+     41.80763000733921,
+     133.3862481186537
+    ]
+   }
+  },
+  {
+   "name": "curve0_max_domain",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "max_domain"
+   }
+  },
+  {
+   "name": "curve0_analytic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "analytic",
+    "a": 0.0,
+    "b": 199.08395241590102
+   }
+  },
+  {
+   "name": "curve0_match_self",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "line_join_case00",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case01",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case02",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case03",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case04",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case05",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case06",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case07",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case08",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case09",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case10",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case11",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -2.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case12",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case13",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "line_join_case14",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "line_join_case15",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        2,
+        2,
+        7,
+        7
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         14.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         20.0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    ],
+    "senses": [
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "rectangle_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         10,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         10,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         10,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         10,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_join_2d",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 2,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         10,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 2,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         10,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         10,
+         5,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 2,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         10,
+         5,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         5,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 2,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         5,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_join_lengths",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRectangle: four line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         10,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        10,
+        10
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         10,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         10,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        10,
+        10,
+        15,
+        15
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         10,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        15,
+        15,
+        25,
+        25
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        25,
+        25,
+        30,
+        30
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "regular_polygon_3_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.440892098500626e-16,
+         1.2320508075688774,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.440892098500626e-16,
+         1.2320508075688774,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -8.881784197001252e-16,
+         -2.2320508075688767,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -8.881784197001252e-16,
+         -2.2320508075688767,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "regular_polygon_5_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.618033988749895,
+         1.402113032590307,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1.618033988749895,
+         1.402113032590307,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -0.6180339887498947,
+         0.6755705045849465,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -0.6180339887498947,
+         0.6755705045849465,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -0.6180339887498951,
+         -1.675570504584946,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -0.6180339887498951,
+         -1.675570504584946,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.6180339887498945,
+         -2.4021130325903073,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1.6180339887498945,
+         -2.4021130325903073,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "regular_polygon_6_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.0,
+         1.2320508075688772,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.0,
+         1.2320508075688772,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.440892098500626e-16,
+         1.2320508075688774,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.440892098500626e-16,
+         1.2320508075688774,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -1.0,
+         -0.4999999999999998,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -1.0,
+         -0.4999999999999998,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -8.881784197001252e-16,
+         -2.2320508075688767,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -8.881784197001252e-16,
+         -2.2320508075688767,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.0,
+         -2.232050807568877,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.0,
+         -2.232050807568877,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "regular_polygon_8_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.414213562373095,
+         0.9142135623730949,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.414213562373095,
+         0.9142135623730949,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0000000000000002,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1.0000000000000002,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -0.4142135623730949,
+         0.9142135623730951,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -0.4142135623730949,
+         0.9142135623730951,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -1.0,
+         -0.4999999999999998,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -1.0,
+         -0.4999999999999998,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -0.41421356237309537,
+         -1.914213562373095,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -0.41421356237309537,
+         -1.914213562373095,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9999999999999997,
+         -2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0.9999999999999997,
+         -2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.414213562373095,
+         -1.9142135623730954,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.414213562373095,
+         -1.9142135623730954,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "regular_polygon_12_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.7320508075688776,
+         0.4999999999999999,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.7320508075688776,
+         0.4999999999999999,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.0,
+         1.2320508075688772,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.0,
+         1.2320508075688772,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0000000000000002,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1.0000000000000002,
+         1.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.440892098500626e-16,
+         1.2320508075688774,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         4.440892098500626e-16,
+         1.2320508075688774,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -0.7320508075688774,
+         0.4999999999999999,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -0.7320508075688774,
+         0.4999999999999999,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -1.0,
+         -0.4999999999999998,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -1.0,
+         -0.4999999999999998,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -0.7320508075688776,
+         -1.4999999999999996,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -0.7320508075688776,
+         -1.4999999999999996,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -8.881784197001252e-16,
+         -2.2320508075688767,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -8.881784197001252e-16,
+         -2.2320508075688767,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9999999999999997,
+         -2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0.9999999999999997,
+         -2.5,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.0,
+         -2.232050807568877,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.0,
+         -2.232050807568877,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.7320508075688767,
+         -1.5000000000000009,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2.7320508075688767,
+         -1.5000000000000009,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.0,
+         -0.5,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_then_line_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "circle": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "radius": 2.0,
+        "a0": 0.0,
+        "a1": 90.0
+       }
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -3,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_then_arc_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         2,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "circle": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "radius": 2.0,
+        "a0": 0.0,
+        "a1": 180.0
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_reversed_line_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         -3,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "circle": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "radius": 2.0,
+        "a0": 0.0,
+        "a1": 90.0
+       }
+      }
+     }
+    ],
+    "senses": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "mixed_dim_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 2,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1,
+         0,
+         5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         7,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "single_segment_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         3,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "gap_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1.5,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "near_gap_join",
+   "upstream_ref": "upstream/tests/SM_API_test (TestSmCreateRegularPolygon: n line edges joined end to end)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "cpts": [
+        [
+         1.000001,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "smc_join",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point reach SmBSplineCurve)",
+   "inputs": {
+    "op": "join",
+    "segs": [
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      }
+     },
+     {
+      "dim": 3,
+      "oob": false,
+      "crv": {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "point_curve_0",
+   "upstream_ref": "SmBSplineCurve::CreatePointCurve",
+   "inputs": {
+    "op": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "point_curve_1",
+   "upstream_ref": "SmBSplineCurve::CreatePointCurve",
+   "inputs": {
+    "op": "point",
+    "p": [
+     1.5,
+     -2.5,
+     3.25
+    ]
+   }
+  },
+  {
+   "name": "point_curve_2",
+   "upstream_ref": "SmBSplineCurve::CreatePointCurve",
+   "inputs": {
+    "op": "point",
+    "p": [
+     1000.0,
+     -0.001,
+     0
+    ]
+   }
+  },
+  {
+   "name": "offset_arc",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (offset input); SmBSplineCurve::CreateSimpleOffset",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "d": 0.5
+   }
+  },
+  {
+   "name": "offset_arc_inside",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (offset input); SmBSplineCurve::CreateSimpleOffset",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     -1
+    ],
+    "d": 0.5
+   }
+  },
+  {
+   "name": "offset_arc_zero_normal",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (offset input); SmBSplineCurve::CreateSimpleOffset",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     0
+    ],
+    "d": 0.5
+   }
+  },
+  {
+   "name": "offset_cubic",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (offset input); SmBSplineCurve::CreateSimpleOffset",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "offset",
+    "tol": 0.001,
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "d": 0.25
+   }
+  },
+  {
+   "name": "offset_cubic_zero_normal",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (offset input); SmBSplineCurve::CreateSimpleOffset",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "offset",
+    "tol": 0.001,
+    "n": [
+     0,
+     0,
+     1e-20
+    ],
+    "d": 0.25
+   }
+  },
+  {
+   "name": "bbox_bezier_line_cubic",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        3,
+        3,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0,
+    "b": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_bezier_line_cubic_sub",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        3,
+        3,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0.5,
+    "b": 1.0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "is_line_line_cubic",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        3,
+        3,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 4,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "bbox_bezier_line_quad",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0.5,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       1,
+       1,
+       1,
+       3,
+       3,
+       3
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 1,
+    "b": 3,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_bezier_line_quad_sub",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0.5,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       1,
+       1,
+       1,
+       3,
+       3,
+       3
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 1.5,
+    "b": 2.0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "is_line_line_quad",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0.5,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       1,
+       1,
+       1,
+       3,
+       3,
+       3
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 4,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "bbox_bezier_line_linear",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0,
+    "b": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_bezier_line_linear_sub",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0.25,
+    "b": 0.5,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "is_line_line_linear",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 4,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "bbox_bezier_quad",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0,
+    "b": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_bezier_quad_sub",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0.25,
+    "b": 0.5,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "is_line_quad",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 4,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "bbox_bezier_cubic",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0,
+    "b": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_bezier_cubic_sub",
+   "upstream_ref": "SmBSplineCurve::CalculateBoundingBox (Bezier special cases)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0.25,
+    "b": 0.5,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "is_line_cubic",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 4,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "is_line_zero_length",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 3,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "is_line_closed",
+   "upstream_ref": "SmBSplineCurve::IsLine",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "is_line",
+    "ns": 3,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "piecewise_c0_c0",
+   "upstream_ref": "SmBSplineCurve::IsPiecewiseC0 (intersection-curve form)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "c0"
+   }
+  },
+  {
+   "name": "piecewise_c0_intersector",
+   "upstream_ref": "SmBSplineCurve::IsPiecewiseC0 (intersection-curve form)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "intersector"
+   }
+  },
+  {
+   "name": "piecewise_c0_unique",
+   "upstream_ref": "SmBSplineCurve::IsPiecewiseC0 (intersection-curve form)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "unique"
+   }
+  },
+  {
+   "name": "piecewise_c0_canonical",
+   "upstream_ref": "SmBSplineCurve::IsPiecewiseC0 (intersection-curve form)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "canonical"
+   }
+  },
+  {
+   "name": "piecewise_c0_bbox",
+   "upstream_ref": "SmBSplineCurve::IsPiecewiseC0 (intersection-curve form)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "op": "b_box",
+    "a": 0.5,
+    "b": 1.5,
+    "normal": true,
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "empty_repeated",
+   "upstream_ref": "SmBSplineCurve(lDim) without NURB",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false
+    },
+    "op": "repeated",
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "analytic_line",
+   "upstream_ref": "SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "analytic",
+    "a": 0,
+    "b": 1
+   }
+  },
+  {
+   "name": "analytic_line_sub",
+   "upstream_ref": "SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "analytic",
+    "a": 0.25,
+    "b": 0.5
+   }
+  },
+  {
+   "name": "analytic_zero_line",
+   "upstream_ref": "SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "analytic",
+    "a": 0,
+    "b": 1
+   }
+  },
+  {
+   "name": "analytic_arc",
+   "upstream_ref": "SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "analytic",
+    "a": 0,
+    "b": 1
+   }
+  },
+  {
+   "name": "analytic_quad",
+   "upstream_ref": "SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "analytic",
+    "a": 0,
+    "b": 1
+   }
+  },
+  {
+   "name": "analytic_polyline",
+   "upstream_ref": "SmBSplineCurve::CreateAnalyticCurve (USE_ANALYTICS)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.5,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "analytic",
+    "a": 0,
+    "b": 1
+   }
+  },
+  {
+   "name": "set_canonical",
+   "upstream_ref": "SmBSplineCurve::SetCanonical (CreateCanonical data)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_canonical",
+    "data": {
+     "dim": 3,
+     "deg": 2,
+     "pts": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       3,
+       2,
+       1
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "form": 1,
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      3,
+      1,
+      3
+     ],
+     "kt": 3
+    }
+   }
+  },
+  {
+   "name": "set_canonical_rational_trim",
+   "upstream_ref": "SmBSplineCurve::SetCanonical (CreateCanonical data)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_canonical",
+    "data": {
+     "dim": 3,
+     "deg": 2,
+     "pts": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       3,
+       2,
+       1
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "form": 1,
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      3,
+      1,
+      3
+     ],
+     "kt": 3,
+     "weights": [
+      1,
+      0.5,
+      2,
+      1
+     ],
+     "trim": [
+      0.1,
+      0.9
+     ]
+    }
+   }
+  },
+  {
+   "name": "set_canonical_2d",
+   "upstream_ref": "SmBSplineCurve::SetCanonical (CreateCanonical data)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_canonical",
+    "data": {
+     "dim": 2,
+     "deg": 2,
+     "pts": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       3,
+       2,
+       1
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "form": 1,
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      3,
+      1,
+      3
+     ],
+     "kt": 3
+    }
+   }
+  },
+  {
+   "name": "set_canonical_bad_degree",
+   "upstream_ref": "SmBSplineCurve::SetCanonical (CreateCanonical data)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_canonical",
+    "data": {
+     "dim": 3,
+     "deg": 0,
+     "pts": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       3,
+       2,
+       1
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "form": 1,
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      3,
+      1,
+      3
+     ],
+     "kt": 3
+    }
+   }
+  },
+  {
+   "name": "set_canonical_bad_weights",
+   "upstream_ref": "SmBSplineCurve::SetCanonical (CreateCanonical data)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "set_canonical",
+    "data": {
+     "dim": 3,
+     "deg": 2,
+     "pts": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       0
+      ],
+      [
+       3,
+       2,
+       1
+      ],
+      [
+       4,
+       0,
+       0
+      ]
+     ],
+     "form": 1,
+     "knots": [
+      0,
+      0.5,
+      1
+     ],
+     "mults": [
+      3,
+      1,
+      3
+     ],
+     "kt": 3,
+     "weights": [
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat0_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat0_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat0_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat0_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat1_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat1_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat1_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v30_rat1_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat0_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat0_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat0_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat0_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat1_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat1_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat1_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_v33_rat1_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": false,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat0_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat0_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat0_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat0_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat1_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat1_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat1_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v30_rat1_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat0_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat0_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat0_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat0_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 0,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1,
+      2,
+      -1,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat1_dim2_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat1_dim2_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 2,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.0,
+      1,
+      2,
+      2.0,
+      3,
+      1,
+      0.5,
+      4,
+      0,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat1_dim3_as3",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_bin_v33_rat1_dim3_as2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 33,
+    "db": {
+     "n": 3,
+     "p": 2,
+     "rat": 1,
+     "dim": 3,
+     "kt": 3,
+     "form": 2,
+     "vals": [
+      0,
+      0,
+      1.5,
+      1.0,
+      1,
+      2,
+      -1,
+      2.0,
+      3,
+      1,
+      0.5,
+      0.5,
+      4,
+      0,
+      2,
+      1.0,
+      0,
+      0,
+      0,
+      0.4,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_dim1",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 1,
+     "p": 1,
+     "rat": 0,
+     "dim": 1,
+     "vals": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_rat2",
+   "upstream_ref": "SmBSplineCurve::ReadFromDB (WriteToDB layout)",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": true,
+    "version": 30,
+    "db": {
+     "n": 1,
+     "p": 1,
+     "rat": 2,
+     "dim": 3,
+     "vals": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      2,
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "elevate_too_high",
+   "upstream_ref": "SmBSplineCurve::DegreeElevate (NL degree limit)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "elevate",
+    "deg": 24
+   }
+  },
+  {
+   "name": "expert_start_after_end",
+   "upstream_ref": "SmBSplineCurve::GetControlPointsExpert",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 2,
+    "end": 1,
+    "stride": 3
+   }
+  },
+  {
+   "name": "expert_small_stride",
+   "upstream_ref": "SmBSplineCurve::GetControlPointsExpert",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 0,
+    "end": 1,
+    "stride": 3
+   }
+  },
+  {
+   "name": "expert_2d_rational_form0",
+   "upstream_ref": "SmBSplineCurve::GetControlPointsExpert",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "expert",
+    "form": 0,
+    "start": 0,
+    "end": 2,
+    "stride": 4
+   }
+  },
+  {
+   "name": "expert_2d_rational_form1",
+   "upstream_ref": "SmBSplineCurve::GetControlPointsExpert",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "expert",
+    "form": 1,
+    "start": 0,
+    "end": 2,
+    "stride": 4
+   }
+  },
+  {
+   "name": "expert_2d_rational_form2",
+   "upstream_ref": "SmBSplineCurve::GetControlPointsExpert",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "expert",
+    "form": 2,
+    "start": 0,
+    "end": 2,
+    "stride": 4
+   }
+  },
+  {
+   "name": "set_cp_2d",
+   "upstream_ref": "SmBSplineCurve::SetControlPoint",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "set_cp",
+    "form": 2,
+    "index": 1,
+    "p": [
+     1,
+     1,
+     0
+    ],
+    "w": 3.0
+   }
+  },
+  {
+   "name": "match_2d_nonrational",
+   "upstream_ref": "SmBSplineCurve::MatchWeights",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "match_count_differs",
+   "upstream_ref": "SmBSplineCurve::MatchWeights",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "match",
+    "other": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "reverse_2d",
+   "upstream_ref": "SmBSplineCurve::ReverseParameterization",
+   "inputs": {
+    "this": {
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ],
+       [
+        2,
+        4,
+        1.7976931348623157e+308,
+        2.0
+       ],
+       [
+        3,
+        0,
+        1.7976931348623157e+308,
+        1.0
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "reverse",
+    "a": 0.2,
+    "b": 0.7
+   }
+  }
+ ]
+}

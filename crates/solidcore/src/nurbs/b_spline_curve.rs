@@ -7,8 +7,10 @@
 //! each lives in its own submodule and adds methods to [`BSplineCurve`].
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, Ends, KnotType, NurbCircleParam, ProjectionType,
     Tessellation,
 };
+pub use p2::{AnalyticCurve, BoundingBoxRequest, BoundingBoxes, ControlPointForm, CurveCanonical};

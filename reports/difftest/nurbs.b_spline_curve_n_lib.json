@@ -194,40 +194,28 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveCurve_deform_start",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#24 (upstream upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveCurve_deform_both_tan",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#25 (upstream upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveCurve_through_mid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#26 (upstream upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -462,16 +450,12 @@
       "values_compared": 74
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "closedCurve_through_mid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#56 (upstream upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -690,40 +674,28 @@
       "values_compared": 488
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "crvToOffset_deform_start",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#84 (upstream upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 724
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "crvToOffset_deform_both_tan",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#85 (upstream upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 724
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "crvToOffset_through_mid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#86 (upstream upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 488
     },
     {
       "max_rel_err": 0.0,
@@ -958,16 +930,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "crvTrim1_through_mid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#116 (upstream upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -1202,16 +1170,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "crvTrim2_through_mid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#146 (upstream upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -1430,40 +1394,28 @@
       "values_compared": 6960
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "curve0_deform_start",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#174 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 8706
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "curve0_deform_both_tan",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#175 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 8706
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "curve0_through_mid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#176 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 0
+      "values_compared": 6960
     },
     {
       "max_rel_err": 0.0,
@@ -1658,16 +1610,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect0_deform",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#201 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle edges))",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -1694,16 +1642,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect1_deform",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#205 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle edges))",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -1730,16 +1674,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect2_deform",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#209 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle edges))",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -1766,16 +1706,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect3_deform",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#213 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle edges))",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -2291,8 +2227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "cub_through_pw",
@@ -2375,8 +2311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0006",
@@ -2555,8 +2491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0028",
@@ -2606,16 +2542,12 @@
       "values_compared": 80
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0034",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746548",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -2874,16 +2806,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746581",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -2903,8 +2831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0070",
@@ -2930,16 +2858,12 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0073",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746587",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -3071,8 +2995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0090",
@@ -3114,16 +3038,12 @@
       "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0095",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746609",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -3270,16 +3190,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0114",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746628",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -3395,8 +3311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0129",
@@ -3430,16 +3346,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0133",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746647",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -3474,16 +3386,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0138",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746652",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -3631,8 +3539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0157",
@@ -4130,16 +4038,12 @@
       "values_compared": 420
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0219",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746733",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -4230,16 +4134,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0231",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746745",
-      "values_compared": 0
+      "values_compared": 116
     },
     {
       "max_rel_err": 0.0,
@@ -4298,16 +4198,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0239",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746753",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -4366,16 +4262,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746761",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -4419,8 +4311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0253",
@@ -4838,16 +4730,12 @@
       "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0305",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746819",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -4915,8 +4803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0314",
@@ -4943,8 +4831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0317",
@@ -5074,16 +4962,12 @@
       "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746847",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -5110,16 +4994,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746851",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -5274,16 +5154,12 @@
       "values_compared": 246
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0357",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746871",
-      "values_compared": 0
+      "values_compared": 114
     },
     {
       "max_rel_err": 0.0,
@@ -5311,8 +5187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0361",
@@ -5331,8 +5207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0363",
@@ -5487,8 +5363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0382",
@@ -5579,8 +5455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0393",
@@ -5703,8 +5579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0408",
@@ -5778,16 +5654,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0417",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746931",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -5846,16 +5718,12 @@
       "values_compared": 306
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0425",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746939",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -6026,16 +5894,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0447",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746961",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -6206,16 +6070,12 @@
       "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0469",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746983",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -6274,16 +6134,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165746991",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -6398,16 +6254,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0492",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747006",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -6434,21 +6286,17 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0496",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747010",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0497",
@@ -7394,16 +7242,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0615",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747129",
-      "values_compared": 0
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -7487,8 +7331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0626",
@@ -7755,8 +7599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0659",
@@ -7918,16 +7762,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0679",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747193",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -8011,8 +7851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0690",
@@ -8078,16 +7918,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0698",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747212",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -8107,8 +7943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0701",
@@ -8254,16 +8090,12 @@
       "values_compared": 328
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0719",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747233",
-      "values_compared": 0
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -8722,28 +8554,20 @@
       "values_compared": 115
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0777",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747291",
-      "values_compared": 0
+      "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0778",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747292",
-      "values_compared": 0
+      "values_compared": 53
     },
     {
       "max_rel_err": 0.0,
@@ -8771,8 +8595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0782",
@@ -8806,16 +8630,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0786",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747300",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -8874,16 +8694,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0794",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747308",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -8903,8 +8719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0797",
@@ -8939,8 +8755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0801",
@@ -9159,8 +8975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0828",
@@ -9235,8 +9051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0837",
@@ -9311,8 +9127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0846",
@@ -9331,8 +9147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0848",
@@ -9462,16 +9278,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0864",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747378",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -9507,8 +9319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0869",
@@ -9543,8 +9355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0873",
@@ -9690,16 +9502,12 @@
       "values_compared": 540
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0891",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747405",
-      "values_compared": 0
+      "values_compared": 116
     },
     {
       "max_rel_err": 0.0,
@@ -9830,16 +9638,12 @@
       "values_compared": 751
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0908",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747422",
-      "values_compared": 0
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -9867,8 +9671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0912",
@@ -10071,8 +9875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0937",
@@ -10274,16 +10078,12 @@
       "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0962",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747476",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -10406,16 +10206,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0978",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747492",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -10451,8 +10247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0983",
@@ -10583,8 +10379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0999",
@@ -10626,16 +10422,12 @@
       "values_compared": 300
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747518",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -10903,8 +10695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1038",
@@ -10915,8 +10707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1039",
@@ -11238,28 +11030,20 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1079",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747593",
-      "values_compared": 0
+      "values_compared": 86
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1080",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747594",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -11374,16 +11158,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1095",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747609",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -11642,16 +11422,12 @@
       "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1128",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747642",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -12070,16 +11846,12 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1181",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747695",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -12131,8 +11903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1188",
@@ -12191,8 +11963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1195",
@@ -12506,16 +12278,12 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747748",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -12742,16 +12510,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1263",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747777",
-      "values_compared": 0
+      "values_compared": 86
     },
     {
       "max_rel_err": 0.0,
@@ -12843,8 +12607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1275",
@@ -12854,16 +12618,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1276",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747790",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -12898,16 +12658,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747795",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -12990,16 +12746,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1292",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747806",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -13018,16 +12770,12 @@
       "values_compared": 143
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747809",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -13159,8 +12907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1312",
@@ -13490,16 +13238,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1353",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747867",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -13511,8 +13255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1355",
@@ -13682,16 +13426,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1376",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747890",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -13766,40 +13506,28 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1386",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747900",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747901",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747902",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -14154,16 +13882,12 @@
       "values_compared": 265
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1433",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747947",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -14190,16 +13914,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747951",
-      "values_compared": 0
+      "values_compared": 114
     },
     {
       "max_rel_err": 0.0,
@@ -14346,16 +14066,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1456",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747970",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -14415,8 +14131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1464",
@@ -14450,16 +14166,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1468",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165747982",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -14630,16 +14342,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1490",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748004",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -14835,8 +14543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1515",
@@ -14878,16 +14586,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1520",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748034",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -14922,16 +14626,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1525",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748039",
-      "values_compared": 0
+      "values_compared": 86
     },
     {
       "max_rel_err": 0.0,
@@ -15071,8 +14771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1543",
@@ -15154,16 +14854,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1553",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748067",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -15255,8 +14951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1565",
@@ -15347,8 +15043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1576",
@@ -15366,16 +15062,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1578",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748092",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -15554,16 +15246,12 @@
       "values_compared": 628
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1601",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748115",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -15646,16 +15334,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1612",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748126",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -15987,8 +15671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1654",
@@ -16110,16 +15794,12 @@
       "values_compared": 200
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1669",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748183",
-      "values_compared": 0
+      "values_compared": 119
     },
     {
       "max_rel_err": 0.0,
@@ -16507,8 +16187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1718",
@@ -16631,8 +16311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1733",
@@ -16762,16 +16442,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748263",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -16902,16 +16578,12 @@
       "values_compared": 77
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1766",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748280",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -17162,16 +16834,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1798",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748312",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -17246,16 +16914,12 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1808",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748322",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -17291,8 +16955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1813",
@@ -17391,8 +17055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1825",
@@ -17650,16 +17314,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1857",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748371",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -18118,16 +17778,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1915",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748429",
-      "values_compared": 0
+      "values_compared": 74
     },
     {
       "max_rel_err": 0.0,
@@ -18178,16 +17834,12 @@
       "values_compared": 76
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1922",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748436",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -18199,8 +17851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1924",
@@ -18242,16 +17894,12 @@
       "values_compared": 45
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1929",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748443",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -18279,8 +17927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1933",
@@ -18323,8 +17971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1938",
@@ -18455,8 +18103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1954",
@@ -18498,21 +18146,17 @@
       "values_compared": 67
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1959",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748473",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1960",
@@ -18546,16 +18190,12 @@
       "values_compared": 41
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1964",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748478",
-      "values_compared": 0
+      "values_compared": 61
     },
     {
       "max_rel_err": 0.0,
@@ -18678,16 +18318,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1980",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748494",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -18779,8 +18415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1992",
@@ -18807,8 +18443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineCurve::IsIntersectorApprox",
-        "unit": "nurbs.b_spline_curve_p2"
+        "symbol": "SmCurve::ApproximateLength",
+        "unit": "curve.curve_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen1995",
@@ -18818,16 +18454,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1996",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748510",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -18838,16 +18470,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineCurve::DegreeElevate",
-        "unit": "nurbs.b_spline_curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1998",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8852160202165748512",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -18859,12 +18487,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 150,
+  "cases_deferred": 57,
   "cases_failed": 0,
-  "cases_passed": 2132,
+  "cases_passed": 2225,
   "cases_total": 2282,
   "deferred_by_unit": {
-    "nurbs.b_spline_curve_p2": 150
+    "curve.curve_p2": 57
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -21,10 +21,9 @@
 //! is `flags` (`dim oob borrowed knot_type form has_nurb`) and, with a NURB, `dims`
 //! (`n p m`), `cpts` (x y z w as stored) and `u`.
 //!
-//! Cases whose Rust side reaches an unported callee are deferred: every
-//! `SetIntersectionCurveThroughPoint` (`IsIntersectorApprox`, unit
-//! `nurbs.b_spline_curve_p2`) and `DeformToEndPointTargets` of curves of degree below 3
-//! or of even degree (`DegreeElevate`, same unit). Every run has at least
+//! Cases whose Rust side reaches an unported callee are deferred: the
+//! `SetIntersectionCurveThroughPoint` calls on intersector-form curves that reach
+//! `SmCurve::ApproximateLength` (unit `curve.curve_p2`). Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
 //! redrawn.
 

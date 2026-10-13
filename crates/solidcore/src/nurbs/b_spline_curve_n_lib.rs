@@ -77,12 +77,12 @@
 //!   `NL_INP_ERR` for `ur <= ul` and upstream then dereferences its `NULL` result; the
 //!   port returns `InvalidInput`.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
-//!   `IsIntersectorApprox` (`IsPiecewiseC0`, unit `nurbs.b_spline_curve_p2`) and uses
+//!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
 //!   `SmCurve::ApproximateLength` (`curve.curve_p2`), `SmSurface::LocalPointSolve`
 //!   (`surface.surface_p5`), `SmSurface::GetNaturalUVDomain`, `SmSurface::Evaluate` and
 //!   `smsurf_DropVectors` (`surface.surface_p2`); `DeformToEndPointTargets` calls
-//!   `DegreeElevate` (`nurbs.b_spline_curve_p2`) for curves of degree below 3 or of even
-//!   degree. Those calls return [`SolidError::Unported`] until the units are ported.
+//!   [`BSplineCurve::degree_elevate`] for curves of degree below 3 or of even degree.
+//!   The calls into unported units return [`SolidError::Unported`] until they land.
 //!   Surfaces are opaque handles `S` until a surface type exists.
 //!   `DeformToEndPointTargets` forwards derived curve types to
 //!   `SmCurve::DeformToEndPointTargets` (`curve.curve_p6`); a [`BSplineCurve`] is never
@@ -316,21 +316,13 @@ fn nlib_curve(curve: &BSplineCurve, operation: &'static str) -> Result<Curve> {
 // ---- back-edges -------------------------------------------------------------------
 
 /// `SmBSplineCurve::IsIntersectorApprox`: degree 3 and `IsPiecewiseC0`.
-fn is_intersector_approx(_curve: &BSplineCurve) -> Result<bool> {
-    // UNPORTED(nurbs.b_spline_curve_p2): SmBSplineCurve::IsIntersectorApprox
-    Err(SolidError::Unported {
-        upstream: "SmBSplineCurve::IsIntersectorApprox",
-        unit: "nurbs.b_spline_curve_p2",
-    })
+fn is_intersector_approx(curve: &BSplineCurve) -> Result<bool> {
+    curve.is_intersector_approx()
 }
 
 /// `SmBSplineCurve::DegreeElevate`.
-fn degree_elevate(_curve: &mut BSplineCurve, _new_degree: usize) -> Result<()> {
-    // UNPORTED(nurbs.b_spline_curve_p2): SmBSplineCurve::DegreeElevate
-    Err(SolidError::Unported {
-        upstream: "SmBSplineCurve::DegreeElevate",
-        unit: "nurbs.b_spline_curve_p2",
-    })
+fn degree_elevate(curve: &mut BSplineCurve, new_degree: usize) -> Result<()> {
+    curve.degree_elevate(new_degree)
 }
 
 /// `SmCurve::ApproximateLength` of `curve` over `interval` with `samples` samples.
@@ -2322,17 +2314,18 @@ mod tests {
             ),
             Err(SolidError::Upstream { .. })
         ));
-        assert!(matches!(
-            q.deform_to_end_point_targets(
-                Some(Vec3::new(0.0, 0.5, 0.0)),
-                None,
-                None,
-                InValueType::Same,
-                None,
-                InValueType::Same
-            ),
-            Err(SolidError::Unported { .. })
-        ));
+        // degree 2: elevated to 3 first (DegreeElevate)
+        q.deform_to_end_point_targets(
+            Some(Vec3::new(0.0, 0.5, 0.0)),
+            None,
+            None,
+            InValueType::Same,
+            None,
+            InValueType::Same,
+        )
+        .unwrap();
+        let s = q.ends().unwrap().start;
+        assert!((s - Vec3::new(0.0, 0.5, 0.0)).length() < 1e-12);
         let mut knot = 0.5;
         let r = cubic().set_intersection_curve_through_point::<()>(
             &mut knot,
@@ -2343,7 +2336,8 @@ mod tests {
             &[],
             0.1,
         );
-        assert!(matches!(r, Err(SolidError::Unported { .. })));
+        // not an intersector-form curve
+        assert!(matches!(r, Err(SolidError::Upstream { .. })));
     }
 
     #[test]
