@@ -1167,9 +1167,9 @@ depends_on = ["nlib.basis_basic", "nlib.crv_basic", "nlib.crv_geom", "nlib.crv_n
 est_lines = 2214
 layer = 16
 tests = ["SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCurveSweep", "SM_API_test:TestSmPipeSweep", "SM_API_test:TestSmCurveSweepFromFaces", "SM_API_test:TestSmCurveSweepFailureCleanup", "prog_test:my_test_bsplinesurface_nlib"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-nlib.srf_adv_p6-a1"
+claimed_at = "2026-10-13T00:25:33Z"
 notes = "2 fns; largest: N_FillNSidedHole, N_CreateSweepScale; unit-SCC #22 (220 units); 51 upstream test entry points reach this unit"
 
 [[unit]]
