@@ -16,6 +16,8 @@
 //! a case still reaching an unported callee is deferred.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -244,11 +246,17 @@ fn str_codes(out: &mut Vec<f64>, s: &str) {
 }
 
 fn arg(args: &[f64], i: usize) -> Result<f64, HarnessError> {
-    args.get(i).copied().ok_or_else(|| harness("missing argument"))
+    args.get(i)
+        .copied()
+        .ok_or_else(|| harness("missing argument"))
 }
 
 fn arg3(args: &[f64], i: usize) -> Result<Vec3, HarnessError> {
-    Ok(Vec3::new(arg(args, i)?, arg(args, i + 1)?, arg(args, i + 2)?))
+    Ok(Vec3::new(
+        arg(args, i)?,
+        arg(args, i + 1)?,
+        arg(args, i + 2)?,
+    ))
 }
 
 fn st<T>(r: &solidcore::Result<T>) -> f64 {
@@ -281,11 +289,11 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         }
         Op::Eq => {
             out.push(0.0);
-            if arg(args, 0)? != 0.0 {
-                out.push(flag(a.approx_eq(&a)));
-            } else {
+            if arg(args, 0)? == 0.0 {
                 let b = build(&i.b)?;
                 out.push(flag(a.approx_eq(&b)));
+            } else {
+                out.push(flag(a.approx_eq(&a)));
             }
         }
         Op::Adjust => {
@@ -350,7 +358,11 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         Op::Queries => {
             let t = arg(args, 0)? as i64;
             out.push(0.0);
-            out.extend([flag(a.is_bounded()), flag(a.is_analytic()), flag(a.is_arc())]);
+            out.extend([
+                flag(a.is_bounded()),
+                flag(a.is_analytic()),
+                flag(a.is_arc()),
+            ]);
             let si = a.step_interval();
             out.extend([si.min(), si.max()]);
             let md = a.max_analytic_domain();
@@ -386,10 +398,10 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             }
         }
         Op::ReadDb => {
-            let ft = if arg(args, 0)? != 0.0 {
-                FileType::Binary
-            } else {
+            let ft = if arg(args, 0)? == 0.0 {
                 FileType::Ascii
+            } else {
+                FileType::Binary
             };
             let dim = arg(args, 1)? as u64;
             let version = arg(args, 2)? as u64;
@@ -397,11 +409,16 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             let mut db = DatabaseReader::new();
             db.open_for_read(db_bytes(i)?, ft);
             let r = if via_curve {
-                Curve::read_from_db(&solidcore::kernel::Kernel::default(), PARABOLA_TYPE, &mut db, dim, version).and_then(|c| {
-                    match c.into_kind() {
-                        CurveKind::Parabola(p) => Ok(p),
-                        _ => Err(SolidError::sm_err("difftest::curve_parabola::read_db")),
-                    }
+                Curve::read_from_db(
+                    &solidcore::kernel::Kernel::default(),
+                    PARABOLA_TYPE,
+                    &mut db,
+                    dim,
+                    version,
+                )
+                .and_then(|c| match c.into_kind() {
+                    CurveKind::Parabola(p) => Ok(p),
+                    _ => Err(SolidError::sm_err("difftest::curve_parabola::read_db")),
                 })
             } else {
                 Parabola::read_from_db(&mut db, dim, version)
@@ -446,7 +463,12 @@ fn vec_scaled(rng: &mut Rng, scale: f64) -> [f64; 3] {
 fn gen_axis(rng: &mut Rng) -> [f64; 3] {
     match rng.below(6) {
         0 => *rng
-            .choose(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]])
+            .choose(&[
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [-1.0, 0.0, 0.0],
+            ])
             .unwrap_or(&[1.0, 0.0, 0.0]),
         1 => {
             // unit length
@@ -547,7 +569,10 @@ fn base_stream(p: &Parabola, binary: bool, version: u64, data: &mut Vec<String>)
     let Some(cur) = p.base().gw_nurb() else {
         return;
     };
-    let rational = cur.cpts().first().is_some_and(|q| q.w != solidcore::nurbs::math::NOW);
+    let rational = cur
+        .cpts()
+        .first()
+        .is_some_and(|q| q.w != solidcore::nurbs::math::NOW);
     let two_d = p.dim() == 2;
     let n = cur.n() as i64;
     let deg = cur.degree() as i64;
@@ -563,10 +588,10 @@ fn base_stream(p: &Parabola, binary: bool, version: u64, data: &mut Vec<String>)
         for q in cur.cpts() {
             let mut line = format!("d{:e} d{:e}", q.x, q.y);
             if !two_d {
-                line.push_str(&format!(" d{:e}", q.z));
+                let _ = write!(line, " d{:e}", q.z);
             }
             if rational {
-                line.push_str(&format!(" d{:e}", q.w));
+                let _ = write!(line, " d{:e}", q.w);
             }
             data.push(line);
         }
@@ -574,17 +599,22 @@ fn base_stream(p: &Parabola, binary: bool, version: u64, data: &mut Vec<String>)
             data.push(format!("d{k:e}"));
         }
     } else {
-        data.extend([n.to_string(), deg.to_string(), rat.to_string(), dim.to_string()]);
+        data.extend([
+            n.to_string(),
+            deg.to_string(),
+            rat.to_string(),
+            dim.to_string(),
+        ]);
         if version > 32 {
             data.extend([kt.to_string(), form.to_string()]);
         }
         for q in cur.cpts() {
             let mut line = format!("{:e} {:e}", q.x, q.y);
             if !two_d {
-                line.push_str(&format!(" {:e}", q.z));
+                let _ = write!(line, " {:e}", q.z);
             }
             if rational {
-                line.push_str(&format!(" {:e}", q.w));
+                let _ = write!(line, " {:e}", q.w);
             }
             data.push(line);
         }
@@ -609,7 +639,13 @@ fn gen_read(rng: &mut Rng, a: &CurveIn) -> (Vec<f64>, String, bool) {
         Some(p) => {
             let (a2p, f) = p.canonical();
             let si = p.step_interval();
-            (a2p.origin(), a2p.x_axis(), a2p.y_axis(), f, [si.min(), si.max()])
+            (
+                a2p.origin(),
+                a2p.x_axis(),
+                a2p.y_axis(),
+                f,
+                [si.min(), si.max()],
+            )
         }
         None => (Vec3::ZERO, Vec3::X, Vec3::Y, 1.0, [0.0, 1.0]),
     };
@@ -643,12 +679,7 @@ fn gen_read(rng: &mut Rng, a: &CurveIn) -> (Vec<f64>, String, bool) {
         data.push('\n');
     }
     (
-        vec![
-            flag(binary),
-            dim as f64,
-            version as f64,
-            flag(via_curve),
-        ],
+        vec![flag(binary), dim as f64, version as f64, flag(via_curve)],
         data,
         binary,
     )

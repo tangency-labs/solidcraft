@@ -91,7 +91,9 @@ struct InlineSrf {
 #[serde(untagged)]
 enum SrfIn {
     /// An upstream `.sms` surface file (path relative to the repository root).
-    File { sms: String },
+    File {
+        sms: String,
+    },
     Inline(InlineSrf),
 }
 
@@ -219,7 +221,7 @@ struct ReadDbIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum Inputs {
-    Object { cos: CosIn, ops: Vec<OpIn> },
+    Object { cos: Box<CosIn>, ops: Vec<OpIn> },
     ReadDb { read_db: ReadDbIn },
 }
 
@@ -258,8 +260,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -523,7 +529,11 @@ fn build_surface(s: &SrfIn) -> Result<BSplineSurface, HarnessError> {
     let net = i
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     let sur =
         Surface::new(net, i.p, i.q, i.u, i.v).map_err(|e| harness(format!("surface: {e}")))?;
@@ -537,8 +547,11 @@ fn build(c: &CosIn) -> Result<solidcore::Result<CrvOnSurf>, HarnessError> {
         .domain
         .map(|[a, bb, cc, d]| Extent2d::from_bounds(a, bb, cc, d));
     let r = match &c.uv {
-        UvIn::Bspline(bs) => CrvOnSurf::new(&Kernel::default(), build_uv(bs)?, srf, domain, c.owner),
-        UvIn::Line([x0, y0, x1, y1]) => CrvOnSurf::from_uv_line(&Kernel::default(), 
+        UvIn::Bspline(bs) => {
+            CrvOnSurf::new(&Kernel::default(), build_uv(bs)?, srf, domain, c.owner)
+        }
+        UvIn::Line([x0, y0, x1, y1]) => CrvOnSurf::from_uv_line(
+            &Kernel::default(),
             Point2::new(*x0, *y0),
             Point2::new(*x1, *y1),
             srf,
@@ -635,7 +648,7 @@ fn status(e: &SolidError) -> f64 {
 
 /// A deferral or a harness failure that ends the Rust run.
 enum Stop {
-    Deferred(Output),
+    Deferred(Box<Output>),
     Harness(HarnessError),
 }
 
@@ -650,7 +663,7 @@ fn st<T>(r: &solidcore::Result<T>) -> Result<f64, Stop> {
     match r {
         Ok(_) => Ok(0.0),
         Err(e) => match Output::unported(e) {
-            Some(d) => Err(Stop::Deferred(d)),
+            Some(d) => Err(Stop::Deferred(Box::new(d))),
             None => Ok(status(e)),
         },
     }
@@ -807,7 +820,8 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             put_state(o, c);
         }
         OpIn::Reverse { a, b: bb } => {
-            let r = c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
+            let r =
+                c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(st(&r)?);
             if let Ok(nv) = r {
                 o.extend([nv.min(), nv.max()]);
@@ -858,7 +872,12 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             breaks,
             match_param,
         } => {
-            let r = c.get_or_create_bs_approx(&Kernel::default(), *tol, breaks.as_deref(), *match_param);
+            let r = c.get_or_create_bs_approx(
+                &Kernel::default(),
+                *tol,
+                breaks.as_deref(),
+                *match_param,
+            );
             o.push(st(&r)?);
             match r {
                 Ok(bs) => {
@@ -875,7 +894,12 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
                 pseudo: false,
                 polar: false,
             };
-            let r = c.calculate_bounding_box(&Kernel::default(), &Extent1d::from_min_max(*a, *bb), req, true);
+            let r = c.calculate_bounding_box(
+                &Kernel::default(),
+                &Extent1d::from_min_max(*a, *bb),
+                req,
+                true,
+            );
             o.push(st(&r)?);
             if let Ok(bx) = r {
                 let n = bx.normal.ok_or_else(|| harness("no normal box"))?;
@@ -919,9 +943,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
         } => {
             let ivl = Extent1d::from_min_max(*a, *bb);
             let run = |this: &CrvOnSurf, oc: &Curve| {
-                this.surface_curve_max_distance_between(
-                    k, &ivl, oc, *s0, *s1, *samples, *tol, *max,
-                )
+                this.surface_curve_max_distance_between(k, &ivl, oc, *s0, *s1, *samples, *tol, *max)
             };
             let r = match other {
                 None => {
@@ -965,8 +987,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             } else {
                 FileType::Ascii
             };
-            let mut db =
-                DatabaseReader::with_stream(ft, InputStream::new(read_db.bytes.clone()));
+            let mut db = DatabaseReader::with_stream(ft, InputStream::new(read_db.bytes.clone()));
             match CrvOnSurf::read_from_db(&Kernel::default(), &mut db, read_db.version) {
                 Ok(c) => {
                     o.extend([0.0, 1.0]);
@@ -995,7 +1016,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             for op in ops {
                 match rust_op(&mut o, &mut c, op, &k) {
                     Ok(()) => {}
-                    Err(Stop::Deferred(d)) => return Ok(d),
+                    Err(Stop::Deferred(d)) => return Ok(*d),
                     Err(Stop::Harness(e)) => return Err(e),
                 }
             }
@@ -1038,7 +1059,8 @@ fn gen_knots(rng: &mut Rng, p: usize, extra: usize, a: f64, len: f64) -> Vec<f64
 }
 
 fn gen_range(rng: &mut Rng) -> (f64, f64) {
-    if rng.chance(0.5) {
+    let unit_interval = rng.chance(0.5);
+    if unit_interval {
         (0.0, 1.0)
     } else if rng.chance(0.5) {
         (rng.below(5) as f64 - 2.0, 1.0 + rng.below(6) as f64)
@@ -1053,7 +1075,13 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
         // a bilinear patch (upstream's planar and bilinear test surfaces)
         let (a, la) = gen_range(rng);
         let (c, lc) = gen_range(rng);
-        let z = |rng: &mut Rng| if rng.chance(0.5) { 0.0 } else { rng.uniform(-2.0, 2.0) };
+        let z = |rng: &mut Rng| {
+            if rng.chance(0.5) {
+                0.0
+            } else {
+                rng.uniform(-2.0, 2.0)
+            }
+        };
         let s = rng.uniform(1.0, 10.0);
         return InlineSrf {
             net: vec![
@@ -1541,7 +1569,10 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
     let ops = (0..nops)
         .map(|_| gen_op(rng, &c, d, &mut range, outside))
         .collect();
-    Some(Inputs::Object { cos: c, ops })
+    Some(Inputs::Object {
+        cos: Box::new(c),
+        ops,
+    })
 }
 
 impl UnitDiff for Runner {
