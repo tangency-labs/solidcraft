@@ -4,6 +4,9 @@ Rust-vs-C++ disagreements, upstream bugs, nondeterminism and other facts later a
 need. Add entries under a heading per unit (or "General"); keep the newest at the end
 of each section.
 
+Upstream C++ defects only (UB, crashes, hangs, nondeterminism, wrong results, wrong docs)
+are also logged, one entry each, in `plan/upstream-issues.md` for the upstream maintainers.
+
 ## General
 
 - **Nondeterministic upstream paths.** `SmFace::GetPointsInFace` (asked for more than one

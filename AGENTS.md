@@ -243,6 +243,8 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
 
 - `plan/findings.md`: Rust-vs-C++ disagreements, upstream bugs, nondeterminism (e.g.
   upstream `srand(time(NULL))`), anything a later agent must know.
+- `plan/upstream-issues.md`: upstream C++ defects also get an entry here (problems only,
+  with location, trigger, how found and whether the C++ build confirmed it).
 - `plan/PROGRESS.md`: the checklist (generated; never edit by hand).
 - `plan/STATUS.md`: overall progress summary and handoff notes.
 - `bin/`: all build output (cargo `target-dir`, `bin/cpp/` for C++). Gitignored. Never
