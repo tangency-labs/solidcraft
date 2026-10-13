@@ -73,10 +73,13 @@
 
 #[cfg(doc)]
 use crate::curve::curve::p2::FindCurveDistanceExtrema;
-use crate::curve::curve::p2::{at, unitize_tangent, Curve, CurveEvaluate, CurveKind};
+use crate::curve::curve::p2::{
+    at, unitize_tangent, Curve, CurveEvaluate, CurveKind, CurvePropertyType,
+};
+use crate::curve::curve::p3::eval_n;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -93,37 +96,15 @@ use crate::geom::tol::{are_same, is_zero, tol3d};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::math::{max2, max4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 
-use super::p2::CurvePropertyType;
-
 const OP_CHAIN: &str = "curve::curve::p4::fix_chain_curves_list";
 const OP_EFO: &str = "curve::curve::p4::CurvePropertyEfo::evaluate";
 const OP_TAN: &str = "curve::curve::p4::CcTangentIntEnfo::static_evaluate";
 const OP_DIST_AT: &str = "curve::curve::p4::CpDistAtEnfo::evaluate";
 
-/// `SmEdge_TYPE`.
-const EDGE_TYPE: i64 = 16016;
-/// `SmEdgeuse_TYPE`.
-const EDGEUSE_TYPE: i64 = 16005;
-/// `SmFace_TYPE`.
-const FACE_TYPE: i64 = 16002;
-/// `SmSurfOfRevolution_TYPE`.
-const SURF_OF_REVOLUTION_TYPE: i64 = 15020;
-/// `SmSurfOfExtrusion_TYPE`.
-const SURF_OF_EXTRUSION_TYPE: i64 = 15030;
-
-/// Whether `e` is [`SolidError::Unported`] (never swallowed).
-const fn is_unported(e: &SolidError) -> bool {
-    matches!(e, SolidError::Unported { .. })
-}
-
 /// `EvaluatePoint` whose status upstream ignores: [`Vec3::UNDEF`] (a never-written
 /// `SmPoint3d`) on failure; [`SolidError::Unported`] is propagated.
 fn point_or_undef<C: CurveEvaluate + ?Sized>(curve: &C, t: f64) -> Result<Point3> {
-    match curve.evaluate_point(t) {
-        Ok(p) => Ok(p),
-        Err(e) if is_unported(&e) => Err(e),
-        Err(_) => Ok(Vec3::UNDEF),
-    }
+    Ok(ignored(curve.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
 }
 
 /// `Evaluate` whose status upstream ignores into `pv` (entries not written keep
@@ -135,31 +116,12 @@ fn eval_into<C: CurveEvaluate + ?Sized>(
     non_zero_tangents: bool,
     pv: &mut [Vec3],
 ) -> Result<()> {
-    match curve.evaluate(t, num_derivs, true, non_zero_tangents) {
-        Ok(v) => {
-            for (d, s) in pv.iter_mut().zip(v) {
-                *d = s;
-            }
-            Ok(())
+    if let Some(v) = ignored(curve.evaluate(t, num_derivs, true, non_zero_tangents))? {
+        for (d, s) in pv.iter_mut().zip(v) {
+            *d = s;
         }
-        Err(e) if is_unported(&e) => Err(e),
-        Err(_) => Ok(()),
     }
-}
-
-/// An evaluation as a fixed array of `N` entries (missing ones [`Vec3::UNDEF`]).
-fn eval_n<const N: usize, C: CurveEvaluate + ?Sized>(
-    curve: &C,
-    t: f64,
-    num_derivs: usize,
-    non_zero_tangents: bool,
-) -> Result<[Vec3; N]> {
-    let v = curve.evaluate(t, num_derivs, true, non_zero_tangents)?;
-    let mut out = [Vec3::UNDEF; N];
-    for (d, s) in out.iter_mut().zip(v) {
-        *d = s;
-    }
-    Ok(out)
+    Ok(())
 }
 
 // ---- chaining ---------------------------------------------------------------------------
@@ -415,10 +377,7 @@ pub fn fix_chain_curves_list(
 
 /// `ReverseParameterization(domain, domain)` with its status ignored.
 fn reverse_ignored(curve: &mut Curve, domain: &Extent1d) -> Result<()> {
-    match curve.reverse_parameterization(domain) {
-        Err(e) if is_unported(&e) => Err(e),
-        _ => Ok(()),
-    }
+    ignore_status(curve.reverse_parameterization(domain))
 }
 
 // ---- solver helpers -----------------------------------------------------------------------
@@ -435,7 +394,6 @@ fn reverse_ignored(curve: &mut Curve, domain: &Extent1d) -> Result<()> {
 /// # Errors
 ///
 /// Those of the curve evaluations.
-#[allow(clippy::too_many_arguments)]
 pub fn filter_solution<C1, C2, O>(
     curve1: &C1,
     ivl1: &Extent1d,
@@ -469,8 +427,8 @@ where
     }
 
     // Get Solution CurvePoints and CurveTangents (nonZeroTangent values)
-    let pv1: [Vec3; 2] = eval_n(curve1, s0, 1, true)?;
-    let pv2: [Vec3; 2] = eval_n(curve2, s1, 1, true)?;
+    let pv1: [Vec3; 2] = eval_n(curve1, s0, 1, true, true)?;
+    let pv2: [Vec3; 2] = eval_n(curve2, s1, 1, true, true)?;
     let [p1, t1] = pv1;
     let [p2, t2] = pv2;
 
@@ -997,14 +955,14 @@ pub fn assert_valid_base(
     let owner_ok = owner.is_none_or(|o| {
         matches!(
             o.type_code,
-            EDGE_TYPE
-                | EDGEUSE_TYPE
-                | SURF_OF_EXTRUSION_TYPE
-                | SURF_OF_REVOLUTION_TYPE
+            labels::EDGE_TYPE
+                | labels::EDGEUSE_TYPE
+                | labels::SURF_OF_EXTRUSION_TYPE
+                | labels::SURF_OF_REVOLUTION_TYPE
                 | super::p2::CRV_IN_VOLUME_TYPE
                 | super::p2::OFFSET_CURVE_TYPE
                 | super::p2::CRV_ON_SURF_TYPE
-        ) || (dim == 2 && o.type_code == FACE_TYPE)
+        ) || (dim == 2 && o.type_code == labels::FACE_TYPE)
     });
     rtn &= if owner_ok {
         if let Some(l) = list {
@@ -1228,14 +1186,13 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
 
     /// `m_crCurve.Evaluate(dT, n, TRUE, sC, non_zero)` into four entries.
     fn eval(&self, t: f64, n: usize, non_zero: bool) -> Result<[Vec3; 4]> {
-        eval_n(self.curve, t, n, non_zero)
+        eval_n(self.curve, t, n, true, non_zero)
     }
 }
 
 impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
-    #[allow(clippy::too_many_lines)]
-    fn evaluate(&mut self, t: f64, out: &mut FunctionValue, signal_errors: bool) -> Result<()> {
-        let _ = signal_errors; // only chooses whether upstream prints the error
+    // `signal_errors` only chooses whether upstream prints the error.
+    fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _signal_errors: bool) -> Result<()> {
         let err = || SolidError::sm_err(OP_EFO);
 
         // init output
@@ -1639,7 +1596,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 // Determine which case we have (ahead / behind on both tangents).
                 let flip = match line_line_closest_point(p, tan0, c[0], c[1]) {
                     Ok((t0, t1)) => t0 * t1 < 0.0, // If opposite signs, flip.
-                    Err(e) if is_unported(&e) => return Err(e),
+                    Err(e) if e.is_unported() => return Err(e),
                     Err(_) => {
                         // parallel (or anti-parallel) tangents
                         let dot = c[1].dot(tan0);
@@ -1770,8 +1727,8 @@ impl<'a, C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> CcTangentIntEnf
         let found = false;
 
         // Curve1Point, Curve2Point positions and tangents (nonZeroTangent values)
-        let pvv1: [Vec3; 3] = eval_n(curve1, x0, 2, true)?;
-        let pvv2: [Vec3; 3] = eval_n(curve2, x1, 2, true)?;
+        let pvv1: [Vec3; 3] = eval_n(curve1, x0, 2, true, true)?;
+        let pvv2: [Vec3; 3] = eval_n(curve2, x1, 2, true, true)?;
         let tan_len_sq1 = pvv1[1].length_squared();
         let tan_len_sq2 = pvv2[1].length_squared();
 
@@ -2003,7 +1960,7 @@ impl<C: CurveEvaluate + ?Sized> EvalNFunctions for CpDistAtEnfo<'_, C> {
         let found = false;
 
         // CurvePoint position and tangent (nonZeroTangent values)
-        let pv: [Vec3; 2] = eval_n(self.curve, x0, 1, true)?;
+        let pv: [Vec3; 2] = eval_n(self.curve, x0, 1, true, true)?;
         let tan_len_sq1 = pv[1].length_squared();
 
         // if we have a zero length tangent then we must fail

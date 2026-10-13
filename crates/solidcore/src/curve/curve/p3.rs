@@ -84,7 +84,7 @@ use crate::geom::global_solver::{Branch, GlobalSolve, SolverOperation};
 use crate::geom::local_solve1d::{EvalFunction, FunctionValue, LocalSolve1d, TerminationReason};
 use crate::geom::local_solve_nd::{BoundaryHandler, EvalNFunctions, LocalSolveNd};
 use crate::geom::matrix::Matrix;
-use crate::geom::solution_array::{Solution, SolutionObject, SolutionType, SortKey};
+use crate::geom::solution_array::{Solution, SolutionEnd, SolutionObject, SolutionType, SortKey};
 use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::geom::tree::NodeData;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -103,15 +103,6 @@ const OP_LINE_FIT: &str = "curve::curve::p3::BestLineFitEnfo::evaluate";
 /// `SM_ERR_NOT_CONVERGING`.
 const SM_ERR_NOT_CONVERGING: i32 = 1022;
 
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::InvalidInput { operation, reason }
-}
-
-/// Whether `e` is [`SolidError::Unported`] (never swallowed).
-const fn is_unported(e: &SolidError) -> bool {
-    matches!(e, SolidError::Unported { .. })
-}
-
 /// `EvaluatePoint` whose status upstream ignores: the previous value of the output
 /// on failure; [`SolidError::Unported`] is propagated.
 fn point_keep<C: CurveEvaluate + ?Sized>(curve: &C, t: f64, prev: Point3) -> Result<Point3> {
@@ -120,7 +111,7 @@ fn point_keep<C: CurveEvaluate + ?Sized>(curve: &C, t: f64, prev: Point3) -> Res
 
 /// `Evaluate` (from the left) into an `N`-entry array; entries not written stay
 /// [`Vec3::UNDEF`].
-fn eval_n<const N: usize, C: CurveEvaluate + ?Sized>(
+pub(super) fn eval_n<const N: usize, C: CurveEvaluate + ?Sized>(
     curve: &C,
     t: f64,
     num_derivs: usize,
@@ -144,13 +135,12 @@ fn div(v: Vec3, d: f64) -> Vec3 {
 /// Sets `ivl` to `[min, max]`; upstream ignores the status of `SetMinMax`, which
 /// leaves the interval unchanged for `min > max`.
 fn set_min_max(ivl: &mut Extent1d, min: f64, max: f64) {
-    if ivl.set_min_max(min, max).is_err() {
-        // keep the previous interval, as upstream
-    }
+    // On failure the previous interval is kept, as upstream.
+    let _ = ivl.set_min_max(min, max);
 }
 
 /// `m_vStart[i] = v` / `m_vEnd[i] = v`.
-fn set_param(end: &mut crate::geom::solution_array::SolutionEnd, i: usize, v: f64) -> Result<()> {
+fn set_param(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
     *end.param_mut(i)? = v;
     Ok(())
 }
@@ -375,7 +365,7 @@ pub struct FixedGaps {
 fn move_end_point(curve: &mut Curve, point: Point3) -> Result<()> {
     let n = curve.number_control_points()?;
     let CurveKind::BSpline(c) = curve.kind_mut() else {
-        return Err(invalid(
+        return Err(SolidError::invalid_input(
             OP_GAPS,
             "end point of a curve that is not a B-spline",
         ));
@@ -403,7 +393,7 @@ pub fn crvs_fix_gaps(curves: Vec<Curve>, tol: f64) -> Result<FixedGaps> {
     let mut chain_start = chained.chain_starts.clone();
     chain_start.push(chained.curves.len());
 
-    let missing = || invalid(OP_GAPS, "chain index out of range");
+    let missing = || SolidError::invalid_input(OP_GAPS, "chain index out of range");
 
     // between each curve within chain
     for j in 1..chain_start.len() {
@@ -550,12 +540,15 @@ impl Curve {
                 .ok()
                 .and_then(|i| knots.get(i))
                 .copied()
-                .ok_or(invalid(OP_ARC, "knot index out of range"))
+                .ok_or(SolidError::invalid_input(OP_ARC, "knot index out of range"))
         };
 
         // Ruling this out will make later checks easier:
         if start_param < knot(0)? - param_tol || start_param > knot(num_knots - 1)? + param_tol {
-            return Err(invalid(OP_ARC, "start parameter outside the curve"));
+            return Err(SolidError::invalid_input(
+                OP_ARC,
+                "start parameter outside the curve",
+            ));
         }
 
         let mut ik: i64;
@@ -907,10 +900,16 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
         jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
         let (Some(&x0), Some(&x1)) = (x.first(), x.get(1)) else {
-            return Err(invalid(OP_LINE_FIT, "need two parameters"));
+            return Err(SolidError::invalid_input(
+                OP_LINE_FIT,
+                "need two parameters",
+            ));
         };
         if f.len() < 2 {
-            return Err(invalid(OP_LINE_FIT, "need two function values"));
+            return Err(SolidError::invalid_input(
+                OP_LINE_FIT,
+                "need two function values",
+            ));
         }
 
         // init output
@@ -1051,7 +1050,7 @@ impl Curve {
             let vectors = opts.vectors.ok_or(SolidError::null_pointer(OP_POINT))?;
             let vec0 = *vectors
                 .first()
-                .ok_or(invalid(OP_POINT, "empty option vectors"))?;
+                .ok_or(SolidError::invalid_input(OP_POINT, "empty option vectors"))?;
 
             // locals
             let mut sol = Solution::new();
@@ -1091,9 +1090,10 @@ impl Curve {
         } // end SolverOperation == RAYFIRE or SIGNED_DIRECTED_MINIMIZE check
 
         if op == SolverOperation::AtDistance {
-            let target = opts
-                .target_distance
-                .ok_or(invalid(OP_POINT, "missing target distance"))?;
+            let target = opts.target_distance.ok_or(SolidError::invalid_input(
+                OP_POINT,
+                "missing target distance",
+            ))?;
             let mut intervals = ExtentNd::new(4);
             let unbounded = Extent1d::from_raw(-BIG_DOUBLE, BIG_DOUBLE);
             for (i, ivl) in [*interval, unbounded, unbounded, unbounded]
@@ -1118,7 +1118,7 @@ impl Curve {
             let guess_t = [guess, 0.1, 0.1, 0.1];
             let r = match ls.solve_it(&guess_t, EFF_ZERO) {
                 Ok(r) => r,
-                Err(e) if is_unported(&e) => return Err(e),
+                Err(e) if e.is_unported() => return Err(e),
                 // some sort of error in solver
                 Err(_) => return Err(SolidError::sm_err(OP_POINT)),
             };
@@ -1145,7 +1145,7 @@ impl Curve {
         // acceptable accuracy when Func(t) < tolerance
         let r = match ls.solve_it(&mut efo, guess, 1.0e-8) {
             Ok(r) => r,
-            Err(e) if is_unported(&e) => return Err(e),
+            Err(e) if e.is_unported() => return Err(e),
             // some solver error - return without answer
             Err(_) => return Ok((false, solution)),
         };
@@ -1259,7 +1259,7 @@ where
             opt_vectors
                 .and_then(|v| v.get(i))
                 .copied()
-                .ok_or(invalid(OP_CURVE, "missing option vector"))
+                .ok_or(SolidError::invalid_input(OP_CURVE, "missing option vector"))
         };
         let normal = vec(0)?;
         let mut direction = vec(0)?;
@@ -1372,7 +1372,7 @@ where
     C2: CurveEvaluate + ?Sized,
 {
     if op == SolverOperation::Signed3dDirectedMinimize {
-        return Err(invalid(
+        return Err(SolidError::invalid_input(
             OP_CURVE,
             "the 3D signed directed minimum needs Curve operands",
         ));
@@ -1433,10 +1433,13 @@ impl Curve {
 
         // Do intersection and then compute 3D distance
         let mut solution = Solution::new();
-        let vectors = opt_vectors.ok_or(invalid(OP_CURVE, "missing option vectors"))?;
+        let vectors = opt_vectors.ok_or(SolidError::invalid_input(
+            OP_CURVE,
+            "missing option vectors",
+        ))?;
         let vec0 = *vectors
             .first()
-            .ok_or(invalid(OP_CURVE, "missing option vector"))?;
+            .ok_or(SolidError::invalid_input(OP_CURVE, "missing option vector"))?;
         let origin = Vec3::new(0.0, 0.0, 0.0);
         let aux_data = Vec3::new(0.0, 0.0, 0.0);
         let proj1 = Self::from(ProjectedCurve::new(
@@ -1797,7 +1800,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let needs_more_subdivision = false;
 
         // locals
-        let curve_node_id = branch[0].ok_or(invalid(OP_GS, "null curve node"))?;
+        let curve_node_id = branch[0].ok_or(SolidError::invalid_input(OP_GS, "null curve node"))?;
         let tree = self.base.tree(0)?;
         let curve_node = tree.node(curve_node_id)?;
         if matches!(curve_node.data, NodeData::None) {
@@ -1806,7 +1809,9 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let bez_span = *tree.curve_span(curve_node)?;
         let owner = tree.owner_object()?;
 
-        let curve = self.curve.ok_or(invalid(OP_GS, "solver without curve"))?;
+        let curve = self
+            .curve
+            .ok_or(SolidError::invalid_input(OP_GS, "solver without curve"))?;
         let mut ivl = *bez_span.interval();
         let prop = self.property;
 
@@ -1986,7 +1991,9 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         // each guess
         let mut ii = 0;
         while ii < guess_t.len() {
-            let guess = *guess_t.get(ii).ok_or(invalid(OP_GS, "guess index"))?;
+            let guess = *guess_t
+                .get(ii)
+                .ok_or(SolidError::invalid_input(OP_GS, "guess index"))?;
             let this_ii = ii;
             ii += 1;
             let mut found = match local_property_analysis(
@@ -1999,7 +2006,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                 &mut sol,
             ) {
                 Ok(f) => f,
-                Err(e) if is_unported(&e) => return Err(e),
+                Err(e) if e.is_unported() => return Err(e),
                 // Had an error just try a different starting point - perhaps some
                 // higher derivative was zero.
                 Err(_) => continue,

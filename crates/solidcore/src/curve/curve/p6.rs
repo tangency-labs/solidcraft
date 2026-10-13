@@ -127,12 +127,6 @@ fn is_point_solution_across_closed_seam_boundary<O: Copy>(
     ))
 }
 
-/// A status upstream ignores: `Ok(Some(v))`, or `Ok(None)` for a failure; only
-/// [`SolidError::Unported`] propagates.
-fn keep<T>(r: Result<T>) -> Result<Option<T>> {
-    ignored(r)
-}
-
 // ---- CalculateBoundingBox --------------------------------------------------------------
 
 /// The base-class `SmCurve::CalculateBoundingBox` of `curve` over `interval`: the
@@ -173,7 +167,7 @@ pub fn calculate_bounding_box_base(
     let mut pt_der = [Vec3::UNDEF, Vec3::UNDEF];
     let sample = |t: f64, pt_der: &mut [Vec3; 2]| -> Result<()> {
         // nonZeroTangent values (status ignored)
-        if let Some(v) = keep(curve.evaluate(t, num_derivs, false, true))? {
+        if let Some(v) = ignored(curve.evaluate(t, num_derivs, false, true))? {
             for (dst, src) in pt_der.iter_mut().zip(v) {
                 *dst = src;
             }
@@ -198,7 +192,7 @@ pub fn calculate_bounding_box_base(
         if ii >= NUM_SPANS - 1 {
             rel_t1 = 1.0;
         }
-        keep(sub_ivl.set_min_max(interval.evaluate(rel_t0), interval.evaluate(rel_t1)))?;
+        ignored(sub_ivl.set_min_max(interval.evaluate(rel_t0), interval.evaluate(rel_t1)))?;
 
         let pt0 = pt1;
         sample(sub_ivl.max(), &mut pt_der)?;
@@ -303,7 +297,7 @@ pub fn calculate_bounding_box_base(
     let mut bbox = Extent3d::new();
     if req.normal {
         let p0 = point(0)?;
-        keep(bbox.set_min_max(p0, p0))?;
+        ignored(bbox.set_min_max(p0, p0))?;
     }
 
     // init pseudobox
@@ -334,7 +328,7 @@ pub fn calculate_bounding_box_base(
             // use basis vectors based on selected sample points
             let v2 = point(l3)? - point(l2)?;
             let [b1, b2, b3] = v1.make_unit_ortho_vectors(Some(v2))?;
-            keep(pseudo.set_basis(b1, b2, b3))?;
+            ignored(pseudo.set_basis(b1, b2, b3))?;
         }
     }
 
@@ -489,7 +483,7 @@ impl Curve {
             pseudo: true,
             polar: false,
         };
-        let pseudo = keep(self.calculate_bounding_box(&self.natural_interval(), req, true))?
+        let pseudo = ignored(self.calculate_bounding_box(&self.natural_interval(), req, true))?
             .and_then(|b| b.pseudo)
             .unwrap_or_else(PseudoBox::new);
         Ok(pseudo.is_planar(tol))
@@ -630,7 +624,6 @@ impl Curve {
     /// # Errors
     ///
     /// Those of the hyperbola override and of [`Curve::global_point_solve`].
-    #[allow(clippy::too_many_arguments)]
     pub fn global_point_solve_step<O: SolutionObject>(
         &mut self,
         k: &Kernel,
@@ -747,8 +740,8 @@ impl Curve {
         // there are a large number of knots.
         if num_samples == 0 {
             do_precise = true;
-            let knots = keep(self.knots(None))?.map_or(0, |(k, _)| k.len());
-            let other_knots = keep(other.knots(None))?.map_or(0, |(k, _)| k.len());
+            let knots = ignored(self.knots(None))?.map_or(0, |(k, _)| k.len());
+            let other_knots = ignored(other.knots(None))?.map_or(0, |(k, _)| k.len());
             num_samples = 22 + knots as u64 + other_knots as u64;
         }
 
@@ -990,7 +983,6 @@ impl Curve {
     ///
     /// Those of the evaluations, [`Curve::local_point_solve`] and
     /// [`Curve::curve_max_distance_between`].
-    #[allow(clippy::too_many_arguments)]
     pub fn simple_coincidence_checker<O: Copy>(
         &self,
         k: &Kernel,
@@ -1194,7 +1186,6 @@ impl Curve {
     /// `InvalidInput` past [`MAX_COINCIDENCE_DEPTH`] nested splits;
     /// [`SolidError::Unported`] for the seam test of split solutions (unit
     /// `curve.curve_p5`).
-    #[allow(clippy::too_many_arguments)]
     pub fn global_coincidence_checker<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1218,7 +1209,6 @@ impl Curve {
     }
 
     /// [`Curve::global_coincidence_checker`] at split depth `depth`.
-    #[allow(clippy::too_many_arguments)]
     fn global_coincidence_checker_at<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1259,9 +1249,9 @@ impl Curve {
                 pseudo: false,
                 polar: false,
             };
-            if let Some(this_box) = keep(self.calculate_bounding_box(interval, req, true))? {
+            if let Some(this_box) = ignored(self.calculate_bounding_box(interval, req, true))? {
                 if let Some(other_box) =
-                    keep(other.calculate_bounding_box(other_interval, req, true))?
+                    ignored(other.calculate_bounding_box(other_interval, req, true))?
                 {
                     if let (Some(a), Some(b)) = (this_box.normal, other_box.normal) {
                         if a.are_disjoint(&b, tol) {
@@ -1662,7 +1652,6 @@ impl Curve {
     /// of the line and B-spline deformations; [`SolidError::Unported`] for the
     /// approximation of curves not derived from B-splines (`SmCurve::ApproximateCurve`,
     /// unit `curve.curve_p1`).
-    #[allow(clippy::too_many_arguments)]
     pub fn deform_to_end_point_targets(
         &mut self,
         k: &Kernel,
