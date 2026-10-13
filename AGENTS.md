@@ -33,6 +33,9 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
   use checked arithmetic and call `DatabaseReader::ensure_available(count, min_bytes,
   op)` before allocating, as `BSplineSurface::read_from_db` does. Upstream `malloc`
   fails softly; Rust aborts.
+- Polymorphic readers that can nest (`Curve::read_from_db`, and the surface/topology
+  dispatchers when ported) call `db.enter_nested(op)?` before dispatching and
+  `db.leave_nested()` after, so crafted files cannot recurse without bound.
 
 **Correctness gate.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within

@@ -626,7 +626,14 @@ pub struct DatabaseReader {
     stream: Option<InputStream>,
     byte_swap: bool,
     version: u64,
+    /// Current depth of nested polymorphic reads (not upstream; see `enter_nested`).
+    nesting: u32,
 }
+
+/// Deepest nesting of polymorphic reads (a curve holding a curve holding ...) a
+/// reader accepts. Not upstream: upstream recurses without bound, so a crafted file
+/// overflows the stack. Real models nest a handful of levels.
+pub const MAX_READ_NESTING: u32 = 64;
 
 impl Default for DatabaseReader {
     fn default() -> Self {
@@ -661,6 +668,7 @@ impl DatabaseReader {
             stream: None,
             byte_swap: is_big_endian(),
             version: DEFAULT_VERSION,
+            nesting: 0,
         }
     }
 
@@ -672,6 +680,7 @@ impl DatabaseReader {
             stream: None,
             byte_swap: file_type.default_byte_swap(),
             version: DEFAULT_VERSION,
+            nesting: 0,
         }
     }
 
@@ -730,6 +739,31 @@ impl DatabaseReader {
                 reason: "header-declared size exceeds the remaining input",
             }),
         }
+    }
+
+    /// Enters one level of nested polymorphic reading (`Curve::read_from_db` and the
+    /// like call this before dispatching, and [`Self::leave_nested`] after).
+    ///
+    /// Not an upstream function; bounds recursion on crafted input (see
+    /// [`MAX_READ_NESTING`] and `plan/findings.md`, "nested reads").
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when the nesting limit is reached.
+    pub fn enter_nested(&mut self, operation: &'static str) -> Result<()> {
+        if self.nesting >= MAX_READ_NESTING {
+            return Err(SolidError::InvalidInput {
+                operation,
+                reason: "objects nested too deeply in the database stream",
+            });
+        }
+        self.nesting += 1;
+        Ok(())
+    }
+
+    /// Leaves one level entered with [`Self::enter_nested`].
+    pub fn leave_nested(&mut self) {
+        self.nesting = self.nesting.saturating_sub(1);
     }
 
     /// The input stream for ASCII extraction (`*GetInStreamPtr() >> ...`).
@@ -955,6 +989,17 @@ impl DatabaseReader {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn nesting_is_bounded() {
+        let mut db = DatabaseReader::new();
+        for _ in 0..MAX_READ_NESTING {
+            assert!(db.enter_nested("test").is_ok());
+        }
+        assert!(db.enter_nested("test").is_err());
+        db.leave_nested();
+        assert!(db.enter_nested("test").is_ok());
+    }
     use super::*;
 
     fn ascii(s: &str) -> InputStream {

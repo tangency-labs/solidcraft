@@ -1717,3 +1717,13 @@ Green, no disagreement. Upstream behaviour worth knowing:
 - `SmConic::ReadFromDB`: an ASCII type code whose extraction is skipped leaves
   `lConicType` uninitialised (port: `InvalidInput`); type codes outside `0..=3` behave as
   `SM_CT_UNKNOWN`.
+
+## Nested reads (all polymorphic readers)
+
+Upstream `SmCurve::ReadFromDB` dispatches to `SmProjectedCurve::ReadFromDB` (and offset,
+iso, ... curves), which reads its base curve through `SmCurve::ReadFromDB` again, with no
+depth limit: a crafted file of a few bytes per level overflows the stack. The Rust
+dispatcher bounds nesting with `DatabaseReader::enter_nested` (limit
+`MAX_READ_NESTING` = 64); deeper input is `InvalidInput`. Deviation from upstream only
+for inputs that would crash it. Found by the commit security review of
+`curve.projected_curve`.
