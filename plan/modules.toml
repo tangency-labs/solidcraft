@@ -543,10 +543,10 @@ depends_on = ["geom.extent1d", "geom.extent3d", "geom.geom_utility_p1", "geom.po
 est_lines = 383
 layer = 6
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "partial"
+status = "green"
 claimed_by = "swarm-curve.hermite_curve-a1"
 claimed_at = "2026-10-12T21:03:28Z"
-notes = "18 fns; largest: SmHermiteCurve::Evaluate, SmHermiteCurve::CalculateBoundingBox, SmHermiteCurve::ReadFromDB, SmHermiteCurve::GetKnots; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(3), curve.curve_p5(3); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest: 2131 cases, 2038 pass, 93 deferred (curve.curve_p2: SmCurve::IsKindOf)"
+notes = "18 fns; largest: SmHermiteCurve::Evaluate, SmHermiteCurve::CalculateBoundingBox, SmHermiteCurve::ReadFromDB, SmHermiteCurve::GetKnots; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(3), curve.curve_p5(3); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest green: 2131 cases, 0 deferred, max_rel_err 0 (SmCurve::IsKindOf wired by curve.curve_p2)"
 
 [[unit]]
 id = "geom.a_object"
@@ -767,7 +767,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-nurbs.b_spline_curve_p1-a1"
 claimed_at = "2026-10-12T21:56:25Z"
-notes = "PARTIAL: difftest 2216 cases (216 fixture on the six pt_TestFiles .smc curves, smSweepTest lines/circles and edge cases + 2000 generated), 2156 pass bit-identical, 60 deferred (curve.curve_p2 59: SmCurve::EvaluateContinuity / IsKindOf / ApproximateLength; curve.curve_p1 1: TessellateByBisection); 30,216-case run clean; no UNPORTED(nurbs.b_spline_curve_p1) stubs to wire; SmBSplineCurve.h default bNonZeroTangents=FALSE binds in Evaluate recursion (findings.md). 56 fns; largest: SmBSplineCurve::Evaluate, SmBSplineCurve::EditEndPoint, SmBSplineCurve::FairBlendCurveDerivatives, SmBSplineCurve::CreateCanonical; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(11), curve.curve_p5(5), curve.ellipse_p1(5), curve.ellipse_p2(5), curve.hyperbola(5), curve.line(5), curve.parabola(5), curve.curve_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2216 cases, now 2212 pass / 4 deferred (curve.curve_p1: TessellateByBisection) after curve.curve_p2 wired its stubs; originally (216 fixture on the six pt_TestFiles .smc curves, smSweepTest lines/circles and edge cases + 2000 generated), 2156 pass bit-identical, 60 deferred (curve.curve_p2 59: SmCurve::EvaluateContinuity / IsKindOf / ApproximateLength; curve.curve_p1 1: TessellateByBisection); 30,216-case run clean; no UNPORTED(nurbs.b_spline_curve_p1) stubs to wire; SmBSplineCurve.h default bNonZeroTangents=FALSE binds in Evaluate recursion (findings.md). 56 fns; largest: SmBSplineCurve::Evaluate, SmBSplineCurve::EditEndPoint, SmBSplineCurve::FairBlendCurveDerivatives, SmBSplineCurve::CreateCanonical; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(11), curve.curve_p5(5), curve.ellipse_p1(5), curve.ellipse_p2(5), curve.hyperbola(5), curve.line(5), curve.parabola(5), curve.curve_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "nlib.crv_approx"
@@ -829,10 +829,10 @@ depends_on = ["geom.axis2_placement", "geom.extent1d", "geom.object", "geom.solu
 est_lines = 2794
 layer = 11
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "partial"
+status = "green"
 claimed_by = "swarm-nurbs.b_spline_curve_n_lib-a1"
 claimed_at = "2026-10-12T23:07:07Z"
-notes = "25 fns; largest: SmBSplineCurve::SetIntersectionCurveThroughPoint, SmBSplineCurve::DeformToEndPointTargets, SmBSplineCurve::Trim, SmBSplineCurve::InterpolatePoints; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(19), surface.surface_p2(3), nurbs.b_spline_curve_p2(2), curve.curve_p6(1), surface.surface_p5(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL: difftest 2282 cases (282 fixture from the six pt_TestFiles .smc curves, FitCrvPoints.pts / Points.pts, my_test_curve_interface, smSurfaceTest.cpp:1975 helix, TestSmMakeCurvesCompatible, TestSmCreateRectangle / TestSmCreateRegularPolygon edges and edge cases + 2000 generated), 2225 pass bit-identical (max_rel_err 0), 57 deferred on curve.curve_p2 (SmCurve::ApproximateLength in SetIntersectionCurveThroughPoint; was 150 on nurbs.b_spline_curve_p2 before its IsIntersectorApprox / DegreeElevate stubs were wired); 100,282-case run clean; --perturb SENSITIVE; no UNPORTED(nurbs.b_spline_curve_n_lib) stubs existed to wire"
+notes = "25 fns; largest: SmBSplineCurve::SetIntersectionCurveThroughPoint, SmBSplineCurve::DeformToEndPointTargets, SmBSplineCurve::Trim, SmBSplineCurve::InterpolatePoints; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(19), surface.surface_p2(3), nurbs.b_spline_curve_p2(2), curve.curve_p6(1), surface.surface_p5(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; GREEN: difftest 2282 cases, 0 deferred after curve.curve_p2 wired SmCurve::ApproximateLength (was PARTIAL: (282 fixture from the six pt_TestFiles .smc curves, FitCrvPoints.pts / Points.pts, my_test_curve_interface, smSurfaceTest.cpp:1975 helix, TestSmMakeCurvesCompatible, TestSmCreateRectangle / TestSmCreateRegularPolygon edges and edge cases + 2000 generated), 2225 pass bit-identical (max_rel_err 0), 57 deferred on curve.curve_p2 (SmCurve::ApproximateLength in SetIntersectionCurveThroughPoint; was 150 on nurbs.b_spline_curve_p2 before its IsIntersectorApprox / DegreeElevate stubs were wired); 100,282-case run clean; --perturb SENSITIVE; no UNPORTED(nurbs.b_spline_curve_n_lib) stubs existed to wire)"
 
 [[unit]]
 id = "nurbs.nurbs_srf"
@@ -897,7 +897,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "partial"
 claimed_by = "swarm-nurbs.b_spline_curve_p2-a1"
 claimed_at = "2026-10-12T23:42:38Z"
-notes = "22 fns; largest: SmBSplineCurve::CalculateBoundingBox, SmBSplineCurve::CreateByJoining, SmBSplineCurve::CreateAnalyticCurve, SmBSplineCurve::ReadFromDB; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(14), curve.curve_p5(3), curve.curve_p4(2), curve.offset_curve(2), curve.curve_p1(1), curve.ellipse_p1(1), curve.line(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL: difftest 2328 cases (328 fixture: the six pt_TestFiles .smc curves through every op and read back with ReadFromDB, my_test_reversed_line_join line pairs, TestSmCreateRectangle / TestSmCreateRegularPolygon joins, arc/line joins, Bezier bounding-box cases, edge cases + 2000 generated), 2011 pass bit-identical (max_rel_err 0), 317 deferred (curve.curve_p2 167: SmCurve::IsKindOf in IsDegenerate/HasRepeatedEndControlPoints, EvaluateContinuity in CreateSimpleOffset; curve.curve_p4 79: IsClosed/IsDegenerate; curve.curve_p5 66: SmCurve::IsLine/IsArc; curve.line 5: SmLine in CreateAnalyticCurve); 20,328-case run clean; --perturb SENSITIVE; wired UNPORTED(nurbs.b_spline_curve_p2) in nurbs.b_spline_curve_n_lib (IsIntersectorApprox, DegreeElevate)"
+notes = "22 fns; largest: SmBSplineCurve::CalculateBoundingBox, SmBSplineCurve::CreateByJoining, SmBSplineCurve::CreateAnalyticCurve, SmBSplineCurve::ReadFromDB; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(14), curve.curve_p5(3), curve.curve_p4(2), curve.offset_curve(2), curve.curve_p1(1), curve.ellipse_p1(1), curve.line(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL: difftest 2328 cases (328 fixture: the six pt_TestFiles .smc curves through every op and read back with ReadFromDB, my_test_reversed_line_join line pairs, TestSmCreateRectangle / TestSmCreateRegularPolygon joins, arc/line joins, Bezier bounding-box cases, edge cases + 2000 generated), 2011 pass bit-identical (max_rel_err 0), 317 deferred (curve.curve_p2 167: SmCurve::IsKindOf in IsDegenerate/HasRepeatedEndControlPoints, EvaluateContinuity in CreateSimpleOffset; curve.curve_p4 79: IsClosed/IsDegenerate; curve.curve_p5 66: SmCurve::IsLine/IsArc; curve.line 5: SmLine in CreateAnalyticCurve); 20,328-case run clean; --perturb SENSITIVE; wired UNPORTED(nurbs.b_spline_curve_p2) in nurbs.b_spline_curve_n_lib (IsIntersectorApprox, DegreeElevate); after curve.curve_p2 wired SmCurve::IsKindOf/EvaluateContinuity: 2178 pass, 150 deferred (curve.curve_p4 79, curve.curve_p5 66, curve.line 5)"
 
 [[unit]]
 id = "nurbs.b_spline_surface_p1"
@@ -920,10 +920,10 @@ depends_on = ["curve.hermite_curve", "geom.a_object", "geom.axis2_placement", "g
 est_lines = 2302
 layer = 13
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-curve.curve_p2-a1"
 claimed_at = "2026-10-13T00:14:00Z"
-notes = "79 fns; largest: SmCurvePropertyGS::BranchMayContainAnswers, SmCurve::SurfaceMaxDistanceBetween, SmCurve::EvaluateContinuity, sm_FlushCrv; cycle back-edges (call into later units; stub or co-port): curve.curve_cache(4), surface.surface_p2(3), curve.ellipse_p1(2), curve.composite_curve_p2(1), curve.conic(1), curve.crv_in_volume(1), curve.crv_on_surf(1), curve.hyperbola(1), curve.iso_curve(1), curve.line(1), curve.offset_curve(1), curve.parabola(1), curve.projected_curve(1), curve.tangent_field(1), surface.surface_p5(1), surface.surface_p7(1), topology.topology(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "79 fns; largest: SmCurvePropertyGS::BranchMayContainAnswers, SmCurve::SurfaceMaxDistanceBetween, SmCurve::EvaluateContinuity, sm_FlushCrv; cycle back-edges (call into later units; stub or co-port): curve.curve_cache(4), surface.surface_p2(3), curve.ellipse_p1(2), curve.composite_curve_p2(1), curve.conic(1), curve.crv_in_volume(1), curve.crv_on_surf(1), curve.hyperbola(1), curve.iso_curve(1), curve.line(1), curve.offset_curve(1), curve.parabola(1), curve.projected_curve(1), curve.tangent_field(1), surface.surface_p5(1), surface.surface_p7(1), topology.topology(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; PARTIAL: difftest 3018 cases (18 fixture re-expressing the prog_test/SM_API_test line and circle curves, ApproximateLength(ivl, 20), circle seam continuity, Hermite base defaults, ReadFromDB dispatch + 3000 generated over B-spline, Hermite and arc curves, the static helpers via verbatim shim copies and the solver box tests), 3012 pass bit-identical (max_rel_err 0), 6 deferred (curve.curve_p5 5: SmCurve::IsArc, curve.line 1: SmLine in CreateAnalyticCurve); --perturb SENSITIVE; introduces curve::curve::Curve (CurveKind enum + owner) and CurveEvaluate; wired UNPORTED(curve.curve_p2) in curve.hermite_curve (93 -> 0, green), nurbs.b_spline_curve_n_lib (57 -> 0, green), nurbs.b_spline_curve_p1 (60 -> 4), nurbs.b_spline_curve_p2 (317 -> 150), nurbs.b_spline_curve_p3 (391 -> 359); geom.tools / geom.solution_array / geom.tol stubs stay (opaque handles, see findings.md)"
 
 [[unit]]
 id = "nlib.srf_tool_p4"
@@ -949,7 +949,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "partial"
 claimed_by = "swarm-nurbs.b_spline_curve_p3-a1"
 claimed_at = "2026-10-13T00:13:51Z"
-notes = "difftest partial: 2195 cases, 1229 passed, 966 deferred (curve.curve_p2 734, curve.curve_p5 130, curve.curve_p8 56, curve.curve_p4 46); 9 fns; largest: SmBSplineCurve::AssertValid, SmBSplineCurve::JoinWith, SmBSplineCurve::TrimGap, SmBSplineCurve::IsSegmentLine; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(6), curve.line(3), curve.curve_p4(1), curve.curve_p7(1), curve.curve_p8(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "difftest partial: 2195 cases, 1836 passed, 359 deferred (curve.curve_p5 188, curve.curve_p7 69, curve.curve_p8 56, curve.curve_p4 46) after curve.curve_p2 wired its stubs (was 966 deferred, curve.curve_p2 734); 9 fns; largest: SmBSplineCurve::AssertValid, SmBSplineCurve::JoinWith, SmBSplineCurve::TrimGap, SmBSplineCurve::IsSegmentLine; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(6), curve.line(3), curve.curve_p4(1), curve.curve_p7(1), curve.curve_p8(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.conic"
