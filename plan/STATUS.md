@@ -138,7 +138,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 ## Ready set
 
 empty: every todo unit still waits on a claimed or todo dependency. Claimed and in
-progress: `curve.crv_in_volume`, `curve.line`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2`. New curve classes become `CurveKind` variants of
+progress: `curve.crv_in_volume`, `curve.line`, `curve.parabola`. New curve classes become `CurveKind` variants of
 `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a merge that adds a
 variant must also extend the exhaustive matches in `curve::curve_cache`.
 
