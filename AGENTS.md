@@ -179,7 +179,30 @@ into `upstream/` (see README), build the C++ reference with
    cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
    cargo run --profile difftest -p difftest --features cpp -- --green            # what CI runs (~2 min)
    ```
-5. **Finish the PR**: merge the latest `origin/main` into your branch (never rebase a
+5. **Before you mark a PR ready**, check each item. Earlier PRs passed CI yet still
+   disagreed with the C++ because of these:
+   1. **Default arguments** match upstream (e.g. `IsDegenerate()` defaults to
+      `SM_EFF_ZERO`, not a zone tolerance).
+   2. **No parameter dropped or hard-coded** (e.g. `0.0` passed instead of the
+      caller's value).
+   3. **Every upstream special-case branch ported** (e.g. cylinder reparametrisation
+      for a line parallel to the axis).
+   4. **Statuses upstream relies on are honoured** (e.g. `Unitize()` turning a zero
+      vector into `(0,0,1)`).
+   5. **The shim builds every geometry kind the code branches on** (real
+      `SmEllipse`/`SmCircle`/`SmLine`/..., not B-spline stand-ins), or those branches
+      are never compared.
+   6. **FFI guards reject exactly the inputs that are undefined or crash in C++**: no
+      more (valid inputs stay covered), no fewer (no garbage or segfaults).
+   7. **Generated cases cover** degenerate, boundary, tolerance-limit, huge/tiny-scale
+      and sub-domain inputs, and most cases compare real values, not just an error
+      status.
+   8. **No panics on extreme caller input**: bound derivative orders and counts; file
+      readers bound header counts; input-driven recursion is bounded (section 1).
+   9. **`UNPORTED` stubs only for calls into units that are not `green`/`partial`**,
+      tagged with the owning unit from `harness/callgraph/units.json`; co-ports are
+      recorded as `CO-PORTED` in `plan/modules.toml` notes.
+6. **Finish the PR**: merge the latest `origin/main` into your branch (never rebase a
    pushed branch), re-verify, set the unit's `status` to `"green"` or `"partial"` in
    `plan/modules.toml` with case/deferred counts in `notes` (plus any units you
    promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
