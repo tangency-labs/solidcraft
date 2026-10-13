@@ -1,6 +1,6 @@
 # solidcore status
 
-Last updated: 2026-10-13, Wave 1 in progress (after `curve.curve_p6` and style review batch #15). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
+Last updated: 2026-10-13, Wave 1 in progress (after `curve.curve_p7`). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
 
@@ -11,9 +11,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 261 (65 layers), 387,903 upstream lines |
 | Green | **69** (82,444 lines): `geom.extent3d`, `geom.vector2d`, `nlib.knots`, `nlib.math`, `topology.database_io`, `geom.tol`, `nlib.geom`, `geom.assert_array`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.periodic_extent1d`, `geom.vector3d`, `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.polynomial`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box`, `nlib.crv_basic`, `geom.pseudo_box`, `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_fit_p2`, `nlib.crv_nurb`, `nlib.funcs_adv`, `nlib.srf_fit`, `nlib.crv_fit_p3`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv`, `topology.topology`, `nlib.crv_adv_p1`, `nlib.crv_common`, `nlib.spiral`, `nlib.crv_adv_p2`, `nlib.srf_common`, `nlib.crv_approx`, `nlib.crv_offset`, `nlib.srf_nurb`, `nlib.srf_tool_p2`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_srf`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nlib.srf_tool_p4`, `curve.conic`, `curve.projected_curve`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_adv_p6`, `nlib.srf_offset`, `curve.offset_curve`, `surface.b_spline_volume`, `nurbs.b_spline_curve_p1` |
-| Partial | **29** (40,123 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2`, `curve.line`, `nurbs.b_spline_surface_p2`, `curve.ellipse_p2`, `surface.volume_p1`, `curve.curve_p4`, `surface.twist_volume`, `curve.curve_p3`, `curve.curve_p1`, `curve.curve_p6` |
-| Ported (green + partial) | 98 units, 122,567 upstream lines (31.6%); about 128,000 Rust lines in `crates/solidcore/src` |
-| Claimed | 4 (5,765 lines): `curve.parabola`, `curve.ellipse_p1`, `curve.curve_p7`, `curve.crv_on_surf` |
+| Partial | **30** (41,789 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2`, `curve.line`, `nurbs.b_spline_surface_p2`, `curve.ellipse_p2`, `surface.volume_p1`, `curve.curve_p4`, `surface.twist_volume`, `curve.curve_p3`, `curve.curve_p1`, `curve.curve_p6`, `curve.curve_p7` |
+| Ported (green + partial) | 99 units, 124,233 upstream lines (32.0%); about 128,000 Rust lines in `crates/solidcore/src` |
+| Claimed | 3 (4,099 lines): `curve.parabola`, `curve.crv_on_surf`, `curve.ellipse_p1` |
 | Blocked | 0 |
 | Todo | 159 (259,571 lines) |
 
@@ -143,11 +143,12 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `curve.curve_p3` | `curve::curve::p3` | 3076 cases (76 fixture: SM_API_test rectangle / hexagon loops (normals, gap fixing, linearity, plane intersections), smCurveTest line at-distance and circle drop-point / extrema solves + 3000 generated), 2334 bit-identical; `--perturb` SENSITIVE | 742 (`curve.curve_p5`: `LocalPropertyAnalysis` 385, `SmCCIntersectENFO::Evaluate` 136, base `SmCurve::Length` 120, `SmFindCCNormalENFO::Evaluate` 101) |
 | `curve.curve_p1` | `curve::curve::p1` | 3083 cases (83 fixture: smCurveTest my_test_point_extrema / my_test_drop_point line and circle solves, the circle centre, SM_API_test rectangle / hexagon edges through every op, edge cases + 3000 generated), 2493 bit-identical; a 12,083-case run was also clean; `--perturb` SENSITIVE | 590 (`curve.curve_p5`: `LocalPropertyAnalysis` 310, `SmFindCCNormalENFO::Evaluate` 163, `SmCCIntersectENFO::Evaluate` 73, `IsArc` 44) |
 | `curve.curve_p6` | `curve::curve::p6` | 3136 cases (136 fixture: SM_API_test rectangle / hexagon edges (boxes, planarity, coincidence, gaps, drops), my_test_reversed_line_join line pairs, smCurveTest DeformToEndPointTargets B-spline and line steps, circle boxes, edge cases + 3000 generated), 3048 bit-identical; 30k-seed run clean; `--perturb` SENSITIVE | 88 (`curve.curve_p5` 88: `SmFindCCNormalENFO::Evaluate`, `sm_IsPointSolutionAcrossClosedSeamBoundary`, `LocalPropertyAnalysis` / `IsArc` in global solves) |
+| `curve.curve_p7` | `curve::curve::p7` | 3027 cases (27 fixture: SM_API_test rectangle / hexagon edge pairs, my_test_reversed_line_join segments, arc plane intersection / classification with comb, edge cases: coincident, tolerance-limit gaps, degenerate Hermite, self-intersecting loop, projections + 3000 generated: whole `SolveIt` and single leaf-pair `LocalSolve`, `GlobalPropertyAnalysis` over all 29 properties), 1716 bit-identical; `--perturb` SENSITIVE; co-ported `sm_FindAdditionalCcTangentGuess` | 1311 (`curve.curve_p5` 1311: `SmCCIntersectENFO::Evaluate` behind `LocalCurveIntersect`, `LocalPropertyAnalysis`) |
 
 ## Ready set
 
 Empty (2026-10-13): every todo unit still waits on a claimed or todo dependency.
-Claimed and in progress: `curve.parabola`, `curve.ellipse_p1`, `curve.curve_p7`,
+Claimed and in progress: `curve.parabola`, `curve.ellipse_p1`,
 `curve.crv_on_surf`. `curve.curve_p5` (`LocalPropertyAnalysis`, `IsArc`, the CC
 evaluators) is the largest single blocker of the curve partials. New curve classes become
 `CurveKind` variants of `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a
@@ -155,8 +156,12 @@ merge that adds a variant must also extend the exhaustive matches in `curve::cur
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 98 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 99 ported
   units is bit-identical (`max_rel_err = 0`).
+- `curve.curve_p7` ports the curve/curve intersection local solve and
+  `GlobalPropertyAnalysis`; `CciGlobalSolver` now carries its curves and kernel
+  (`with_curves`), and a pruned curve tree (aux data without full tree) is rejected (its
+  leaves are not spans; upstream reads them as spans).
 - `curve.curve_p6` bounds `GlobalCoincidenceChecker`'s recursion
   (`MAX_COINCIDENCE_DEPTH`) and retags the ellipse stub to `curve.ellipse_p1`;
   `curve.curve_p1` co-ports `IsLine` dispatch and `CacheMakeOrValidate`'s cache build.
