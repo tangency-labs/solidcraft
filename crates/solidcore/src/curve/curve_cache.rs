@@ -570,7 +570,10 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 }
                 true
             }
-            CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Projected(_) => false,
+            CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Projected(_)
+            | CurveKind::Iso(_) => false,
         };
 
         // ordered leaf Beziers each passing the tessellation tests
@@ -587,7 +590,10 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             let nurb = match self.curve.kind() {
                 CurveKind::BSpline(b) => b.gw_nurb(),
                 CurveKind::Hyperbola(h) => h.base().gw_nurb(),
-                CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Projected(_) => None,
+                CurveKind::Hermite(_)
+                | CurveKind::Conic(_)
+                | CurveKind::Projected(_)
+                | CurveKind::Iso(_) => None,
             };
             create_bezier_segment_block(nurb, &self.curve)?
         };
