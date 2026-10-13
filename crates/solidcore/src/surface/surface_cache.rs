@@ -8,6 +8,7 @@
 //! free functions).
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{
     AltSrfCache, AltSrfCacheType, BezierAux2d, BezierPatch, PatchBoundaryBoundingPlanes,

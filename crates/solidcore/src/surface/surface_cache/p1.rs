@@ -81,9 +81,11 @@
 //!   are used; the curve-bounded surface runs the base class bodies
 //!   (`SmSurface::CreateIsoParametricCurve`, `surface.surface_p5`;
 //!   `SmSurface::CalculateBoundingBox`, `surface.surface_p1`), and
-//!   `SmSurface::IsSingularity` (`surface.surface_p5`), `SmSurface::EvaluateNormal`
-//!   (`surface.surface_p7`) and `SmSurface::GetFace` (`surface.surface_p1`) are not
-//!   overridden by any kind: those return [`SolidError::Unported`]. An `SmPlane` is an
+//!   `SmSurface::IsSingularity` (`surface.surface_p5`; only the plane overrides it,
+//!   with "no singularity", wired by `surface.surface_cache_p2`),
+//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`) and `SmSurface::GetFace`
+//!   (`surface.surface_p1`) are not overridden by the other kinds: those return
+//!   [`SolidError::Unported`]. An `SmPlane` is an
 //!   `SmBSplineSurface` upstream: the cast gives its B-spline part, and its
 //!   `CreateIsoParametricCurve` (an `SmLine`, which the cache cannot hold as a
 //!   [`BSplineCurve`] without losing the line's overrides) and the inherited
@@ -106,7 +108,7 @@
 //!   list; a continuity array longer than the knot list) or dereference a null
 //!   subdivision surface, the port returns [`SolidError::InvalidInput`].
 //! - **Not ported here.** `GetNthBoundingPlane`, `AddCurvesToCache`, the destructor
-//!   (`surface.surface_cache_p2`), the tree construction (`surface.surface_cache_p3`),
+//!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction (`surface.surface_cache_p3`),
 //!   `GetBoundingPlane`, `GetBrep`, `GetMemoryUsed`, `AssertValid`, the `Dump` and
 //!   `Draw` functions (other units or debug output).
 
@@ -175,7 +177,7 @@ pub const fn is_kind_of(t: i64) -> bool {
     t == TYPE || object::is_kind_of(t)
 }
 
-fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
+pub(super) fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
 
@@ -192,7 +194,7 @@ const fn plane_iso_unported() -> SolidError {
 /// `SM_CAST_PTR(SmBSplineSurface, surface)` for callers that run only non-virtual
 /// `SmBSplineSurface` members: an `SmPlane` gives its B-spline part. Callers that
 /// reach a virtual member deal with planes first.
-const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
+pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
@@ -259,7 +261,7 @@ fn bspline_iso_curve(
 
 /// `SmSurface::CalculateBoundingBox(domain, ...)`: the B-spline override; other kinds
 /// run the base class body.
-fn calculate_bounding_box(
+pub(super) fn calculate_bounding_box(
     surface: &Surface,
     domain: &Extent2d,
     req: &BoundingBoxRequest<'_>,
@@ -285,13 +287,19 @@ fn calculate_bounding_box(
     }
 }
 
-/// `SmSurface::IsSingularity(uv, eSingDir)`: not overridden by the ported kinds.
-fn is_singularity(_surface: &Surface, _uv: Point2) -> Result<bool> {
-    // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-    Err(SolidError::unported(
-        "SmSurface::IsSingularity",
-        "surface.surface_p5",
-    ))
+/// `SmSurface::IsSingularity(uv, eSingDir)`: the `SmPlane` override (a plane has no
+/// singularity); the other ported kinds run the base class body.
+fn is_singularity(surface: &Surface, _uv: Point2) -> Result<bool> {
+    match surface.kind() {
+        SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
+            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
+            Err(SolidError::unported(
+                "SmSurface::IsSingularity",
+                "surface.surface_p5",
+            ))
+        }
+    }
 }
 
 /// `SmSurface::EvaluateNormal(uv, u_from_left, v_from_left, normal)`: not overridden
@@ -1767,7 +1775,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     }
 
     /// The surface a node's `mBA_pSurface` handle refers to.
-    fn node_surface(&self, handle: Option<O>) -> Result<&Surface> {
+    pub(super) fn node_surface(&self, handle: Option<O>) -> Result<&Surface> {
         let h = handle.ok_or_else(|| invalid(OP_POLAR, "node has no surface"))?;
         if Some(h) == self.surface_handle {
             return Ok(&self.surface);

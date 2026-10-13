@@ -133,18 +133,18 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
+pub(crate) fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
 /// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
+pub(crate) struct Reader<'a> {
+    pub(crate) input: &'a [f64],
+    pub(crate) at: usize,
 }
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
             .get(self.at)
@@ -154,7 +154,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finite(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > MAX_COORD {
             return Err(bad("non-finite or huge value"));
@@ -162,15 +162,15 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
+    pub(crate) fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
         (0..k).map(|_| self.finite()).collect()
     }
 
-    fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
+    pub(crate) fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
         Ok([self.finite()?, self.finite()?, self.finite()?])
     }
 
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
+    pub(crate) fn index(&mut self, max: usize) -> Result<usize, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
             return Err(bad(format!("bad index/count {v} (max {max})")));
@@ -179,7 +179,7 @@ impl Reader<'_> {
     }
 
     /// An index in `-1..max` (`-1` = none).
-    fn opt_index(&mut self, max: i64) -> Result<i64, FfiError> {
+    pub(crate) fn opt_index(&mut self, max: i64) -> Result<i64, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < -1.0 || v >= max as f64 {
             return Err(bad(format!("bad index {v} (below {max})")));
@@ -187,11 +187,11 @@ impl Reader<'_> {
         Ok(v as i64)
     }
 
-    fn flag(&mut self) -> Result<bool, FfiError> {
+    pub(crate) fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
     }
 
-    fn domain(&mut self) -> Result<[f64; 4], FfiError> {
+    pub(crate) fn domain(&mut self) -> Result<[f64; 4], FfiError> {
         let d = [self.finite()?, self.finite()?, self.finite()?, self.finite()?];
         if d[0] > d[2] || d[1] > d[3] {
             return Err(bad("domain not ordered"));
@@ -200,7 +200,7 @@ impl Reader<'_> {
     }
 
     /// A domain inside `outer`; with `strict` of positive size in both directions.
-    fn domain_in(&mut self, outer: &Srf, strict: bool) -> Result<[f64; 4], FfiError> {
+    pub(crate) fn domain_in(&mut self, outer: &Srf, strict: bool) -> Result<[f64; 4], FfiError> {
         let d = self.domain()?;
         let o = outer.dom;
         if d[0] < o[0] || d[1] < o[1] || d[2] > o[2] || d[3] > o[3] {
@@ -212,7 +212,7 @@ impl Reader<'_> {
         Ok(d)
     }
 
-    fn done(&self) -> Result<(), FfiError> {
+    pub(crate) fn done(&self) -> Result<(), FfiError> {
         if self.at != self.input.len() {
             return Err(bad("trailing input"));
         }
@@ -285,14 +285,14 @@ fn check_points(rd: &mut Reader<'_>, k: usize, what: &str) -> Result<(), FfiErro
 }
 
 /// A validated surface: its domain and distinct knot counts.
-struct Srf {
-    dom: [f64; 4],
-    u_distinct: usize,
-    v_distinct: usize,
+pub(crate) struct Srf {
+    pub(crate) dom: [f64; 4],
+    pub(crate) u_distinct: usize,
+    pub(crate) v_distinct: usize,
 }
 
 /// A surface `n m p q r s cpts u v`.
-fn surface(rd: &mut Reader<'_>) -> Result<Srf, FfiError> {
+pub(crate) fn surface(rd: &mut Reader<'_>) -> Result<Srf, FfiError> {
     let n = rd.index(MAX_INDEX)?;
     let m = rd.index(MAX_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;
@@ -317,7 +317,7 @@ fn surface(rd: &mut Reader<'_>) -> Result<Srf, FfiError> {
 }
 
 /// A B-spline surface block `oob form surface`.
-fn bspline_block(rd: &mut Reader<'_>) -> Result<Srf, FfiError> {
+pub(crate) fn bspline_block(rd: &mut Reader<'_>) -> Result<Srf, FfiError> {
     rd.flag()?;
     rd.index(11)?;
     surface(rd)
@@ -341,7 +341,7 @@ fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 /// Alternate cache user data `hv V hb b hl l hd d hp p`.
-fn key(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+pub(crate) fn key(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     rd.flag()?;
     rd.vec3()?;
     rd.flag()?;
@@ -359,7 +359,7 @@ fn key(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 /// `k` then `k` curves; `-1` = no array.
-fn curves(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+pub(crate) fn curves(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let k = rd.opt_index(9)?;
     for _ in 0..k.max(0) {
         curve(rd)?;

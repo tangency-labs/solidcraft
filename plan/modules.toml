@@ -1691,10 +1691,10 @@ soft_depends_on = ["curve.curve_p5", "curve.iso_curve", "geom.extent1d", "geom.e
 est_lines = 1245
 layer = 24
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
-notes = "7 fns; largest: SmSurfaceCache::TestAgainstTolerances, SmSurfaceCache::SubdivideByBlock, sm_CreateApproximateBezierPatchBlock, sm_CreateBezierPatchBlock; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+status = "partial"
+claimed_by = "swarm-surface.surface_cache_p2"
+claimed_at = "2026-10-13T22:42:47Z"
+notes = "PARTIAL: difftest 905 cases (105 fixture + 800 generated), 721 pass bit-identical, 184 deferred (surface.plane_p1 53: SmPlane::CreateIsoParametricCurve in bounding planes and size tolerances; surface.surface_p1 47: SmSurface::GetFace in the B-spline bounding box of SM_AD_AUX_DATA nodes; surface.surface_p5 43: SmSurface::IsSingularity 35 in the Bezier approximation of B-splines, SmSurface::CreateIsoParametricCurve 8 of curve-bounded surfaces; surface.surface_p7 28: SmSurface::EvaluateNormal in bounding planes; surface.surface_p9 13: SmSurface::FindTessellationSplits in every SubdivideByBlock with a surface); --perturb SENSITIVE 721/721; wired the SmPlane override of IsSingularity into the surface cache Bezier approximation (p1 helper); no co-ports; 7 fns; largest: SmSurfaceCache::TestAgainstTolerances, SmSurfaceCache::SubdivideByBlock, sm_CreateApproximateBezierPatchBlock, sm_CreateBezierPatchBlock; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.torus"

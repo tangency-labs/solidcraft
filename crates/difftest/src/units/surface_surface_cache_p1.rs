@@ -59,7 +59,7 @@ pub const MIN_GENERATED: usize = 800;
 /// `surface.surface_cache_p1` runner.
 pub struct Runner;
 
-fn harness(msg: impl Into<String>) -> HarnessError {
+pub(crate) fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
@@ -71,18 +71,18 @@ const SURFACE_HANDLE: i64 = -7;
 /// An inline surface: control net as stored (`[x, y, z, w]`, rows in u), degrees,
 /// knots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct InlineSrf {
-    net: Vec<Vec<[f64; 4]>>,
-    p: usize,
-    q: usize,
-    u: Vec<f64>,
-    v: Vec<f64>,
+pub(crate) struct InlineSrf {
+    pub(crate) net: Vec<Vec<[f64; 4]>>,
+    pub(crate) p: usize,
+    pub(crate) q: usize,
+    pub(crate) u: Vec<f64>,
+    pub(crate) v: Vec<f64>,
 }
 
 /// A surface input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-enum SrfIn {
+pub(crate) enum SrfIn {
     /// An upstream `.sms` file (absolute path after fixture expansion).
     File { sms: String },
     /// Inline data.
@@ -91,40 +91,40 @@ enum SrfIn {
 
 /// A B-spline surface with its flags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct BssIn {
+pub(crate) struct BssIn {
     #[serde(default)]
-    oob: bool,
+    pub(crate) oob: bool,
     #[serde(default = "default_form")]
-    form: u8,
-    srf: SrfIn,
+    pub(crate) form: u8,
+    pub(crate) srf: SrfIn,
 }
 
-fn default_form() -> u8 {
+pub(crate) fn default_form() -> u8 {
     BSplineSurfaceForm::Unspecified as u8
 }
 
 /// An inline curve: dimension, control points as stored, degree, knots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CrvIn {
-    dim: u64,
-    cpts: Vec<[f64; 4]>,
-    p: usize,
-    u: Vec<f64>,
+pub(crate) struct CrvIn {
+    pub(crate) dim: u64,
+    pub(crate) cpts: Vec<[f64; 4]>,
+    pub(crate) p: usize,
+    pub(crate) u: Vec<f64>,
 }
 
 /// Alternate cache user data (`None` = null pointer).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct KeyIn {
+pub(crate) struct KeyIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    vec: Option<[f64; 3]>,
+    pub(crate) vec: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    b: Option<bool>,
+    pub(crate) b: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    l: Option<i64>,
+    pub(crate) l: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    d: Option<f64>,
+    pub(crate) d: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    p: Option<i64>,
+    pub(crate) p: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,7 +311,7 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 /// Reads an upstream `.sms` text file: `n m`, `p q`, rational flag, `(n+1)(m+1)`
 /// points (`x y z`, or `wx wy wz w` when rational, v index fastest), `n+p+2` u knots,
 /// `m+q+2` v knots.
-fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
+pub(crate) fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
     let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
@@ -335,14 +335,14 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     Ok(InlineSrf { net, p, q, u, v })
 }
 
-fn srf(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
+pub(crate) fn srf(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
     match s {
         SrfIn::File { sms } => read_sms(sms),
         SrfIn::Inline(i) => Ok(i.clone()),
     }
 }
 
-fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
+pub(crate) fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
     let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
     let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
@@ -352,13 +352,13 @@ fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
     Ok((n, m))
 }
 
-fn flag(b: bool) -> f64 {
+pub(crate) fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
 }
 
 // ---- C++ side -----------------------------------------------------------------------
 
-fn push_srf(o: &mut Vec<f64>, s: &InlineSrf) -> Result<(), HarnessError> {
+pub(crate) fn push_srf(o: &mut Vec<f64>, s: &InlineSrf) -> Result<(), HarnessError> {
     let (n, m) = shape(s)?;
     o.extend(
         [n, m, s.p, s.q, s.u.len().saturating_sub(1), s.v.len().saturating_sub(1)]
@@ -374,13 +374,13 @@ fn push_srf(o: &mut Vec<f64>, s: &InlineSrf) -> Result<(), HarnessError> {
     Ok(())
 }
 
-fn push_bss(o: &mut Vec<f64>, b: &BssIn) -> Result<(), HarnessError> {
+pub(crate) fn push_bss(o: &mut Vec<f64>, b: &BssIn) -> Result<(), HarnessError> {
     o.push(flag(b.oob));
     o.push(f64::from(b.form));
     push_srf(o, &srf(&b.srf)?)
 }
 
-fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
+pub(crate) fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
     let n = c.cpts.len().saturating_sub(1);
     o.extend([
         c.dim as f64,
@@ -394,7 +394,7 @@ fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
     o.extend_from_slice(&c.u);
 }
 
-fn push_key(o: &mut Vec<f64>, k: &KeyIn) {
+pub(crate) fn push_key(o: &mut Vec<f64>, k: &KeyIn) {
     o.push(flag(k.vec.is_some()));
     o.extend(k.vec.unwrap_or([0.0; 3]));
     o.push(flag(k.b.is_some()));
@@ -407,7 +407,7 @@ fn push_key(o: &mut Vec<f64>, k: &KeyIn) {
     o.push(k.p.unwrap_or(-1) as f64);
 }
 
-fn push_curves(o: &mut Vec<f64>, c: Option<&Vec<CrvIn>>) {
+pub(crate) fn push_curves(o: &mut Vec<f64>, c: Option<&Vec<CrvIn>>) {
     match c {
         None => o.push(-1.0),
         Some(v) => {
@@ -571,7 +571,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-fn surface_of(s: &InlineSrf) -> Result<NlSurface, HarnessError> {
+pub(crate) fn surface_of(s: &InlineSrf) -> Result<NlSurface, HarnessError> {
     let net = s
         .net
         .iter()
@@ -581,7 +581,7 @@ fn surface_of(s: &InlineSrf) -> Result<NlSurface, HarnessError> {
         .map_err(|e| harness(format!("surface input: {e}")))
 }
 
-fn bss_of(b: &BssIn) -> Result<BSplineSurface, HarnessError> {
+pub(crate) fn bss_of(b: &BssIn) -> Result<BSplineSurface, HarnessError> {
     let mut s = BSplineSurface::from_nurb(surface_of(&srf(&b.srf)?)?, false);
     *s.out_of_bounds_enabled_mut() = b.oob;
     let form = BSplineSurfaceForm::from_code(u64::from(b.form))
@@ -590,7 +590,7 @@ fn bss_of(b: &BssIn) -> Result<BSplineSurface, HarnessError> {
     Ok(s)
 }
 
-fn curve_of(c: &CrvIn) -> Result<BSplineCurve, HarnessError> {
+pub(crate) fn curve_of(c: &CrvIn) -> Result<BSplineCurve, HarnessError> {
     let pw = c
         .cpts
         .iter()
@@ -647,11 +647,11 @@ fn split_code(s: SplitDir) -> f64 {
     }
 }
 
-fn v3(p: [f64; 3]) -> Vec3 {
+pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 
-fn dom_of(d: [f64; 4]) -> Extent2d {
+pub(crate) fn dom_of(d: [f64; 4]) -> Extent2d {
     Extent2d::from_bounds(d[0], d[1], d[2], d[3])
 }
 
@@ -671,7 +671,7 @@ fn obj(i: i64) -> Option<i64> {
 }
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
@@ -679,7 +679,7 @@ fn status(e: &SolidError) -> f64 {
     }
 }
 
-fn push3(o: &mut Vec<f64>, v: Vec3) {
+pub(crate) fn push3(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
@@ -687,11 +687,11 @@ fn push2(o: &mut Vec<f64>, v: Vec2) {
     o.extend([v.x, v.y]);
 }
 
-fn push_dom(o: &mut Vec<f64>, d: &Extent2d) {
+pub(crate) fn push_dom(o: &mut Vec<f64>, d: &Extent2d) {
     o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
 }
 
-fn push_box(o: &mut Vec<f64>, b: &Extent3d) {
+pub(crate) fn push_box(o: &mut Vec<f64>, b: &Extent3d) {
     push3(o, b.min());
     push3(o, b.max());
 }
@@ -734,7 +734,7 @@ fn dump_polar(o: &mut Vec<f64>, b: &PolarBox) {
     push_dom(o, &b.domain());
 }
 
-fn key_of(k: &KeyIn) -> AltCacheKey {
+pub(crate) fn key_of(k: &KeyIn) -> AltCacheKey {
     AltCacheKey {
         vec: k.vec.map(v3),
         boolean: k.b,
@@ -744,7 +744,7 @@ fn key_of(k: &KeyIn) -> AltCacheKey {
     }
 }
 
-fn alt_type(t: u8) -> AltSrfCacheType {
+pub(crate) fn alt_type(t: u8) -> AltSrfCacheType {
     if t == 0 {
         AltSrfCacheType::Silhouette
     } else {
@@ -752,7 +752,7 @@ fn alt_type(t: u8) -> AltSrfCacheType {
     }
 }
 
-fn curves_of(c: Option<&Vec<CrvIn>>) -> Result<Option<Vec<SmCurve>>, HarnessError> {
+pub(crate) fn curves_of(c: Option<&Vec<CrvIn>>) -> Result<Option<Vec<SmCurve>>, HarnessError> {
     c.map(|v| {
         v.iter()
             .map(|c| curve_of(c).map(SmCurve::from))
@@ -1239,7 +1239,7 @@ fn cpp_output(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- generated cases ----------------------------------------------------------------
 
-fn gen_knots(rng: &mut Rng, p: usize, n: usize) -> Vec<f64> {
+pub(crate) fn gen_knots(rng: &mut Rng, p: usize, n: usize) -> Vec<f64> {
     let interior = n - p;
     let mut inner: Vec<f64> = (0..interior).map(|_| rng.uniform(0.05, 0.95)).collect();
     if rng.chance(0.2) && interior >= 2 {
@@ -1264,7 +1264,7 @@ fn gen_knots(rng: &mut Rng, p: usize, n: usize) -> Vec<f64> {
 
 /// A surface: a bumpy grid, a plane, a cylinder-like sheet, or one with a collapsed
 /// (degenerate) side.
-fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
+pub(crate) fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
     let p = 1 + rng.below(max_deg as u64) as usize;
     let q = 1 + rng.below(max_deg as u64) as usize;
     let n = p + rng.below(3) as usize;
@@ -1318,7 +1318,7 @@ fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
     }
 }
 
-fn gen_bss(rng: &mut Rng, s: InlineSrf) -> BssIn {
+pub(crate) fn gen_bss(rng: &mut Rng, s: InlineSrf) -> BssIn {
     BssIn {
         oob: rng.chance(0.1),
         form: if rng.chance(0.85) { 11 } else { rng.below(10) as u8 },
@@ -1326,7 +1326,7 @@ fn gen_bss(rng: &mut Rng, s: InlineSrf) -> BssIn {
     }
 }
 
-fn gen_curve(rng: &mut Rng) -> CrvIn {
+pub(crate) fn gen_curve(rng: &mut Rng) -> CrvIn {
     let p = 1 + rng.below(3) as usize;
     let n = p + rng.below(3) as usize;
     let cpts = (0..=n)
@@ -1340,7 +1340,7 @@ fn gen_curve(rng: &mut Rng) -> CrvIn {
     }
 }
 
-fn domain_of_srf(s: &InlineSrf) -> [f64; 4] {
+pub(crate) fn domain_of_srf(s: &InlineSrf) -> [f64; 4] {
     let u0 = s.u.first().copied().unwrap_or(0.0);
     let u1 = s.u.last().copied().unwrap_or(1.0);
     let v0 = s.v.first().copied().unwrap_or(0.0);
@@ -1349,7 +1349,7 @@ fn domain_of_srf(s: &InlineSrf) -> [f64; 4] {
 }
 
 /// A sub-domain of `d`: the whole, a knot-aligned or a random piece.
-fn gen_sub_dom(rng: &mut Rng, d: [f64; 4]) -> [f64; 4] {
+pub(crate) fn gen_sub_dom(rng: &mut Rng, d: [f64; 4]) -> [f64; 4] {
     if rng.chance(0.3) {
         return d;
     }
@@ -1363,7 +1363,7 @@ fn gen_sub_dom(rng: &mut Rng, d: [f64; 4]) -> [f64; 4] {
     [a, c, b, e]
 }
 
-fn gvec(rng: &mut Rng, s: f64) -> [f64; 3] {
+pub(crate) fn gvec(rng: &mut Rng, s: f64) -> [f64; 3] {
     [
         rng.uniform(-s, s),
         rng.uniform(-s, s),
@@ -1371,7 +1371,7 @@ fn gvec(rng: &mut Rng, s: f64) -> [f64; 3] {
     ]
 }
 
-fn gen_key(rng: &mut Rng) -> KeyIn {
+pub(crate) fn gen_key(rng: &mut Rng) -> KeyIn {
     KeyIn {
         vec: rng.chance(0.4).then(|| gvec(rng, 2.0)),
         b: rng.chance(0.4).then(|| rng.chance(0.5)),
@@ -1382,7 +1382,7 @@ fn gen_key(rng: &mut Rng) -> KeyIn {
 }
 
 /// A key equal to or slightly off `k` (or with values left out).
-fn perturb_key(rng: &mut Rng, k: &KeyIn) -> KeyIn {
+pub(crate) fn perturb_key(rng: &mut Rng, k: &KeyIn) -> KeyIn {
     let mut q = k.clone();
     match rng.below(6) {
         0 => q.vec = q.vec.map(|v| [v[0] + rng.uniform(-1e-12, 1e-12), v[1], v[2]]),
