@@ -1079,7 +1079,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-curve.tangent_field-a1"
 claimed_at = "2026-10-13T01:00:35Z"
-notes = "difftest 655 cases, 266 deferred (surface.surface_p2 143, surface.surface_p7 110, surface.surface_p1 11, curve.crv_on_surf 2); 12 fns; largest: SmTangentField::EvaluatePoint, SmTangentField::Create, SmTangentField::ReadFromDB, SmTangentField::Evaluate; cycle back-edges (call into later units; stub or co-port): curve.crv_on_surf(5), surface.surface_p7(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest 655 cases, 264 deferred (surface.surface_p2 143, surface.surface_p7 110, surface.surface_p1 11; curve.crv_on_surf 2 wired: SmCrvOnSurf::ReadFromDB); 12 fns; largest: SmTangentField::EvaluatePoint, SmTangentField::Create, SmTangentField::ReadFromDB, SmTangentField::Evaluate; cycle back-edges (call into later units; stub or co-port): curve.crv_on_surf(5), surface.surface_p7(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "nlib.srf_adv_p4"
@@ -1284,10 +1284,10 @@ depends_on = ["curve.curve_p2", "curve.curve_p3", "curve.curve_p6", "curve.line"
 est_lines = 1728
 layer = 19
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-curve.crv_on_surf-a1"
 claimed_at = "2026-10-13T04:49:20Z"
-notes = "38 fns; largest: SmCrvOnSurf::SurfaceCurveMaxDistanceBetween, SmCrvOnSurf::Evaluate, SmCrvOnSurf::GetKnots, SmCrvOnSurf::SetAll; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(14), surface.surface_p1(4), curve.curve_p5(3), intersect.curve_class_p1(2), surface.surface_p7(2), curve.curve_p1(1), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2094 cases (94 fixture: smTopoTest my_check_loop_uv_gap SmBSplineCurve::CreateLineSegment UV edges on the bulge patch with owner 1 (eval, approx, cached breaks, drops, copies, edits, self gap), smMergeTest plane SM_SP_UMAX boundary via the UV-line constructor for owner flags 0-3, smTopoTest face trim curves on Surface.sms / DropCurveSurface.sms + 2000 generated op programs incl. ReadFromDB records from upstream WriteToDB), 1553 pass bit-identical (max_rel_err 0), 541 deferred (intersect.curve_class_p4 294: SmCurveClassification of uncached breaks; surface.surface_p7 147: SmSurface::EvaluateNormal; surface.surface_p1 50: Evaluate2ndDerivatives; surface.surface_p2 45: SmSurface::ReadFromDB; curve.curve_p5 5); --perturb SENSITIVE; CurveKind::CrvOnSurf (UV curve + BSplineSurface by value); ApproximateCurve / DropPoint / CalculateBoundingBox dispatch to the override (Curve::approximate_curve_base, drop_point_base); smsurf_LiftSecond/ThirdDerivative co-ported (surface.surface_p2); wired SmCurve::ReadFromDB(SmCrvOnSurf_TYPE) (curve.curve_p2) and SmTangentField base read (curve.tangent_field 266 -> 264 deferred); 3 UNPORTED(curve.crv_on_surf) stubs stay (global_solver node owner, SmTangentField::ApproximateCurve, tangent field as curve kind: see findings); DeformToEndPointTargets branch retagged surface.surface_p5. 38 fns; largest: SmCrvOnSurf::SurfaceCurveMaxDistanceBetween, SmCrvOnSurf::Evaluate, SmCrvOnSurf::GetKnots, SmCrvOnSurf::SetAll; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(14), surface.surface_p1(4), curve.curve_p5(3), intersect.curve_class_p1(2), surface.surface_p7(2), curve.curve_p1(1), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_p7"
