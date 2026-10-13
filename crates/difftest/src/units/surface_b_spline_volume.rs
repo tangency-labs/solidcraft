@@ -16,9 +16,9 @@
 //! `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust error upstream
 //! cannot produce) and the rest as `out`.
 //!
-//! No case is deferred: the only unported overrides (`HasDiscontinuitiesSimple`,
-//! `IsCurveInParamDomainSimple`, unit `surface.b_spline_volume_n_lib`) are not
-//! exercised.
+//! No case is deferred. The NLib overrides (`HasDiscontinuitiesSimple`,
+//! `CalculateContinuitiesSimple`, `IsCurveInParamDomainSimple`) are compared by the
+//! runner of unit `surface.b_spline_volume_n_lib`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
