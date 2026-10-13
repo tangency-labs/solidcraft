@@ -111,8 +111,10 @@
 //! - **Solvers.** The four curve solvers are structs holding a [`GlobalSolver`] and
 //!   implementing [`GlobalSolve`]. Their `LocalSolve` overrides belong to units
 //!   `curve.curve_p9` (`SmCCGlobalSolver`), `curve.curve_p1` (`SmCPGlobalSolver`),
-//!   `curve.curve_p3` (`SmCurvePropertyGS`) and `curve.curve_p7`
-//!   (`SmCCIGlobalSolver`) and return [`SolidError::Unported`]. Curve tree nodes
+//!   `curve.curve_p3` (`SmCurvePropertyGS`, ported there; the solver carries the
+//!   curve it evaluates, [`CurvePropertyGs::curve`], since a tree's owner object is
+//!   only the caller's handle) and `curve.curve_p7`
+//!   (`SmCCIGlobalSolver`); the unported ones return [`SolidError::Unported`]. Curve tree nodes
 //!   hold `SmBezierSpan` / `SmBezierAux1d` data built by the curve cache
 //!   ([`crate::curve::curve_cache`]), read from the tree
 //!   ([`Tree::curve_aux`], [`Tree::curve_span`]); the span end points are those the
@@ -2914,11 +2916,20 @@ pub struct CurvePropertyGs<'t, O> {
     pub property_value: Option<f64>,
     /// `m_cpOptVectors` (this class's own member, shadowing the base one).
     pub opt_vectors: Vec<Vec3>,
+    /// The curve the tree decomposes (upstream reads it back as the tree node's
+    /// owner object, `pCurveNode->GetOwnerObject()`); `None` until set with
+    /// [`CurvePropertyGs::with_curve`].
+    pub curve: Option<&'t Curve>,
 }
 
 /// Angle measure of the `MINIMIZE_*ANGLE*` properties for the unit projected
 /// vector `vec` (`dCosTheta` upstream).
-fn property_angle(prop: CurvePropertyType, o1: Vec3, o2: Vec3, vec: Vec3) -> Result<f64> {
+pub(crate) fn property_angle(
+    prop: CurvePropertyType,
+    o1: Vec3,
+    o2: Vec3,
+    vec: Vec3,
+) -> Result<f64> {
     if prop == CurvePropertyType::MinimizeAngleToPlane {
         Ok(PI / 2.0 - acos(vec.dot(o2).abs()))
     } else {
@@ -2951,11 +2962,20 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
             property,
             property_value,
             opt_vectors,
+            curve: None,
         }
     }
 
+    /// The solver with `curve`, the curve its tree was built for (the owner object
+    /// of the tree's nodes upstream), which [`GlobalSolve::local_solve`] evaluates.
+    #[must_use]
+    pub const fn with_curve(mut self, curve: &'t Curve) -> Self {
+        self.curve = Some(curve);
+        self
+    }
+
     /// Optional vector `i` (`m_cpOptVectors[i]`).
-    fn opt(&self, i: usize) -> Result<Vec3> {
+    pub(crate) fn opt(&self, i: usize) -> Result<Vec3> {
         self.opt_vectors
             .get(i)
             .copied()
@@ -2966,7 +2986,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
     }
 
     /// `*m_cpdPropertyValue`.
-    fn value(&self) -> Result<f64> {
+    pub(crate) fn value(&self) -> Result<f64> {
         self.property_value.ok_or(SolidError::InvalidInput {
             operation: OP_GS,
             reason: "missing property value",
@@ -3277,12 +3297,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CurvePropertyGs<'t, O> {
         self.best_subdivision_node(branch)
     }
 
-    fn local_solve(&mut self, _branch: &Branch) -> Result<bool> {
-        // UNPORTED(curve.curve_p3): SmCurvePropertyGS::LocalSolve
-        Err(SolidError::Unported {
-            upstream: "SmCurvePropertyGS::LocalSolve",
-            unit: "curve.curve_p3",
-        })
+    fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
+        self.local_solve_branch(branch)
     }
 }
 

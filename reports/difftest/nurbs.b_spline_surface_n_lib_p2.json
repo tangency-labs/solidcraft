@@ -1227,8 +1227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::LocalCurveIntersect",
-        "unit": "curve.curve_p3"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0096",
@@ -2319,8 +2319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::LocalCurveIntersect",
-        "unit": "curve.curve_p3"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0229",
@@ -3175,8 +3175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::LocalCurveIntersect",
-        "unit": "curve.curve_p3"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0334",
@@ -5039,8 +5039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::LocalCurveIntersect",
-        "unit": "curve.curve_p3"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0564",
@@ -5344,7 +5344,7 @@
   "cases_passed": 628,
   "cases_total": 654,
   "deferred_by_unit": {
-    "curve.curve_p3": 4,
+    "curve.curve_p5": 4,
     "surface.surface_p2": 17,
     "surface.surface_p7": 5
   },

@@ -46,8 +46,9 @@
 //!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`),
 //!   `SmSurface::EvaluateNormal` (`surface.surface_p7`),
 //!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`),
-//!   `SmSurface::Evaluate1stDerivatives` (`surface.surface_p1`) and
-//!   `SmCurve::LocalCurveIntersect` (`curve.curve_p3`). Upstream ignores the status of
+//!   `SmSurface::Evaluate1stDerivatives` (`surface.surface_p1`) and the
+//!   intersection equations of `SmCurve::LocalCurveIntersect`
+//!   (`SmCCIntersectENFO::Evaluate`, `curve.curve_p5`). Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
 //! - Status values upstream ignores stay ignored (`EditParameterization` before
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
@@ -55,7 +56,7 @@
 
 use crate::curve::curve::p2::Curve as SmCurve;
 use crate::curve::tangent_field::{CurveEnd as TangentFieldEnd, TangentDirType, TangentField};
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
@@ -292,20 +293,29 @@ fn evaluate_1st_derivatives(_surface: &BSplineSurface, _uv: Point2) -> Result<(V
 }
 
 /// `SmCurve::LocalCurveIntersect(domain, other, other_domain, tol, guess, other_guess,
-/// ..)`: whether an intersection was found and its parameter on `rail`.
+/// ..)`: whether an intersection was found and its parameter on `rail` (the status is
+/// ignored upstream: a failure is no intersection; `Unported` is propagated).
 fn local_curve_intersect(
-    _rail: &BSplineCurve,
-    _domain: &Extent1d,
-    _other: &BSplineCurve,
-    _other_domain: &Extent1d,
-    _tol: f64,
-    _guess: f64,
-    _other_guess: f64,
+    rail: &BSplineCurve,
+    domain: &Extent1d,
+    other: &BSplineCurve,
+    other_domain: &Extent1d,
+    tol: f64,
+    guess: f64,
+    other_guess: f64,
 ) -> Result<(bool, f64)> {
-    // UNPORTED(curve.curve_p3): SmCurve::LocalCurveIntersect
-    Err(SolidError::Unported {
-        upstream: "SmCurve::LocalCurveIntersect",
-        unit: "curve.curve_p3",
+    let r = ignored(crate::curve::curve::p3::local_curve_intersect(
+        rail,
+        domain,
+        other,
+        other_domain,
+        tol,
+        guess,
+        other_guess,
+    ))?;
+    Ok(match r.flatten() {
+        Some(i) => (true, i.my_param),
+        None => (false, UNDEF_DOUBLE),
     })
 }
 

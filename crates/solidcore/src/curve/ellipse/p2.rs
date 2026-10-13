@@ -81,13 +81,16 @@
 //!   before a failing status (partial solution arrays) are not returned.
 //! - **Back-edges.** `SmCurve::LocalPropertyAnalysis` (`curve.curve_p5`),
 //!   `SmCurve::GlobalPointSolve` (`curve.curve_p1`, also for the line of
-//!   `IntersectWithLine`), `SmCurve::LocalCurveSolve` (`curve.curve_p3`) and
-//!   `SmCurve::GlobalCoincidenceChecker` (`curve.curve_p6`) return
-//!   [`SolidError::Unported`]. `ConvertToNURBSParameter` always reports an exact
+//!   `IntersectWithLine`) and `SmCurve::GlobalCoincidenceChecker` (`curve.curve_p6`)
+//!   return [`SolidError::Unported`]. `SmCurve::LocalCurveSolve` (unit
+//!   `curve.curve_p3`) evaluates the ellipse through its B-spline base and the line
+//!   through [`curve_base::Curve`] (its Newton equations, `SmFindCCNormalENFO`, are
+//!   unit `curve.curve_p5`). `ConvertToNURBSParameter` always reports an exact
 //!   conversion when it succeeds, so `DropPointFast`'s refinement call is never
 //!   reached.
 
 use crate::curve::curve::p2::{self as curve_base, ELLIPSE_TYPE};
+use crate::curve::curve::p3::local_curve_solve;
 use crate::curve::line::{CurveLocationType, Line};
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
@@ -185,36 +188,53 @@ fn line_global_point_solve<O: Copy>(
 /// &dDist, NULL, dGuess0, dGuess1, bFoundAnswer, sSol)` of `curve` with the ellipse
 /// `other`: whether an answer was found and the solution.
 fn local_curve_solve_ellipse<O: Copy>(
-    _curve: &Ellipse,
-    _interval: &Extent1d,
-    _other: &Ellipse,
-    _other_interval: &Extent1d,
-    _tol: f64,
-    _target_distance: f64,
-    _guesses: [f64; 2],
+    curve: &Ellipse,
+    interval: &Extent1d,
+    other: &Ellipse,
+    other_interval: &Extent1d,
+    tol: f64,
+    target_distance: f64,
+    guesses: [f64; 2],
 ) -> Result<(bool, Solution<O>)> {
-    // UNPORTED(curve.curve_p3): SmCurve::LocalCurveSolve
-    Err(SolidError::Unported {
-        upstream: "SmCurve::LocalCurveSolve",
-        unit: "curve.curve_p3",
-    })
+    // (the ellipses evaluate through their B-spline base)
+    local_curve_solve(
+        &curve.base,
+        interval,
+        &other.base,
+        other_interval,
+        SolverOperation::Minimize,
+        tol,
+        Some(target_distance),
+        None,
+        guesses,
+        [None, None],
+    )
 }
 
 /// [`local_curve_solve_ellipse`] with the line `other`.
 fn local_curve_solve_line<O: Copy>(
-    _curve: &Ellipse,
-    _interval: &Extent1d,
-    _other: &Line,
-    _other_interval: &Extent1d,
-    _tol: f64,
-    _target_distance: f64,
-    _guesses: [f64; 2],
+    curve: &Ellipse,
+    interval: &Extent1d,
+    other: &Line,
+    other_interval: &Extent1d,
+    tol: f64,
+    target_distance: f64,
+    guesses: [f64; 2],
 ) -> Result<(bool, Solution<O>)> {
-    // UNPORTED(curve.curve_p3): SmCurve::LocalCurveSolve
-    Err(SolidError::Unported {
-        upstream: "SmCurve::LocalCurveSolve",
-        unit: "curve.curve_p3",
-    })
+    // (the line evaluates through the curve dispatch, as its virtual Evaluate)
+    let other = curve_base::Curve::from(other.clone());
+    local_curve_solve(
+        &curve.base,
+        interval,
+        &other,
+        other_interval,
+        SolverOperation::Minimize,
+        tol,
+        Some(target_distance),
+        None,
+        guesses,
+        [None, None],
+    )
 }
 
 /// `SmCurve::GlobalCoincidenceChecker(Interval, Other, OtherInterval, dTol,
@@ -1478,7 +1498,7 @@ impl Ellipse {
     ///
     /// The errors of the plane and circle intersections; [`SolidError::Unported`]
     /// from the general point solver (`curve.curve_p1`), the local curve solver
-    /// (`curve.curve_p3`) and the coincidence checker (`curve.curve_p6`).
+    /// (its Newton equations, `curve.curve_p5`) and the coincidence checker (`curve.curve_p6`).
     pub fn intersect_with_ellipse<O: Copy>(
         &self,
         interval: &Extent1d,
@@ -1697,7 +1717,7 @@ impl Ellipse {
     ///
     /// `SM_ERR` from the plane intersection of a line parallel to the plane or a zero
     /// line vector; [`SolidError::Unported`] from the general point solver
-    /// (`curve.curve_p1`) and the local curve solver (`curve.curve_p3`).
+    /// (`curve.curve_p1`) and the local curve solver (its Newton equations, `curve.curve_p5`).
     pub fn intersect_with_line<O: Copy>(
         &self,
         interval: &Extent1d,
