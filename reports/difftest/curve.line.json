@@ -698,16 +698,12 @@
       "values_compared": 45
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "assert_base",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.line/upstream.json#87 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -16831,17 +16827,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 1,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2102,
+  "cases_passed": 2103,
   "cases_total": 2103,
-  "deferred_by_unit": {
-    "curve.curve_p5": 1
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "curve.line"
 }

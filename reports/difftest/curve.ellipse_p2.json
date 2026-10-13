@@ -10,16 +10,12 @@
       "values_compared": 387
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "analytic_curves_circle_arc_0_90",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#1 (upstream tests/prog_test/src/smCurveTest.cpp:4903 (my_test_analytic_curves))",
-      "values_compared": 0
+      "values_compared": 296
     },
     {
       "max_rel_err": 0.0,
@@ -118,28 +114,20 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_x_offset_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#14 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_outside_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#15 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -302,16 +290,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "circle_circle_coincident",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#36 (upstream tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections))",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -410,16 +394,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#49 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -430,16 +410,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_-1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#51 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -530,16 +506,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_end_out_of_plane_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#63 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -550,16 +522,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "line_circle_perp_1e-05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#65 (upstream tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections))",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -682,16 +650,12 @@
       "values_compared": 224
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "arc_near_zero_start",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#81 (upstream edge cases (source/SMLib/src/SmEllipse.cpp))",
-      "values_compared": 0
+      "values_compared": 216
     },
     {
       "max_rel_err": 0.0,
@@ -702,16 +666,12 @@
       "values_compared": 203
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "arc_near_360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#83 (upstream edge cases (source/SMLib/src/SmEllipse.cpp))",
-      "values_compared": 0
+      "values_compared": 229
     },
     {
       "max_rel_err": 0.0,
@@ -722,16 +682,12 @@
       "values_compared": 250
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "tiny_arc",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#85 (upstream edge cases (source/SMLib/src/SmEllipse.cpp))",
-      "values_compared": 0
+      "values_compared": 196
     },
     {
       "max_rel_err": 0.0,
@@ -838,16 +794,12 @@
       "values_compared": 94
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "drop_seam_pointing",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.ellipse_p2/upstream.json#99 (upstream edge cases (source/SMLib/src/SmEllipse.cpp))",
-      "values_compared": 0
+      "values_compared": 134
     },
     {
       "max_rel_err": 0.0,
@@ -930,16 +882,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0008",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976435",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -974,16 +922,12 @@
       "values_compared": 159
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0013",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976440",
-      "values_compared": 0
+      "values_compared": 112
     },
     {
       "max_rel_err": 0.0,
@@ -1226,16 +1170,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0044",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976471",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -1358,28 +1298,20 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0060",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976487",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0061",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976488",
-      "values_compared": 0
+      "values_compared": 92
     },
     {
       "max_rel_err": 0.0,
@@ -1582,16 +1514,12 @@
       "values_compared": 93
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976514",
-      "values_compared": 0
+      "values_compared": 146
     },
     {
       "max_rel_err": 0.0,
@@ -1690,16 +1618,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0100",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976527",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -1742,16 +1666,12 @@
       "values_compared": 181
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976533",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -1786,16 +1706,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976538",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -1910,16 +1826,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0126",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976553",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -2010,16 +1922,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0138",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976565",
-      "values_compared": 0
+      "values_compared": 136
     },
     {
       "max_rel_err": 0.0,
@@ -2262,28 +2170,20 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0169",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976596",
-      "values_compared": 0
+      "values_compared": 117
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0170",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976597",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -2494,16 +2394,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0197",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976624",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "max_rel_err": 0.0,
@@ -2594,16 +2490,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0209",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976636",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -3166,16 +3058,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0280",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976707",
-      "values_compared": 0
+      "values_compared": 69
     },
     {
       "max_rel_err": 0.0,
@@ -3226,16 +3114,12 @@
       "values_compared": 101
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0287",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976714",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -3390,16 +3274,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0307",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976734",
-      "values_compared": 0
+      "values_compared": 77
     },
     {
       "max_rel_err": 0.0,
@@ -3434,16 +3314,12 @@
       "values_compared": 97
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0312",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976739",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -3814,28 +3690,20 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0359",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976786",
-      "values_compared": 0
+      "values_compared": 173
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976787",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -3902,16 +3770,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0369",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976796",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -4082,16 +3946,12 @@
       "values_compared": 109
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0391",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976818",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -4462,16 +4322,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0438",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976865",
-      "values_compared": 0
+      "values_compared": 176
     },
     {
       "max_rel_err": 0.0,
@@ -4882,16 +4738,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0490",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976917",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -5358,16 +5210,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0549",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976976",
-      "values_compared": 0
+      "values_compared": 96
     },
     {
       "max_rel_err": 0.0,
@@ -5418,16 +5266,12 @@
       "values_compared": 72
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0556",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877976983",
-      "values_compared": 0
+      "values_compared": 138
     },
     {
       "max_rel_err": 0.0,
@@ -5830,16 +5674,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0607",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977034",
-      "values_compared": 0
+      "values_compared": 104
     },
     {
       "max_rel_err": 0.0,
@@ -5906,16 +5746,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0616",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977043",
-      "values_compared": 0
+      "values_compared": 162
     },
     {
       "max_rel_err": 0.0,
@@ -5942,16 +5778,12 @@
       "values_compared": 97
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0620",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977047",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -6002,16 +5834,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0627",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977054",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -6462,28 +6290,20 @@
       "values_compared": 67
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0684",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977111",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0685",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977112",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -6630,16 +6450,12 @@
       "values_compared": 137
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0704",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977131",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -6754,16 +6570,12 @@
       "values_compared": 80
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0719",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977146",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -7390,16 +7202,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0798",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977225",
-      "values_compared": 0
+      "values_compared": 180
     },
     {
       "max_rel_err": 0.0,
@@ -7410,16 +7218,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0800",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977227",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -7462,16 +7266,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0806",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977233",
-      "values_compared": 0
+      "values_compared": 175
     },
     {
       "max_rel_err": 0.0,
@@ -7498,16 +7298,12 @@
       "values_compared": 55
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0810",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977237",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -7550,16 +7346,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0816",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977243",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
       "max_rel_err": 0.0,
@@ -7570,16 +7362,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0818",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977245",
-      "values_compared": 0
+      "values_compared": 168
     },
     {
       "max_rel_err": 0.0,
@@ -7726,16 +7514,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0837",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977264",
-      "values_compared": 0
+      "values_compared": 171
     },
     {
       "max_rel_err": 0.0,
@@ -7794,16 +7578,12 @@
       "values_compared": 52
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0845",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977272",
-      "values_compared": 0
+      "values_compared": 183
     },
     {
       "max_rel_err": 0.0,
@@ -7822,16 +7602,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0848",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977275",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -8330,16 +8106,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0911",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977338",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "max_rel_err": 0.0,
@@ -8638,16 +8410,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0949",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977376",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -8722,16 +8490,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0959",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977386",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -9014,16 +8778,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0995",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977422",
-      "values_compared": 0
+      "values_compared": 102
     },
     {
       "max_rel_err": 0.0,
@@ -9074,16 +8834,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977429",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -9246,28 +9002,20 @@
       "values_compared": 170
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977450",
-      "values_compared": 0
+      "values_compared": 108
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1024",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977451",
-      "values_compared": 0
+      "values_compared": 99
     },
     {
       "max_rel_err": 0.0,
@@ -9790,16 +9538,12 @@
       "values_compared": 166
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977517",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -9922,16 +9666,12 @@
       "values_compared": 96
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977533",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -10398,16 +10138,12 @@
       "values_compared": 56
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1165",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977592",
-      "values_compared": 0
+      "values_compared": 97
     },
     {
       "max_rel_err": 0.0,
@@ -10418,16 +10154,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1167",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977594",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -10566,16 +10298,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1185",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977612",
-      "values_compared": 0
+      "values_compared": 93
     },
     {
       "max_rel_err": 0.0,
@@ -10594,16 +10322,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977615",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "max_rel_err": 0.0,
@@ -10638,16 +10362,12 @@
       "values_compared": 97
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1193",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977620",
-      "values_compared": 0
+      "values_compared": 78
     },
     {
       "max_rel_err": 0.0,
@@ -10914,16 +10634,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1227",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977654",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -11278,16 +10994,12 @@
       "values_compared": 96
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1272",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977699",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -11738,16 +11450,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1329",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977756",
-      "values_compared": 0
+      "values_compared": 114
     },
     {
       "max_rel_err": 0.0,
@@ -11886,16 +11594,12 @@
       "values_compared": 102
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1347",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977774",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -12002,28 +11706,20 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1361",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977788",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1362",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977789",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -12242,28 +11938,20 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1390",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977817",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1391",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977818",
-      "values_compared": 0
+      "values_compared": 148
     },
     {
       "max_rel_err": 0.0,
@@ -13346,28 +13034,20 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1527",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977954",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1528",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977955",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -13706,16 +13386,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1571",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877977998",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "max_rel_err": 0.0,
@@ -13790,16 +13466,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1581",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978008",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -14010,16 +13682,12 @@
       "values_compared": 174
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1608",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978035",
-      "values_compared": 0
+      "values_compared": 63
     },
     {
       "max_rel_err": 0.0,
@@ -14118,16 +13786,12 @@
       "values_compared": 104
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1621",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978048",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -14282,16 +13946,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1641",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978068",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -14806,16 +14466,12 @@
       "values_compared": 105
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1706",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978133",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -14930,16 +14586,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1721",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978148",
-      "values_compared": 0
+      "values_compared": 105
     },
     {
       "max_rel_err": 0.0,
@@ -14950,16 +14602,12 @@
       "values_compared": 109
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1723",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978150",
-      "values_compared": 0
+      "values_compared": 91
     },
     {
       "max_rel_err": 0.0,
@@ -15146,16 +14794,12 @@
       "values_compared": 100
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1747",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978174",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "max_rel_err": 0.0,
@@ -15430,16 +15074,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1782",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978209",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -15802,16 +15442,12 @@
       "values_compared": 85
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1828",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978255",
-      "values_compared": 0
+      "values_compared": 106
     },
     {
       "max_rel_err": 0.0,
@@ -16374,28 +16010,20 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1899",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978326",
-      "values_compared": 0
+      "values_compared": 142
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1900",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978327",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -16598,16 +16226,12 @@
       "values_compared": 94
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1926",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978353",
-      "values_compared": 0
+      "values_compared": 172
     },
     {
       "max_rel_err": 0.0,
@@ -16922,16 +16546,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1966",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978393",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -17086,16 +16706,12 @@
       "values_compared": 168
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1986",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978413",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -17170,16 +16786,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1996",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2282641783877978423",
-      "values_compared": 0
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -17207,17 +16819,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 97,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2005,
+  "cases_passed": 2102,
   "cases_total": 2102,
-  "deferred_by_unit": {
-    "curve.curve_p5": 97
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "curve.ellipse_p2"
 }

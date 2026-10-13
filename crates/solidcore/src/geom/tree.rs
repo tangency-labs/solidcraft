@@ -38,7 +38,7 @@
 //! | [`TreeNode::bounding_box`]             | `SmTreeNode::GetBoundingBox`                    |
 //! | [`ObjectList`]                         | `SmObjectList`                                  |
 //! | [`Tree::curve_spans`], [`Tree::curve_parents`], [`Tree::curve_aux`], [`Tree::curve_span`], [`Tree::set_curve_data`], [`CurveSpanRef`] | the owning `SmCurveCache`'s `m_sBezMgr` / `m_sParentMgr` and the casts of `m_pData` to `SmBezierAux1d*` / `SmBezierSpan*` |
-//! | [`SurfaceAux`]                         | the `SmBezierAux2d` fields read here (`m_eSplitDir`, `m_bIsMarked`, `m_eNodeClass`, `m_pFace`, `mBA_pSurface`) |
+//! | [`SurfaceAux`]                         | the `SmBezierAux2d` fields read here (`m_eSplitDir`, `m_bIsMarked`, `m_eNodeClass`, `m_pFace`, `mBA_pSurface`) and the arena slot of the rest |
 //! | [`AuxDataType`], [`NodeGeomType`], [`SplitDir`], [`NodeClass`] | `SmAuxDataType`, `SmNodeGeomType`, `SmSurfParamType` (U/V), `SmNodeClassType` |
 //!
 //! Deviations:
@@ -64,10 +64,14 @@
 //!   ([`crate::curve::curve_cache::CurveCache`]) hands its span data (upstream
 //!   reached through `m_pData` pointers into the cache) and its curve handle to the
 //!   tree it builds ([`Tree::set_curve_data`]); `GetOwnerObject` of a curve tree
-//!   returns that handle. `GetOwnerObject` of surface trees and
-//!   `GetFirstBezierPatch` call into the surface caches and B-spline surfaces,
-//!   which are not ported yet; those paths return [`SolidError::Unported`] (see the
-//!   `UNPORTED` markers).
+//!   returns that handle. A surface cache
+//!   ([`crate::surface::surface_cache::p1::SurfaceCache`]) hands its surface handle
+//!   to its tree ([`Tree::set_owner_surface`]); `GetOwnerObject` of a surface tree
+//!   returns it. The surface decomposition data (`SmBezierPatch`, subdivision
+//!   surfaces) stays in the cache, so the `GetFirstBezierPatch` paths that read it
+//!   return [`SolidError::Unported`] until the tree construction hands it over (see
+//!   the `UNPORTED` markers; `SurfaceCache::first_bezier_patch` answers from the
+//!   cache).
 //! - `SM_ASSERT`, `WARN` (bad split-direction data) and debug drawing are not
 //!   ported; a `WARN` branch simply adds nothing, as upstream.
 
@@ -253,6 +257,12 @@ pub struct SurfaceAux<O> {
     pub face: Option<O>,
     /// `mBA_pSurface`: subdivided surface of this node's domain, if any.
     pub surface: Option<O>,
+    /// Where the rest of the node's `SmBezierAux2d` lives (upstream `m_pData` points
+    /// at it): the index of its `SmBezierPatch` in the owning surface cache's patch
+    /// arena for [`AuxDataType::BezierSurface`] nodes, of its `SmBezierAux2d` in the
+    /// cache's aux arena otherwise (see [`crate::surface::surface_cache::p1`]);
+    /// `None` for subdivision data no cache holds.
+    pub slot: Option<usize>,
 }
 
 /// Curve decomposition data a node points at: an entry of [`Tree::curve_spans`]
@@ -410,6 +420,9 @@ pub struct Tree<O> {
     /// The curve of an owning curve cache (`SmCurveCache::GetCurve`), as the
     /// caller's handle.
     owner_curve: Option<O>,
+    /// The surface of an owning surface cache (`SmSurfaceCache::GetSurface`), as the
+    /// caller's handle.
+    owner_surface: Option<O>,
 }
 
 /// C `int` expression `1 << count` widened to `ULONG` (sign-extended, as on
@@ -497,6 +510,13 @@ impl<O> Tree<O> {
         self.owner_curve = owner_curve;
     }
 
+    /// Sets the handle of the owning surface cache's surface
+    /// (`SmSurfaceCache::GetSurface`, reported by [`Tree::owner_object`] for surface
+    /// cache trees).
+    pub fn set_owner_surface(&mut self, owner_surface: Option<O>) {
+        self.owner_surface = owner_surface;
+    }
+
     /// The curve decomposition data of `node`: its `SmBezierAux1d` part (upstream
     /// casts `m_pData`, for a leaf an `SmBezierSpan`).
     ///
@@ -554,6 +574,7 @@ impl<O: Copy + PartialEq> Tree<O> {
             curve_spans: Vec::new(),
             curve_parents: Vec::new(),
             owner_curve: None,
+            owner_surface: None,
         }
     }
 
@@ -632,12 +653,9 @@ impl<O: Copy + PartialEq> Tree<O> {
     pub fn owner_object(&self) -> Result<Option<O>> {
         match self.owner {
             Some(TreeOwner::CurveCache) => Ok(self.owner_curve),
-            // UNPORTED(surface.surface_cache_p1): SmSurfaceCache::GetSurface
+            // SmSurfaceCache::GetSurface
             Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => {
-                Err(SolidError::Unported {
-                    upstream: "SmSurfaceCache::GetSurface",
-                    unit: "surface.surface_cache_p1",
-                })
+                Ok(self.owner_surface)
             }
             Some(TreeOwner::BrepCache | TreeOwner::Other) | None => Ok(None),
         }
@@ -1128,10 +1146,14 @@ impl<O: Copy + PartialEq> Tree<O> {
         for _ in 0..=self.nodes.len() {
             let n = self.node(cur)?;
             if n.aux_type == AuxDataType::BezierSurface {
-                // UNPORTED(surface.surface_cache_p1): SmBezierPatch::GetBezierPtr
+                // The patch data lives in the owning surface cache's arenas
+                // (crate::surface::surface_cache::p1::SurfaceCache::first_bezier_patch
+                // answers from there); the tree reaches it once the tree construction
+                // hands it over, as the curve cache does with set_curve_data.
+                // UNPORTED(surface.surface_cache_p3): SmBezierPatch::GetBezierPtr
                 return Err(SolidError::Unported {
                     upstream: "SmBezierPatch::GetBezierPtr",
-                    unit: "surface.surface_cache_p1",
+                    unit: "surface.surface_cache_p3",
                 });
             }
             if !n.aux_type.is_surface_subdivision() {
@@ -1142,12 +1164,13 @@ impl<O: Copy + PartialEq> Tree<O> {
             let aux = self.surface_aux(cur, OP)?;
             if aux.surface.is_some() && (n.parent.is_none() || owner_surface != aux.surface) {
                 // SmBSplineSurface::GetGwNurbPointer is ported (nurbs.b_spline_surface_p1),
-                // but the subdivision surface behind the opaque handle `O` and a
-                // BezierPatchRef for its NURB only exist once the surface cache owns them.
-                // UNPORTED(surface.surface_cache_p1): SmBSplineSurface::GetGwNurbPointer
+                // but the surface behind the opaque handle `O` is held by the surface
+                // cache (SurfaceCache::first_bezier_patch resolves it there); the tree
+                // reaches it once the tree construction hands it over.
+                // UNPORTED(surface.surface_cache_p3): SmBSplineSurface::GetGwNurbPointer
                 return Err(SolidError::Unported {
                     upstream: "SmBSplineSurface::GetGwNurbPointer",
-                    unit: "surface.surface_cache_p1",
+                    unit: "surface.surface_cache_p3",
                 });
             }
             match n.parent {
@@ -1580,10 +1603,10 @@ mod tests {
         let (mut t, [root, ..]) = grid();
         assert_eq!(t.first_bezier_patch(root).unwrap(), None);
         t.set_owner_object(Some(TreeOwner::SurfaceCache));
-        assert!(matches!(
-            t.first_bezier_patch(root),
-            Err(SolidError::Unported { .. })
-        ));
+        assert_eq!(t.owner_object().unwrap(), None);
+        t.set_owner_surface(Some(5));
+        assert_eq!(t.owner_object().unwrap(), Some(5));
+        assert_eq!(t.first_bezier_patch(root).unwrap(), None);
         t.node_mut(root).unwrap().aux_type = AuxDataType::BezierSurface;
         assert!(t.first_bezier_patch(root).is_err());
         t.set_owner_object(Some(TreeOwner::BrepCache));

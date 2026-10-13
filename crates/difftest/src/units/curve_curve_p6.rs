@@ -718,6 +718,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                     None,
                     requested,
                     Some(this),
+                    Some(Obj(2, ivl_of(*ivl))),
                 )
             );
             o.extend([0.0, sols.len() as f64]);

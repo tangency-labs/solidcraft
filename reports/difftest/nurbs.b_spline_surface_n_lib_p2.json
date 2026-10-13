@@ -1226,16 +1226,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmCCIntersectENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0096",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8782368395807994629",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -2318,16 +2314,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCCIntersectENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0229",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8782368395807994762",
-      "values_compared": 0
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -3174,16 +3166,12 @@
       "values_compared": 136
     },
     {
-      "deferred": {
-        "symbol": "SmCCIntersectENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0334",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8782368395807994867",
-      "values_compared": 0
+      "values_compared": 55
     },
     {
       "max_rel_err": 0.0,
@@ -5038,16 +5026,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCCIntersectENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0564",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8782368395807995097",
-      "values_compared": 0
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -5339,13 +5323,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 26,
+  "cases_deferred": 22,
   "cases_failed": 0,
-  "cases_passed": 628,
+  "cases_passed": 632,
   "cases_total": 654,
   "deferred_by_unit": {
     "curve.crv_on_surf": 17,
-    "curve.curve_p5": 4,
     "surface.surface_p7": 5
   },
   "max_rel_err": 0.0,

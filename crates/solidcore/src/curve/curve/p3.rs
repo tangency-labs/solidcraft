@@ -61,11 +61,12 @@
 //!   first span lengths of `FindParameterAtArcLength`, `GetKnots`, `SetControlPoint`,
 //!   `SetCanonical`) the error is ignored and the previous value kept, except
 //!   [`SolidError::Unported`], which is always propagated.
-//! - **Unported callees** (unit `curve.curve_p5`): `SmCurve::Length` of the base class
-//!   (the line override is ported), `SmCurve::LocalPropertyAnalysis`,
-//!   `sm_FindAdditionalCpGuess`, `SmCurve::IsPeriodic` and the `Evaluate` members of
-//!   `SmCCIntersectENFO` and `SmFindCCNormalENFO` return
-//!   [`SolidError::Unported`].
+//! - **Callees of unit `curve.curve_p5`** (`SmCurve::Length`,
+//!   `SmCurve::LocalPropertyAnalysis`, `sm_FindAdditionalCpGuess`, `SmCurve::IsPeriodic`
+//!   and the `Evaluate` members of `SmCCIntersectENFO` and `SmFindCCNormalENFO`) are
+//!   wired. `FindParameterAtArcLength` takes the kernel for `Length` (its curve cache
+//!   reads the kernel's tolerances); `Length` of curved spans reaches `SmIntegrator`
+//!   (unit `mass.integrator`, [`SolidError::Unported`]).
 
 use crate::curve::curve::p2::{
     proj_signed_angle, property_angle, unitize_tangent, Curve, CurveEvaluate, CurveKind,
@@ -75,6 +76,7 @@ use crate::curve::curve::p4::{
     fix_chain_curves_list, proj_dist, CcIntersectEnfo, CcTangentIntEnfo, ChainedCurves,
     FindCcNormalEnfo, FindPcExtremaEfo,
 };
+use crate::curve::curve::p5::{find_additional_cp_guess, is_periodic, local_property_analysis};
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -146,66 +148,6 @@ pub(crate) fn set_param(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
     Ok(())
 }
 
-// ---- unported callees (unit curve.curve_p5) ---------------------------------------------
-
-/// `SmCurve::Length(crInterval, dTol, rdLength)` (virtual): the line override, else
-/// the base class (unit `curve.curve_p5`).
-fn curve_length(curve: &Curve, interval: &Extent1d, _tol: f64) -> Result<f64> {
-    match curve.kind() {
-        CurveKind::Line(l) => Ok(l.length(interval)),
-        _ => {
-            // UNPORTED(curve.curve_p5): SmCurve::Length
-            Err(SolidError::Unported {
-                upstream: "SmCurve::Length",
-                unit: "curve.curve_p5",
-            })
-        }
-    }
-}
-
-/// `SmCurve::LocalPropertyAnalysis(crInterval, eProp, dGuess, cpdValue, cpVectors,
-/// rbFoundSolution, rSolution)`: whether a solution was found (written into
-/// `solution`).
-pub(crate) fn local_property_analysis<O: Copy>(
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _property: CurvePropertyType,
-    _guess: f64,
-    _value: Option<f64>,
-    _vectors: &[Vec3],
-    _solution: &mut Solution<O>,
-) -> Result<bool> {
-    // UNPORTED(curve.curve_p5): SmCurve::LocalPropertyAnalysis
-    Err(SolidError::Unported {
-        upstream: "SmCurve::LocalPropertyAnalysis",
-        unit: "curve.curve_p5",
-    })
-}
-
-/// `sm_FindAdditionalCpGuess(crCurve, crInterval, crABC, dTsectT, ..)`: a second
-/// plane intersection guess near a tangency.
-fn find_additional_cp_guess(
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _abc: Vec3,
-    _tsect_t: f64,
-) -> Result<Option<f64>> {
-    // UNPORTED(curve.curve_p5): sm_FindAdditionalCpGuess
-    Err(SolidError::Unported {
-        upstream: "sm_FindAdditionalCpGuess",
-        unit: "curve.curve_p5",
-    })
-}
-
-/// `SmCurve::IsPeriodic(crInterval)`.
-fn is_periodic<C: ?Sized>(_curve: &C, _interval: &Extent1d) -> Result<bool> {
-    // UNPORTED(curve.curve_p5): SmCurve::IsPeriodic
-    Err(SolidError::Unported {
-        upstream: "SmCurve::IsPeriodic",
-        unit: "curve.curve_p5",
-    })
-}
-
 impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
     for CcIntersectEnfo<'_, C1, C2>
 {
@@ -222,36 +164,36 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
         Ok(())
     }
 
-    /// `SmCCIntersectENFO::Evaluate` (unit `curve.curve_p5`).
+    fn solution_size(&self) -> f64 {
+        self.solution_size
+    }
+
+    fn scaled_zero(&self) -> f64 {
+        self.scaled_zero
+    }
+
+    /// `SmCCIntersectENFO::Evaluate` ([`CcIntersectEnfo::evaluate_equations`]).
     fn evaluate(
         &mut self,
-        _x: &[f64],
-        _f: &mut [f64],
-        _jacobian: Option<&mut Matrix>,
+        x: &[f64],
+        f: &mut [f64],
+        jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
-        // UNPORTED(curve.curve_p5): SmCCIntersectENFO::Evaluate
-        Err(SolidError::Unported {
-            upstream: "SmCCIntersectENFO::Evaluate",
-            unit: "curve.curve_p5",
-        })
+        self.evaluate_equations(x, f, jacobian)
     }
 }
 
 impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
     for FindCcNormalEnfo<'_, C1, C2>
 {
-    /// `SmFindCCNormalENFO::Evaluate` (unit `curve.curve_p5`).
+    /// `SmFindCCNormalENFO::Evaluate` ([`FindCcNormalEnfo::evaluate_equations`]).
     fn evaluate(
         &mut self,
-        _x: &[f64],
-        _f: &mut [f64],
-        _jacobian: Option<&mut Matrix>,
+        x: &[f64],
+        f: &mut [f64],
+        jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
-        // UNPORTED(curve.curve_p5): SmFindCCNormalENFO::Evaluate
-        Err(SolidError::Unported {
-            upstream: "SmFindCCNormalENFO::Evaluate",
-            unit: "curve.curve_p5",
-        })
+        self.evaluate_equations(x, f, jacobian)
     }
 }
 
@@ -497,10 +439,11 @@ impl Curve {
     /// `InvalidInput` for a start parameter more than `SM_EFF_ZERO` (relative) outside
     /// the knots, or below the first knot when stepping backwards (an out of bounds
     /// read upstream), or a curve without knots; those of the lengths and
-    /// evaluations of the Newton iteration ([`SolidError::Unported`] for the base
-    /// class `Length`, unit `curve.curve_p5`).
+    /// evaluations of the Newton iteration ([`SolidError::Unported`] for `Length` of
+    /// curved spans, unit `mass.integrator`).
     pub fn find_parameter_at_arc_length(
         &self,
+        k: &Kernel,
         start_param: f64,
         arc_length: f64,
     ) -> Result<ArcLengthParameter> {
@@ -577,7 +520,7 @@ impl Curve {
             set_min_max(&mut interval, knot(ik)?, start_param);
         }
 
-        if let Some(l) = ignored(curve_length(self, &interval, tol))? {
+        if let Some(l) = ignored(self.length(k, &interval, tol))? {
             span_len = l;
         }
 
@@ -605,7 +548,7 @@ impl Curve {
             }
 
             set_min_max(&mut interval, knot(ik)?, knot(ik + 1)?);
-            if let Some(l) = ignored(curve_length(self, &interval, tol))? {
+            if let Some(l) = ignored(self.length(k, &interval, tol))? {
                 span_len = l;
             }
 
@@ -631,7 +574,7 @@ impl Curve {
         } else {
             set_min_max(&mut interval, curr_t, start_param);
         }
-        let mut curr_len = curve_length(self, &interval, tol)?;
+        let mut curr_len = self.length(k, &interval, tol)?;
         if !increasing {
             curr_len = -curr_len;
         }
@@ -703,7 +646,7 @@ impl Curve {
                 set_min_max(&mut interval, curr_t, start_param);
             }
 
-            curr_len = curve_length(self, &interval, tol)?;
+            curr_len = self.length(k, &interval, tol)?;
 
             if !increasing {
                 curr_len = -curr_len;
@@ -1025,9 +968,8 @@ impl Curve {
     ///
     /// `SM_ERR_NULL_POINTER` for a ray without distance tolerance or vectors;
     /// `InvalidInput` for an empty vector array or a missing target distance;
-    /// `SM_ERR` when the at-distance solver fails; those of the evaluations
-    /// ([`SolidError::Unported`] from `LocalPropertyAnalysis`, unit
-    /// `curve.curve_p5`). A failing Newton iteration of the other operations is no
+    /// `SM_ERR` when the at-distance solver fails; those of the evaluations and of
+    /// `LocalPropertyAnalysis`. A failing Newton iteration of the other operations is no
     /// answer, as upstream.
     pub fn local_point_solve<O: Copy>(
         &self,
@@ -1354,8 +1296,7 @@ where
 ///
 /// `InvalidInput` for [`SolverOperation::Signed3dDirectedMinimize`] (see
 /// [`Curve::local_curve_solve`]) or a missing option vector; those of the solver
-/// and evaluations ([`SolidError::Unported`] from `SmFindCCNormalENFO::Evaluate`,
-/// unit `curve.curve_p5`).
+/// and evaluations.
 pub fn local_curve_solve<O: Copy, C1, C2>(
     this: &C1,
     interval: &Extent1d,
@@ -1591,8 +1532,7 @@ where
 ///
 /// # Errors
 ///
-/// Those of the solvers and evaluations ([`SolidError::Unported`] from
-/// `SmCCIntersectENFO::Evaluate`, unit `curve.curve_p5`).
+/// Those of the solvers and evaluations.
 pub fn local_curve_intersect<C1, C2>(
     this: &C1,
     interval: &Extent1d,
@@ -1793,9 +1733,8 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
     /// `SM_ERR_NULL_POINTER` for a node without data, `InvalidInput` for a missing
     /// branch node, curve, option vector or value or a node that is not a curve
     /// leaf; status `1` for a projected pseudo box corner at the origin of the angle
-    /// properties; those of the evaluations ([`SolidError::Unported`] from
-    /// `LocalPropertyAnalysis` and `sm_FindAdditionalCpGuess`, unit
-    /// `curve.curve_p5`).
+    /// properties; those of the evaluations, `LocalPropertyAnalysis` and
+    /// `sm_FindAdditionalCpGuess`.
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
         // init output
         let needs_more_subdivision = false;
@@ -2163,14 +2102,15 @@ mod tests {
 
     #[test]
     fn arc_length_on_a_line() {
+        let k = Kernel::default();
         let l = line([0.0; 3], [2.0, 0.0, 0.0], 0.0, 5.0);
         let ivl = l.natural_interval();
         let r = l
-            .find_parameter_at_arc_length(ivl.min(), 0.25 * ivl.length() * 2.0)
+            .find_parameter_at_arc_length(&k, ivl.min(), 0.25 * ivl.length() * 2.0)
             .unwrap();
         assert!(r.converged);
         assert!(!r.past_end);
-        let back = l.find_parameter_at_arc_length(ivl.max(), -1e6).unwrap();
+        let back = l.find_parameter_at_arc_length(&k, ivl.max(), -1e6).unwrap();
         assert!(back.past_end);
     }
 
@@ -2197,7 +2137,7 @@ mod tests {
     }
 
     #[test]
-    fn curve_solvers_wait_for_curve_p5() {
+    fn crossing_lines_intersect_locally() {
         let a = hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
         let b = hermite(
             [0.5, -1.0, 0.0],
@@ -2206,7 +2146,11 @@ mod tests {
             [0.0, 2.0, 0.0],
         );
         let ivl = a.natural_interval();
-        let r = local_curve_intersect(&a, &ivl, &b, &ivl, 1e-6, 0.4, 0.6);
-        assert!(matches!(r, Err(SolidError::Unported { .. })));
+        let r = local_curve_intersect(&a, &ivl, &b, &ivl, 1e-6, 0.4, 0.6)
+            .unwrap()
+            .unwrap();
+        assert!((r.my_param - 0.5).abs() < 1e-9, "{r:?}");
+        assert!((r.other_param - 0.5).abs() < 1e-9, "{r:?}");
+        assert!(r.deviation < 1e-9);
     }
 }

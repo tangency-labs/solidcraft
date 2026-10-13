@@ -54,10 +54,11 @@ documents one per key in `abs_floors()`, recorded in its report). Never loosen a
 goes in `plan/findings.md` (unit, inputs, both values, suspected cause) and the unit
 stays `blocked`.
 
-**Git.** Commit locally only; never push, never rewrite `main`'s history, never
-`reset`/`checkout`/`restore` files you did not write. Stage explicit paths only (never
-`git add -A`/`git add .`), commit immediately after staging. If `.git/index.lock`
-exists, wait a few seconds and retry; never delete it. End every commit message with:
+**Git.** Work happens through pull requests to github.com/bherbruck/solidcore. Never
+push to `main` directly, never force-push shared branches, never rewrite `main`'s
+history, never `reset`/`checkout`/`restore` files you did not write. Stage explicit
+paths only (never `git add -A`/`git add .`). End every commit message with your
+tool's attribution, e.g. for Claude Code:
 
 ```
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
@@ -130,47 +131,53 @@ Every ported file starts with:
 //! Deviations: <anything not 1:1, e.g. out-param -> return value, rand() -> kernel.rng>.
 ```
 
-## 4. Swarm workflow
+## 4. Porting a unit (PR workflow)
 
 Unit list and states: `plan/modules.toml` (format: `plan/modules.schema.md`, order:
-`plan/order.md`). Pick a `todo` unit whose `depends_on` are all `green` or `partial`, lowest `layer`
-first (in a swarm run, the coordinator assigns units).
+`plan/order.md`). **`plan/PROGRESS.md` is the checklist** (regenerated on `main` by CI;
+never edit it in a PR). A unit is ready when its `depends_on` are all `green` or
+`partial`; take the lowest `layer` first.
 
-1. **Claim** (in the main tree, on `main`): re-read `plan/modules.toml`; set
-   `status = "claimed"`, `claimed_by = "<your agent name>"`, `claimed_at = "<UTC ISO-8601>"`
-   for one unit; then `git add plan/modules.toml && git commit -m "claim: <unit id>"`.
-   One unit per commit. **First claim in history wins**: check `git log -p -1 --
-   plan/modules.toml`; if someone else's claim of that unit landed first, pick another.
-2. **Worktree**: `git worktree add ../solidcore-wt/<unit id> -b unit/<unit id> main`, then
-   in it `ln -s ../../solidcore/upstream upstream` and
-   `export SOLIDCORE_CPP_DIR=$HOME/github/solidcore/bin/cpp` (shared C++ build).
-   Work only there.
-3. **Port** the upstream files listed for the unit into its `rust_module`, plus the C++
-   shim (`harness/cpp/shim/<unit_id_with_underscores>.cpp`, functions `sc_<unit>_<fn>`,
-   plain C data only), its `solidcore-ffi` binding, and its difftest cases, following
-   the conventions documented in `crates/difftest` and `crates/solidcore-ffi`. Use the
-   upstream tests/fixtures listed in the unit's `tests` as difftest inputs, plus edge
-   cases (degenerate, boundary, tolerance-limit inputs).
-4. **Verify** in the worktree:
+**One-time setup** (per machine): clone this repo, clone upstream at the pinned commit
+into `upstream/` (see README), build the C++ reference with
+`nice -n 10 harness/cpp/build.sh --jobs 6`.
+
+1. **Claim = a draft PR.** Check nobody has it:
+   `gh pr list --state open --search "<unit id> in:title"`. If none, branch from the
+   latest `main` (`git fetch origin && git switch -c unit/<unit id> origin/main`),
+   `git commit --allow-empty -m "claim: <unit id>"`, push, and open a draft PR titled
+   exactly **`port: <unit id>`**. **The lowest-numbered open PR for a unit wins**; if
+   yours lost, close it. Do not edit `plan/modules.toml` to claim. Push WIP at least
+   daily; a draft PR with no pushes for 48 h may be taken over (comment on it first).
+   If the unit's `notes` mention a WIP branch on `origin`, start from it.
+2. **Port** the upstream functions the unit owns (listed in
+   `harness/callgraph/units.json`) into its `rust_module`, plus the C++ shim
+   (`harness/cpp/shim/<unit_id_with_underscores>.cpp`, functions `sc_<unit>_<fn>`, plain
+   C data only), its `solidcore-ffi` binding, and its difftest runner and fixtures,
+   following `crates/difftest/README.md`. Inputs: the unit's upstream `tests`, plus
+   fixed-seed generated and edge cases (degenerate, boundary, tolerance limits).
+3. **Wire back-edges** (section 4a): replace `UNPORTED(<unit id>)` stubs elsewhere with
+   real calls and re-run the difftest of every unit you touched.
+4. **Verify** (`export CARGO_BUILD_JOBS=2 RUSTC_WRAPPER=sccache`, everything under
+   `nice -n 10`):
    ```sh
    cargo fmt --all --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test -p solidcore
    cargo check -p solidcore --target wasm32-unknown-unknown
-   cargo run -p difftest --features cpp -- --unit <unit id>   # see crates/difftest/README.md
+   cargo run -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
    ```
-5. **Merge** when green: in the worktree `git merge main` (resolve; never rebase
-   shared history), re-run step 4, then in the main tree
-   `git merge --no-ff unit/<unit id> -m "merge: <unit id>"`.
-6. **Mark green**: in the main tree set the unit's `status = "green"` (record the
-   difftest case count in `notes`), commit `plan/modules.toml` alone. Update
-   `plan/STATUS.md` if your unit changes a summary line.
-7. **Clean up**: `rm -rf ../solidcore-wt/<unit id>/bin`,
-   `git worktree remove ../solidcore-wt/<unit id>`, `git branch -d unit/<unit id>`.
+5. **Finish the PR**: merge the latest `origin/main` into your branch (never rebase a
+   pushed branch), re-verify, set the unit's `status` to `"green"` or `"partial"` in
+   `plan/modules.toml` with case/deferred counts in `notes` (plus any units you
+   promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
+   the PR description. CI runs fmt, clippy, tests, wasm and difftest on every green or
+   partial unit; a maintainer merges when CI is green.
 
-Blocked (dependency missing, upstream behaviour unclear, gate cannot be met): set
-`status = "blocked"` with a reason in `notes`, write details to `plan/findings.md`, commit
-both, and move on. Never leave a unit `claimed` when you stop working on it.
+**Blocked** (gate cannot be met, upstream behaviour unclear): record details in
+`plan/findings.md`, set `status = "blocked"` with a reason in `notes`, and open the PR
+with just that so others can see it. Never sit on a draft PR you have stopped working
+on: close it, and say where the WIP is.
 
 ## 4a. Cycles, back-edges and the merge lock
 
@@ -190,14 +197,14 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
   `UNPORTED(<your unit id>)` across `crates/solidcore`, replace each stub with the real
   call, and re-run difftest for every unit you touched. Any unit whose deferred count
   drops to 0 and passes becomes `green`; record this in the same commit.
-- **Merge lock.** Everything that writes the main tree (claim commit, merge, status
-  update) runs under one lock, held only briefly:
-  `flock $HOME/github/solidcore/.git/swarm.lock -c '<commands>'`.
+- **Local swarms only:** when several agents share one clone, everything that writes
+  that clone's `main` runs under `flock .git/swarm.lock -c '<commands>'`.
 
 ## 5. Where things go
 
 - `plan/findings.md`: Rust-vs-C++ disagreements, upstream bugs, nondeterminism (e.g.
   upstream `srand(time(NULL))`), anything a later agent must know.
-- `plan/STATUS.md`: overall progress summary.
+- `plan/PROGRESS.md`: the checklist (generated; never edit by hand).
+- `plan/STATUS.md`: overall progress summary and handoff notes.
 - `bin/`: all build output (cargo `target-dir`, `bin/cpp/` for C++). Gitignored. Never
   commit build output or anything under `upstream/`.

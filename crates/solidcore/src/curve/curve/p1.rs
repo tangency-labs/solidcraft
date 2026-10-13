@@ -59,22 +59,18 @@
 //! - `SM_ASSERT`, `WARN` and the `SM_DEBUG_CODE` drawing blocks are not ported;
 //!   `TessellateByBisection`'s unused `GetDegree` (its only consumer,
 //!   `sm_FindTestParams`, ignores it) is not called.
-//! - **Unported callees** (unit `curve.curve_p5`): `SmCurve::LocalPropertyAnalysis`
-//!   (the projected, directed and pivot operations of `LocalSolve`), the evaluators
-//!   behind `LocalCurveSolve` / `LocalCurveIntersect` (`ClassifyIntersectingRangeSolution`
-//!   and `sm_RefineCCSolutions` past their early exits) and `SmCurve::IsArc` (the
-//!   analytic conversion of a B-spline cache) return [`SolidError::Unported`].
+//! - **Callees of unit `curve.curve_p5`** (`SmCurve::LocalPropertyAnalysis`, the
+//!   evaluators behind `LocalCurveSolve` / `LocalCurveIntersect`, `SmCurve::IsArc`)
+//!   are wired; [`SolidError::Unported`] is propagated from what they reach.
 
 use crate::curve::curve::p2::{
     add_to_curve, evaluate_continuity, find_test_params, flush_crv, output, pop_stack,
     proj_signed_angle, push_point, stack_look, test_step, CpGlobalSolver, Curve, CurveKind,
     CurvePropertyType, TessStepResult, BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE,
 };
-use crate::curve::curve::p3::{
-    eval_n, local_curve_intersect, local_property_analysis, PointSolveOptions,
-};
+use crate::curve::curve::p3::{eval_n, local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p4::proj_dist;
-use crate::curve::curve::p5::make_curve_cache;
+use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::TessellationRequest;
 use crate::error::{ignored, Result, SolidError};
@@ -143,8 +139,7 @@ fn status_value(e: &SolidError) -> f64 {
 /// # Errors
 ///
 /// `SM_ERR` for a range solution without two variables; `SM_ERR_NULL_POINTER` for
-/// an object that is not a curve; [`SolidError::Unported`] from the local
-/// intersection (unit `curve.curve_p5`).
+/// an object that is not a curve; those of the local intersection.
 pub fn refine_cc_solutions<'c, O, F>(solutions: &mut SolutionArray<O>, curve_of: F) -> Result<()>
 where
     O: SolutionObject,
@@ -623,7 +618,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the local solves (unit `curve.curve_p5`).
+    /// Those of the local solves.
     pub fn classify_intersecting_range_solution<O: SolutionObject>(
         &self,
         other: &Self,
@@ -894,8 +889,7 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
     ///
     /// `SM_ERR_NULL_POINTER` for a node without data; `InvalidInput` for a missing
     /// branch node, curve or option vector or a node that is not a curve leaf; those
-    /// of `Unitize`, the signed angle and `AddSortedSolution`;
-    /// [`SolidError::Unported`] from `LocalPropertyAnalysis` (unit `curve.curve_p5`).
+    /// of `Unitize`, the signed angle, `AddSortedSolution` and `LocalPropertyAnalysis`.
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
         // init outputs
         let needs_more_subdivision = false;
@@ -1525,8 +1519,7 @@ impl Curve {
     ///
     /// `SM_ERR_NULL_POINTER` when the cache cannot be built or
     /// [`SolverOperation::AtDistance`] has no target distance; those of the polishing
-    /// local solve; [`SolidError::Unported`] from unported callees (unit
-    /// `curve.curve_p5`). Failures of the tree solve itself are ignored, as upstream.
+    /// local solve; [`SolidError::Unported`] from unported callees. Failures of the tree solve itself are ignored, as upstream.
     pub fn global_point_solve<O: SolutionObject>(
         &self,
         k: &Kernel,

@@ -559,12 +559,22 @@ fn st_of<T>(r: &solidcore::Result<T>) -> Result<f64, Box<Output>> {
     }
 }
 
+/// A solution object handle: an id and, for a curve object (upstream's `SmCurve*`),
+/// the curve's natural interval (read by `SmSolution::IsEqual`).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Obj(i64);
+struct Obj(i64, Option<Extent1d>);
 
 impl SolutionObject for Obj {
     fn kind(&self) -> ObjectKind {
-        ObjectKind::Other
+        if self.1.is_some() {
+            ObjectKind::Curve
+        } else {
+            ObjectKind::Other
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        self.1
     }
 }
 
@@ -654,7 +664,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::ArcLength { curve, start, len } => {
             let c = build(curve)?;
-            let r = tri!(o, c.find_parameter_at_arc_length(*start, *len));
+            let r = tri!(o, c.find_parameter_at_arc_length(&k, *start, *len));
             o.extend([f64::from(r.status()), r.end_param, b(r.past_end)]);
         }
         OpIn::PcExtrema {
@@ -747,7 +757,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                     *target,
                     if vs.is_empty() { None } else { Some(&vs) },
                     *g,
-                    [Some(Obj(0)), Some(Obj(1))],
+                    [Some(Obj(0, None)), Some(Obj(1, None))],
                 )
             );
             o.extend([0.0, b(found)]);
@@ -796,7 +806,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 min_parametric_ratio: cache.ratio,
             };
             let mut cc: CurveCache<Obj> = CurveCache::new(c.clone(), ivl_of(cache.ivl), opts);
-            cc.set_curve_handle(Some(Obj(0)));
+            cc.set_curve_handle(Some(Obj(0, Some(c.natural_interval()))));
             tri!(o, cc.tessellate(&k));
             o.push(0.0);
             let tree = cc.tree().ok_or_else(|| harness("no tree"))?;

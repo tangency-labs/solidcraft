@@ -2414,3 +2414,101 @@ Upstream behaviour worth knowing (all kept by the port unless noted):
 - **Deferred cases** (unit `curve.curve_p5`): most trimmed offsets reach
   `SmCCIntersectENFO::Evaluate` (curve/curve intersection), `SmCurve::IsArc` (offset
   approximation) or `SmCurve::LocalPropertyAnalysis` (`sm_FixBowTie`, classification).
+
+## surface.curve_bounded_surface
+
+- **`SmCurveBoundedSurface::operator==` reads past the UV array.** The UV loop runs to the
+  number of 3D boundaries; with more 3D than UV boundaries (and equal counts, flags and
+  3D curves) upstream reads `m_vUVBoundaries[i]` out of bounds and crashed the difftest
+  (`drop_curve_eq_other_same` before the guard). The port stops at the end of the UV
+  array; the ffi rejects `EqOther` when `n3d > nuv`.
+- **`SmCurveBoundedSurface::ReadFromDB`** reads the UV boundaries with the type of the last
+  3D boundary (`l3DType`, `0` when there is none, so any UV boundary then fails with
+  `SM_ERR`) and drops the implicit-outer flag it reads (the new surface gets `FALSE`). The
+  port keeps both; the difftest covers them with `WriteToDB`-layout ASCII records.
+- **Deferred cases**: the evaluation overrides call basis-surface virtuals the Rust
+  `Surface` dispatch does not have yet (`surface.surface_p1`: `EvaluateSimple`,
+  `EvaluateSTEP`, `EvaluateSTEPPoint`, `SmSurface::operator==`; `surface.surface_p3`:
+  `EvaluateGeometric`, `EvaluateNormalSection`; `surface.surface_p5`:
+  `EvaluateNormalAtSingularity`; `surface.surface_p7`: `EvaluateNormal`). `SmCrvOnSurf` and
+  `SmIsoCurve` still hold a B-spline surface; reading one over a curve bounded surface
+  returns `Unported` (`surface.surface_p1`).
+
+## surface.surface_cache_p1
+
+- **`GetSurfaceContinuity` skips the last internal v knot.** The v loop runs
+  `iv + 1 < size - 1` (the u loop `iu + 1 < size`), so the continuity at the last
+  internal v knot is never looked at. Kept; the difftest covers it.
+- **`sm_CullArray` on an empty array** ends with `SetSize(1)`, which callocs one `0.0`
+  element; the port returns `[0.0]` too.
+- **`BuildTreeTop` re-initialises `m_sAuxMgr`** (active count 0, blocks kept), so the
+  head nodes it makes reuse the aux memory of any earlier `SM_AD_AUX_DATA` /
+  `SM_AD_BEZIER_SURFACE_HEAD` nodes; upstream only calls it on first generation
+  `SmBezierPatch` nodes, which the difftest (and the ffi) keep to.
+- **`SmBezierAux2d::BuildPolarBox`** dereferences `mBA_pSurface` of every node on the
+  chain; `BuildTreeTop` heads have a null one until `BuildTree` resets them to the owner
+  surface. The port returns `InvalidInput` for a node without surface.
+- **`SmTreeNode::GetFirstBezierPatch` from a bare tree.** The decomposition data
+  (`SmBezierPatch` in `m_sBezMgr`, `SmBezierAux2d` in `m_sAuxMgr`, the subdivision
+  surfaces) lives in the `SurfaceCache` arenas; tree nodes carry the arena slot
+  (`SurfaceAux::slot`). `SurfaceCache::first_bezier_patch` answers from the cache, the
+  tree-only `Tree::first_bezier_patch` (and `SmSurfaceGridElement::Init`,
+  `sm_CsArePerpenDisjoint`, which start from a bare tree node) stay `Unported` until the
+  tree construction (`surface.surface_cache_p3`) hands the data to the tree, as
+  `CurveCache::build_tree` does with `set_curve_data`.
+- **Deferred cases**: every polar box (`SmBSplineSurface::CalculateBoundingBox` samples
+  `SmSurface::EvaluateNormal`, `surface.surface_p7`), boundary bounding planes with
+  collinear samples (straight boundaries: `EvaluateNormal`), every
+  `sm_ComputeBezierApproximation` (`SmSurface::IsSingularity`, `surface.surface_p5`) and
+  `GetFace` (`surface.surface_p1`).
+
+## curve.curve_p5 (`SmCurve`, part 5)
+
+No Rust-vs-C++ disagreement: 3067 of 3067 non-deferred difftest cases bit-identical (97
+upstream-derived and edge-case fixtures: `TestSmCreateRectangle` / `TestSmCreateRegularPolygon`
+edges through clean-up, duplicate removal, `IsLine` / `IsLinear` / `IsArc` / `Length` /
+`IsDomainBoundary`, the `my_test_reversed_line_join` lines, closest-point inversions, Newton
+Jacobians; plus 3000 generated; a 20000-seed run is clean; `--perturb` detects every case).
+30 cases are deferred: `Length` of spans of degree above 1 (`SmIntegrator::IntegrateIt`, unit
+`mass.integrator`; 28) and gap closing that reaches `SmCurve::GetNaturalInterval` through a
+solution handle (an `UNPORTED(curve.curve_p2)` stub in `geom::solution_array`; 2).
+Upstream behaviour worth knowing:
+
+- **`CrvsCleanup` crashes (SIGSEGV)** when the curve next to a removed tiny curve is closed:
+  `TrimGap` between the previous curve and a closed curve (end points equal) dies inside
+  upstream (reproduced with a cubic segment, a tiny segment and a closed quadratic loop).
+  The port completes the clean-up. Difftest never generates a closed curve next to a tiny
+  one. `CrvsCleanup` also casts every neighbour to `SmBSplineCurve` for `TrimGap`; the port
+  returns `InvalidInput` for any other kind there and the ffi only sends B-splines.
+- **`Length` casts its cache curve to `SmBSplineCurve`** and integrates any curve the cache
+  tessellates, Hermite curves included (the Rust cache tessellates them as upstream does),
+  so a Hermite `Length` is deferred like any curved span, not the end point distance the
+  comment promises.
+- **`SmFindCCNormalENFO::Evaluate`** reads `m_cpOptVectors[0..1]` without a `NULL` check for
+  `SM_SO_SIGNED_PIVOT_MINIMIZE` (the port returns `InvalidInput`), and the iteration count
+  that triggers the curvature "step back" only counts evaluations with a Jacobian.
+- **`sm_IsPointSolutionAcrossClosedSeamBoundary`** compares the solution's object pointers
+  with its curves; the port's caller (`GlobalCoincidenceChecker`) passes whether the first
+  object is `this` (the split solutions always name `[this, other]`).
+- **`SmCurve::CacheMakeOrValidate`** is reached in the port only through
+  `make_curve_cache` (building) and `validate_curve_cache` (type check, reuse);
+  `GetOrCreateObjectCache` on an object without the curve returns `InvalidInput` when a
+  new curve cache would be needed.
+- **Wiring this unit exposed four harness / port gaps in dependent units** (their cases
+  were deferred on `curve.curve_p5` before):
+  - `SmPolarConversion::ConvertToNURBSParameter` writes the polar-table guess to
+    `rdNurbsParameter` before the point inversion; when the inversion fails (`SM_ERR`)
+    callers that ignore the status (`SmEllipse::AssertValid`) use that guess. The ellipse
+    port now does the same (`convert_to_nurbs_parameter_or_written`); without a usable table
+    nothing is written and upstream reads an uninitialised `dNurbT` (UB): `curve.ellipse_p1`
+    no longer generates those cases.
+  - `SmSolution::IsEqual` scales its parameter tolerance by the object's natural interval;
+    the `curve.curve_p3` / `curve.curve_p7` runners' solution handles now are curve objects
+    with the curve's interval (as upstream's `SmCurve*`), so near-equal minima merge.
+  - `GlobalPointSolve` answers from the cache's analytic curve, whose pointer names the
+    solution: `Curve::global_point_solve_step` takes that handle (`analytic`).
+  - `SmGlobalSolver::SolveIt` initialises `sStartBranch[i]` only for `i < m_lNumTrees`; a
+    one-tree solve whose top node is a leaf hands an uninitialised `apBranch[1]` to
+    `LocalSolve`, and `SmCurvePropertyGS::LocalSolve`'s angle special case copies it into
+    `m_apNodes[1]` of a one-object solution. The `curve.curve_p7` harness reports the second
+    node only for two-object solutions.

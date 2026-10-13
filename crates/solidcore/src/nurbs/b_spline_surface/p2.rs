@@ -59,8 +59,7 @@
 //! - **Back-edges.** `CopyAndAddAnalytics` needs `SmPlane::IsNurbSurfacePlane`
 //!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
-//!   `CreateSphereFromArcs` `SmCurve::IsArc`
-//!   (`curve.curve_p5`); `CreateTrimmedPlaneFromRuled` (unless the ruled
+//!   `CreateTrimmedPlaneFromRuled` (unless the ruled
 //!   surface is a rectangle) `SmSurface::Evaluate1stDerivatives`
 //!   (`surface.surface_p1`); `IsDegeneratePoint` over another domain
 //!   `SmSurface::IsDegeneratePoint` (`surface.surface_p1`); `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and
@@ -209,12 +208,19 @@ fn is_nurb_surface_plane(_srf: &BSplineSurface) -> Result<Option<BSplineSurface>
 }
 
 /// `SmCurve::IsArc(lNumberOfSamplePoints, d3DTol, ..)` of a B-spline curve.
-fn curve_is_arc(_c: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<Option<ArcData>> {
-    // UNPORTED(curve.curve_p5): SmCurve::IsArc
-    Err(SolidError::Unported {
-        upstream: "SmCurve::IsArc",
-        unit: "curve.curve_p5",
-    })
+fn curve_is_arc(c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+    let arc = crate::curve::curve::p5::is_arc_base(
+        c,
+        |c, tol| c.is_degenerate(tol, None),
+        num_samples,
+        tol,
+    )?;
+    Ok(arc.map(|(frame, radius, start_deg, end_deg)| ArcData {
+        frame,
+        radius,
+        start_deg,
+        end_deg,
+    }))
 }
 
 /// `pOptSweepCurve->SmBSplineCurve::GetCanonical(..)` and `GetNaturalInterval()` of

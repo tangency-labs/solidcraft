@@ -1858,16 +1858,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0096",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118104",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2262,16 +2258,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0146",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118154",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2778,16 +2770,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0210",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118218",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -2798,16 +2786,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0212",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118220",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3050,16 +3034,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0243",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118251",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3606,28 +3586,20 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0312",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118320",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0313",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118321",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -3806,16 +3778,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0336",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118344",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -3906,16 +3874,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0348",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118356",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4270,16 +4234,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0393",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118401",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -4834,16 +4794,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0463",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118471",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4998,16 +4954,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0483",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118491",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5258,16 +5210,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0515",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118523",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5278,16 +5226,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0517",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118525",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5354,16 +5298,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0526",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118534",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -5374,16 +5314,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0528",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118536",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -5402,16 +5338,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0531",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118539",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5422,16 +5354,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0533",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118541",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5450,16 +5378,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0536",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118544",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -5606,16 +5530,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118563",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -6026,16 +5946,12 @@
       "values_compared": 101
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0607",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118615",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6414,16 +6330,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0655",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118663",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6594,16 +6506,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0677",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118685",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7126,16 +7034,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0743",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118751",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7450,16 +7354,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0783",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118791",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -7822,16 +7722,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0829",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118837",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -7962,16 +7858,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0846",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118854",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8094,16 +7986,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0862",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118870",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8218,16 +8106,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0877",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118885",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8470,16 +8354,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0908",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118916",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8714,16 +8594,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0938",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118946",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8814,16 +8690,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0950",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118958",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9050,28 +8922,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0979",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118987",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0980",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961118988",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9234,16 +9098,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119009",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9414,16 +9274,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119031",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -9498,16 +9354,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1033",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119041",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9990,16 +9842,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1094",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119102",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10378,16 +10226,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1142",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119150",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11166,16 +11010,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1240",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119248",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -11298,16 +11138,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119264",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11830,16 +11666,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1322",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119330",
-      "values_compared": 0
+      "values_compared": 145
     },
     {
       "max_rel_err": 0.0,
@@ -12010,16 +11842,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1344",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119352",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -12214,16 +12042,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1369",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119377",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12474,16 +12298,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1401",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119409",
-      "values_compared": 0
+      "values_compared": 120
     },
     {
       "max_rel_err": 0.0,
@@ -12598,16 +12418,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1416",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119424",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -12682,16 +12498,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1426",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119434",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12710,16 +12522,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1429",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119437",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12978,16 +12786,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1462",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119470",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -13174,16 +12978,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1486",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119494",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13418,16 +13218,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1516",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119524",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -13470,16 +13266,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1522",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119530",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -13514,16 +13306,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1527",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119535",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14238,16 +14026,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1617",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119625",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14266,16 +14050,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1620",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119628",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -16030,40 +15810,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1840",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119848",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1841",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119849",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1842",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119850",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -16258,16 +16026,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1867",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119875",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16310,16 +16074,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1873",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119881",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16538,16 +16298,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1901",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119909",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -16878,16 +16634,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1943",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961119951",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -17458,16 +17210,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120023",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -17598,16 +17346,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2032",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120040",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -17618,16 +17362,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2034",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120042",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -18070,16 +17810,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120098",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -18394,16 +18130,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2130",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120138",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -18462,16 +18194,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2138",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120146",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -18514,16 +18242,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2144",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120152",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -18918,16 +18642,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2194",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120202",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19266,28 +18986,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2237",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120245",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2238",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120246",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19634,16 +19346,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2282",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120290",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19686,16 +19394,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2288",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120296",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -19834,16 +19538,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2306",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120314",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -20350,16 +20050,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2370",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120378",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -20722,16 +20418,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2416",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120424",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -20894,16 +20586,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120445",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -20930,16 +20618,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2441",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120449",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -21422,16 +21106,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2502",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120510",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -22394,16 +22074,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2623",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120631",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -23070,16 +22746,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2707",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120715",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -23090,16 +22762,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2709",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120717",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -23350,16 +23018,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2741",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120749",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -23994,16 +23658,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFindCCNormalENFO::Evaluate",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2821",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120829",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -24998,16 +24658,12 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2946",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120954",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -25034,16 +24690,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsArc",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2950",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120958",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -25094,16 +24746,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen2957",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577091725961120965",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -25443,17 +25091,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 88,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3048,
+  "cases_passed": 3136,
   "cases_total": 3136,
-  "deferred_by_unit": {
-    "curve.curve_p5": 88
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "curve.curve_p6"
 }

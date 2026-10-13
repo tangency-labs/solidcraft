@@ -1,0 +1,43 @@
+name: Progress checklist
+
+# Regenerates plan/PROGRESS.md from plan/modules.toml and open "port: <unit id>" PRs,
+# and commits it to main when it changed. PRs never edit PROGRESS.md themselves.
+on:
+  push:
+    branches: [main]
+    paths: [plan/modules.toml, harness/plan/progress.py]
+  pull_request_target:
+    types: [opened, reopened, closed, edited, ready_for_review, converted_to_draft]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: progress
+  cancel-in-progress: false
+
+jobs:
+  progress:
+    runs-on: ubuntu-latest
+    steps:
+      # Always main: never check out or run PR code with a write token.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Regenerate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 harness/plan/progress.py --prs
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- plan/PROGRESS.md; then echo "unchanged"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plan/PROGRESS.md
+          git commit -m "plan/PROGRESS.md: regenerate [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main

@@ -370,11 +370,25 @@ impl From<SolidError> for Fail {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Obj(i64);
+struct Obj(i64, Option<Extent1d>);
+
+/// A handle of curve `c` (upstream's `SmCurve*`: a curve object with the curve's
+/// natural interval, read by `SmSolution::IsEqual`).
+fn curve_obj(h: i64, c: &Curve) -> Obj {
+    Obj(h, Some(c.natural_interval()))
+}
 
 impl SolutionObject for Obj {
     fn kind(&self) -> ObjectKind {
-        ObjectKind::Other
+        if self.1.is_some() {
+            ObjectKind::Curve
+        } else {
+            ObjectKind::Other
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        self.1
     }
 }
 
@@ -427,7 +441,12 @@ fn put_sol(
             -1.0
         },
         nd(n1, s.nodes[0]),
-        nd(n2, s.nodes[1]),
+        // only for two objects (see the shim)
+        if s.num_objects > 1 {
+            nd(n2, s.nodes[1])
+        } else {
+            -1.0
+        },
         s.start.solution_value,
     ]);
     o.extend(s.start.parameters.iter().take(np));
@@ -447,7 +466,7 @@ fn build_cache(
     h: i64,
 ) -> Result<CurveCache<Obj>, Fail> {
     match cache {
-        None => make_curve_cache::<Obj>(k, c, Some(Obj(h))).map_err(|e| {
+        None => make_curve_cache::<Obj>(k, c, Some(curve_obj(h, c))).map_err(|e| {
             if e.is_unported() {
                 Fail::from(e)
             } else {
@@ -467,7 +486,7 @@ fn build_cache(
                 min_parametric_ratio: ci.ratio,
             };
             let mut cc: CurveCache<Obj> = CurveCache::new(c.clone(), ivl_of(ci.ivl), opts);
-            cc.set_curve_handle(Some(Obj(h)));
+            cc.set_curve_handle(Some(curve_obj(h, c)));
             cc.tessellate(k).map_err(Fail::from)?;
             if cc.tree().is_none() {
                 return Err(Fail::Status(1006.0));
@@ -612,13 +631,13 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 property_value: Some(*val),
                 opt_vectors: &vs,
                 want_comb: *comb,
-                handle: Some(Obj(0)),
+                handle: Some(curve_obj(0, &c)),
             };
             let mut o: Vec<f64> = Vec::new();
             match c.global_property_analysis(&k, &ivl_of(*ivl), prop, *tol, &opts) {
                 Ok(r) => {
                     // the solutions name nodes of the curve's (deterministic) cache tree
-                    let cache = make_curve_cache::<Obj>(&k, &c, Some(Obj(0)))
+                    let cache = make_curve_cache::<Obj>(&k, &c, Some(curve_obj(0, &c)))
                         .map_err(|e| harness(e.to_string()))?;
                     let tree = cache.tree().ok_or_else(|| harness("no tree"))?;
                     let (n1, _) = index_nodes(tree)?;

@@ -77,9 +77,8 @@
 //!   `GetMaxAnalyticDomain` calls `SmCurve::IsClosed`
 //!   ([`crate::curve::curve::p4::is_closed_base`]); `CreateAnalyticCurve` builds
 //!   `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
-//!   (`curve.curve_p5`); `CreateSimpleOffset` calls `SmCurve::IsArc`
-//!   (`curve.curve_p5`); those calls return [`SolidError::Unported`] until the
-//!   units are ported. It approximates an [`OffsetCurve`] with
+//!   (`curve.curve_p5`, [`crate::curve::curve::p5::is_arc_base`]); `CreateSimpleOffset`
+//!   calls `SmCurve::IsArc` too. It approximates an [`OffsetCurve`] with
 //!   `SmCurve::ApproximateCurve` ([`Curve::approximate_curve`]), passing the
 //!   caller's `bOptMatchParameterization` as `bOptCreateAnalytics` and `FALSE` for
 //!   matching, as upstream.
@@ -227,13 +226,15 @@ pub(crate) type ArcData = (Axis2Placement, f64, f64, f64);
 /// `SmBSplineCurve`.
 pub(crate) type IsArcFn<'a> = dyn Fn(&BSplineCurve, u64, f64) -> Result<Option<ArcData>> + 'a;
 
-/// `SmCurve::IsArc(lNumberOfSamplePoints, dTol, ...)` of `curve`.
-fn curve_is_arc(_curve: &BSplineCurve, _num_samples: u64, _tol: f64) -> Result<Option<ArcData>> {
-    // UNPORTED(curve.curve_p5): SmCurve::IsArc
-    Err(SolidError::Unported {
-        upstream: "SmCurve::IsArc",
-        unit: "curve.curve_p5",
-    })
+/// `SmCurve::IsArc(lNumberOfSamplePoints, dTol, ...)` of `curve` (its virtual
+/// `IsDegenerate` is [`BSplineCurve::is_degenerate`]).
+fn curve_is_arc(curve: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+    crate::curve::curve::p5::is_arc_base(
+        curve,
+        |c, tol| c.is_degenerate(tol, None),
+        num_samples,
+        tol,
+    )
 }
 
 /// `SmOffsetCurve(3, curve, ivl, normal, dist)` approximated with
@@ -655,8 +656,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB; [`SolidError::Unported`] for the arc test of rational
-    /// quadratics (`SmCurve::IsArc`, `curve.curve_p5`).
+    /// `SM_ERR` without a NURB; those of the arc test of rational quadratics
+    /// (`SmCurve::IsArc`).
     pub fn create_analytic_curve(
         &self,
         k: &Kernel,

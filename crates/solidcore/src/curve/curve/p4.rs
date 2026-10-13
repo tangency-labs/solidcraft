@@ -1792,11 +1792,15 @@ pub struct CcIntersectEnfo<'a, C1: ?Sized, C2: ?Sized> {
     pub periodicities: Option<Vec<bool>>,
     /// `m_dSquaredTolerance` (not used).
     pub squared_tolerance: f64,
+    /// `m_dSolutionSize`: the gap length of the last evaluation.
+    pub solution_size: f64,
+    /// `m_dScaledZero`: `SM_EFF_ZERO` scaled by the size of the last points.
+    pub scaled_zero: f64,
 }
 
 impl<'a, C1: ?Sized, C2: ?Sized> CcIntersectEnfo<'a, C1, C2> {
     /// `SmCCIntersectENFO(crCurve1, crCurve2, dSquaredTolerance)`: no intervals or
-    /// periodicities.
+    /// periodicities; the base class's solution size `0` and scaled zero `1`.
     #[must_use]
     pub const fn new(curve1: &'a C1, curve2: &'a C2, squared_tolerance: f64) -> Self {
         Self {
@@ -1805,6 +1809,8 @@ impl<'a, C1: ?Sized, C2: ?Sized> CcIntersectEnfo<'a, C1, C2> {
             intervals: None,
             periodicities: None,
             squared_tolerance,
+            solution_size: 0.0,
+            scaled_zero: 1.0,
         }
     }
 

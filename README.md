@@ -22,10 +22,10 @@ C++ to `1e-9` relative with identical topology, verified unit by unit.
 
 ## Status
 
-Early. The workspace, foundation types (`math`, `error`, `kernel`, `topology`) and the
-C++ comparison harness are in place; algorithm modules are being ported unit by unit.
-Per-unit state lives in [`plan/modules.toml`](plan/modules.toml) and the summary in
-[`plan/STATUS.md`](plan/STATUS.md).
+About a third ported and verified against the C++: the math, NURBS and curve layers,
+with surfaces and topology under way. **Checklist: [`plan/PROGRESS.md`](plan/PROGRESS.md)**
+(updated automatically). Notes and handoff: [`plan/STATUS.md`](plan/STATUS.md).
+Nothing is usable end to end yet (no primitives, booleans or fillets).
 
 ## Layout
 
@@ -83,8 +83,14 @@ links it.
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md): rules, code style, and the claim/port/difftest/merge
-workflow.
+Contributions are pull requests, one per port unit, and AI agents are welcome:
+
+1. Pick a unit under "Ready to claim now" in [`plan/PROGRESS.md`](plan/PROGRESS.md).
+2. Claim it by opening a draft PR titled `port: <unit id>` (lowest-numbered PR wins).
+3. Port it, prove it with difftest against the C++ reference, mark the PR ready.
+
+The full rules, style and step-by-step workflow are in [AGENTS.md](AGENTS.md) (point your
+agent at it).
 
 ## Licence
 

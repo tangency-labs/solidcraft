@@ -54,16 +54,19 @@
 //! - **Recursion.** `GlobalCoincidenceChecker` splits closed and half closed curves
 //!   recursively; past [`MAX_COINCIDENCE_DEPTH`] nested splits it fails with
 //!   `InvalidInput` (upstream recurses without bound).
-//! - **Unported callees.** `SmCurve::LocalPropertyAnalysis` and
-//!   `sm_IsPointSolutionAcrossClosedSeamBoundary` (unit `curve.curve_p5`, also behind
-//!   `LocalCurveSolve`'s `SmFindCCNormalENFO::Evaluate`) return
-//!   [`SolidError::Unported`].
+//! - **Seam test.** `sm_IsPointSolutionAcrossClosedSeamBoundary` (unit
+//!   `curve.curve_p5`) is told whether the solution's first object is its `this`
+//!   curve: the split solutions name `[this, other]`, so it is when the coincidence
+//!   check split the other curve, or `this` and the other are the same curve.
 
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::p2::{
     at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
 };
-use crate::curve::curve::p3::{local_property_analysis, PointSolveOptions};
+use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p5::{
+    is_point_solution_across_closed_seam_boundary, local_property_analysis,
+};
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -112,22 +115,6 @@ impl SolutionObject for CurveHandle {
     }
 }
 
-/// `sm_IsPointSolutionAcrossClosedSeamBoundary(rSol, crThisCurve, crInterval,
-/// crOtherCurve, crOtherInterval)`.
-fn is_point_solution_across_closed_seam_boundary<O: Copy>(
-    _sol: &Solution<O>,
-    _this: &Curve,
-    _interval: &Extent1d,
-    _other: &Curve,
-    _other_interval: &Extent1d,
-) -> Result<bool> {
-    // UNPORTED(curve.curve_p5): sm_IsPointSolutionAcrossClosedSeamBoundary
-    Err(SolidError::unported(
-        "sm_IsPointSolutionAcrossClosedSeamBoundary",
-        "curve.curve_p5",
-    ))
-}
-
 // ---- CalculateBoundingBox --------------------------------------------------------------
 
 /// The base-class `SmCurve::CalculateBoundingBox` of `curve` over `interval`: the
@@ -141,8 +128,7 @@ fn is_point_solution_across_closed_seam_boundary<O: Copy>(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from `LocalPropertyAnalysis` (unit `curve.curve_p5`) and
-/// the base `Tessellate` (unit `curve.curve_p1`); those of `IsDegenerate` and
+/// Those of `LocalPropertyAnalysis` and the base `Tessellate`; those of `IsDegenerate` and
 /// `ApproximateLength`; `InvalidInput` where upstream would read past the samples.
 pub fn calculate_bounding_box_base(
     curve: &Curve,
@@ -651,7 +637,9 @@ impl Curve {
     /// `GlobalPointSolveSTEP`: the line, hyperbola, ellipse and parabola overrides;
     /// the base passes the call to [`Curve::global_point_solve`]. `this` names the
     /// curve in the solutions (the hyperbola's, ellipse's and parabola's name no
-    /// object, see their units).
+    /// object, see their units); `analytic` names the analytic replacement the base
+    /// solve may answer from ([`GlobalPointSolveOptions::analytic_handle`]: upstream's
+    /// pointer to the cache's analytic curve).
     ///
     /// # Errors
     ///
@@ -668,6 +656,7 @@ impl Curve {
         vectors: Option<&[Vec3]>,
         requested: SolutionRequested,
         this: Option<O>,
+        analytic: Option<O>,
     ) -> Result<Vec<Solution<O>>> {
         let owner = self.owner();
         match self.kind_mut() {
@@ -752,7 +741,7 @@ impl Curve {
                     target_distance,
                     opt_vectors: vectors,
                     handle: this,
-                    ..GlobalPointSolveOptions::default()
+                    analytic_handle: analytic,
                 };
                 Ok(self
                     .global_point_solve(
@@ -781,9 +770,7 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// Those of the evaluations and local solves; [`SolidError::Unported`] for the
-    /// global solve (unit `curve.curve_p1`) and the curve/curve maximisation
-    /// (`SmFindCCNormalENFO::Evaluate`, unit `curve.curve_p5`).
+    /// Those of the evaluations, the global solve and the local solves.
     pub fn curve_max_distance_between(
         &self,
         k: &Kernel,
@@ -1266,9 +1253,8 @@ impl Curve {
     /// # Errors
     ///
     /// Those of the evaluations, box, closure, degeneracy and drop computations;
-    /// `InvalidInput` past [`MAX_COINCIDENCE_DEPTH`] nested splits;
-    /// [`SolidError::Unported`] for the seam test of split solutions (unit
-    /// `curve.curve_p5`).
+    /// `InvalidInput` past [`MAX_COINCIDENCE_DEPTH`] nested splits; those of the seam
+    /// test of split solutions.
     pub fn global_coincidence_checker<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1653,6 +1639,8 @@ impl Curve {
         for part in parts {
             for sol in part {
                 // Skip Closed Curve Point Solutions using wrong endPoint
+                // (the solutions' objects are [this, other]; upstream compares
+                // the object pointers with the seam test's `this` curve)
                 let across = if split_this {
                     is_point_solution_across_closed_seam_boundary(
                         sol,
@@ -1660,6 +1648,7 @@ impl Curve {
                         other_interval,
                         self,
                         interval,
+                        core::ptr::eq(other, self),
                     )?
                 } else {
                     is_point_solution_across_closed_seam_boundary(
@@ -1668,6 +1657,7 @@ impl Curve {
                         interval,
                         other,
                         other_interval,
+                        true,
                     )?
                 };
                 if across {

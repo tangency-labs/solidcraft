@@ -173,12 +173,19 @@ fn surface_evaluate_2nd_derivatives(
 /// only ported surface kind is the B-spline; the other types are unported in the
 /// reader).
 fn surface_read_from_db(
+    k: &Kernel,
     surface_type: i64,
     db: &mut DatabaseReader,
     version: u64,
 ) -> Result<BSplineSurface> {
-    match Surface::read_from_db(surface_type, db, version)?.into_kind() {
+    match Surface::read_from_db(k, surface_type, db, version)?.into_kind() {
         SurfaceKind::BSpline(s) => Ok(s),
+        // UNPORTED(surface.surface_p1): SmSurface dispatch for a non-B-spline surface
+        // (the curve holds an SmBSplineSurface until the SmSurface virtuals are ported)
+        SurfaceKind::CurveBounded(_) => Err(SolidError::unported(
+            "SmSurface virtuals of an SmCurveBoundedSurface",
+            "surface.surface_p1",
+        )),
     }
 }
 
@@ -1627,7 +1634,7 @@ impl CrvOnSurf {
             .read_type(false)?
             .type_code
             .ok_or_else(|| SolidError::invalid_input(OP_READ, "surface type not read"))?;
-        let surface = surface_read_from_db(surface_type, db, version)?;
+        let surface = surface_read_from_db(k, surface_type, db, version)?;
 
         // when appropriate - breaks
         let mut breaks = Vec::new();
@@ -1692,6 +1699,10 @@ impl CurveEvaluate for CrvOnSurf {
 
     fn evaluate_point(&self, t: f64) -> Result<Point3> {
         Self::evaluate_point(self, t)
+    }
+
+    fn as_crv_on_surf(&self) -> Option<&CrvOnSurf> {
+        Some(self)
     }
 }
 

@@ -1076,7 +1076,8 @@ fn dump_bss(o: &mut Vec<f64>, s: &BSplineSurface) {
 fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
     match s.map(Surface::kind) {
         Some(sp2::SurfaceKind::BSpline(b)) => dump_bss(o, b),
-        None => o.push(0.0),
+        // `put_state` of a surface that is not a B-spline
+        Some(sp2::SurfaceKind::CurveBounded(_)) | None => o.push(0.0),
     }
 }
 
@@ -1972,7 +1973,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
             let mut r = DatabaseReader::new();
             r.open_for_read(bytes, if *binary { FileType::Binary } else { FileType::Ascii });
             record(|o| {
-                let s = Surface::read_from_db(*ty, &mut r, *version)?;
+                let s = Surface::read_from_db(&Kernel::default(), *ty, &mut r, *version)?;
                 dump_state(o, Some(&s));
                 Ok(())
             })

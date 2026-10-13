@@ -42,9 +42,7 @@
 //!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`),
 //!   `SmSurface::EvaluateNormal` (`surface.surface_p7`),
 //!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`),
-//!   `SmSurface::Evaluate1stDerivatives` (`surface.surface_p1`) and the
-//!   intersection equations of `SmCurve::LocalCurveIntersect`
-//!   (`SmCCIntersectENFO::Evaluate`, `curve.curve_p5`). Upstream ignores the status of
+//!   `SmSurface::Evaluate1stDerivatives` (`surface.surface_p1`). Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
 //! - Status values upstream ignores stay ignored (`EditParameterization` before
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,

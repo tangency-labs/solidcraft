@@ -60,9 +60,8 @@
 //!   (`SmCurve::EvaluateContinuity`);
 //!   `TrimGap` intersects with `SmCurve::GlobalCurveIntersect` (`curve.curve_p8`,
 //!   whose status upstream ignores: a failure finds no intersection here, upstream
-//!   keeps the solutions found before it; its Newton intersections reach unit
-//!   `curve.curve_p5`); `AssertValid` calls `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`, whose
-//!   span solves reach `SmCurve::LocalPropertyAnalysis` of `curve.curve_p5`); its
+//!   keeps the solutions found before it); `AssertValid` calls
+//!   `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`); its
 //!   `SmCurve::AssertValid` is [`crate::curve::curve::p4::assert_valid_base`] for a
 //!   curve without owner. Those calls return
 //!   [`SolidError::Unported`] until the units are ported. `SmTol::IsDegenerate(this)`
@@ -830,7 +829,7 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// [`SolidError::Unported`] when the intersection of the extended curves reaches
-    /// an unported unit (`curve.curve_p5`); `InvalidInput` when an
+    /// an unported unit; `InvalidInput` when an
     /// end point cannot be compared (NaN) or an extension is missing (upstream crashes).
     pub fn trim_gap(
         &mut self,
@@ -1016,9 +1015,7 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// Past the knot checks [`SolidError::Unported`] from
-    /// `SmCurve::GlobalPropertyAnalysis` (its span solves reach
-    /// `SmCurve::LocalPropertyAnalysis`, `curve.curve_p5`). `k` gives the system zone tolerance of
+    /// Past the knot checks those of `SmCurve::GlobalPropertyAnalysis`. `k` gives the system zone tolerance of
     /// `SmTol::IsDegenerate(this)`.
     pub fn assert_valid(
         &self,

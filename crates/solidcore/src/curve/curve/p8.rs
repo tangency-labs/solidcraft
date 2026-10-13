@@ -191,8 +191,7 @@ impl Curve {
     /// `SM_ERR_NULL_POINTER` when a cache cannot be built or a solution names an
     /// unknown handle; those of the analytic intersections, the global solves, the
     /// coincidence check, the drops, the gap measure and the evaluations upstream
-    /// checks; [`SolidError::Unported`] from unported callees (unit
-    /// `curve.curve_p5`).
+    /// checks; [`SolidError::Unported`] from unported callees.
     pub fn global_curve_intersect<O: SolutionObject>(
         &self,
         k: &Kernel,

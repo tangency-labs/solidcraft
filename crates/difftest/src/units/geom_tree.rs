@@ -358,6 +358,7 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
                 node_class: node_class(d.class),
                 face: obj(d.face),
                 surface: obj(d.surface),
+                slot: None,
             }),
             ..TreeNode::new()
         });

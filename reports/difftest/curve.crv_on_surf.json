@@ -1122,16 +1122,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0039",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7770047198091880901",
-      "values_compared": 0
+      "values_compared": 1297
     },
     {
       "max_rel_err": 0.0,
@@ -4167,8 +4163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
+        "symbol": "SmSurface::EvaluateNormal",
+        "unit": "surface.surface_p7"
       },
       "max_rel_err": 0.0,
       "name": "gen0378",
@@ -8014,16 +8010,12 @@
       "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0812",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7770047198091881674",
-      "values_compared": 0
+      "values_compared": 366
     },
     {
       "max_rel_err": 0.0,
@@ -10718,16 +10710,12 @@
       "values_compared": 525
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1115",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7770047198091881977",
-      "values_compared": 0
+      "values_compared": 158
     },
     {
       "deferred": {
@@ -15378,16 +15366,12 @@
       "values_compared": 147
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::LocalPropertyAnalysis",
-        "unit": "curve.curve_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen1633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7770047198091882495",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -18739,15 +18723,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 496,
+  "cases_deferred": 492,
   "cases_failed": 0,
-  "cases_passed": 1598,
+  "cases_passed": 1602,
   "cases_total": 2094,
   "deferred_by_unit": {
-    "curve.curve_p5": 5,
     "intersect.curve_class_p4": 294,
     "surface.surface_p1": 50,
-    "surface.surface_p7": 147
+    "surface.surface_p7": 148
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -63,9 +63,10 @@
 //!
 //! Deviations:
 //! - **Object model.** `SmSurface` is not abstract upstream, but every ported surface
-//!   is a derived class: the [`SurfaceKind`] variants. The only ported kind is
-//!   [`BSplineSurface`]; the analytic and generated surfaces (`SmPlane`, `SmCone`,
-//!   ...) join the enum in their own units. Each virtual method is one `match`: a
+//!   is a derived class: the [`SurfaceKind`] variants. The ported kinds are
+//!   [`BSplineSurface`] and [`CurveBoundedSurface`] (unit
+//!   `surface.curve_bounded_surface`); the analytic and generated surfaces (`SmPlane`,
+//!   `SmCone`, ...) join the enum in their own units. Each virtual method is one `match`: a
 //!   kind that overrides it calls its own method, the others run the base-class body
 //!   ported here. The base bodies are also public as `base_*` functions (they are
 //!   what a kind without an override runs, and what difftest compares with an
@@ -89,9 +90,10 @@
 //!   (`intersect.surface_intersector_p1`); `CurveOnClassify` needs
 //!   `SmCurveClassification` (`intersect.curve_class_p*`); `CreatePlaneWith3DCurves`
 //!   needs `SmTrimmingTools` (`topology.trimming_tools`); `smsurf_GetSurfaceCache`
-//!   and `sm_GetOriginalSurface` need the surface caches (`surface.surface_cache_p1`,
-//!   `geom.a_object`'s cache manager has no surface caches yet); the polar box test of
-//!   `sm_CsArePerpenDisjoint` needs `SmBezierPatch` (`surface.surface_cache_p1`);
+//!   needs the cache store to make surface caches (`SmSurface::CacheMakeOrValidate`,
+//!   `surface.surface_p1`); the polar box test of `sm_CsArePerpenDisjoint` needs the
+//!   `SmBezierPatch` of a tree node, which the tree reaches once the tree construction
+//!   (`surface.surface_cache_p3`) hands the cache's patch data over;
 //!   `ReadFromDB` of the analytic and generated surfaces needs their units. Those
 //!   calls return [`SolidError::Unported`]. The `IntersectWithPlane` default takes
 //!   the plane as an opaque argument until `SmPlane` is ported.
@@ -152,7 +154,7 @@ use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::polynomial::solve_quadratic;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject};
 use crate::geom::tol::{are_same, eff_zero_param, scaled_zero2, tol3d};
-use crate::geom::tree::{AuxDataType, Tree, TreeNode};
+use crate::geom::tree::{AuxDataType, Tree, TreeNode, TreeOwner};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -162,6 +164,7 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, LocationType, SurfParamType
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType, SkinnedSurfaceOptions};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
+use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::topology::database_io::DatabaseReader;
 
 // ---- type codes ---------------------------------------------------------------------
@@ -227,6 +230,8 @@ const fn base_err() -> SolidError {
 pub enum SurfaceKind {
     /// `SmBSplineSurface`.
     BSpline(BSplineSurface),
+    /// `SmCurveBoundedSurface`.
+    CurveBounded(CurveBoundedSurface),
 }
 
 /// A surface (`SmSurface`): its concrete kind and the object owning it (`m_pOwner`:
@@ -395,6 +400,7 @@ impl Surface {
     pub const fn type_code(&self) -> i64 {
         match &self.kind {
             SurfaceKind::BSpline(_) => BSplineSurface::TYPE,
+            SurfaceKind::CurveBounded(s) => s.type_code(),
         }
     }
 
@@ -403,6 +409,7 @@ impl Surface {
     pub const fn type_string(&self) -> &'static str {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.type_string(),
+            SurfaceKind::CurveBounded(s) => s.type_string(),
         }
     }
 
@@ -411,6 +418,7 @@ impl Surface {
     pub const fn class_string(&self) -> &'static str {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.class_string(),
+            SurfaceKind::CurveBounded(s) => s.class_string(),
         }
     }
 
@@ -422,6 +430,7 @@ impl Surface {
     pub fn is_kind_of(&self, t: i64) -> Result<bool> {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.is_kind_of(t),
+            SurfaceKind::CurveBounded(s) => Ok(s.is_kind_of(t)),
         }
     }
 
@@ -435,6 +444,7 @@ impl Surface {
     pub fn copy(&self) -> Result<Self> {
         match &self.kind {
             SurfaceKind::BSpline(s) => Ok(Self::from(s.copy())),
+            SurfaceKind::CurveBounded(_) => base_copy(),
         }
     }
 
@@ -446,6 +456,7 @@ impl Surface {
     pub fn copy_and_add_analytics(&self) -> Result<Self> {
         match &self.kind {
             SurfaceKind::BSpline(s) => Ok(Self::from(s.copy_and_add_analytics()?)),
+            SurfaceKind::CurveBounded(_) => base_copy_and_add_analytics(),
         }
     }
 
@@ -466,6 +477,7 @@ impl Surface {
     ) -> Result<Vec<Vec<Vec3>>> {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.evaluate(uv, highest_u_deriv, highest_v_deriv, flags),
+            SurfaceKind::CurveBounded(s) => s.evaluate(uv, highest_u_deriv, highest_v_deriv, flags),
         }
     }
 
@@ -477,6 +489,7 @@ impl Surface {
     pub fn evaluate_point(&self, uv: Point2) -> Result<Point3> {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.evaluate_point(uv),
+            SurfaceKind::CurveBounded(s) => s.evaluate_point(uv),
         }
     }
 
@@ -487,6 +500,7 @@ impl Surface {
     pub fn natural_uv_domain(&self) -> Extent2d {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.natural_uv_domain(),
+            SurfaceKind::CurveBounded(s) => s.natural_uv_domain(),
         }
     }
 
@@ -502,6 +516,7 @@ impl Surface {
     pub fn degree(&self, param: SurfParamType) -> usize {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.degree(param),
+            SurfaceKind::CurveBounded(_) => base_degree(),
         }
     }
 
@@ -511,6 +526,7 @@ impl Surface {
     pub fn number_control_points(&self, param: SurfParamType) -> usize {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.number_control_points(param),
+            SurfaceKind::CurveBounded(_) => base_number_control_points(),
         }
     }
 
@@ -522,6 +538,7 @@ impl Surface {
     pub fn max_analytic_domain(&self) -> Result<Extent2d> {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.max_analytic_domain(),
+            SurfaceKind::CurveBounded(_) => Ok(base_max_analytic_domain()),
         }
     }
 
@@ -530,6 +547,7 @@ impl Surface {
     pub fn is_bilinear(&self) -> bool {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.is_bilinear(),
+            SurfaceKind::CurveBounded(_) => base_is_bilinear(),
         }
     }
 
@@ -541,6 +559,7 @@ impl Surface {
     pub fn is_parallel_to_vector(&self, vector: Vec3) -> Result<bool> {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.is_parallel_to_vector(vector),
+            SurfaceKind::CurveBounded(_) => Ok(base_is_parallel_to_vector()),
         }
     }
 
@@ -557,6 +576,7 @@ impl Surface {
     ) -> Result<(Vec<f64>, Vec<usize>)> {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.knots(param, ivl),
+            SurfaceKind::CurveBounded(_) => base_knots(),
         }
     }
 
@@ -593,6 +613,7 @@ impl Surface {
             SurfaceKind::BSpline(s) => {
                 s.step_inversion(anal_domain, point_on_surf, tol_3d, uv_guess)
             }
+            SurfaceKind::CurveBounded(_) => base_step_inversion(),
         }
     }
 
@@ -643,6 +664,7 @@ impl Surface {
     pub fn adjust_step_uv_domain(&mut self, new_step_uv_domain: &Extent2d) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.adjust_step_uv_domain(new_step_uv_domain),
+            SurfaceKind::CurveBounded(_) => base_adjust_step_uv_domain(),
         }
     }
 
@@ -654,6 +676,7 @@ impl Surface {
     pub fn reverse(&mut self, param: SurfParamType) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reverse(param),
+            SurfaceKind::CurveBounded(_) => base_edit(),
         }
     }
 
@@ -665,6 +688,7 @@ impl Surface {
     pub fn reparameterize(&mut self, new_domain: &Extent2d) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reparameterize(new_domain),
+            SurfaceKind::CurveBounded(_) => base_edit(),
         }
     }
 
@@ -676,6 +700,7 @@ impl Surface {
     pub fn swap_uv(&mut self) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.swap_uv(),
+            SurfaceKind::CurveBounded(_) => base_edit(),
         }
     }
 
@@ -687,6 +712,7 @@ impl Surface {
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.transform(rotate_n_move, scale),
+            SurfaceKind::CurveBounded(_) => base_edit(),
         }
     }
 
@@ -698,6 +724,7 @@ impl Surface {
     pub fn trim_with_domain(&mut self, trim_domain: &mut Extent2d) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.trim_with_domain(trim_domain),
+            SurfaceKind::CurveBounded(_) => base_edit(),
         }
     }
 
@@ -715,6 +742,7 @@ impl Surface {
                 let (l, r) = s.split_at(param, surf_param)?;
                 Ok((Self::from(l), Self::from(r)))
             }
+            SurfaceKind::CurveBounded(_) => base_split_at(),
         }
     }
 
@@ -732,6 +760,7 @@ impl Surface {
             SurfaceKind::BSpline(s) => Ok(Self::from(
                 s.create_extended_surface(dist, extension_continuity)?,
             )),
+            SurfaceKind::CurveBounded(_) => base_create_extended_surface(),
         }
     }
 
@@ -753,6 +782,7 @@ impl Surface {
                 dist,
                 extension_continuity,
             )?)),
+            SurfaceKind::CurveBounded(_) => base_create_extended_surface(),
         }
     }
 
@@ -765,7 +795,12 @@ impl Surface {
     ///
     /// `SM_ERR` for a type that is not a surface; [`SolidError::Unported`] for the
     /// surface types not ported yet; those of the type's reader.
-    pub fn read_from_db(surface_type: i64, db: &mut DatabaseReader, version: u64) -> Result<Self> {
+    pub fn read_from_db(
+        k: &Kernel,
+        surface_type: i64,
+        db: &mut DatabaseReader,
+        version: u64,
+    ) -> Result<Self> {
         // pass the call along to the appropriate derived type
         match surface_type {
             B_SPLINE_SURFACE_TYPE => Ok(Self::from(BSplineSurface::read_from_db(db, version)?)),
@@ -801,11 +836,9 @@ impl Surface {
             )),
             // UNPORTED(surface.torus): SmTorus::ReadFromDB
             TORUS_TYPE => Err(SolidError::unported("SmTorus::ReadFromDB", "surface.torus")),
-            // UNPORTED(surface.curve_bounded_surface): SmCurveBoundedSurface::ReadFromDB
-            CURVE_BOUNDED_SURFACE_TYPE => Err(SolidError::unported(
-                "SmCurveBoundedSurface::ReadFromDB",
-                "surface.curve_bounded_surface",
-            )),
+            CURVE_BOUNDED_SURFACE_TYPE => Ok(Self::from(CurveBoundedSurface::read_from_db(
+                k, db, version,
+            )?)),
             // UNPORTED(surface.offset_surface): SmOffsetSurface::ReadFromDB
             OFFSET_SURFACE_TYPE => Err(SolidError::unported(
                 "SmOffsetSurface::ReadFromDB",
@@ -1242,28 +1275,34 @@ pub fn notify<T>(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`]: the surface caches (`surface.surface_cache_p1`).
+/// [`SolidError::Unported`]: the cache store makes surface caches through
+/// `SmSurface::CacheMakeOrValidate` (`surface.surface_p1`).
 pub fn surface_cache(_surface: &Surface) -> Result<a_object::CacheId> {
-    // UNPORTED(surface.surface_cache_p1): SmCacheMgr::GetOrCreateObjectCache(SM_OC_TRIMSRF / SM_OC_SURFACE)
+    // SmCacheMgr::GetOrCreateObjectCache(SM_OC_TRIMSRF / SM_OC_SURFACE) makes the cache
+    // through SmSurface::CacheMakeOrValidate; the cache store holds no surface caches
+    // until it is ported.
+    // UNPORTED(surface.surface_p1): SmSurface::CacheMakeOrValidate
     Err(SolidError::unported(
-        "SmCacheMgr::GetOrCreateObjectCache",
-        "surface.surface_cache_p1",
+        "SmSurface::CacheMakeOrValidate",
+        "surface.surface_p1",
     ))
 }
 
 /// `sm_GetOriginalSurface`: the surface of the surface cache owning the tree of
-/// `node`.
+/// `node` (its handle, `SmSurfaceCache::GetSurface`).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`]: `SmSurfaceCache::GetSurface`
-/// (`surface.surface_cache_p1`).
-pub fn original_surface<O>(_tree: &Tree<O>, _node: &TreeNode<O>) -> Result<O> {
-    // UNPORTED(surface.surface_cache_p1): SmSurfaceCache::GetSurface
-    Err(SolidError::unported(
-        "SmSurfaceCache::GetSurface",
-        "surface.surface_cache_p1",
-    ))
+/// `SM_ERR` when the tree is not owned by a surface cache or the cache has no
+/// surface handle (upstream signals and reads through the owner anyway).
+pub fn original_surface<O: Copy + PartialEq>(tree: &Tree<O>, _node: &TreeNode<O>) -> Result<O> {
+    const OP: &str = "surface::surface::p2::original_surface";
+    match tree.owner() {
+        Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => {
+            tree.owner_object()?.ok_or(SolidError::sm_err(OP))
+        }
+        _ => Err(SolidError::sm_err(OP)),
+    }
 }
 
 // ---- SmSurfaceEval ----------------------------------------------------------------------
@@ -3233,7 +3272,8 @@ pub fn cc_local_solve<O: SolutionObject>(
 /// # Errors
 ///
 /// Those of `SmExtent3d::ComputeConeBoundTo`; [`SolidError::Unported`] once the
-/// patch's polar box is needed (`SmBezierPatch`, `surface.surface_cache_p1`).
+/// patch's polar box is needed (`SmBezierPatch` of a tree node,
+/// `surface.surface_cache_p3`).
 pub fn cs_are_perpen_disjoint<O>(
     curve_tree: &Tree<O>,
     curve_node: &TreeNode<O>,
@@ -3248,13 +3288,16 @@ pub fn cs_are_perpen_disjoint<O>(
             return Ok(false);
         }
 
-        // UNPORTED(surface.surface_cache_p1): SmBezierPatch::GetPolarBox
+        // SmBezierPatch::GetPolarBox is SurfaceCache::polar_box, but the patch data
+        // lives in the surface cache, which the tree reaches once the tree
+        // construction hands it over.
+        // UNPORTED(surface.surface_cache_p3): SmBezierPatch::GetPolarBox
         // (then IsDisjointWithCone, and for a curve span node the chord cone test
         // smgu_ConesAreDisjointPerpen with the span's turning angle plus 3 degrees)
         let _ = (curve_tree, cone_vec);
         return Err(SolidError::unported(
             "SmBezierPatch::GetPolarBox",
-            "surface.surface_cache_p1",
+            "surface.surface_cache_p3",
         ));
     }
 
@@ -3615,11 +3658,13 @@ mod tests {
     #[test]
     fn read_from_db_unported_types() {
         let mut db = DatabaseReader::default();
-        let e = Surface::read_from_db(PLANE_TYPE, &mut db, 1).unwrap_err();
+        let e = Surface::read_from_db(&Kernel::default(), PLANE_TYPE, &mut db, 1).unwrap_err();
         assert!(e.is_unported());
-        assert!(!Surface::read_from_db(12345, &mut db, 1)
-            .unwrap_err()
-            .is_unported());
+        assert!(
+            !Surface::read_from_db(&Kernel::default(), 12345, &mut db, 1)
+                .unwrap_err()
+                .is_unported()
+        );
     }
 
     #[test]

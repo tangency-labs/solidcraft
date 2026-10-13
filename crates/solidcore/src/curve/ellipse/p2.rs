@@ -76,8 +76,8 @@
 //! - **Statuses.** Calls whose status upstream ignores keep upstream's values, except
 //!   that [`SolidError::Unported`] is always propagated. Upstream outputs written
 //!   before a failing status (partial solution arrays) are not returned.
-//! - **Back-edges.** `SmCurve::LocalPropertyAnalysis` (`curve.curve_p5`) returns
-//!   [`SolidError::Unported`]. `SmCurve::GlobalPointSolve` and
+//! - **Back-edges.** `SmCurve::LocalPropertyAnalysis` (`curve.curve_p5`) runs on the
+//!   ellipse's B-spline base (the ellipse evaluates through it). `SmCurve::GlobalPointSolve` and
 //!   `SmCurve::GlobalCoincidenceChecker` of the ellipse are
 //!   [`curve_base::Curve::global_point_solve`] and
 //!   [`curve_base::Curve::global_coincidence_checker`] on copies of the ellipses as
@@ -140,16 +140,23 @@ fn table(v: &[f64], i: usize, operation: &'static str) -> Result<f64> {
 /// &Point, bFoundAnswer, sSolution)` of `curve`: whether an answer was found and its
 /// parameter.
 fn local_point_inversion(
-    _curve: &Ellipse,
-    _interval: &Extent1d,
-    _guess: f64,
-    _point: Point3,
+    curve: &Ellipse,
+    interval: &Extent1d,
+    guess: f64,
+    point: Point3,
 ) -> Result<(bool, f64)> {
-    // UNPORTED(curve.curve_p5): SmCurve::LocalPropertyAnalysis
-    Err(SolidError::Unported {
-        upstream: "SmCurve::LocalPropertyAnalysis",
-        unit: "curve.curve_p5",
-    })
+    // (the ellipse evaluates through its NURB)
+    let mut solution: Solution<()> = Solution::new();
+    let found = crate::curve::curve::p5::local_property_analysis(
+        curve.base(),
+        interval,
+        curve_base::CurvePropertyType::PointInversion,
+        guess,
+        None,
+        &[point],
+        &mut solution,
+    )?;
+    Ok((found, solution.start.param(0)?))
 }
 
 /// `SmCurve::GlobalPointSolve(Interval, SM_SO_INTERSECT, Point, dTol, NULL, NULL,
@@ -540,13 +547,47 @@ impl PolarConversion {
     ///
     /// `InvalidInput` for a table without curve or knots (upstream dereferences
     /// them); the errors of [`Self::angle_param_to_nurb_param`] and of the
-    /// evaluations; [`SolidError::Unported`] from the point inversion
-    /// (`SmCurve::LocalPropertyAnalysis`).
+    /// evaluations and of the point inversion (`SmCurve::LocalPropertyAnalysis`).
     pub fn convert_to_nurbs_parameter(
         &self,
         curve: &Ellipse,
         polar_param_deg: f64,
+        zone_tol: f64,
+    ) -> Result<(f64, bool)> {
+        let mut written = None;
+        self.convert_to_nurbs_parameter_into(curve, polar_param_deg, zone_tol, &mut written)
+    }
+
+    /// [`Self::convert_to_nurbs_parameter`] for a caller that ignores its status: the
+    /// parameter, or after a failure the value upstream had already written to
+    /// `rdNurbsParameter` (the polar table's guess; `None` when nothing was written,
+    /// an uninitialised value upstream).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] only.
+    pub fn convert_to_nurbs_parameter_or_written(
+        &self,
+        curve: &Ellipse,
+        polar_param_deg: f64,
+        zone_tol: f64,
+    ) -> Result<Option<f64>> {
+        let mut written = None;
+        match self.convert_to_nurbs_parameter_into(curve, polar_param_deg, zone_tol, &mut written) {
+            Ok((t, _)) => Ok(Some(t)),
+            Err(e) if e.is_unported() => Err(e),
+            Err(_) => Ok(written),
+        }
+    }
+
+    /// The body of [`Self::convert_to_nurbs_parameter`]; `written` follows upstream's
+    /// writes to the out-parameter `rdNurbsParameter`.
+    fn convert_to_nurbs_parameter_into(
+        &self,
+        curve: &Ellipse,
+        polar_param_deg: f64,
         _zone_tol: f64,
+        written: &mut Option<f64>,
     ) -> Result<(f64, bool)> {
         if !self.has_curve {
             return Err(SolidError::InvalidInput {
@@ -601,6 +642,7 @@ impl PolarConversion {
             // check first angle boundary
             if are_same_to_tol(polar_deg, first_angle, angle_tol) {
                 nurbs_guess = first_knot;
+                *written = Some(nurbs_guess);
             } else {
                 // for every arc interval
                 for ii in 1..self.angles.len() {
@@ -609,6 +651,7 @@ impl PolarConversion {
                     // check interval other bound
                     if are_same_to_tol(polar_deg, angle, angle_tol) {
                         nurbs_guess = table(&self.natural_knots, ii, OP_TO_NURBS)?;
+                        *written = Some(nurbs_guess);
                         break;
                     }
 
@@ -622,6 +665,7 @@ impl PolarConversion {
                             angle,
                             polar_deg,
                         )?;
+                        *written = Some(nurbs_guess);
                         break;
                     }
                 }
@@ -650,6 +694,7 @@ impl PolarConversion {
             }
             param
         };
+        *written = Some(nurbs_param);
         Ok((nurbs_param, true))
     }
 }

@@ -54,8 +54,8 @@
 //!   `ReadFromDB` the status of the B-spline base reader (the curve then keeps the
 //!   empty base of `SmHyperbola()`); here too, except [`SolidError::Unported`],
 //!   which always propagates. `STEPInversion` ignores the status of
-//!   `SmCurve::EvaluateSTEPPoint` (unit `curve.curve_p5`), which returns
-//!   [`SolidError::Unported`] until that unit is ported.
+//!   `SmCurve::EvaluateSTEPPoint` (unit `curve.curve_p5`: `EvaluateSTEP` without
+//!   derivatives; a failure leaves the point [`Vec3::UNDEF`]).
 //! - **Global solve.** `GlobalPointSolveSTEP` runs `SmCurve::GlobalPointSolve` on a
 //!   [`Curve`] made of a copy of the hyperbola (taking the [`Kernel`] for the
 //!   curve cache); its solutions name no object.
@@ -68,7 +68,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{self as curve_base, at, HYPERBOLA_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::assert_array::labels::{SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -356,8 +356,7 @@ impl Hyperbola {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] when `classify` needs the curve point
-    /// (`SmCurve::EvaluateSTEPPoint`, unit `curve.curve_p5`).
+    /// None in practice: the STEP evaluation's status is ignored, as upstream.
     pub fn step_inversion(
         &self,
         point: Point3,
@@ -385,12 +384,20 @@ impl Hyperbola {
             };
 
             // check distance to point
+            let mut l = l;
             if l == CurveLocation::Interior {
-                // UNPORTED(curve.curve_p5): SmCurve::EvaluateSTEPPoint
-                return Err(SolidError::Unported {
-                    upstream: "SmCurve::EvaluateSTEPPoint",
-                    unit: "curve.curve_p5",
-                });
+                // SmCurve::EvaluateSTEPPoint: EvaluateSTEP without derivatives
+                // (status ignored)
+                let point_at = ignored(self.evaluate_step(param, 0))?
+                    .and_then(|v| v.first().copied())
+                    .unwrap_or(Vec3::UNDEF);
+                let dist = point_at.distance(point);
+                let scaled_zero = EFF_ZERO * (1.0 + point_at.max_dimension());
+
+                // when dist is too large - point is not on the line
+                if dist > scaled_zero {
+                    l = CurveLocation::Exterior;
+                }
             }
             loc = Some(l);
         }
@@ -848,10 +855,9 @@ mod tests {
     fn unported_paths_and_step_solve() {
         let mut h = canonical();
         let p = h.evaluate_step(0.0, 0).unwrap()[0];
-        assert!(matches!(
-            h.step_inversion(p, true),
-            Err(SolidError::Unported { .. })
-        ));
+        let (t, loc) = h.step_inversion(p, true).unwrap();
+        assert!(t.abs() < 1e-12);
+        assert_eq!(loc, Some(CurveLocation::Interior));
         let far = Point3::new(0.0, 0.0, 100.0);
         assert_eq!(
             h.step_inversion(far, true).unwrap().1,

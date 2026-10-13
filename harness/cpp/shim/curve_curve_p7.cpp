@@ -1974,7 +1974,9 @@ void put_sol(std::vector<double>& o, const SmSolution& s, const void* a, const v
     o.push_back(s.m_lNumObjects > 0 ? id(s.m_apObjects[0]) : -1.0);
     o.push_back(s.m_lNumObjects > 1 ? id(s.m_apObjects[1]) : -1.0);
     o.push_back(nd(n1, s.m_apNodes[0]));
-    o.push_back(nd(n2, s.m_apNodes[1]));
+    // (a one-object solution's second node can be an uninitialised branch slot of
+    // SmGlobalSolver::SolveIt, see plan/findings.md: reported only for two objects)
+    o.push_back(s.m_lNumObjects > 1 ? nd(n2, s.m_apNodes[1]) : -1.0);
     o.push_back(s.m_vStart.m_dSolutionValue);
     for (ULONG i = 0; i < np; i++)
         o.push_back(s.m_vStart[i]);

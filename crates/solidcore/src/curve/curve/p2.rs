@@ -311,6 +311,22 @@ pub trait CurveEvaluate {
 
     /// The point at `t` (`EvaluatePoint`).
     fn evaluate_point(&self, t: f64) -> Result<Point3>;
+
+    /// The virtual `IsClosed(crInterval, dTol)`: the base class
+    /// ([`crate::curve::curve::p4::is_closed_base`]) unless the kind overrides it.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    fn is_closed_virtual(&self, interval: &Extent1d, tol: f64) -> Result<bool> {
+        crate::curve::curve::p4::is_closed_base(self, interval, tol)
+    }
+
+    /// `SM_CAST_PTR(SmCrvOnSurf, this)`: the curve as a curve on a surface, if it is
+    /// one.
+    fn as_crv_on_surf(&self) -> Option<&CrvOnSurf> {
+        None
+    }
 }
 
 impl CurveEvaluate for BSplineCurve {
@@ -478,6 +494,17 @@ impl CurveEvaluate for Curve {
 
     fn evaluate_point(&self, t: f64) -> Result<Point3> {
         Self::evaluate_point(self, t)
+    }
+
+    fn is_closed_virtual(&self, interval: &Extent1d, tol: f64) -> Result<bool> {
+        Self::is_closed(self, interval, tol)
+    }
+
+    fn as_crv_on_surf(&self) -> Option<&CrvOnSurf> {
+        match &self.kind {
+            CurveKind::CrvOnSurf(c) => Some(c),
+            _ => None,
+        }
     }
 }
 
@@ -1707,7 +1734,7 @@ impl Curve {
                 })
             }
             HERMITE_CURVE_TYPE => HermiteCurve::read_from_db(db).map(Self::from),
-            ISO_CURVE_TYPE => IsoCurve::read_from_db(db, version).map(Self::from),
+            ISO_CURVE_TYPE => IsoCurve::read_from_db(k, db, version).map(Self::from),
             OFFSET_CURVE_TYPE => OffsetCurve::read_from_db(k, db, version).map(Self::from),
             PROJECTED_CURVE_TYPE => ProjectedCurve::read_from_db(k, db, version).map(Self::from),
             _ => Err(SolidError::sm_err(OP_READ)),

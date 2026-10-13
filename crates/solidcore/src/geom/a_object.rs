@@ -61,9 +61,11 @@
 //! - **Unported.** `SmAObject::Notify(SM_NO_REG_PROPAGATION)` asks each "other"
 //!   source region whether it is void (`SmRegion::IsVoid`, unit `topology.shell`);
 //!   building a new `SmBrepCache` needs unit
-//!   `topology.brep_cache`; the curve and surface `CacheMakeOrValidate` overrides
-//!   belong to `curve.curve_p5` and `surface.surface_p1`. These return
-//!   [`SolidError::Unported`].
+//!   `topology.brep_cache`; the surface `CacheMakeOrValidate` override belongs to
+//!   `surface.surface_p1`. These return [`SolidError::Unported`]. The curve override
+//!   (unit `curve.curve_p5`) checks the type and reuses an existing cache; a new curve
+//!   cache is built from the curve ([`crate::curve::curve::p5::make_curve_cache`]),
+//!   which this object-level call does not have: `InvalidInput`.
 //! - **Graphics and debug.** The display list of `SmSAGObject` (reset on edits and
 //!   destruction), `SE_MSG` / `SM_ASSERT*` (compiled out of the release reference
 //!   build) and `Dump` are not ported. `SmAObject::AssertValid`'s two checks (the
@@ -975,11 +977,17 @@ pub fn get_or_create_object_cache(
     let made = match maker {
         CacheMaker::AObject => Ok(cache_make_or_validate(cache_type, old)),
         CacheMaker::SagObject => sag_cache_make_or_validate(cache_type, object_type, old),
-        // UNPORTED(curve.curve_p5): SmCurve::CacheMakeOrValidate
-        CacheMaker::Curve => Err(SolidError::Unported {
-            upstream: "SmCurve::CacheMakeOrValidate",
-            unit: "curve.curve_p5",
-        }),
+        CacheMaker::Curve => match crate::curve::curve::p5::validate_curve_cache(cache_type, old) {
+            Ok(Some(old)) => Ok(Some(old)),
+            // a new curve cache needs the curve: built with `make_curve_cache`
+            Ok(None) => {
+                return Err(SolidError::invalid_input(
+                    "geom::a_object::get_or_create_object_cache",
+                    "a new curve cache is built from the curve (make_curve_cache)",
+                ))
+            }
+            Err(e) => Err(e),
+        },
         // UNPORTED(surface.surface_p1): SmSurface::CacheMakeOrValidate
         CacheMaker::Surface => Err(SolidError::Unported {
             upstream: "SmSurface::CacheMakeOrValidate",
@@ -1363,7 +1371,30 @@ mod tests {
                 ..
             })
         ));
-        assert!(get(CacheMaker::Curve, 0, &o, Some(&ctx)).is_err());
+        // a curve cache of the wrong type: SM_ERR, so no cache
+        assert_eq!(get(CacheMaker::Curve, 0, &o, Some(&ctx)).unwrap(), None);
+        // a curve cache reuses the old one; a new one needs the curve
+        assert_eq!(
+            get_or_create_object_cache(
+                ObjectCacheType::Curve,
+                Some(&ctx),
+                CacheMaker::Curve,
+                0,
+                &o
+            )
+            .unwrap(),
+            Some(id)
+        );
+        assert!(matches!(
+            get_or_create_object_cache(
+                ObjectCacheType::Curve,
+                Some(&ctx),
+                CacheMaker::Curve,
+                0,
+                &AObject::new()
+            ),
+            Err(SolidError::InvalidInput { .. })
+        ));
         let mut s = AttributeStore::new();
         long_on(&mut s, 3, 5, 1, Behavior::Copy);
         o.destroy(ObjectKey(3), &mut s, &mut c).unwrap();

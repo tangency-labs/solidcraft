@@ -401,6 +401,10 @@ impl CurveEvaluate for CompositeCurve {
         // SmCurve::EvaluatePoint (not overridden)
         Err(SolidError::sm_err(OP))
     }
+
+    fn is_closed_virtual(&self, _interval: &Extent1d, _tol: f64) -> Result<bool> {
+        Ok(Self::is_closed(self))
+    }
 }
 
 impl CompositeCurve {

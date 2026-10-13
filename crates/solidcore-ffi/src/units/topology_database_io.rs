@@ -171,36 +171,53 @@ pub fn run(source: &Source<'_>, file_type: i32, ops: &[(i64, i64)]) -> Result<Sc
     }
     let n_ops = i64::try_from(ops.len()).map_err(|_| FfiError::InvalidArgument("ops".into()))?;
     let flat: Vec<i64> = ops.iter().flat_map(|&(o, a)| [o, a]).collect();
-    let mut records = vec![0i64; 5 * ops.len()];
-    let mut ints = vec![0i64; ints_cap.max(1)];
-    let mut dbls = vec![0f64; dbls_cap.max(1)];
-    let (mut ints_len, mut dbls_len, mut open_status) = (0i64, 0i64, 0i64);
-    // SAFETY: `data` is valid for `data.len()` reads and `path` (when given) is a
-    // NUL-terminated string; `flat` holds 2*n_ops values; `records` has 5*n_ops
-    // writable slots; `ints`/`dbls` have the capacities passed (the shim checks
-    // them before copying); the length/status out-params are valid i64s. Array
-    // counts are bounded by MAX_COUNT, ops that dereference the stream only run
-    // when there is one, and word extractions get a buffer of `word_cap` (the data
-    // or file length) + 2 bytes inside the shim. Nothing is retained after the call.
-    let st = unsafe {
-        sys::sc_topology_database_io_run(
-            mode,
-            data.as_ptr(),
-            data.len() as i64,
-            path.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
-            file_type,
-            word_cap as i64,
-            flat.as_ptr(),
-            n_ops,
-            &raw mut open_status,
-            records.as_mut_ptr(),
-            ints.as_mut_ptr(),
-            ints.len() as i64,
-            &raw mut ints_len,
-            dbls.as_mut_ptr(),
-            dbls.len() as i64,
-            &raw mut dbls_len,
-        )
+    // Start small and retry once at the exact size the shim reports: the worst-case
+    // bounds above can reach tens of GB for generated scripts, which some machines
+    // refuse to reserve even though almost none of it is used.
+    let mut caps = (ints_cap.clamp(1, 1 << 16), dbls_cap.clamp(1, 1 << 16));
+    let mut attempt = 0;
+    let (st, records, ints, dbls, ints_len, dbls_len, open_status) = loop {
+        let mut records = vec![0i64; 5 * ops.len()];
+        let mut ints = vec![0i64; caps.0];
+        let mut dbls = vec![0f64; caps.1];
+        let (mut ints_len, mut dbls_len, mut open_status) = (0i64, 0i64, 0i64);
+        // SAFETY: `data` is valid for `data.len()` reads and `path` (when given) is a
+        // NUL-terminated string; `flat` holds 2*n_ops values; `records` has 5*n_ops
+        // writable slots; `ints`/`dbls` have the capacities passed (the shim checks
+        // them before copying); the length/status out-params are valid i64s. Array
+        // counts are bounded by MAX_COUNT, ops that dereference the stream only run
+        // when there is one, and word extractions get a buffer of `word_cap` (the data
+        // or file length) + 2 bytes inside the shim. Nothing is retained after the call.
+        let st = unsafe {
+            sys::sc_topology_database_io_run(
+                mode,
+                data.as_ptr(),
+                data.len() as i64,
+                path.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                file_type,
+                word_cap as i64,
+                flat.as_ptr(),
+                n_ops,
+                &raw mut open_status,
+                records.as_mut_ptr(),
+                ints.as_mut_ptr(),
+                ints.len() as i64,
+                &raw mut ints_len,
+                dbls.as_mut_ptr(),
+                dbls.len() as i64,
+                &raw mut dbls_len,
+            )
+        };
+        let need = (
+            usize::try_from(ints_len).unwrap_or(0),
+            usize::try_from(dbls_len).unwrap_or(0),
+        );
+        if st == SC_ERR_BUFFER && attempt == 0 && need.0 <= ints_cap.max(1) && need.1 <= dbls_cap.max(1) {
+            caps = (need.0.max(1), need.1.max(1));
+            attempt += 1;
+            continue;
+        }
+        break (st, records, ints, dbls, ints_len, dbls_len, open_status);
     };
     if st == SC_ERR_BUFFER {
         return Err(FfiError::Status(st));
