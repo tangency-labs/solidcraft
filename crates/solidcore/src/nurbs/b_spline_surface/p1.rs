@@ -1034,23 +1034,20 @@ impl BSplineSurface {
     /// (or of every v column) lie on a line parallel to it (`IsParallelToVector`).
     /// `false` without NURB; `true` for a zero vector (see the module docs).
     ///
+    /// The `SmPlane` branch is
+    /// [`crate::surface::plane::Plane::is_parallel_to_vector`].
+    ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for an analytic plane (`SmPlane::GetPosition`).
+    /// None (the `Result` is kept for the derived surfaces).
     pub fn is_parallel_to_vector(&self, vector: Vec3) -> Result<bool> {
         let Ok(test_vec) = vector.unitize() else {
             // SER(sTestVec.Unitize()): SM_ERR_INVALID_INPUT returned as the boolean
             return Ok(true);
         };
 
-        if self.is_kind_of(PLANE_TYPE)? {
-            // the SmPlane branch: |Z . v| < SM_EFF_ZERO * (1 + |origin|max)
-            // UNPORTED(surface.plane_p1): SmPlane::GetPosition
-            return Err(SolidError::Unported {
-                upstream: "SmPlane::GetPosition",
-                unit: "surface.plane_p1",
-            });
-        }
+        // the SmPlane branch (|Z . v| < SM_EFF_ZERO * (1 + |origin|max)) is
+        // Plane::is_parallel_to_vector: a plane is never a plain BSplineSurface here
 
         let Some(sur) = self.nurb_ref() else {
             return Ok(false); // FS

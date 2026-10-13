@@ -1,0 +1,827 @@
+{
+ "cases": [
+  {
+   "name": "extend_unit",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 4
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 5
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 13
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 2
+     },
+     {
+      "op": "extend",
+      "dir": 0,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 1,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 2,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 4,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 6,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 8,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 10.0,
+      "cont": 4
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_scaled",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0.6,
+      0.8,
+      0
+     ],
+     "y": [
+      -0.8,
+      0.6,
+      0
+     ],
+     "scale": [
+      2,
+      3
+     ],
+     "domain": [
+      -1,
+      -2,
+      3,
+      4
+     ]
+    },
+    "ops": [
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 4
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 5
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 13
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 2
+     },
+     {
+      "op": "extend",
+      "dir": 0,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 1,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 2,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 4,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 6,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 8,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 10.0,
+      "cont": 4
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_infinite",
+   "inputs": {
+    "make": {
+     "kind": "normal",
+     "o": [
+      1,
+      2,
+      3
+     ],
+     "n": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 4
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 5
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 13
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 2
+     },
+     {
+      "op": "extend",
+      "dir": 0,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 1,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 2,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 4,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 6,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 8,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 10.0,
+      "cont": 4
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_canonical",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "o": [
+      0,
+      0,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 4
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 5
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 13
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 2
+     },
+     {
+      "op": "extend",
+      "dir": 0,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 1,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 2,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 4,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 6,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 8,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 10.0,
+      "cont": 4
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_degen",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      1,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 4
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 5
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 13
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 2
+     },
+     {
+      "op": "extend",
+      "dir": 0,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 1,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 2,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 4,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 6,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 8,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 10.0,
+      "cont": 4
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_inverted",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      1,
+      1,
+      0,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 4
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 5
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 13
+     },
+     {
+      "op": "extend",
+      "dist": 0.25,
+      "cont": 2
+     },
+     {
+      "op": "extend",
+      "dir": 0,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 1,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 2,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 4,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 6,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 8,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dir": 3,
+      "dist": 10.0,
+      "cont": 4
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_after_toggle",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      2,
+      3
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      2
+     ]
+    },
+    "ops": [
+     {
+      "op": "make_nurb"
+     },
+     {
+      "op": "toggle"
+     },
+     {
+      "op": "extend",
+      "dir": 5,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "extend",
+      "dist": 0.5,
+      "cont": 5
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extend_after_swap",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      2,
+      3
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      2
+     ]
+    },
+    "ops": [
+     {
+      "op": "swap"
+     },
+     {
+      "op": "extend",
+      "dir": 7,
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "reverse"
+     },
+     {
+      "op": "extend",
+      "dist": 0.5,
+      "cont": 3
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  }
+ ]
+}

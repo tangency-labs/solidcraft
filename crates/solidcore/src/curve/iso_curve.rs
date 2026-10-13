@@ -410,6 +410,11 @@ fn surface_read_from_db(
             "SmSurface virtuals of an SmCurveBoundedSurface",
             "surface.surface_p1",
         )),
+        // UNPORTED(surface.surface_p1): SmSurface dispatch for an SmPlane
+        SurfaceKind::Plane(_) => Err(SolidError::unported(
+            "SmSurface virtuals of an SmPlane",
+            "surface.surface_p1",
+        )),
     }
 }
 

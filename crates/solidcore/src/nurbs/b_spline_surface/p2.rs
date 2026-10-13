@@ -74,7 +74,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_closest_point;
-use crate::geom::vector2d::Point2;
+use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
@@ -88,6 +88,7 @@ use crate::nurbs::math::{NOW, NOZ};
 use crate::nurbs::nurbs_srf::{is_nsrf_degenerate, split_srf};
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch};
+use crate::surface::plane::Plane;
 
 use super::p1::{
     BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, CanonicalSurfaceData, SurfParamType,
@@ -256,18 +257,25 @@ fn evaluate_1st_derivatives(_srf: &BSplineSurface, _uv: Point2) -> Result<(Point
 struct PlaneData {
     /// `EvaluateNormal` at the domain centre.
     normal: Vec3,
-    /// The points at the domain corners `(0, 0)`, `(0, 1)`, `(1, 0)`, `(1, 1)`
+    /// The points at the natural domain corners `(0, 0)`, `(0, 1)`, `(1, 0)`, `(1, 1)`
     /// (relative).
     corners: [Point3; 4],
 }
 
-/// `new SmPlane(point, x_dir, y_dir, scale, domain)`, its normal and corners.
-fn new_plane(_point: Point3, _x_dir: Vec3, _y_dir: Vec3, _domain: &Extent2d) -> Result<PlaneData> {
-    // UNPORTED(surface.plane_p1): SmPlane::SmPlane
-    Err(SolidError::Unported {
-        upstream: "SmPlane::SmPlane",
-        unit: "surface.plane_p1",
-    })
+/// `new SmPlane(point, x_dir, y_dir, (1, 1), domain)`, its normal
+/// (`EvaluateNormal`) and the points at the corners of its natural domain
+/// (`EvaluatePoint` at `GetMin`, `(0, 1)`, `(1, 0)`, `GetMax`).
+fn new_plane(point: Point3, x_dir: Vec3, y_dir: Vec3, domain: &Extent2d) -> PlaneData {
+    let plane = Plane::new(point, x_dir, y_dir, Vec2::new(1.0, 1.0), domain);
+    let normal = plane.evaluate_normal();
+    let plane_domain = plane.natural_uv_domain();
+    let corners = [
+        plane.evaluate_point(plane_domain.min()),
+        plane.evaluate_point(plane_domain.evaluate(0.0, 1.0)),
+        plane.evaluate_point(plane_domain.evaluate(1.0, 0.0)),
+        plane.evaluate_point(plane_domain.max()),
+    ];
+    PlaneData { normal, corners }
 }
 
 /// `SmSurface::CreateNaturalUVTrimCurves(domain, SM_SP_U, FALSE, ..)`: the 3D trimming
@@ -873,7 +881,7 @@ impl BSplineSurface {
         let size = bbox.size();
         let leng = size.length();
         let tmp_domain = Extent2d::from_bounds(-leng, -leng, leng, leng);
-        let plane = new_plane(pnt, dv, du, &tmp_domain)?;
+        let plane = new_plane(pnt, dv, du, &tmp_domain);
 
         // Make sure both curves are on the plane before continuing.
         if !curve1.is_on_plane(pnt, plane.normal, tol, None)?.on_plane {

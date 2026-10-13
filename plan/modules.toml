@@ -1453,10 +1453,10 @@ depends_on = ["curve.curve_p2", "curve.curve_p4", "curve.curve_p5", "curve.curve
 est_lines = 1934
 layer = 23
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "39 fns; largest: SmPlane::CoincidenceCheck, SmPlane::DropCurve, SmPlane::GlobalLineIntersect, SmPlane::DropPointFast; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(2), surface.surface_p7(2), intersect.surface_drop_lib_p3(1), surface.surface_p5(1), surface.surface_p6(1), surface.surface_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "partial: difftest 2705 cases (1205 fixture: 18 upstream-derived, 1179 adversarial, 8 extension; 1500 generated): 2538 passed, 167 deferred (intersect.surface_drop_lib_p3 125, surface.surface_p7 40, surface.surface_p8 2), max_rel_err 0, perturb 2538/2538 detected; CreateExtendedSurface re-dispatched to the plane overrides; surface cache plane paths are UNPORTED(surface.plane_p1) (iso curve needs Curve storage in the cache, CalculateBoundingBox not re-dispatched); 39 fns; largest: SmPlane::CoincidenceCheck, SmPlane::DropCurve, SmPlane::GlobalLineIntersect, SmPlane::DropPointFast; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(2), surface.surface_p7(2), intersect.surface_drop_lib_p3(1), surface.surface_p5(1), surface.surface_p6(1), surface.surface_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surf_of_revolution_p1"

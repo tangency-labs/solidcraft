@@ -83,7 +83,12 @@
 //!   `SmSurface::CalculateBoundingBox`, `surface.surface_p1`), and
 //!   `SmSurface::IsSingularity` (`surface.surface_p5`), `SmSurface::EvaluateNormal`
 //!   (`surface.surface_p7`) and `SmSurface::GetFace` (`surface.surface_p1`) are not
-//!   overridden by any kind: those return [`SolidError::Unported`]. Where upstream
+//!   overridden by any kind: those return [`SolidError::Unported`]. An `SmPlane` is an
+//!   `SmBSplineSurface` upstream: the cast gives its B-spline part, and its
+//!   `CreateIsoParametricCurve` (an `SmLine`, which the cache cannot hold as a
+//!   [`BSplineCurve`] without losing the line's overrides) and the inherited
+//!   `CalculateBoundingBox` (which dispatches back to the plane) return
+//!   [`SolidError::Unported`] (`surface.plane_p1`). Where upstream
 //!   casts with `SM_CAST_PTR(SmBSplineSurface, ...)` and `NER`s, a non-B-spline surface
 //!   gives `SM_ERR_NULL_POINTER`. `PointClassify` is the base class body (`SM_ERR`); the
 //!   trimmed surface cache overrides belong to `surface.trim_srf_cache`.
@@ -174,10 +179,23 @@ fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
 
-/// `SM_CAST_PTR(SmBSplineSurface, surface)`.
+/// `SmPlane::CreateIsoParametricCurve` (virtual, reached through an `SmSurface` or
+/// an `SmBSplineSurface` pointer): not wired into the cache.
+const fn plane_iso_unported() -> SolidError {
+    // UNPORTED(surface.plane_p1): SmPlane::CreateIsoParametricCurve. Ported as
+    // Plane::create_iso_parametric_curve, but it makes an SmLine and this cache holds
+    // its iso curves as BSplineCurve, which would drop the SmLine overrides (evaluation,
+    // length); wiring it needs Curve storage here.
+    SolidError::unported("SmPlane::CreateIsoParametricCurve", "surface.plane_p1")
+}
+
+/// `SM_CAST_PTR(SmBSplineSurface, surface)` for callers that run only non-virtual
+/// `SmBSplineSurface` members: an `SmPlane` gives its B-spline part. Callers that
+/// reach a virtual member deal with planes first.
 const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
+        SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::CurveBounded(_) => None,
     }
 }
@@ -213,6 +231,7 @@ fn create_iso_parametric_curve(
 ) -> Result<BSplineCurve> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => bspline_iso_curve(k, b, param, iso, domain),
+        SurfaceKind::Plane(_) => Err(plane_iso_unported()),
         SurfaceKind::CurveBounded(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::CreateIsoParametricCurve
             Err(SolidError::unported(
@@ -247,6 +266,15 @@ fn calculate_bounding_box(
 ) -> Result<BoundingBoxes> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => b.calculate_bounding_box(domain, req),
+        SurfaceKind::Plane(_) => {
+            // UNPORTED(surface.plane_p1): SmBSplineSurface::CalculateBoundingBox on an
+            // SmPlane, inherited and dispatching to the plane (IsKindOf(SmPlane_TYPE),
+            // the SmPlane::EvaluateNormal override); the plane does not re-dispatch it yet
+            Err(SolidError::unported(
+                "SmBSplineSurface::CalculateBoundingBox",
+                "surface.plane_p1",
+            ))
+        }
         SurfaceKind::CurveBounded(_) => {
             // UNPORTED(surface.surface_p1): SmSurface::CalculateBoundingBox
             Err(SolidError::unported(
@@ -539,6 +567,10 @@ impl PatchBoundaryBoundingPlanes {
     ) -> Result<BSplineCurve> {
         let (spt, param) = self.iso_of(index);
         let bss = bspline_of(surface).ok_or(SolidError::null_pointer(OP_BOUNDARY))?;
+        if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+            // the cast succeeds; the virtual call reaches the SmPlane override
+            return Err(plane_iso_unported());
+        }
         // make the curve (3D Tol SM_BIG_DOUBLE: not used)
         bspline_iso_curve(k, bss, spt, param, None)
     }

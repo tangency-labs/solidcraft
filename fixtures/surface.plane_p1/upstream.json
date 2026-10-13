@@ -1,0 +1,1990 @@
+{
+ "cases": [
+  {
+   "name": "section_plane_adjust",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:716",
+   "inputs": {
+    "make": {
+     "kind": "normal",
+     "o": [
+      1,
+      2,
+      3
+     ],
+     "n": [
+      0.3,
+      0.4,
+      0.8660254037844386
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "adjust",
+      "dom": {
+       "explicit": [
+        -5,
+        -5,
+        5,
+        5
+       ]
+      }
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 5,
+      "p": [
+       2,
+       2,
+       9
+      ],
+      "tol": 0.001
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 3,
+      "p": [
+       40,
+       2,
+       9
+      ],
+      "tol": 0.001
+     },
+     {
+      "op": "inherited",
+      "v": [
+       0.3,
+       0.4,
+       0.8660254037844386
+      ]
+     },
+     {
+      "op": "queries",
+      "uv": [
+       0.5,
+       0.5
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve_test_plane",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:7296",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "evaluate",
+      "uv": [
+       3,
+       4
+      ],
+      "hu": 2,
+      "hv": 2,
+      "upper": true
+     },
+     {
+      "op": "evaluate",
+      "uv": [
+       -3,
+       14
+      ],
+      "hu": 1,
+      "hv": 3
+     },
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "segment",
+       "a": [
+        1,
+        1,
+        5
+       ],
+       "b": [
+        9,
+        8,
+        -1
+       ]
+      },
+      "tol": 0.001,
+      "keep_all": true
+     },
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "segment",
+       "a": [
+        -5,
+        1,
+        2
+       ],
+       "b": [
+        15,
+        8,
+        2
+       ]
+      },
+      "tol": 0.001
+     },
+     {
+      "op": "iso",
+      "iso": 4,
+      "want_uv": true
+     },
+     {
+      "op": "iso",
+      "v_dir": true,
+      "iso": 7,
+      "want_uv": true
+     },
+     {
+      "op": "iso",
+      "iso": 4,
+      "domain": [
+       1,
+       2,
+       3,
+       6
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "curve_test_plane_creating_fallback",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:7296 (falls back to SmSurface::DropCurve)",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "segment",
+       "a": [
+        -5,
+        1,
+        2
+       ],
+       "b": [
+        15,
+        8,
+        2
+       ]
+      },
+      "tol": 0.001,
+      "creating": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "merge_test_canonical",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:605",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "o": [
+      20,
+      15,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "ops": [
+     {
+      "op": "inherited",
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "inherited",
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "iso",
+      "iso": 5,
+      "domain": [
+       0,
+       0,
+       5,
+       5
+      ],
+      "want_uv": true
+     },
+     {
+      "op": "line",
+      "dom": {
+       "explicit": [
+        0,
+        0,
+        5,
+        5
+       ]
+      },
+      "p": [
+       22,
+       16,
+       4
+      ],
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "copy"
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "canonical",
+       "o": [
+        20,
+        15,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "general_xy_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1537",
+   "inputs": {
+    "make": {
+     "kind": "normal",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "n": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "queries",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "kind_of",
+      "t": 15011
+     },
+     {
+      "op": "kind_of",
+      "t": 15002
+     },
+     {
+      "op": "kind_of",
+      "t": 15001
+     },
+     {
+      "op": "kind_of",
+      "t": 15013
+     },
+     {
+      "op": "project",
+      "p": [
+       3,
+       -2,
+       7
+      ]
+     },
+     {
+      "op": "normal",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "normal",
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "op": "eq",
+      "other": {
+       "kind": "normal",
+       "o": [
+        0,
+        0,
+        1e-12
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "error_codes_unit_square",
+   "upstream_ref": "tests/SM_API_test/src/TestSmErrorCodes.cpp:89",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       0.5,
+       0.5,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       0.5,
+       0.5,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ray": true,
+      "tol": 1e-06
+     },
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       2,
+       0.5,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       -1,
+       0.5,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       -1,
+       0.5,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ivl": [
+       0.5,
+       1.5
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       -1,
+       0.5,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ray": true,
+      "tol": 1e-06
+     },
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       -1,
+       0.5,
+       0.1
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 0,
+      "p": [
+       0.5,
+       0.5,
+       1e-07
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 0,
+      "p": [
+       0.5,
+       0.5,
+       0.001
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 5,
+      "p": [
+       1.5,
+       0.5,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 5,
+      "p": [
+       1.0000005,
+       0.5,
+       0
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 3,
+      "p": [
+       0.2,
+       0.5,
+       3
+      ],
+      "tol": 1e-06,
+      "target": 2.0
+     },
+     {
+      "op": "drop",
+      "dom": "step",
+      "sop": 4,
+      "p": [
+       0.2,
+       0.5,
+       3
+      ],
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "topo_test_canonical_frame",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:368",
+   "inputs": {
+    "make": {
+     "kind": "canonical",
+     "o": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "toggle"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "rebuild"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "swap"
+     },
+     {
+      "op": "state"
+     },
+     {
+      "op": "reverse",
+      "v_dir": true
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_degenerate_domain",
+   "upstream_ref": "edge case: zero-width domain",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      1,
+      0,
+      1,
+      2
+     ]
+    },
+    "ops": [
+     {
+      "op": "make_nurb"
+     },
+     {
+      "op": "inherited",
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "eval_point",
+      "uv": [
+       3,
+       3
+      ]
+     },
+     {
+      "op": "evaluate",
+      "uv": [
+       3,
+       3
+      ],
+      "hu": 1,
+      "hv": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_nonperpendicular_axes",
+   "upstream_ref": "edge case: axes made perpendicular",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      1,
+      1,
+      1
+     ],
+     "x": [
+      2,
+      0,
+      0
+     ],
+     "y": [
+      1,
+      1,
+      0
+     ],
+     "scale": [
+      0.5,
+      3
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "state"
+     },
+     {
+      "op": "eval_fast",
+      "uv": [
+       2,
+       -3
+      ]
+     },
+     {
+      "op": "project",
+      "p": [
+       0,
+       4,
+       9
+      ]
+     },
+     {
+      "op": "inherited",
+      "v": [
+       0,
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_reparameterize_keeps_origin",
+   "upstream_ref": "edge case: Reparameterize keeps the origin",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      2,
+      3
+     ],
+     "domain": [
+      1,
+      1,
+      2,
+      3
+     ]
+    },
+    "ops": [
+     {
+      "op": "reparam",
+      "dom": {
+       "explicit": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     {
+      "op": "eval_point",
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "eval_point",
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_line_in_plane_point",
+   "upstream_ref": "edge case: line in the plane touching a corner (one parameter)",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "line",
+      "dom": "step",
+      "p": [
+       1,
+       1,
+       0
+      ],
+      "v": [
+       1,
+       -1,
+       0
+      ],
+      "tol": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_drop_curve_bspline",
+   "upstream_ref": "edge case: B-spline drops inside and clamped outside",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "b_spline",
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         1,
+         1,
+         2.1,
+         null
+        ],
+        [
+         3,
+         5,
+         1.9,
+         null
+        ],
+        [
+         6,
+         2,
+         2.3,
+         null
+        ],
+        [
+         8,
+         8,
+         2,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      },
+      "tol": 0.5
+     },
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "b_spline",
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         1,
+         1,
+         2.1,
+         1
+        ],
+        [
+         3,
+         5,
+         1.9,
+         2
+        ],
+        [
+         6,
+         2,
+         2.3,
+         1
+        ],
+        [
+         8,
+         8,
+         2,
+         1
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      },
+      "ivl": [
+       0.2,
+       0.7
+      ],
+      "tol": 0.5,
+      "keep_all": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_drop_curve_bspline_fallback",
+   "upstream_ref": "edge case: B-spline drops inside and clamped outside (clamped control points: SmSurface::DropCurve)",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "b_spline",
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         1,
+         1,
+         2.1,
+         null
+        ],
+        [
+         3,
+         5,
+         1.9,
+         null
+        ],
+        [
+         6,
+         2,
+         2.3,
+         null
+        ],
+        [
+         8,
+         8,
+         2,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        0.5,
+        1,
+        1,
+        1
+       ]
+      },
+      "tol": 0.001
+     },
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "b_spline",
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         1,
+         1,
+         2,
+         null
+        ],
+        [
+         3,
+         15,
+         2,
+         null
+        ],
+        [
+         6,
+         2,
+         2,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      },
+      "tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_drop_curve_perpendicular_line",
+   "upstream_ref": "edge case: a line perpendicular to the plane drops to a point",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "segment",
+       "a": [
+        3,
+        3,
+        0
+       ],
+       "b": [
+        3,
+        3,
+        5
+       ]
+      },
+      "tol": 10,
+      "keep_all": true
+     },
+     {
+      "op": "drop_curve",
+      "dom": "step",
+      "curve": {
+       "kind": "segment",
+       "a": [
+        30,
+        3,
+        2
+       ],
+       "b": [
+        40,
+        3,
+        2
+       ]
+      },
+      "tol": 0.001,
+      "keep_all": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_coincidence",
+   "upstream_ref": "edge case: plane/plane coincidence branches",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         0,
+         0,
+         10,
+         10
+        ]
+       }
+      },
+      "tol": 1e-06,
+      "whole": true
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         2,
+         2,
+         5,
+         5
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         -5,
+         -5,
+         20,
+         20
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         12,
+         0,
+         20,
+         10
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         10,
+         0,
+         20,
+         10
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         -5,
+         4,
+         15,
+         6
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         0.7071067811865476,
+         0.7071067811865476,
+         0
+        ],
+        "y": [
+         -0.7071067811865476,
+         0.7071067811865476,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         -3,
+         12,
+         3,
+         14
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2.5
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         0,
+         0,
+         10,
+         10
+        ]
+       }
+      },
+      "tol": 1e-06
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "plane",
+       "make": {
+        "kind": "bounded",
+        "o": [
+         0,
+         0,
+         2
+        ],
+        "x": [
+         1,
+         0,
+         0.01
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "scale": [
+         1,
+         1
+        ],
+        "domain": [
+         0,
+         0,
+         10,
+         10
+        ]
+       }
+      },
+      "tol": 1e-06,
+      "whole": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_coincidence_bspline",
+   "upstream_ref": "edge case: plane/plane coincidence branches (not an SmPlane: SmSurface::IsPlanar)",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      2
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ]
+    },
+    "ops": [
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "b_spline",
+       "p": 1,
+       "q": 1,
+       "net": [
+        [
+         [
+          0,
+          0,
+          2,
+          null
+         ],
+         [
+          0,
+          10,
+          2,
+          null
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          2,
+          null
+         ],
+         [
+          10,
+          10,
+          2,
+          null
+         ]
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "tol": 1e-06,
+      "whole": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_trim_line",
+   "upstream_ref": "edge case: TrimPlaneLineToPlaneDomain",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "trim_line",
+      "dom": "step",
+      "a": [
+       -1,
+       0.5,
+       0
+      ],
+      "b": [
+       2,
+       0.5,
+       0
+      ],
+      "tol": 0
+     },
+     {
+      "op": "trim_line",
+      "dom": "step",
+      "a": [
+       1,
+       0.5,
+       0
+      ],
+      "b": [
+       2,
+       0.5,
+       0
+      ],
+      "tol": 0
+     },
+     {
+      "op": "trim_line",
+      "dom": "step",
+      "a": [
+       -1,
+       0.5,
+       0
+      ],
+      "b": [
+       0,
+       0.5,
+       0
+      ],
+      "tol": 0
+     },
+     {
+      "op": "trim_line",
+      "dom": "step",
+      "a": [
+       2,
+       0.5,
+       0
+      ],
+      "b": [
+       3,
+       0.5,
+       0
+      ],
+      "tol": 0
+     },
+     {
+      "op": "trim_line",
+      "dom": "step",
+      "a": [
+       -1,
+       2,
+       0
+      ],
+      "b": [
+       2,
+       2,
+       0
+      ],
+      "tol": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_grazing",
+   "upstream_ref": "edge case: sm_IsGrazingIntersection",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "grazing",
+      "curve": {
+       "kind": "b_spline",
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         null
+        ],
+        [
+         1,
+         0,
+         0,
+         null
+        ],
+        [
+         1,
+         1,
+         0,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      },
+      "t": 0,
+      "line": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        2,
+        0,
+        0
+       ]
+      ],
+      "s": 0
+     },
+     {
+      "op": "grazing",
+      "curve": {
+       "kind": "b_spline",
+       "dim": 3,
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         null
+        ],
+        [
+         1,
+         0,
+         0,
+         null
+        ],
+        [
+         2,
+         0,
+         0,
+         null
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      },
+      "t": 0,
+      "line": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        2,
+        0,
+        0
+       ]
+      ],
+      "s": 0
+     },
+     {
+      "op": "grazing",
+      "curve": {
+       "kind": "segment",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      },
+      "t": 0.5,
+      "line": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        2,
+        0,
+        0
+       ]
+      ],
+      "s": 0
+     }
+    ]
+   }
+  }
+ ]
+}

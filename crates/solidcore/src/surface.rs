@@ -9,6 +9,7 @@
 
 pub mod b_spline_volume;
 pub mod curve_bounded_surface;
+pub mod plane;
 #[allow(clippy::module_inception)]
 pub mod surface;
 pub mod surface_cache;
