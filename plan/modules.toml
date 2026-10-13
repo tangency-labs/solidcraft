@@ -1193,9 +1193,9 @@ depends_on = ["geom.extent3d", "geom.pseudo_box", "geom.tol", "geom.transform", 
 est_lines = 1226
 layer = 16
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-surface.b_spline_volume-a1"
+claimed_at = "2026-10-13T03:04:36Z"
 notes = "23 fns; largest: SmBSplineVolume::EvaluateSimple, SmBSplineVolume::ReadFromDB, SmBSplineVolume::EvaluateIsoParametricCurveSimple, SmBSplineVolume::EvaluateBoundingBoxSimple; unit-SCC #22 (220 units); only 201 of 1226 lines survive RTA (reached via virtual dispatch to classes no in-scope entry point constructs); low priority / likely deferrable; 319 upstream test entry points reach this unit"
 
 [[unit]]
