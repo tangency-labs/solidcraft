@@ -1271,10 +1271,10 @@ depends_on = ["geom.extent1d", "geom.extent2d", "geom.extent3d", "geom.object", 
 est_lines = 1932
 layer = 18
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-nurbs.b_spline_surface_n_lib_p2-a1"
 claimed_at = "2026-10-13T01:27:54Z"
-notes = "4 fns; largest: SmBSplineSurface::CreateCornerBlend, SmBSplineSurface::Evaluate, SmBSplineSurface::CreateSkinnedSurface, SmBSplineSurface::TrimWithDomain; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(4), surface.surface_p2(3), curve.tangent_field(2), curve.crv_on_surf(1), curve.curve_p3(1), curve.curve_p4(1), surface.surface_p1(1), surface.surface_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 654 cases (54 fixture + 600 generated), 628 pass bit-identical, 26 deferred (surface.surface_p2 17: SmTangentField ctor GetNaturalUVDomain in G1 corner blends; surface.surface_p7 5: EvaluateNormal in n-sided blends; curve.curve_p3 4: LocalCurveIntersect for re-synchronized rails); 20k-seed run clean; GetDerivativeLimit co-ported (CO-PORT(surface.surface_p2)); no UNPORTED(nurbs.b_spline_surface_n_lib_p2) stubs existed. 4 fns; largest: SmBSplineSurface::CreateCornerBlend, SmBSplineSurface::Evaluate, SmBSplineSurface::CreateSkinnedSurface, SmBSplineSurface::TrimWithDomain; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(4), surface.surface_p2(3), curve.tangent_field(2), curve.crv_on_surf(1), curve.curve_p3(1), curve.curve_p4(1), surface.surface_p1(1), surface.surface_p3(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.crv_on_surf"
