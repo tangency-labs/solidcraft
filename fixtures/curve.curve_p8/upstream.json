@@ -1,0 +1,2430 @@
+{
+ "cases": [
+  {
+   "name": "rectangle_adjacent_sides_gci",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "rectangle_adjacent_sides_gci_skip",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "rectangle_opposite_sides_gci",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "rectangle_opposite_sides_gci_skip",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "rectangle_closing_sides_gci",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "rectangle_closing_sides_gci_skip",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "polygon_adjacent_sides_gci",
+   "upstream_ref": "SM_API_test:TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "polygon_adjacent_sides_gci_skip",
+   "upstream_ref": "SM_API_test:TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.9999999999999996,
+        1.7320508075688774,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "reversed_line_join_gci",
+   "upstream_ref": "prog_test:my_test_reversed_line_join",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "reversed_line_join_gci_skip",
+   "upstream_ref": "prog_test:my_test_reversed_line_join",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "rectangle_test_gci",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "rectangle_test_gci_skip",
+   "upstream_ref": "SM_API_test:TestSmCreateRectangle",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "polygon_test_far_gci",
+   "upstream_ref": "SM_API_test:TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.0,
+        2.4492935982947064e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "polygon_test_far_gci_skip",
+   "upstream_ref": "SM_API_test:TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0000000000000002,
+        1.7320508075688772,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.0,
+        2.4492935982947064e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -1.0000000000000009,
+        -1.7320508075688767,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": true
+   }
+  },
+  {
+   "name": "rect_simple_0_1_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "skip": false
+   }
+  },
+  {
+   "name": "rect_simple_1_2_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "skip": false
+   }
+  },
+  {
+   "name": "rect_simple_2_3_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "skip": false
+   }
+  },
+  {
+   "name": "rect_simple_3_0_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "skip": false
+   }
+  },
+  {
+   "name": "rect_global_opposite_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "skip": false
+   }
+  },
+  {
+   "name": "rect_edge_sub_segment_simple_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "rect_edge_sub_segment_simple_reversed_gci",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06,
+    "skip": false
+   }
+  },
+  {
+   "name": "join0_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join1_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join2_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join3_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join4_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join5_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join6_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join7_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join8_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join9_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join10_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join11_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join12_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join13_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join14_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "join15_simple_gci",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "ivl1": [
+     2.0,
+     7.0
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "ivl2": [
+     0.0,
+     2.0
+    ],
+    "tol": 1e-07,
+    "skip": false
+   }
+  },
+  {
+   "name": "circle_global_far_segment_gci",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605 (CreateCircleSegment(center (0,3,0), r 1, 0..360, quadratic))",
+   "inputs": {
+    "op": "gci",
+    "c1": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl1": [
+     0.0,
+     1.0
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        12,
+        10,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-05,
+    "skip": false
+   }
+  }
+ ]
+}

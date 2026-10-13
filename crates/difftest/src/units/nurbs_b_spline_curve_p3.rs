@@ -24,8 +24,9 @@
 //! on the plane, joins without a gap tolerance (`SmCurve::ApproximateLength`) or of
 //! continuing lines (the `SmLine_TYPE` test) or of curves `IsLine` cannot classify
 //! (`curve.curve_p5`), subdivision of curves with interior knots
-//! (`SmCurve::EvaluateContinuity`), gap trimming with a gap to close
-//! (`SmCurve::GlobalCurveIntersect`, `curve.curve_p8`) and `AssertValid` past its
+//! (`SmCurve::EvaluateContinuity`), gap trimming whose intersection of the extended
+//! curves reaches a Newton intersection (`SmCurve::GlobalCurveIntersect` through
+//! `SmCCIntersectENFO::Evaluate`, `curve.curve_p5`) and `AssertValid` past its
 //! knot checks (`SmCurve::AssertValid`, `curve.curve_p4`; `SmTol::IsDegenerate`).
 //! Every run has at least [`MIN_GENERATED`] generated cases; generated inputs the ffi
 //! wrapper rejects are redrawn.

@@ -58,8 +58,10 @@
 //!   overrides this one) and `JoinWith` measures `SmCurve::ApproximateLength` without
 //!   a gap tolerance; `SubdivideAtDiscontinuity` calls `CalculateContinuities`
 //!   (`SmCurve::EvaluateContinuity`);
-//!   `TrimGap` intersects with `SmCurve::GlobalCurveIntersect` (`curve.curve_p8`);
-//!   `AssertValid` calls `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`, whose
+//!   `TrimGap` intersects with `SmCurve::GlobalCurveIntersect` (`curve.curve_p8`,
+//!   whose status upstream ignores: a failure finds no intersection here, upstream
+//!   keeps the solutions found before it; its Newton intersections reach unit
+//!   `curve.curve_p5`); `AssertValid` calls `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`, whose
 //!   span solves reach `SmCurve::LocalPropertyAnalysis` of `curve.curve_p5`); its
 //!   `SmCurve::AssertValid` is [`crate::curve::curve::p4::assert_valid_base`] for a
 //!   curve without owner. Those calls return
@@ -71,6 +73,7 @@
 
 use crate::curve::curve::p2::{Curve, CurvePropertyType};
 use crate::curve::curve::p7::PropertyAnalysisOptions;
+use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -149,20 +152,43 @@ fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize)
     Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
 }
 
+/// A curve of [`global_curve_intersect`] in its solutions (`0`: the first curve, `1`:
+/// the second, `2` / `3`: their analytic replacements).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GapCurve(u8);
+
+impl SolutionObject for GapCurve {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+}
+
 /// `SmCurve::GlobalCurveIntersect` of `curve0` over `ivl0` with `curve1` over `ivl1`
-/// at tolerance `tol`: the solutions' types and start ends.
+/// at tolerance `tol`: the solutions' types and start ends. The status is ignored
+/// upstream: a failed intersection gives no solutions here (upstream keeps those found
+/// before the failure); [`SolidError::Unported`] is passed on.
 fn global_curve_intersect(
-    _curve0: &BSplineCurve,
-    _ivl0: &Extent1d,
-    _curve1: &BSplineCurve,
-    _ivl1: &Extent1d,
-    _tol: f64,
+    k: &Kernel,
+    curve0: &BSplineCurve,
+    ivl0: &Extent1d,
+    curve1: &BSplineCurve,
+    ivl1: &Extent1d,
+    tol: f64,
 ) -> Result<Vec<(SolutionType, SolutionEnd)>> {
-    // UNPORTED(curve.curve_p8): SmCurve::GlobalCurveIntersect
-    Err(SolidError::Unported {
-        upstream: "SmCurve::GlobalCurveIntersect",
-        unit: "curve.curve_p8",
-    })
+    let c0 = Curve::from(curve0.clone());
+    let c1 = Curve::from(curve1.clone());
+    let opts = CurveIntersectOptions {
+        skip_global_coincidence_check: false,
+        handles: [Some(GapCurve(0)), Some(GapCurve(1))],
+        analytic_handles: [Some(GapCurve(2)), Some(GapCurve(3))],
+    };
+    let found = ignored(c0.global_curve_intersect(k, ivl0, &c1, ivl1, tol, &opts))?;
+    Ok(found.map_or_else(Vec::new, |sols| {
+        sols.as_slice()
+            .iter()
+            .map(|s| (s.solution_type, s.start))
+            .collect()
+    }))
 }
 
 /// The property `SmCurve::GlobalPropertyAnalysis` minimizes.
@@ -803,8 +829,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] when there is a gap to close
-    /// (`SmCurve::GlobalCurveIntersect`, unit `curve.curve_p8`); `InvalidInput` when an
+    /// [`SolidError::Unported`] when the intersection of the extended curves reaches
+    /// an unported unit (`curve.curve_p5`); `InvalidInput` when an
     /// end point cannot be compared (NaN) or an extension is missing (upstream crashes).
     pub fn trim_gap(
         &mut self,
@@ -884,6 +910,7 @@ impl BSplineCurve {
 
         // intersect the extended curves
         let solutions = global_curve_intersect(
+            k,
             &curve0e,
             &curve0e.natural_interval(),
             &curve1e,

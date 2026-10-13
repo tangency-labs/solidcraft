@@ -1603,8 +1603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gap_small",
@@ -2347,8 +2347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCurve::IsArc",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0088",
@@ -2658,16 +2658,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0126",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940601427",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -2735,8 +2731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0135",
@@ -4571,8 +4567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0359",
@@ -4591,8 +4587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCurve::IsArc",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0361",
@@ -4659,8 +4655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0369",
@@ -5735,8 +5731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0499",
@@ -5763,8 +5759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0502",
@@ -6023,8 +6019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0534",
@@ -6110,16 +6106,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0544",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940601845",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -6214,16 +6206,12 @@
       "values_compared": 63
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0556",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940601857",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -6267,8 +6255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0562",
@@ -6387,8 +6375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0576",
@@ -6474,16 +6462,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0586",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940601887",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -7263,8 +7247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0683",
@@ -7527,8 +7511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0715",
@@ -8451,8 +8435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0825",
@@ -8478,16 +8462,12 @@
       "values_compared": 102
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0828",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940602129",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -8783,8 +8763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0864",
@@ -8931,8 +8911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0882",
@@ -9166,16 +9146,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0910",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940602211",
-      "values_compared": 0
+      "values_compared": 44
     },
     {
       "max_rel_err": 0.0,
@@ -9218,16 +9194,12 @@
       "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen0916",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940602217",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -9523,8 +9495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCurve::IsArc",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0952",
@@ -9915,8 +9887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0999",
@@ -10039,8 +10011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1014",
@@ -10399,8 +10371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1058",
@@ -10435,8 +10407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1062",
@@ -11042,16 +11014,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1133",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940602434",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -11307,8 +11275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1165",
@@ -11403,8 +11371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1176",
@@ -11635,8 +11603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1204",
@@ -12087,8 +12055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCurve::IsArc",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1259",
@@ -12375,8 +12343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1294",
@@ -12427,8 +12395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1300",
@@ -12859,8 +12827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1352",
@@ -13279,8 +13247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1402",
@@ -13307,8 +13275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1405",
@@ -13726,16 +13694,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1455",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940602756",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "deferred": {
@@ -13927,8 +13891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1479",
@@ -14159,8 +14123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1507",
@@ -14307,8 +14271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1524",
@@ -14791,8 +14755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "sm_IsPointSolutionAcrossClosedSeamBoundary",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1582",
@@ -14915,8 +14879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1597",
@@ -15071,8 +15035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1616",
@@ -15279,8 +15243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1641",
@@ -15299,8 +15263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1643",
@@ -15594,16 +15558,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1679",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940602980",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -16510,16 +16470,12 @@
       "values_compared": 119
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1791",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940603092",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -16539,8 +16495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1794",
@@ -16959,8 +16915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1845",
@@ -17174,16 +17130,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1871",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940603172",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -17611,8 +17563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1923",
@@ -17687,8 +17639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1932",
@@ -17843,8 +17795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
+        "symbol": "SmCCIntersectENFO::Evaluate",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1951",
@@ -18018,16 +17970,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GlobalCurveIntersect",
-        "unit": "curve.curve_p8"
-      },
       "max_rel_err": 0.0,
       "name": "gen1972",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=8015584153940603273",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -18251,13 +18199,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 172,
+  "cases_deferred": 159,
   "cases_failed": 0,
-  "cases_passed": 2023,
+  "cases_passed": 2036,
   "cases_total": 2195,
   "deferred_by_unit": {
-    "curve.curve_p5": 116,
-    "curve.curve_p8": 56
+    "curve.curve_p5": 159
   },
   "max_rel_err": 0.0,
   "pass": true,
