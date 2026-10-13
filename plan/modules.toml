@@ -1310,9 +1310,9 @@ depends_on = ["curve.curve_p1", "curve.curve_p2", "curve.curve_p4", "curve.ellip
 est_lines = 1930
 layer = 19
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
-claimed_by = ""
-claimed_at = ""
+status = "claimed"
+claimed_by = "swarm-curve.ellipse_p1-a1"
+claimed_at = "2026-10-13T04:34:25Z"
 notes = "39 fns; largest: SmEllipse::MakeNurb, SmPolarConversion::ConvertToPolarParameter, SmEllipse::JoinWith, SmEllipse::Trim; cycle back-edges (call into later units; stub or co-port): surface.surf_of_extrusion_p1(1), surface.surf_of_revolution_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
