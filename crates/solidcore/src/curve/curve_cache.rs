@@ -77,7 +77,7 @@
 //!   and `Draw` belong to other units or are debug output.
 
 use crate::curve::curve::p2::{at, Curve, CurveKind, FindCurveDistanceExtrema};
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::line_closest_point;
@@ -126,16 +126,6 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
-}
-
-/// Upstream ignores the status of a call: keep its value, or `None` on failure;
-/// an [`SolidError::Unported`] is propagated.
-fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
-    match r {
-        Ok(v) => Ok(Some(v)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        Err(_) => Ok(None),
-    }
 }
 
 /// Evaluates `curve` at `t` into `pv` (position and first derivative), leaving

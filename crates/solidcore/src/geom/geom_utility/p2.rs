@@ -58,7 +58,7 @@
 //!   [`SegmentHits`], `smgu_LineIntersectSphere` as a count and array,
 //!   `smgu_BestFitLineToPoints` with its matrix, `smgu_3x3Determinate` on a 3x3 array).
 
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::geom_utility::p1::{
     self, add_point, determinant_3_vectors, determinate_4x4, intersect_three_planes,
     line_closest_point, line_coplanar_circle_intersect, line_line_closest_point,
@@ -85,16 +85,6 @@ fn sm_err(operation: &'static str) -> SolidError {
 /// `SM_RAD2DEG(a)` = `a * (180.0 / SM_PI)`.
 fn rad_to_deg(a: f64) -> f64 {
     a * (180.0 / PI)
-}
-
-/// Upstream ignores the status of a call (`SE(...)` or no check at all): drop the
-/// error unless it is [`SolidError::Unported`], which must still surface.
-fn ignore_status<T>(r: Result<T>) -> Result<Option<T>> {
-    match r {
-        Ok(v) => Ok(Some(v)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        Err(_) => Ok(None),
-    }
 }
 
 // ---- types ---------------------------------------------------------------------------

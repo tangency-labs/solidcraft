@@ -148,7 +148,7 @@ use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
 use crate::curve::offset_curve::OffsetCurve;
 use crate::curve::projected_curve::ProjectedCurve;
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::axis2_placement::Axis2Placement;
@@ -272,11 +272,6 @@ const OP_GS: &str = "curve::curve::p2::CurvePropertyGs";
 /// `SM_ERR` of a base-class default.
 const fn base_err() -> SolidError {
     SolidError::sm_err(OP_BASE)
-}
-
-/// Whether `e` is [`SolidError::Unported`] (never swallowed).
-const fn is_unported(e: &SolidError) -> bool {
-    matches!(e, SolidError::Unported { .. })
 }
 
 // ---- the evaluation interface ---------------------------------------------------------
@@ -1393,11 +1388,7 @@ impl Curve {
             let per = ii as f64 / (num_samples as f64 - 1.0);
             let mut param = interval.evaluate(per);
 
-            let crv_pt = match self.evaluate_point(param) {
-                Ok(p) => p,
-                Err(e) if is_unported(&e) => return Err(e),
-                Err(_) => Vec3::UNDEF,
-            };
+            let crv_pt = ignored(self.evaluate_point(param))?.unwrap_or(Vec3::UNDEF);
             let mut drop = surface_drop_point(surface, crv_pt, domain, guess_uv)?;
 
             // If drop failed for first or last point, try moving a small distance from the end.
@@ -1521,14 +1512,6 @@ impl Curve {
     }
 }
 
-/// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
-fn ignore_status<T>(r: Result<T>) -> Result<()> {
-    match r {
-        Err(e) if is_unported(&e) => Err(e),
-        _ => Ok(()),
-    }
-}
-
 /// `SmCurve::Notify`: drops the curve's object cache before an edit and on
 /// destruction, then passes the notification to `SmAObject::Notify`.
 ///
@@ -1570,13 +1553,8 @@ pub fn notify<T>(
 /// [`SolidError::Unported`] from the evaluator.
 pub fn base_ends<C: CurveEvaluate + ?Sized>(curve: &C) -> Result<Ends> {
     let ivl = curve.natural_interval();
-    let point = |t: f64| -> Result<Point3> {
-        match curve.evaluate_point(t) {
-            Ok(p) => Ok(p),
-            Err(e) if is_unported(&e) => Err(e),
-            Err(_) => Ok(Vec3::UNDEF),
-        }
-    };
+    let point =
+        |t: f64| -> Result<Point3> { Ok(ignored(curve.evaluate_point(t))?.unwrap_or(Vec3::UNDEF)) };
     Ok(Ends {
         start: point(ivl.min())?,
         end: point(ivl.max())?,
@@ -1593,11 +1571,7 @@ fn eval_ignored<C: CurveEvaluate + ?Sized>(
     num_derivs: usize,
     non_zero_tangents: bool,
 ) -> Result<Option<Vec<Vec3>>> {
-    match curve.evaluate(t, num_derivs, true, non_zero_tangents) {
-        Ok(v) => Ok(Some(v)),
-        Err(e) if is_unported(&e) => Err(e),
-        Err(_) => Ok(None),
-    }
+    ignored(curve.evaluate(t, num_derivs, true, non_zero_tangents))
 }
 
 /// `SmCurve::ApproximateLength`: the length of the polygon through the curve
@@ -1667,11 +1641,7 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
         Ok((ret, Some(turn_deg)))
     } else {
         let point = |t: f64, prev: Point3| -> Result<Point3> {
-            match curve.evaluate_point(t) {
-                Ok(p) => Ok(p),
-                Err(e) if is_unported(&e) => Err(e),
-                Err(_) => Ok(prev),
-            }
+            Ok(ignored(curve.evaluate_point(t))?.unwrap_or(prev))
         };
 
         // Get Start Point

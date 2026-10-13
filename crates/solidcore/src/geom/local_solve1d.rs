@@ -49,7 +49,7 @@
 //! - `SE(...)`/`SER` error-log side effects and `SM_DEBUG_CODE` tracing are not
 //!   ported.
 
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 pub use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::tol::{in_tol, scaled_zero};
@@ -80,16 +80,6 @@ fn eval_failed(e: SolidError, operation: &'static str) -> SolidError {
         e
     } else {
         sm_err(operation)
-    }
-}
-
-/// For calls whose failure upstream ignores: `Ok(None)` on failure, except that
-/// an `Unported` error is propagated.
-fn ignore_failure<T>(r: Result<T>) -> Result<Option<T>> {
-    match r {
-        Ok(v) => Ok(Some(v)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        Err(_) => Ok(None),
     }
 }
 
@@ -712,7 +702,7 @@ impl LocalSolve1d {
                 let mid_t = prev_t + g * (curr_t - prev_t);
                 temp.t = mid_t;
                 let r = Self::eval_into(eval, &mut temp, &mut found_answer, true);
-                if ignore_failure(r)?.is_none() {
+                if ignored(r)?.is_none() {
                     continue; // just keep trying
                 }
                 if temp.f.abs() < best_interior_f.abs() {
@@ -777,7 +767,7 @@ impl LocalSolve1d {
                 self.lower_bracket_f,
                 self.upper_bracket_f,
             );
-            if let Some((t, f)) = ignore_failure(r)? {
+            if let Some((t, f)) = ignored(r)? {
                 self.curr.t = t;
                 self.curr.f = f;
                 self.found_accuracy = self.curr.f;
@@ -1073,7 +1063,7 @@ impl LocalSolve1d {
                 self.lower_bracket_f,
                 self.upper_bracket_f,
             );
-            if let Some((t, f)) = ignore_failure(r)? {
+            if let Some((t, f)) = ignored(r)? {
                 self.curr.t = t;
                 self.curr.f = f;
             }

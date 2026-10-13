@@ -67,7 +67,7 @@
 
 use crate::curve::curve::p2::{self as curve_base, at, HYPERBOLA_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::assert_array::labels::{SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -120,14 +120,6 @@ pub struct Hyperbola {
 impl From<Hyperbola> for Curve {
     fn from(c: Hyperbola) -> Self {
         Self::new(CurveKind::Hyperbola(c))
-    }
-}
-
-/// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
-fn ignore_status<T>(r: Result<T>) -> Result<()> {
-    match r {
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        _ => Ok(()),
     }
 }
 

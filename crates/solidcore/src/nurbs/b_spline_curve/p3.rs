@@ -67,7 +67,7 @@
 //!   `AssertValid` takes the [`Kernel`]; `SmCurve::IsAnalytic` / `IsBounded` are the
 //!   base `FALSE` / `TRUE`.
 
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -220,16 +220,6 @@ const fn curve_is_bounded(_curve: &BSplineCurve) -> bool {
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
-}
-
-/// An ignored status: the value, or `None` on failure; an unported callee still
-/// fails.
-fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
-    match r {
-        Ok(v) => Ok(Some(v)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        Err(_) => Ok(None),
-    }
 }
 
 /// An `EvaluatePoint` whose status is ignored: [`Vec3::UNDEF`] (the

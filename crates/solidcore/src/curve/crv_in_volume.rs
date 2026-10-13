@@ -84,7 +84,8 @@
 //!   (unit `curve.curve_p5`) only sets the dimension, 3.
 
 use crate::curve::curve::p2::{
-    evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate, CRV_IN_VOLUME_TYPE,
+    at, evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate,
+    CRV_IN_VOLUME_TYPE,
 };
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -1161,11 +1162,6 @@ impl CrvInVolume {
             owner_flag: 3,
         })
     }
-}
-
-/// Entry `i` of an evaluation, or `UNDEF` (an unwritten `SmVector3d`).
-fn at(v: &[Vec3], i: usize) -> Vec3 {
-    v.get(i).copied().unwrap_or(Vec3::UNDEF)
 }
 
 impl CurveEvaluate for CrvInVolume {
