@@ -699,8 +699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::AssertValid",
-        "unit": "curve.curve_p4"
+        "symbol": "SmCurve::GlobalPropertyAnalysis",
+        "unit": "curve.curve_p7"
       },
       "max_rel_err": 0.0,
       "name": "assert_base",
@@ -16836,7 +16836,7 @@
   "cases_passed": 2102,
   "cases_total": 2103,
   "deferred_by_unit": {
-    "curve.curve_p4": 1
+    "curve.curve_p7": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -59,8 +59,9 @@
 //!   a gap tolerance; `SubdivideAtDiscontinuity` calls `CalculateContinuities`
 //!   (`SmCurve::EvaluateContinuity`);
 //!   `TrimGap` intersects with `SmCurve::GlobalCurveIntersect` (`curve.curve_p8`);
-//!   `AssertValid` calls `SmCurve::AssertValid` (`curve.curve_p4`) and
-//!   `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`). Those calls return
+//!   `AssertValid` calls `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`); its
+//!   `SmCurve::AssertValid` is [`crate::curve::curve::p4::assert_valid_base`] for a
+//!   curve without owner. Those calls return
 //!   [`SolidError::Unported`] until the units are ported. `SmTol::IsDegenerate(this)`
 //!   (unit `geom.tol`, which does not port the object dispatch) is computed locally for
 //!   a curve without edge: `IsDegenerate` at twice the system zone tolerance, so
@@ -185,13 +186,21 @@ fn global_property_analysis(
     })
 }
 
-/// `SmCurve::AssertValid(pAList, eTestLevel, SM_NO_WALK, pTestRequests)` of `curve`.
-fn curve_assert_valid(_curve: &BSplineCurve, _list: Option<&mut AssertArray>) -> Result<bool> {
-    // UNPORTED(curve.curve_p4): SmCurve::AssertValid
-    Err(SolidError::Unported {
-        upstream: "SmCurve::AssertValid",
-        unit: "curve.curve_p4",
-    })
+/// `SmCurve::AssertValid(pAList, eTestLevel, SM_NO_WALK, pTestRequests)` of `curve`
+/// (reporting for `key`); a B-spline here has no owner.
+fn curve_assert_valid(
+    curve: &BSplineCurve,
+    list: Option<&mut AssertArray>,
+    key: ObjectKey,
+) -> Result<bool> {
+    crate::curve::curve::p4::assert_valid_base(
+        None,
+        curve.dim(),
+        "SmBSplineCurve",
+        list,
+        false,
+        key,
+    )
 }
 
 /// `SmTol::IsDegenerate(const SmObject*)` of `curve` (its `SmCurve_TYPE` branch,
@@ -946,10 +955,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmCurve::AssertValid` (unit `curve.curve_p4`),
-    /// unless `level_given`; past the knot checks `SmCurve::IsDegenerate` for other
-    /// intervals (`curve.curve_p4`) and `SmCurve::GlobalPropertyAnalysis`
-    /// (`curve.curve_p7`). `k` gives the system zone tolerance of
+    /// Past the knot checks [`SolidError::Unported`] from
+    /// `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`). `k` gives the system zone tolerance of
     /// `SmTol::IsDegenerate(this)`.
     pub fn assert_valid(
         &self,
@@ -965,7 +972,7 @@ impl BSplineCurve {
         rtn &= if level_given {
             true
         } else {
-            curve_assert_valid(self, list.as_deref_mut())?
+            curve_assert_valid(self, list.as_deref_mut(), key)?
         };
 
         // (MakeNurb cannot build a missing NURB for a plain B-spline)
@@ -1442,8 +1449,8 @@ mod tests {
             .assert_valid(&k, Some(&mut list), true, ObjectKey(1))
             .unwrap());
         assert_eq!(list.get(0).map(|r| r.test_index), Some(0));
-        // the base checks are not ported
-        assert!(e.assert_valid(&k, None, false, ObjectKey(1)).is_err());
+        // the base checks pass (no owner); test 0 still fails
+        assert!(!e.assert_valid(&k, None, false, ObjectKey(1)).unwrap());
     }
 
     #[test]

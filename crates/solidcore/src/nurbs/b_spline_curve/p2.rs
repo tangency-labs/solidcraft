@@ -72,9 +72,10 @@
 //! - **Back-edges.** `IsLine` defers to `SmCurve::IsLine` (unit `curve.curve_p5`,
 //!   co-ported by `curve.curve_cache` as [`crate::curve::curve::p5::is_line_base`])
 //!   for rational curves and curves it cannot classify from the control points;
-//!   `IsDegenerate` calls `SmCurve::IsDegenerate` (`curve.curve_p4`) for other
-//!   intervals; `GetMaxAnalyticDomain` calls
-//!   `SmCurve::IsClosed` (`curve.curve_p4`); `CreateAnalyticCurve` builds
+//!   `IsDegenerate` calls `SmCurve::IsDegenerate`
+//!   ([`crate::curve::curve::p4::is_degenerate_base`]) for other intervals;
+//!   `GetMaxAnalyticDomain` calls `SmCurve::IsClosed`
+//!   ([`crate::curve::curve::p4::is_closed_base`]); `CreateAnalyticCurve` builds
 //!   `SmCircle` (`curve.ellipse_p1`) and calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`); `CreateSimpleOffset` calls `SmCurve::IsArc`
 //!   (`curve.curve_p5`) and approximates an [`OffsetCurve`] with
@@ -203,24 +204,16 @@ fn curve_is_line(
 
 /// `SmCurve::IsDegenerate` of `curve` over `interval`.
 fn curve_is_degenerate(
-    _curve: &BSplineCurve,
-    _tol: f64,
-    _interval: Option<&Extent1d>,
+    curve: &BSplineCurve,
+    tol: f64,
+    interval: Option<&Extent1d>,
 ) -> Result<bool> {
-    // UNPORTED(curve.curve_p4): SmCurve::IsDegenerate
-    Err(SolidError::Unported {
-        upstream: "SmCurve::IsDegenerate",
-        unit: "curve.curve_p4",
-    })
+    crate::curve::curve::p4::is_degenerate_base(curve, tol, interval)
 }
 
 /// `SmCurve::IsClosed(crInterval, dTolerance = 0.0)` of `curve`.
-fn curve_is_closed(_curve: &BSplineCurve, _interval: &Extent1d) -> Result<bool> {
-    // UNPORTED(curve.curve_p4): SmCurve::IsClosed
-    Err(SolidError::Unported {
-        upstream: "SmCurve::IsClosed",
-        unit: "curve.curve_p4",
-    })
+fn curve_is_closed(curve: &BSplineCurve, interval: &Extent1d) -> Result<bool> {
+    crate::curve::curve::p4::is_closed_base(curve, interval, 0.0)
 }
 
 /// A circular arc found by `SmCurve::IsArc`: frame, radius, start and end angle
@@ -1263,8 +1256,7 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for another interval (`SmCurve::IsDegenerate`,
-    /// `curve.curve_p4`); `SM_ERR` without a NURB.
+    /// `SM_ERR` without a NURB (natural interval).
     pub fn is_degenerate(&self, tol3d: f64, interval: Option<&Extent1d>) -> Result<bool> {
         // low work - for nonNaturalInterval intervals pass the call along to the
         // general SmCurve::IsDegenerate
@@ -1374,8 +1366,7 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the closed test is `SmCurve::IsClosed` (unit
-    /// `curve.curve_p4`); `SM_ERR` without a NURB.
+    /// `SM_ERR` without a NURB.
     pub fn max_analytic_domain(&self) -> Result<Extent1d> {
         let mut dom = self.natural_interval();
 

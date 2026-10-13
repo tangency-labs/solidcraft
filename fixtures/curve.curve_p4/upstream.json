@@ -1,0 +1,12115 @@
+{
+ "cases": [
+  {
+   "name": "rect_chain_in_order",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "rect_chain_shuffled",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     null,
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "rect_chain_reversed_edges",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": false
+   }
+  },
+  {
+   "name": "rect_chain_two_squares",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         20,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         21,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         21,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         21,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "rect_chain_dup_kept",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": false
+   }
+  },
+  {
+   "name": "rect_chain_gap_beyond_tol",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -2.999,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "rect_chain_gap_within_tol",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -2.999,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 0.01,
+    "del": true
+   }
+  },
+  {
+   "name": "chain_empty",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "chain_all_null",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     null,
+     null
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "rect_edge0_is_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "rect_edge0_is_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "rect_edge0_assert",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "rect_edge0_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 5
+   }
+  },
+  {
+   "name": "rect_edge1_is_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "rect_edge1_is_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "rect_edge1_assert",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "rect_edge1_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 5
+   }
+  },
+  {
+   "name": "rect_edge2_is_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "rect_edge2_is_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "rect_edge2_assert",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "rect_edge2_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 5
+   }
+  },
+  {
+   "name": "rect_edge3_is_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "rect_edge3_is_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "rect_edge3_assert",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "rect_edge3_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 5
+   }
+  },
+  {
+   "name": "far_rect_edge0_degenerate_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge0_degenerate_tol_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge0_degenerate_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge0_degenerate_tol_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge0_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "far_rect_edge1_degenerate_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge1_degenerate_tol_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge1_degenerate_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge1_degenerate_tol_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge1_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "far_rect_edge2_degenerate_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge2_degenerate_tol_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge2_degenerate_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge2_degenerate_tol_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge2_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "far_rect_edge3_degenerate_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge3_degenerate_tol_base1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge3_degenerate_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_rect_edge3_degenerate_tol_base0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "tol": 1e-06,
+    "ivl": [
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "far_rect_edge3_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        10000000000.0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": false,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "far_rect_chain",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:439 (SmApiCreateRectangle((0,1e10,0), 10, 1e-9))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         10000000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": false
+   }
+  },
+  {
+   "name": "hexagon_chain_shuffled",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5.0,
+         6.123233995736766e-16,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -2.500000000000002,
+         -4.330127018922192,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5000000000000004,
+         4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         2.5000000000000004,
+         -4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         2.5000000000000004,
+         4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -2.499999999999999,
+         4.330127018922194,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -2.500000000000002,
+         -4.330127018922192,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5000000000000004,
+         -4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -2.499999999999999,
+         4.330127018922194,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5.0,
+         6.123233995736766e-16,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "hexagon_chain_mixed_dirs",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5000000000000004,
+         4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -2.499999999999999,
+         4.330127018922194,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5000000000000004,
+         4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -2.500000000000002,
+         -4.330127018922192,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5000000000000004,
+         -4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5000000000000004,
+         -4.330127018922193,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -2.499999999999999,
+         4.330127018922194,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5.0,
+         6.123233995736766e-16,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -2.500000000000002,
+         -4.330127018922192,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5.0,
+         6.123233995736766e-16,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-06,
+    "del": true
+   }
+  },
+  {
+   "name": "hexagon_edge0_snap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "snap",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.999,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "hexagon_edge0_proj_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     1,
+     0
+    ],
+    "sop": 11
+   }
+  },
+  {
+   "name": "hexagon_edge1_snap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "snap",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.999,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "hexagon_edge1_proj_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     1,
+     0
+    ],
+    "sop": 11
+   }
+  },
+  {
+   "name": "hexagon_edge2_snap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "snap",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.999,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "hexagon_edge2_proj_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     1,
+     0
+    ],
+    "sop": 11
+   }
+  },
+  {
+   "name": "hexagon_edge3_snap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "snap",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.999,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "hexagon_edge3_proj_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     1,
+     0
+    ],
+    "sop": 11
+   }
+  },
+  {
+   "name": "hexagon_edge4_snap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "snap",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.999,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "hexagon_edge4_proj_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     1,
+     0
+    ],
+    "sop": 11
+   }
+  },
+  {
+   "name": "hexagon_edge5_snap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "snap",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.999,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "hexagon_edge5_proj_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "t": 0.5,
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     1,
+     0
+    ],
+    "sop": 11
+   }
+  },
+  {
+   "name": "far_pentagon_edge0_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10000000000.000002,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000000000.0,
+        10000000000.000002,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_pentagon_edge0_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10000000000.000002,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000000000.0,
+        10000000000.000002,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 4
+   }
+  },
+  {
+   "name": "far_pentagon_edge1_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10000000000.0,
+        10000000000.000002,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_pentagon_edge1_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10000000000.0,
+        10000000000.000002,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 4
+   }
+  },
+  {
+   "name": "far_pentagon_edge2_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_pentagon_edge2_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 4
+   }
+  },
+  {
+   "name": "far_pentagon_edge3_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000000000.0,
+        9999999999.999998,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_pentagon_edge3_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        9999999999.999998,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000000000.0,
+        9999999999.999998,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 4
+   }
+  },
+  {
+   "name": "far_pentagon_edge4_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10000000000.0,
+        9999999999.999998,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000000000.000002,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "far_pentagon_edge4_polar_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:477 (SmApiCreateRegularPolygon((1e10,1e10,0), 5, 1.5e-6))",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        10000000000.0,
+        9999999999.999998,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10000000000.000002,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 4
+   }
+  },
+  {
+   "name": "line_join_0_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_0_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_0_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_0_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_1_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_1_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_1_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_1_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_2_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_2_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_2_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_2_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_3_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_3_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_3_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_3_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_4_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_4_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_4_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_4_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_5_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_5_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_5_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_5_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_6_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_6_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_6_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_6_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_7_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_7_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_7_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_7_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_8_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_8_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_8_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_8_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_9_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_9_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_9_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_9_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_10_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_10_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_10_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_10_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_11_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_11_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_11_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_11_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_12_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        20.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_12_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       20.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_12_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_12_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_13_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        -2.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": false
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_13_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       -2.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_13_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_13_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_14_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        14.0,
+        0,
+        0
+       ],
+       "v": [
+        6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": false
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_14_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       14.0,
+       0,
+       0
+      ],
+      "v": [
+       6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_14_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "owner": false,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_14_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": false
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "line_join_15_chain",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "fix_chain",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        4.0,
+        0,
+        0
+       ],
+       "v": [
+        -6.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ],
+       "scale": 3.0,
+       "inside_out": true
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        2,
+        7
+       ],
+       "scale": 2.0,
+       "inside_out": true
+      }
+     }
+    ],
+    "tol": 1e-07,
+    "del": true
+   }
+  },
+  {
+   "name": "line_join_15_analytic",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       4.0,
+       0,
+       0
+      ],
+      "v": [
+       -6.0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       2
+      ],
+      "scale": 3.0,
+      "inside_out": true
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "line_join_15_assert",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "owner": true,
+    "given": false
+   }
+  },
+  {
+   "name": "line_join_15_closed",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "line": {
+      "p": [
+       0,
+       0,
+       0
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "domain": [
+       2,
+       7
+      ],
+      "scale": 2.0,
+      "inside_out": true
+     }
+    },
+    "base": true,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "circle_closed",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "is_closed",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "base": false,
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "circle_not_degenerate",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "is_degenerate",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "base": true,
+    "tol": 1e-12,
+    "ivl": null
+   }
+  },
+  {
+   "name": "circle_polar_box_unbounded",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "polar_box",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "count": 11
+   }
+  },
+  {
+   "name": "circle_assert_owner",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "assert",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "owner": true,
+    "given": true
+   }
+  },
+  {
+   "name": "circle_point_inversion_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      1.1,
+      3.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.0,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      1.1,
+      3.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.0,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     1.1,
+     3.0,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.0,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.0,
+    "p": [
+     1.1,
+     3.0,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": true,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 14
+   }
+  },
+  {
+   "name": "circle_point_inversion_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      0.8071067811865476,
+      3.7071067811865475,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.125,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      0.8071067811865476,
+      3.7071067811865475,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.125,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     0.8071067811865476,
+     3.7071067811865475,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.125,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.125,
+    "p": [
+     0.8071067811865476,
+     3.7071067811865475,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 12
+   }
+  },
+  {
+   "name": "circle_point_inversion_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      0.10000000000000006,
+      4.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.25,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      0.10000000000000006,
+      4.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.25,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     0.10000000000000006,
+     4.0,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.25,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.25,
+    "p": [
+     0.10000000000000006,
+     4.0,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": true,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 0
+   }
+  },
+  {
+   "name": "circle_point_inversion_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      -0.6071067811865475,
+      3.7071067811865475,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.375,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      -0.6071067811865475,
+      3.7071067811865475,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.375,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     -0.6071067811865475,
+     3.7071067811865475,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.375,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.375,
+    "p": [
+     -0.6071067811865475,
+     3.7071067811865475,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 14
+   }
+  },
+  {
+   "name": "circle_point_inversion_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      -0.9,
+      3.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.5,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      -0.9,
+      3.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.5,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     -0.9,
+     3.0,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.5,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.5,
+    "p": [
+     -0.9,
+     3.0,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": true,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 12
+   }
+  },
+  {
+   "name": "circle_point_inversion_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      -0.6071067811865477,
+      2.2928932188134525,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.625,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      -0.6071067811865477,
+      2.2928932188134525,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.625,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     -0.6071067811865477,
+     2.2928932188134525,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.625,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.625,
+    "p": [
+     -0.6071067811865477,
+     2.2928932188134525,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 0
+   }
+  },
+  {
+   "name": "circle_point_inversion_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      0.09999999999999983,
+      2.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.75,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      0.09999999999999983,
+      2.0,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.75,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     0.09999999999999983,
+     2.0,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.75,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_6",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.75,
+    "p": [
+     0.09999999999999983,
+     2.0,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": true,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 14
+   }
+  },
+  {
+   "name": "circle_point_inversion_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      0.8071067811865473,
+      2.292893218813452,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.875,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      0.8071067811865473,
+      2.292893218813452,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 0.875,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     0.8071067811865473,
+     2.292893218813452,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     0.875,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_7",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 0.875,
+    "p": [
+     0.8071067811865473,
+     2.292893218813452,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": false,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 12
+   }
+  },
+  {
+   "name": "circle_point_inversion_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [
+     [
+      1.1,
+      2.9999999999999996,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 1.0,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_distance_to_point_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 0.5,
+    "vecs": [
+     [
+      1.1,
+      2.9999999999999996,
+      0.2
+     ]
+    ],
+    "sqtol": 0.0,
+    "t": 1.0,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_dist_at_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "cp_dist_at",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "p": [
+     1.1,
+     2.9999999999999996,
+     0.2
+    ],
+    "dsq": 0.25,
+    "sqtol": 0.0,
+    "x": [
+     1.0,
+     0.1,
+     0.1,
+     0.05
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "circle_proj_dist_8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455/4612 (my_test_drop_point on the (0,3,0) unit circle)",
+   "inputs": {
+    "op": "proj_dist",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "t": 1.0,
+    "p": [
+     1.1,
+     2.9999999999999996,
+     0.2
+    ],
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "rev": true,
+    "d": [
+     1,
+     0,
+     0
+    ],
+    "sop": 0
+   }
+  },
+  {
+   "name": "circle_property_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 0,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_0_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 0,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 1,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_1_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 1,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 2,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_2_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 2,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 3,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_3_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 3,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_4",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 4,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_4_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 4,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 5,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_5_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 5,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_6",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 6,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_6_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 6,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_7",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 7,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_7_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 7,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_8",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 8,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_8_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 8,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_9",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 9,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_9_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 9,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_10",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 10,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_10_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 10,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 11,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_11_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 11,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_12",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 12,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_12_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 12,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_13",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 13,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_13_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 13,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_14",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 14,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_14_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 14,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_15",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 15,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_15_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 15,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_16",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 16,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_16_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 16,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_17",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 17,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_17_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 17,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_18",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 18,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_18_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 18,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_19",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 19,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_19_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 19,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_20",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 20,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_20_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 20,
+    "val": null,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_21",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 21,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_21_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 21,
+    "val": null,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_22",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 22,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_22_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 22,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_23",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_23_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 23,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_24",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 24,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_24_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 24,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_25",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_25_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 25,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_26",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 26,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_26_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 26,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_27",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 27,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_27_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 27,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "circle_property_28",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 28,
+    "val": 2.0,
+    "vecs": [
+     [
+      0.3,
+      3.2,
+      0.1
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": false
+   }
+  },
+  {
+   "name": "circle_property_28_null",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632 (my_test_surface_closest_point)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "prop": 28,
+    "val": null,
+    "vecs": [],
+    "sqtol": 1e-10,
+    "t": 0.3,
+    "signal": true
+   }
+  },
+  {
+   "name": "tangent_equations_crossing",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "cc_tangent",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        -1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "x": [
+     0.5,
+     0.5
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "tangent_equations_parallel",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "cc_tangent",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "x": [
+     0.25,
+     0.75
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "tangent_equations_antiparallel",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "cc_tangent",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "x": [
+     0.25,
+     0.75
+    ],
+    "jac": false
+   }
+  },
+  {
+   "name": "tangent_equations_circle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "cc_tangent",
+    "c1": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2,
+        4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        4,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "x": [
+     0.25,
+     0.5
+    ],
+    "jac": true
+   }
+  },
+  {
+   "name": "dist_extrema_circle_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix)",
+   "inputs": {
+    "op": "dist_extrema",
+    "c1": {
+     "circle": {
+      "center": [
+       0,
+       3,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2,
+        4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        4,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "dom": [
+     0,
+     1
+    ],
+    "tol": 1e-09,
+    "t": 0.25
+   }
+  },
+  {
+   "name": "filter_corner_k2_adj0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     2,
+     2
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 0,
+    "s": [
+     1.0,
+     0.0
+    ],
+    "value": 0.001
+   }
+  },
+  {
+   "name": "filter_mid_k2_adj0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     0.5
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        -4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     2,
+     2
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 0,
+    "s": [
+     0.5,
+     0.5
+    ],
+    "value": 0.2
+   }
+  },
+  {
+   "name": "filter_corner_k2_adj1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     2,
+     2
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 1,
+    "s": [
+     1.0,
+     0.0
+    ],
+    "value": 0.001
+   }
+  },
+  {
+   "name": "filter_mid_k2_adj1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     0.5
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        -4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     2,
+     2
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 1,
+    "s": [
+     0.5,
+     0.5
+    ],
+    "value": 0.2
+   }
+  },
+  {
+   "name": "filter_corner_k2_adj2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     2,
+     2
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 2,
+    "s": [
+     1.0,
+     0.0
+    ],
+    "value": 0.001
+   }
+  },
+  {
+   "name": "filter_mid_k2_adj2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     0.5
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        -4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     2,
+     2
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 2,
+    "s": [
+     0.5,
+     0.5
+    ],
+    "value": 0.2
+   }
+  },
+  {
+   "name": "filter_corner_k3_adj0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     3,
+     3
+    ],
+    "k2": [
+     3,
+     3
+    ],
+    "adj": 0,
+    "s": [
+     1.0,
+     0.0
+    ],
+    "value": 0.001
+   }
+  },
+  {
+   "name": "filter_mid_k3_adj0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     0.5
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        -4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     3,
+     3
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 0,
+    "s": [
+     0.5,
+     0.5
+    ],
+    "value": 0.2
+   }
+  },
+  {
+   "name": "filter_corner_k3_adj1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     3,
+     3
+    ],
+    "k2": [
+     3,
+     3
+    ],
+    "adj": 1,
+    "s": [
+     1.0,
+     0.0
+    ],
+    "value": 0.001
+   }
+  },
+  {
+   "name": "filter_mid_k3_adj1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     0.5
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        -4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     3,
+     3
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 1,
+    "s": [
+     0.5,
+     0.5
+    ],
+    "value": 0.2
+   }
+  },
+  {
+   "name": "filter_corner_k3_adj2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     3,
+     3
+    ],
+    "k2": [
+     3,
+     3
+    ],
+    "adj": 2,
+    "s": [
+     1.0,
+     0.0
+    ],
+    "value": 0.001
+   }
+  },
+  {
+   "name": "filter_mid_k3_adj2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "filter",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     0.5
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        -4,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        -2,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "k1": [
+     3,
+     3
+    ],
+    "k2": [
+     2,
+     2
+    ],
+    "adj": 2,
+    "s": [
+     0.5,
+     0.5
+    ],
+    "value": 0.2
+   }
+  },
+  {
+   "name": "rect_edge_no_planes",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "planes",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "planes": []
+   }
+  },
+  {
+   "name": "rect_edge_crossing_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "planes",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "planes": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_x_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       5.0,
+       0.0,
+       0.0
+      ],
+      "v": [
+       -2.4999999999999996,
+       4.330127018922193,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       5,
+       5
+      ]
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "circle_x_hexagon_edge0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "b": {
+     "line": {
+      "p": [
+       5.0,
+       0.0,
+       0.0
+      ],
+      "v": [
+       -2.4999999999999996,
+       4.330127018922193,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "a": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       5,
+       5
+      ]
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hexagon_edge1_x_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       2.5000000000000004,
+       4.330127018922193,
+       0.0
+      ],
+      "v": [
+       -5.0,
+       8.881784197001252e-16,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       5,
+       5
+      ]
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "circle_x_hexagon_edge1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "b": {
+     "line": {
+      "p": [
+       2.5000000000000004,
+       4.330127018922193,
+       0.0
+      ],
+      "v": [
+       -5.0,
+       8.881784197001252e-16,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "a": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       5,
+       5
+      ]
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hexagon_edge2_x_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "line": {
+      "p": [
+       -2.499999999999999,
+       4.330127018922194,
+       0.0
+      ],
+      "v": [
+       -2.500000000000001,
+       -4.330127018922193,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       5,
+       5
+      ]
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "circle_x_hexagon_edge2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "b": {
+     "line": {
+      "p": [
+       -2.499999999999999,
+       4.330127018922194,
+       0.0
+      ],
+      "v": [
+       -2.500000000000001,
+       -4.330127018922193,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ],
+      "scale": 1.0,
+      "inside_out": false
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "a": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       5,
+       5
+      ]
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "hexagon_edges_x_lines",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:462 (SmApiCreateRegularPolygon((0,0,0), 6, 5))",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "curve": {
+      "line": {
+       "p": [
+        5.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        -2.4999999999999996,
+        4.330127018922193,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ]
+      }
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "line": {
+      "p": [
+       2.5000000000000004,
+       4.330127018922193,
+       0.0
+      ],
+      "v": [
+       -5.0,
+       8.881784197001252e-16,
+       0
+      ],
+      "domain": [
+       0,
+       1
+      ]
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "bspline_not_analytic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6))",
+   "inputs": {
+    "op": "analytic",
+    "a": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    },
+    "fa": [
+     0,
+     1
+    ],
+    "b": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    },
+    "fb": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  }
+ ]
+}

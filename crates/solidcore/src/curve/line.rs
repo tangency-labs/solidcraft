@@ -100,9 +100,8 @@
 //!   [`crate::curve::curve::Curve`] of B-spline or line kind; its `IsLine` is
 //!   [`Line::is_line`] or [`BSplineCurve::is_line`] (which can reach the unported
 //!   `SmCurve::IsLine`, `curve.curve_p5`).
-//! - **`AssertValid`** runs the base `SmBSplineCurve::AssertValid` (which needs the
-//!   unported `SmCurve::AssertValid`) unless `level_given`; the line's four end point
-//!   checks then follow.
+//! - **`AssertValid`** runs the base `SmBSplineCurve::AssertValid` unless
+//!   `level_given`; the line's four end point checks then follow.
 //! - **`ReadFromDB`** always builds a new line (the "fill this object" input is
 //!   dropped); the status of the base class read is ignored, as upstream.
 
@@ -1922,8 +1921,7 @@ impl Line {
     ///
     /// # Errors
     ///
-    /// Those of [`BSplineCurve::assert_valid`] ([`SolidError::Unported`]:
-    /// `SmCurve::AssertValid`) unless `level_given`.
+    /// Those of [`BSplineCurve::assert_valid`] unless `level_given`.
     pub fn assert_valid(
         &self,
         k: &Kernel,
