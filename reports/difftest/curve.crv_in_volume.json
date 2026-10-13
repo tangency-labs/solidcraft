@@ -422,16 +422,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0021",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095435",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -1022,16 +1018,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0093",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095507",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -1330,16 +1322,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0130",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095544",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -1498,16 +1486,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0149",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095563",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -1566,16 +1550,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0157",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095571",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -2410,16 +2390,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095670",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -2778,16 +2754,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0300",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095714",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -4570,16 +4542,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0516",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095930",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -4954,16 +4922,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0563",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827095977",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5318,16 +5282,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0606",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096020",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -5906,16 +5866,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0676",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096090",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6266,16 +6222,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0719",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096133",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6342,16 +6294,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0728",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096142",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6918,16 +6866,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0797",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096211",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -8078,16 +8022,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0934",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096348",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10186,16 +10126,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1183",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096597",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10398,16 +10334,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1208",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096622",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11170,16 +11102,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1300",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096714",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11230,16 +11158,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1306",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096720",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11506,16 +11430,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1339",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096753",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11602,16 +11522,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1350",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096764",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -12718,16 +12634,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1484",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827096898",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -13810,16 +13722,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1616",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097030",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -13918,16 +13826,12 @@
       "values_compared": 61
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1628",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097042",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14158,16 +14062,12 @@
       "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1657",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097071",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14546,16 +14446,12 @@
       "values_compared": 74
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1701",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097115",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15370,28 +15266,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1800",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097214",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1801",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097215",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15918,16 +15806,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1864",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097278",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -16338,16 +16222,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1913",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097327",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -16434,16 +16314,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1924",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097338",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -17054,16 +16930,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::EvaluatePoint",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1998",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2397486594827097412",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -17075,13 +16947,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 208,
+  "cases_deferred": 176,
   "cases_failed": 0,
-  "cases_passed": 1822,
+  "cases_passed": 1854,
   "cases_total": 2030,
   "deferred_by_unit": {
     "intersect.curve_class_p4": 175,
-    "surface.volume_p2": 33
+    "surface.volume_p2": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

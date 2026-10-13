@@ -1050,7 +1050,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-curve.crv_in_volume-a1"
 claimed_at = "2026-10-13T01:00:34Z"
-notes = "difftest 2030 cases (1822 pass, 208 deferred: intersect.curve_class_p4 175, surface.volume_p2 33; surface.volume_p1 wired); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest 2030 cases (1854 pass, 176 deferred: intersect.curve_class_p4 175, surface.volume_p2 1; surface.volume_p1 wired; SmVolume::EvaluatePoint co-ported by surface.unbend_volume); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_cache"
@@ -1232,7 +1232,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-surface.volume_p1-a1"
 claimed_at = "2026-10-13T02:16:42Z"
-notes = "63 fns; largest: smvol_LiftThirdDerivative, SmFindPVIntersectENFO::Evaluate, SmVolume::Map, SmVolume::Evaluate; cycle back-edges (call into later units; stub or co-port): surface.b_spline_volume(2), surface.bend_volume(2), surface.twist_volume(2), surface.unbend_volume(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 2886 cases (886 fixtures + 2000 generated), 2847 pass, 39 deferred (surface.unbend_volume 39; twist wired), max_rel_err 0; 20k-seed run clean; --perturb SENSITIVE; wired: curve.crv_in_volume (deferred 604 -> 208), geom.transform (256 -> 3), geom.tol GetScaledZero(SmVolume); geom.solution_array volume stub stays (opaque handle)"
+notes = "63 fns; largest: smvol_LiftThirdDerivative, SmFindPVIntersectENFO::Evaluate, SmVolume::Map, SmVolume::Evaluate; cycle back-edges (call into later units; stub or co-port): surface.b_spline_volume(2), surface.bend_volume(2), surface.twist_volume(2), surface.unbend_volume(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 2886 cases (886 fixtures + 2000 generated), 2884 pass, 2 deferred (surface.surface_p8 2: the unbend IsCurveInParamDomainSimple; twist and unbend wired by their units), max_rel_err 0; 20k-seed run clean; --perturb SENSITIVE; wired: curve.crv_in_volume (deferred 604 -> 208), geom.transform (256 -> 3), geom.tol GetScaledZero(SmVolume); geom.solution_array volume stub stays (opaque handle)"
 
 [[unit]]
 id = "curve.curve_p4"
@@ -1624,7 +1624,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "3 fns; largest: SmBSplineVolume::CalculateContinuitiesSimple, SmBSplineVolume::IsCurveInParamDomainSimple, SmBSplineVolume::HasDiscontinuitiesSimple; only 0 of 310 lines survive RTA (reached via virtual dispatch to classes no in-scope entry point constructs); low priority / likely deferrable; 317 upstream test entry points reach this unit; PARTIAL: difftest 2420 cases (420 fixture: unit cube, cubic/quintic with interior multiplicities, degree 0, single distinct knot, unclamped, near-coincident knots, tiny 1e-9 and huge 1e7 domains, oriented + compounded volumes; all 9 SmVolumeParamType codes, representational and geometric continuities, HasDiscontinuitiesSimple with/without output, IsCurveInParamDomainSimple / IsCurveInParamDomain / IsCurveInInSpaceDomain on real SmLine, SmBSplineCurve, SmEllipse, SmHermiteCurve inside, outside, crossing, on a face and within SM_EFF_ZERO of it + 2000 generated), 1812 passed bit-identical (max_rel_err 0), 0 failed, 608 deferred: curve.curve_p9 537 (SmCurve::CalculateTightBoundingBox 434, SmCurve::IsOnPositiveSideOfPlanes 103), surface.volume_p2 71 (SmVolume::EvaluatePoint via CrvInVolume boxes); --perturb SENSITIVE. Without USE_VOLUMES the geometric continuity path always fails at EvaluateIsoParametricCurveSimple, so HasDiscontinuitiesSimple(geometric) reports none (findings.md, upstream-issues WR-48, WR-49, UB-73). Wired the surface.volume_p1 SmBSplineVolume stubs (Volume::has_discontinuities_simple gains bCalcGeometric, new Volume::calculate_continuities_simple, IsCurveIn*/IsLineInParamDomain take &Kernel); surface.volume_p1, surface.twist_volume, surface.b_spline_volume, curve.crv_in_volume, geom.transform difftests unchanged"
+notes = "3 fns; largest: SmBSplineVolume::CalculateContinuitiesSimple, SmBSplineVolume::IsCurveInParamDomainSimple, SmBSplineVolume::HasDiscontinuitiesSimple; only 0 of 310 lines survive RTA (reached via virtual dispatch to classes no in-scope entry point constructs); low priority / likely deferrable; 317 upstream test entry points reach this unit; PARTIAL: difftest 2420 cases (420 fixture: unit cube, cubic/quintic with interior multiplicities, degree 0, single distinct knot, unclamped, near-coincident knots, tiny 1e-9 and huge 1e7 domains, oriented + compounded volumes; all 9 SmVolumeParamType codes, representational and geometric continuities, HasDiscontinuitiesSimple with/without output, IsCurveInParamDomainSimple / IsCurveInParamDomain / IsCurveInInSpaceDomain on real SmLine, SmBSplineCurve, SmEllipse, SmHermiteCurve inside, outside, crossing, on a face and within SM_EFF_ZERO of it + 2000 generated), 1870 passed bit-identical (max_rel_err 0), 0 failed, 550 deferred: curve.curve_p9 550 (after merging surface.unbend_volume PR #20, whose SmVolume::EvaluatePoint co-port runs the 71 cases formerly deferred on surface.volume_p2: 58 now pass, 13 now reach curve.curve_p9; per-symbol counts before that: SmCurve::CalculateTightBoundingBox 434, SmCurve::IsOnPositiveSideOfPlanes 103); --perturb SENSITIVE. Without USE_VOLUMES the geometric continuity path always fails at EvaluateIsoParametricCurveSimple, so HasDiscontinuitiesSimple(geometric) reports none (findings.md, upstream-issues WR-48, WR-49, UB-73). Wired the surface.volume_p1 SmBSplineVolume stubs (Volume::has_discontinuities_simple gains bCalcGeometric, new Volume::calculate_continuities_simple, IsCurveIn*/IsLineInParamDomain take &Kernel); surface.volume_p1, surface.twist_volume, surface.b_spline_volume, curve.crv_in_volume, geom.transform difftests unchanged"
 
 [[unit]]
 id = "surface.bend_volume"
@@ -1719,10 +1719,10 @@ soft_depends_on = ["curve.crv_in_volume", "curve.curve_p4", "curve.curve_p6", "c
 est_lines = 920
 layer = 24
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "29 fns; largest: SmUnbendVolume::Evaluate, SmUnbendVolume::EvaluateSimple, SmUnbendVolume::EvaluateBoundingBoxSimple, SmUnbendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 1874 cases (374 fixture + 1500 generated), 1807 pass bit-identical, 67 deferred (surface.surface_p8 66: IsCurveInParamDomainSimple -> SmCurve::HasPlaneCrossings -> SmSurface::GlobalCurveIntersect; surface.volume_p2 1: ReadFromDB base read), max_rel_err 0; 30k-seed run clean (30374 cases); --perturb SENSITIVE; CO-PORTED from surface.volume_p2: SmVolume::EvaluatePoint (Volume::evaluate_point) and SmVolume::IsPointInParamDomain (private helper); wired: surface.volume_p1 (deferred 39 -> 2), curve.crv_in_volume (its SmVolume::EvaluatePoint stub now calls the co-port: surface.volume_p2 deferred 33 -> 1); component constructor ported as UnbendVolume::create; 29 fns; largest: SmUnbendVolume::Evaluate, SmUnbendVolume::EvaluateSimple, SmUnbendVolume::EvaluateBoundingBoxSimple, SmUnbendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.cone_p2"
@@ -1778,7 +1778,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "18 fns; largest: SmVolume::EvaluateBoundingBoxSimple, SmVolume::EvaluateBoundingBox, SmVolume::EvaluatePseudoBoxSimple, SmVolume::InvMapPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "CO-PORTED in surface.unbend_volume (PR #20): SmVolume::EvaluatePoint -> surface::volume::Volume::evaluate_point (defined in surface/unbend_volume.rs; SmCrvInVolume::EvaluatePoint calls it), SmVolume::IsPointInParamDomain -> surface::unbend_volume::is_point_in_param_domain (private); move both here when porting; 18 fns; largest: SmVolume::EvaluateBoundingBoxSimple, SmVolume::EvaluateBoundingBox, SmVolume::EvaluatePseudoBoxSimple, SmVolume::InvMapPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_p7"

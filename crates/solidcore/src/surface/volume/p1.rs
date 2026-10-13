@@ -63,11 +63,11 @@
 //!   `CalculateContinuitiesSimple` and `IsCurveInParamDomainSimple` come from unit
 //!   `surface.b_spline_volume_n_lib`).
 //!   [`VolumeKind::Twist`] holds the [`TwistVolume`] members (unit
-//!   `surface.twist_volume`, whose overrides the virtuals here dispatch to).
-//!   The bend and unbend volumes (units `surface.bend_volume`,
-//!   `surface.unbend_volume`) are not ported: their variants
-//!   carry no data and every virtual they override returns
-//!   [`SolidError::Unported`]; the virtuals they inherit run the base code.
+//!   `surface.twist_volume`) and [`VolumeKind::Unbend`] the [`UnbendVolume`] members
+//!   (unit `surface.unbend_volume`); the virtuals here dispatch to their overrides.
+//!   The bend volume (unit `surface.bend_volume`) is not ported: its variant
+//!   carries no data and every virtual it overrides returns
+//!   [`SolidError::Unported`]; the virtuals it inherits run the base code.
 //! - **Ownership.** The next map is held by value (`Box`), the orient maps as
 //!   [`Transform`] matrices (upstream keeps them simple: `RefreshInvOrientMap` makes
 //!   both simple maps). The owner flags `m_lNextOwnerFlag` / `m_lOrientOwnerFlag`
@@ -119,6 +119,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::surface::b_spline_volume::{BSplineVolume, VolumeParam};
 use crate::surface::twist_volume::TwistVolume;
+use crate::surface::unbend_volume::UnbendVolume;
 
 const OP: &str = "surface::volume::p1::Volume";
 const OP_EVAL: &str = "surface::volume::p1::Volume::evaluate";
@@ -179,29 +180,29 @@ pub enum VolumeKind {
     BSpline(BSplineVolume),
     /// `SmBendVolume` (unit `surface.bend_volume`, not ported: no data).
     Bend,
-    /// `SmUnbendVolume` (unit `surface.unbend_volume`, not ported: no data).
-    Unbend,
+    /// `SmUnbendVolume`: the unbend members (the unbend frame is the orient map).
+    Unbend(UnbendVolume),
     /// `SmTwistVolume`: the twist members (the twist frame is the orient map).
     Twist(TwistVolume),
 }
 
 /// The upstream names of one virtual method in the unported classes, in the order
-/// B-spline, bend, unbend.
-type Derived = [&'static str; 3];
+/// B-spline, bend.
+type Derived = [&'static str; 2];
 
 impl VolumeKind {
     /// [`SolidError::Unported`] for the override `names` of an unported kind.
     fn unported<T>(&self, names: Derived) -> Result<T> {
-        let [b_spline, bend, unbend] = names;
+        let [b_spline, bend] = names;
         let _ = b_spline;
         match self {
             // UNPORTED(surface.bend_volume): SmBendVolume virtual overrides
             Self::Bend => Err(SolidError::unported(bend, "surface.bend_volume")),
-            // UNPORTED(surface.unbend_volume): SmUnbendVolume virtual overrides
-            Self::Unbend => Err(SolidError::unported(unbend, "surface.unbend_volume")),
-            Self::Base | Self::Transform(_) | Self::BSpline(_) | Self::Twist(_) => {
-                Err(SolidError::invalid_input(OP, "kind has no override"))
-            }
+            Self::Base
+            | Self::Transform(_)
+            | Self::BSpline(_)
+            | Self::Twist(_)
+            | Self::Unbend(_) => Err(SolidError::invalid_input(OP, "kind has no override")),
         }
     }
 }
@@ -418,14 +419,11 @@ impl Volume {
     pub fn copy(&self, simple_map_only: bool) -> Result<Self> {
         match &self.kind {
             VolumeKind::Base => Err(SolidError::sm_err("surface::volume::p1::Volume::copy")),
-            VolumeKind::Transform(_) | VolumeKind::BSpline(_) | VolumeKind::Twist(_) => {
-                Self::copy_from(self, simple_map_only)
-            }
-            k => k.unported([
-                "SmBSplineVolume::Copy",
-                "SmBendVolume::Copy",
-                "SmUnbendVolume::Copy",
-            ]),
+            VolumeKind::Transform(_)
+            | VolumeKind::BSpline(_)
+            | VolumeKind::Twist(_)
+            | VolumeKind::Unbend(_) => Self::copy_from(self, simple_map_only),
+            k @ VolumeKind::Bend => k.unported(["SmBSplineVolume::Copy", "SmBendVolume::Copy"]),
         }
     }
 
@@ -536,7 +534,7 @@ impl Volume {
             VolumeKind::Transform(_) => TRANSFORM_TYPE,
             VolumeKind::BSpline(_) => B_SPLINE_VOLUME_TYPE,
             VolumeKind::Bend => BEND_VOLUME_TYPE,
-            VolumeKind::Unbend => UNBEND_VOLUME_TYPE,
+            VolumeKind::Unbend(_) => UNBEND_VOLUME_TYPE,
             VolumeKind::Twist(_) => TWIST_VOLUME_TYPE,
         }
     }
@@ -549,7 +547,7 @@ impl Volume {
             VolumeKind::Transform(_) => "SmTransform_TYPE",
             VolumeKind::BSpline(_) => "SmBSplineVolume_TYPE",
             VolumeKind::Bend => "SmBendVolume_TYPE",
-            VolumeKind::Unbend => "SmUnbendVolume_TYPE",
+            VolumeKind::Unbend(_) => "SmUnbendVolume_TYPE",
             VolumeKind::Twist(_) => "SmTwistVolume_TYPE",
         }
     }
@@ -562,7 +560,7 @@ impl Volume {
             VolumeKind::Transform(_) => "SmTransform",
             VolumeKind::BSpline(_) => "SmBSplineVolume",
             VolumeKind::Bend => "SmBendVolume",
-            VolumeKind::Unbend => "SmUnbendVolume",
+            VolumeKind::Unbend(_) => "SmUnbendVolume",
             VolumeKind::Twist(_) => "SmTwistVolume",
         }
     }
@@ -618,11 +616,17 @@ impl Volume {
                 // first check the base, then the members
                 Ok(self.base_eq(other)? && t.members_eq(o))
             }
-            k => k.unported([
-                "SmBSplineVolume::operator==",
-                "SmBendVolume::operator==",
-                "SmUnbendVolume::operator==",
-            ]),
+            VolumeKind::Unbend(u) => {
+                // low work - different types are not equal
+                let VolumeKind::Unbend(o) = &other.kind else {
+                    return Ok(false);
+                };
+                // first check the base, then the members
+                Ok(self.base_eq(other)? && u.members_eq(o))
+            }
+            k @ VolumeKind::Bend => {
+                k.unported(["SmBSplineVolume::operator==", "SmBendVolume::operator=="])
+            }
         }
     }
 
@@ -740,10 +744,10 @@ impl Volume {
             VolumeKind::Transform(t) => Ok(t.natural_param_domain()),
             VolumeKind::BSpline(b) => Ok(b.natural_param_domain()),
             VolumeKind::Twist(t) => Ok(t.natural_param_domain()),
-            k => k.unported([
+            VolumeKind::Unbend(u) => Ok(u.natural_param_domain()),
+            k @ VolumeKind::Bend => k.unported([
                 "SmBSplineVolume::GetNaturalParamDomain",
                 "SmBendVolume::GetNaturalParamDomain",
-                "SmUnbendVolume::GetNaturalParamDomain",
             ]),
         }
     }
@@ -895,12 +899,11 @@ impl Volume {
     pub fn evaluate(&self, param_point: Point3, n: usize, opts: &EvalOptions) -> Result<Vec<Vec3>> {
         match &self.kind {
             VolumeKind::Twist(t) => return t.evaluate(self, param_point, n, opts),
-            VolumeKind::Bend | VolumeKind::Unbend => {
-                return self.kind.unported([
-                    "SmBSplineVolume::Evaluate",
-                    "SmBendVolume::Evaluate",
-                    "SmUnbendVolume::Evaluate",
-                ])
+            VolumeKind::Unbend(u) => return u.evaluate(self, param_point, n, opts),
+            VolumeKind::Bend => {
+                return self
+                    .kind
+                    .unported(["SmBSplineVolume::Evaluate", "SmBendVolume::Evaluate"])
             }
             _ => {}
         }
@@ -1174,10 +1177,10 @@ impl Volume {
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
             VolumeKind::Twist(t) => t.evaluate_simple(param_point, n),
-            k => k.unported([
+            VolumeKind::Unbend(u) => u.evaluate_simple(param_point, n),
+            k @ VolumeKind::Bend => k.unported([
                 "SmBSplineVolume::EvaluateSimple",
                 "SmBendVolume::EvaluateSimple",
-                "SmUnbendVolume::EvaluateSimple",
             ]),
         }
     }
@@ -1235,10 +1238,10 @@ impl Volume {
             VolumeKind::Transform(t) => t.inv_evaluate_guess_point_simple(proj_point),
             VolumeKind::BSpline(b) => b.inv_evaluate_guess_point_simple(proj_point),
             VolumeKind::Twist(t) => Ok(t.inv_evaluate_guess_point_simple(proj_point)),
-            k => k.unported([
+            VolumeKind::Unbend(u) => Ok(u.inv_evaluate_guess_point_simple(proj_point)),
+            k @ VolumeKind::Bend => k.unported([
                 "SmBSplineVolume::InvEvaluateGuessPointSimple",
                 "SmBendVolume::InvEvaluateGuessPointSimple",
-                "SmUnbendVolume::InvEvaluateGuessPointSimple",
             ]),
         }
     }
@@ -1255,10 +1258,10 @@ impl Volume {
             VolumeKind::Transform(t) => Ok(t.is_bounded_simple()),
             VolumeKind::BSpline(b) => Ok(b.is_bounded_simple()),
             VolumeKind::Twist(t) => Ok(t.is_bounded_simple()),
-            k => k.unported([
+            VolumeKind::Unbend(u) => Ok(u.is_bounded_simple()),
+            k @ VolumeKind::Bend => k.unported([
                 "SmBSplineVolume::IsBoundedSimple",
                 "SmBendVolume::IsBoundedSimple",
-                "SmUnbendVolume::IsBoundedSimple",
             ]),
         }
     }
@@ -1272,10 +1275,10 @@ impl Volume {
     pub fn is_point_in_param_domain_simple(&self, param_point: Point3) -> Result<bool> {
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_point_in_param_domain_simple()),
-            VolumeKind::Bend | VolumeKind::Unbend => self.kind.unported([
+            VolumeKind::Unbend(u) => Ok(u.is_point_in_param_domain_simple()),
+            VolumeKind::Bend => self.kind.unported([
                 "SmBSplineVolume::IsPointInParamDomainSimple",
                 "SmBendVolume::IsPointInParamDomainSimple",
-                "SmUnbendVolume::IsPointInParamDomainSimple",
             ]),
             _ => {
                 if self.is_bounded_simple()? {
@@ -1298,10 +1301,10 @@ impl Volume {
     pub fn is_line_in_param_domain_simple(&self, start: Point3, end: Point3) -> Result<bool> {
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_line_in_param_domain_simple()),
-            VolumeKind::Bend | VolumeKind::Unbend => self.kind.unported([
+            VolumeKind::Unbend(u) => Ok(u.is_line_in_param_domain_simple(start, end)),
+            VolumeKind::Bend => self.kind.unported([
                 "SmBSplineVolume::IsLineInParamDomainSimple",
                 "SmBendVolume::IsLineInParamDomainSimple",
-                "SmUnbendVolume::IsLineInParamDomainSimple",
             ]),
             _ => {
                 if self.is_bounded_simple()? {
@@ -1330,10 +1333,10 @@ impl Volume {
             VolumeKind::Transform(t) => Ok(t.is_curve_in_param_domain_simple()),
             VolumeKind::BSpline(b) => b.is_curve_in_param_domain_simple(k, curve),
             VolumeKind::Twist(t) => Ok(t.is_curve_in_param_domain_simple()),
-            kind => kind.unported([
+            VolumeKind::Unbend(u) => u.is_curve_in_param_domain_simple(curve),
+            kind @ VolumeKind::Bend => kind.unported([
                 "SmBSplineVolume::IsCurveInParamDomainSimple",
                 "SmBendVolume::IsCurveInParamDomainSimple",
-                "SmUnbendVolume::IsCurveInParamDomainSimple",
             ]),
         }
     }
@@ -1351,10 +1354,13 @@ impl Volume {
         trim_box: &mut Extent3d,
     ) -> Result<()> {
         match &self.kind {
-            VolumeKind::Bend | VolumeKind::Unbend => self.kind.unported([
+            VolumeKind::Unbend(u) => {
+                *trim_box = u.trim_param_bounding_box_simple(param_box);
+                Ok(())
+            }
+            VolumeKind::Bend => self.kind.unported([
                 "SmBSplineVolume::TrimParamBoundingBoxSimple",
                 "SmBendVolume::TrimParamBoundingBoxSimple",
-                "SmUnbendVolume::TrimParamBoundingBoxSimple",
             ]),
             _ => {
                 // for bounded Natural Param Domains
@@ -1426,7 +1432,7 @@ impl Volume {
         match &self.kind {
             VolumeKind::Transform(t) => Ok(t.has_discontinuities_simple(disconts)),
             VolumeKind::BSpline(b) => b.has_discontinuities_simple(disconts, calc_geometric),
-            VolumeKind::Base | VolumeKind::Bend | VolumeKind::Unbend | VolumeKind::Twist(_) => {
+            VolumeKind::Base | VolumeKind::Bend | VolumeKind::Unbend(_) | VolumeKind::Twist(_) => {
                 // set output to be unbounded and continuous
                 if let Some(d) = disconts {
                     d.init();
@@ -2443,7 +2449,7 @@ mod tests {
         assert!(a.approx_eq(&b).unwrap());
         assert!(!a.approx_eq(&c).unwrap());
         assert!(!a.approx_eq(&Volume::new(VolumeKind::Base)).unwrap());
-        assert!(Volume::new(VolumeKind::Unbend).approx_eq(&a).is_err());
+        assert!(Volume::new(VolumeKind::Bend).approx_eq(&a).is_err());
     }
 
     #[test]
@@ -2610,15 +2616,16 @@ mod tests {
 
     #[test]
     fn unported_kinds_defer() {
-        for (k, unit) in [
-            (VolumeKind::Bend, "surface.bend_volume"),
-            (VolumeKind::Unbend, "surface.unbend_volume"),
-        ] {
-            let vol = Volume::new(k);
-            let r = vol.evaluate_simple(Vec3::ZERO, 0, &EvalOptions::default());
-            assert!(matches!(r, Err(SolidError::Unported { unit: u, .. }) if u == unit));
-            assert!(vol.natural_param_domain().is_err());
-        }
+        let vol = Volume::new(VolumeKind::Bend);
+        let r = vol.evaluate_simple(Vec3::ZERO, 0, &EvalOptions::default());
+        assert!(matches!(
+            r,
+            Err(SolidError::Unported {
+                unit: "surface.bend_volume",
+                ..
+            })
+        ));
+        assert!(vol.natural_param_domain().is_err());
         // the B-spline volume's NLib overrides
         let bs = Volume::new(VolumeKind::BSpline(b_spline()));
         assert!(!bs.has_discontinuities_simple(None, true).unwrap());

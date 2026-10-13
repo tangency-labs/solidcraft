@@ -2,13 +2,14 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**118 / 261 units ported** (83 green, 35 partial), **151,820 / 387,903 upstream lines (39.1%)**. 19 claimed, 0 blocked, 124 todo.
+**119 / 261 units ported** (83 green, 36 partial), **152,729 / 387,903 upstream lines (39.4%)**. 18 claimed, 0 blocked, 124 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
 ## Ready to claim now
 
-_None right now; see the next section._
+- [ ] ▶️ `intersect.curve_class_p1` (2087 lines) — ready
+- [ ] ▶️ `intersect.ray_tracer` (1246 lines) — ready
 
 ## Claimable now, dependencies still missing
 
@@ -25,35 +26,33 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `surface.srf_in_volume` (779 lines) — missing: `surface.surface_p1`, `surface.volume_p2`
 - [ ] `surface.surface_p10` (2172 lines) — missing: `surface.surface_p1`, `surface.surface_p5`
 - [ ] `surface.surface_p3` (1794 lines) — missing: `surface.surface_p1`, `surface.surface_p7`
-- [ ] `intersect.curve_class_p1` (2087 lines) — missing: `intersect.point_class`
 - [ ] `intersect.surface_drop_lib_p1` (1478 lines) — missing: `surface.surface_p1`, `surface.surface_p3`, `surface.surface_p7`
 - [ ] `surface.offset_surface` (1787 lines) — missing: `surface.surface_p1`, `surface.surface_p3`, `surface.surface_p7`
 - [ ] `surface.surface_p11` (1789 lines) — missing: `surface.surface_p1`, `surface.surface_p3`, `surface.surface_p5`, `surface.surface_p6` +2 more
 - [ ] `surface.surface_p8` (2374 lines) — missing: `surface.surface_p1`, `surface.surface_p3`, `surface.surface_p4`, `surface.surface_p5` +2 more
-- [ ] `intersect.curve_class_p7` (2248 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`
-- [ ] `intersect.ray_tracer` (1246 lines) — missing: `intersect.point_class`
+- [ ] `intersect.curve_class_p7` (2248 lines) — missing: `intersect.curve_class_p1`
 - [ ] `intersect.surface_drop_curve` (2014 lines) — missing: `surface.surface_p1`, `surface.surface_p5`
 - [ ] `intersect.surface_drop_lib_p2` (1080 lines) — missing: `intersect.surface_drop_lib_p1`, `surface.surface_p1`, `surface.surface_p5`, `surface.surface_p7`
 - [ ] `surface.surface_point_solve_p1` (1771 lines) — missing: `surface.surface_p1`
-- [ ] `topology.proto_topology_p1` (2746 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`
-- [ ] `intersect.curve_class_p2` (1928 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p7`, `intersect.point_class`
+- [ ] `topology.proto_topology_p1` (2746 lines) — missing: `intersect.curve_class_p1`
+- [ ] `intersect.curve_class_p2` (1928 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p7`
 - [ ] `intersect.surface_drop_lib_p3` (2062 lines) — missing: `intersect.surface_drop_lib_p1`, `intersect.surface_drop_lib_p2`, `surface.offset_surface`, `surface.surface_p1` +4 more
 - [ ] `surface.surface_point_solve_p2` (1882 lines) — missing: `surface.surface_point_solve_p1`
 - [ ] `topology.edgeuse_p1` (1157 lines) — missing: `topology.proto_topology_p1`
-- [ ] `intersect.curve_class_p3` (1986 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p7`, `intersect.point_class`
-- [ ] `intersect.curve_class_p4` (2022 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p7`, `intersect.point_class` +1 more
+- [ ] `intersect.curve_class_p3` (1986 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p7`
+- [ ] `intersect.curve_class_p4` (2022 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p7`, `surface.surface_p7`
 - [ ] `intersect.surface_intersector_p3` (1932 lines) — missing: `intersect.surface_intersector_p2`
 - [ ] `surface.surface_point_solve_p3` (1282 lines) — missing: `surface.surface_p1`, `surface.surface_p4`, `surface.surface_point_solve_p1`, `surface.surface_point_solve_p2`
-- [ ] `intersect.curve_class_p6` (2213 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p3`, `intersect.curve_class_p4` +2 more
+- [ ] `intersect.curve_class_p6` (2213 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p3`, `intersect.curve_class_p4` +1 more
 - [ ] `intersect.surface_intersector_p4` (1570 lines) — missing: `intersect.surface_intersector_p2`, `intersect.surface_intersector_p3`
 - [ ] `intersect.topology_solver_p2` (1391 lines) — missing: `intersect.curve_class_p1`, `intersect.topology_solver_p1`
-- [ ] `topology.face_p2` (1827 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`, `surface.offset_surface`, `surface.surface_p7` +1 more
-- [ ] `intersect.curve_class_p5` (2017 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p3`, `intersect.curve_class_p6` +2 more
+- [ ] `topology.face_p2` (1827 lines) — missing: `intersect.curve_class_p1`, `surface.offset_surface`, `surface.surface_p7`, `topology.edgeuse_p1`
+- [ ] `intersect.curve_class_p5` (2017 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p2`, `intersect.curve_class_p3`, `intersect.curve_class_p6` +1 more
 - [ ] `intersect.surface_intersector_p5` (622 lines) — missing: `intersect.surface_intersector_p2`, `intersect.surface_intersector_p3`, `intersect.surface_intersector_p4`
 - [ ] `topology.edgeuse_p2` (600 lines) — missing: `topology.edgeuse_p1`, `topology.face_p2`
 - [ ] `topology.shell` (750 lines) — missing: `topology.edgeuse_p1`, `topology.proto_topology_p1`
-- [ ] `intersect.curve_class_p8` (1900 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p3`, `intersect.curve_class_p5`, `intersect.point_class`
-- [ ] `intersect.curve_class_p9` (1220 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p3`, `intersect.curve_class_p5`, `intersect.point_class`
+- [ ] `intersect.curve_class_p8` (1900 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p3`, `intersect.curve_class_p5`
+- [ ] `intersect.curve_class_p9` (1220 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p3`, `intersect.curve_class_p5`
 - [ ] `topology.vertexuse` (1429 lines) — missing: `surface.surface_p7`, `topology.edgeuse_p1`, `topology.face_p2`
 - [ ] `topology.vertex` (824 lines) — missing: `topology.edgeuse_p1`, `topology.proto_topology_p1`, `topology.vertexuse`
 - [ ] `topology.loopuse` (892 lines) — missing: `topology.edgeuse_p1`, `topology.face_p2`, `topology.vertexuse`
@@ -65,8 +64,8 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `topology.trimming_tools` (2878 lines) — missing: `topology.edgeuse_p1`, `topology.face_p2`, `topology.loopuse`
 - [ ] `heal.gap` (1475 lines) — missing: `topology.edgeuse_p1`, `topology.vertexuse`
 - [ ] `query.loop` (830 lines) — missing: `topology.loopuse`
-- [ ] `topology.face_p4` (1812 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p7`, `intersect.point_class`, `topology.edgeuse_p1` +4 more
-- [ ] `query.face_p2` (1161 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`, `topology.face_p2`, `topology.face_p4`
+- [ ] `topology.face_p4` (1812 lines) — missing: `intersect.curve_class_p1`, `intersect.curve_class_p7`, `topology.edgeuse_p1`, `topology.face_p2` +3 more
+- [ ] `query.face_p2` (1161 lines) — missing: `intersect.curve_class_p1`, `topology.face_p2`, `topology.face_p4`
 - [ ] `topology.brep_p10` (1890 lines) — missing: `topology.edge`, `topology.edgeuse_p1`, `topology.proto_topology_p1`, `topology.shell` +1 more
 - [ ] `topology.face_p3` (1881 lines) — missing: `topology.edge`, `topology.edgeuse_p1`, `topology.edgeuse_p3`, `topology.face_p2` +3 more
 - [ ] `topology.topology_traverser` (784 lines) — missing: `topology.edge`, `topology.edgeuse_p1`, `topology.face_p2`, `topology.vertex` +1 more
@@ -74,7 +73,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `query.poly` (2119 lines) — missing: `topology.proto_topology_p1`
 - [ ] `topology.brep_p7` (2503 lines) — missing: `intersect.curve_class_p1`, `surface.surface_p1`, `topology.brep_p10`, `topology.edge` +4 more
 - [ ] `topology.face_p1` (2171 lines) — missing: `intersect.curve_class_p1`, `surface.surface_p1`, `topology.edgeuse_p1`, `topology.face_p2` +4 more
-- [ ] `query.face_p1` (465 lines) — missing: `intersect.point_class`, `query.face_p2`, `query.face_p3`, `topology.edge` +4 more
+- [ ] `query.face_p1` (465 lines) — missing: `query.face_p2`, `query.face_p3`, `topology.edge`, `topology.edgeuse_p1` +3 more
 - [ ] `query.face_p4` (1432 lines) — missing: `intersect.curve_class_p1`, `query.face_p3`, `topology.face_p2`, `topology.loopuse`
 - [ ] `query.tess` (838 lines) — missing: `query.poly`, `surface.surface_cache_p3`
 - [ ] `topology.brep_p1` (2454 lines) — missing: `topology.edge`, `topology.edgeuse_p1`, `topology.edgeuse_p3`, `topology.face_p2` +5 more
@@ -82,47 +81,47 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `heal.face_props` (1410 lines) — missing: `intersect.curve_class_p1`, `topology.face_p2`, `topology.loopuse`
 - [ ] `topology.brep_cache` (389 lines) — missing: `topology.brep_p1`, `topology.edge`
 - [ ] `topology.brep_p4` (2113 lines) — missing: `topology.brep_p1`, `topology.edge`, `topology.edgeuse_p1`, `topology.face_p1` +6 more
-- [ ] `topology.brep_p9` (2443 lines) — missing: `intersect.point_class`, `topology.brep_p1`, `topology.edge`, `topology.edgeuse_p1` +8 more
-- [ ] `topology.brep_p2` (2443 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`, `surface.offset_surface`, `topology.brep_cache` +9 more
+- [ ] `topology.brep_p9` (2443 lines) — missing: `topology.brep_p1`, `topology.edge`, `topology.edgeuse_p1`, `topology.face_p1` +7 more
+- [ ] `topology.brep_p2` (2443 lines) — missing: `intersect.curve_class_p1`, `surface.offset_surface`, `topology.brep_cache`, `topology.brep_p1` +8 more
 - [ ] `topology.brep_p5` (2193 lines) — missing: `topology.brep_p1`, `topology.brep_p4`, `topology.edge`, `topology.edgeuse_p1` +6 more
-- [ ] `blend.fillet_geom_p1` (2113 lines) — missing: `intersect.point_class`, `surface.offset_surface`, `topology.brep_p1`, `topology.brep_p2` +6 more
+- [ ] `blend.fillet_geom_p1` (2113 lines) — missing: `surface.offset_surface`, `topology.brep_p1`, `topology.brep_p2`, `topology.edge` +5 more
 - [ ] `heal.heal_data_p2` (2160 lines) — missing: `heal.face_props`, `topology.edge`, `topology.vertex`
 - [ ] `mass.integrator` (1031 lines) — missing: `topology.brep_p1`, `topology.brep_p2`, `topology.edge`, `topology.edgeuse_p1` +2 more
-- [ ] `query.brep` (517 lines) — missing: `intersect.point_class`, `topology.brep_p1`, `topology.brep_p2`
+- [ ] `query.brep` (517 lines) — missing: `topology.brep_p1`, `topology.brep_p2`
 - [ ] `topology.brep_p3` (2503 lines) — missing: `surface.surface_p1`, `topology.brep_p1`, `topology.brep_p2`, `topology.brep_p4` +12 more
-- [ ] `topology.proto_topology_p2` (2091 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`, `topology.edge`, `topology.face_p2` +1 more
+- [ ] `topology.proto_topology_p2` (2091 lines) — missing: `intersect.curve_class_p1`, `topology.edge`, `topology.face_p2`, `topology.proto_topology_p1`
 - [ ] `blend.fillet_solver_p1` (1861 lines) — missing: `blend.fillet_geom_p1`, `surface.offset_surface`, `topology.edge`, `topology.edgeuse_p1` +1 more
-- [ ] `blend.hcr` (1875 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`, `intersect.ray_tracer`, `topology.brep_p1` +3 more
+- [ ] `blend.hcr` (1875 lines) — missing: `intersect.curve_class_p1`, `intersect.ray_tracer`, `topology.brep_p1`, `topology.edge` +2 more
 - [ ] `heal.heal_data_p1` (922 lines) — missing: `heal.heal_data_p2`, `topology.brep_p1`
 - [ ] `heal.stitch_p1` (2037 lines) — missing: `topology.brep_p1`, `topology.brep_p5`, `topology.edge`, `topology.edgeuse_p1` +3 more
 - [ ] `primitive.primitive_creation_p1` (2322 lines) — missing: `surface.cone_p1`, `surface.surf_of_extrusion_p1`, `topology.brep_p1`, `topology.brep_p5` +4 more
-- [ ] `query.api_queries` (809 lines) — missing: `intersect.point_class`, `intersect.topology_solver_p2`, `query.brep`, `query.edge` +2 more
+- [ ] `query.api_queries` (809 lines) — missing: `intersect.topology_solver_p2`, `query.brep`, `query.edge`, `topology.brep_p1` +1 more
 - [ ] `topology.proto_topology_p3` (1577 lines) — missing: `intersect.curve_class_p1`, `topology.edge`, `topology.proto_topology_p1`, `topology.proto_topology_p2`
 - [ ] `blend.fillet_intersector` (1708 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `intersect.adv_surface_intersector`, `topology.edge`
 - [ ] `blend.fillet_solver_p5` (848 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `intersect.curve_class_p1`, `surface.offset_surface` +1 more
 - [ ] `blend.fillet_standard_solver_p1` (2336 lines) — missing: `blend.fillet_solver_p1`, `surface.offset_surface`, `surface.surface_p1`, `surface.surface_p7` +1 more
-- [ ] `boolean.topology_intersector_p1` (2491 lines) — missing: `intersect.curve_class_p1`, `intersect.point_class`, `topology.edge`, `topology.face_p2` +5 more
+- [ ] `boolean.topology_intersector_p1` (2491 lines) — missing: `intersect.curve_class_p1`, `topology.edge`, `topology.face_p2`, `topology.face_p4` +4 more
 - [ ] `heal.heal_data_p3` (1967 lines) — missing: `heal.face_props`, `heal.heal_data_p1`, `heal.heal_data_p2`, `topology.brep_p5` +3 more
 - [ ] `heal.stitch_p2` (1906 lines) — missing: `heal.stitch_p1`, `topology.brep_p1`, `topology.edge`, `topology.face_p3` +1 more
 - [ ] `blend.fillet_solver_p4` (1404 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_intersector`, `blend.fillet_solver_p1`, `surface.offset_surface` +2 more
-- [ ] `boolean.topology_intersector_p2` (2195 lines) — missing: `boolean.topology_intersector_p1`, `intersect.curve_class_p1`, `intersect.point_class`, `topology.edge` +5 more
+- [ ] `boolean.topology_intersector_p2` (2195 lines) — missing: `boolean.topology_intersector_p1`, `intersect.curve_class_p1`, `topology.edge`, `topology.face_p2` +4 more
 - [ ] `offset.offset_geometry_creation` (2652 lines) — missing: `surface.offset_surface`, `surface.surface_p1`, `topology.edge`, `topology.edgeuse_p1` +1 more
 - [ ] `sweep.topology_sweep` (2456 lines) — missing: `heal.stitch_p1`, `topology.brep_p1`, `topology.brep_p3`, `topology.brep_p5` +6 more
-- [ ] `boolean.topology_intersector_p3` (1849 lines) — missing: `boolean.topology_intersector_p1`, `boolean.topology_intersector_p2`, `intersect.curve_class_p1`, `intersect.point_class` +3 more
+- [ ] `boolean.topology_intersector_p3` (1849 lines) — missing: `boolean.topology_intersector_p1`, `boolean.topology_intersector_p2`, `intersect.curve_class_p1`, `topology.edge` +2 more
 - [ ] `sweep.rotational_sweep_geometry` (1542 lines) — missing: `sweep.topology_sweep`, `topology.edge`
 - [ ] `sweep.trans_sweep_geometry` (817 lines) — missing: `sweep.topology_sweep`, `topology.edge`
-- [ ] `boolean.merge_p1` (993 lines) — missing: `boolean.topology_intersector_p1`, `intersect.point_class`, `topology.brep_p1`, `topology.edge` +5 more
+- [ ] `boolean.merge_p1` (993 lines) — missing: `boolean.topology_intersector_p1`, `topology.brep_p1`, `topology.edge`, `topology.edgeuse_p1` +4 more
 - [ ] `primitive.primitive_creation_p3` (1842 lines) — missing: `primitive.primitive_creation_p1`, `sweep.topology_sweep`, `topology.brep_p1`, `topology.brep_p5` +2 more
 - [ ] `blend.fillet_executive_p3` (1608 lines) — missing: `blend.fillet_solver_p1`, `boolean.merge_p1`, `boolean.topology_intersector_p1`, `heal.stitch_p1` +3 more
 - [ ] `boolean.merge_p2` (1967 lines) — missing: `boolean.merge_p1`, `boolean.topology_intersector_p1`, `boolean.topology_intersector_p2`, `heal.stitch_p1` +7 more
-- [ ] `boolean.merge_p5` (475 lines) — missing: `boolean.merge_p1`, `boolean.merge_p2`, `boolean.topology_intersector_p1`, `intersect.point_class` +1 more
-- [ ] `boolean.merge_p4` (2590 lines) — missing: `boolean.merge_p1`, `boolean.merge_p2`, `boolean.merge_p5`, `boolean.topology_intersector_p1` +8 more
+- [ ] `boolean.merge_p5` (475 lines) — missing: `boolean.merge_p1`, `boolean.merge_p2`, `boolean.topology_intersector_p1`, `topology.edge`
+- [ ] `boolean.merge_p4` (2590 lines) — missing: `boolean.merge_p1`, `boolean.merge_p2`, `boolean.merge_p5`, `boolean.topology_intersector_p1` +7 more
 - [ ] `boolean.merge_p3` (1152 lines) — missing: `boolean.merge_p2`, `boolean.merge_p4`, `boolean.merge_p5`, `boolean.topology_intersector_p1` +2 more
 - [ ] `blend.fillet_executive_p1` (2063 lines) — missing: `blend.fillet_executive_p3`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_standard_solver_p1` +11 more
 - [ ] `boolean.api_brep` (410 lines) — missing: `boolean.merge_p3`
 - [ ] `primitive.primitive_creation_p2` (2258 lines) — missing: `primitive.primitive_creation_p1`, `primitive.primitive_creation_p3`, `topology.brep_p1`, `topology.brep_p4` +3 more
 - [ ] `blend.fillet_corner_p1` (1971 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `blend.fillet_standard_solver_p1` +4 more
-- [ ] `blend.fillet_solver_p2` (1939 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `intersect.point_class` +3 more
+- [ ] `blend.fillet_solver_p2` (1939 lines) — missing: `blend.fillet_executive_p1`, `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `topology.edge` +2 more
 - [ ] `blend.fillet_solver_p3` (1112 lines) — missing: `blend.fillet_geom_p1`, `blend.fillet_solver_p1`, `intersect.curve_class_p1`, `surface.offset_surface` +3 more
 - [ ] `offset.offset_executive_p1` (2107 lines) — missing: `offset.offset_geometry_creation`, `surface.offset_surface`, `topology.brep_p1`, `topology.edge` +3 more
 - [ ] `primitive.api_primitives` (885 lines) — missing: `primitive.primitive_creation_p1`, `primitive.primitive_creation_p2`, `surface.cone_p1`
@@ -154,11 +153,10 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.surface_p7` (2406 lines) — in progress: #24 @Pluto-XI (ready for review)
 - [ ] 🔨 `surface.plane_p2` (1627 lines) — in progress: #40 @bherbruck (ready for review)
 - [ ] 🔨 `surface.surface_p1` (2458 lines) — in progress: #43 @Mqrius (draft)
-- [ ] 🔨 `intersect.point_class` (909 lines) — in progress: #21 @Pluto-XI (ready for review)
 - [ ] 🔨 `intersect.surface_silhouette` (979 lines) — in progress: #45 @bherbruck (draft)
 - [ ] 🔨 `intersect.topology_solver_p1` (1838 lines) — in progress: #30 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.adv_surface_intersector` (1646 lines) — in progress: #41 @bherbruck (ready for review)
-- [ ] 🔨 `intersect.surface_intersector_p2` (1677 lines) — in progress: #42 @bherbruck (draft)
+- [ ] 🔨 `intersect.surface_intersector_p2` (1677 lines) — in progress: #42 @bherbruck (ready for review)
 - [ ] 🔨 `sweep.api_surfaces` (381 lines) — in progress: #37 @bherbruck (ready for review)
 
 ## By module
@@ -351,15 +349,15 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `topology.proto_topology_p2` (2091 lines) — waiting
 - [ ] ⏳ `topology.proto_topology_p3` (1577 lines) — waiting
 
-### intersect (2/25)
+### intersect (3/25)
 
 - [ ] 🟡 `intersect.surface_tracer` (1900 lines) — partial, 427 cases
-- [ ] 🔨 `intersect.point_class` (909 lines) — in progress: #21 @Pluto-XI (ready for review)
-- [ ] ⏳ `intersect.curve_class_p1` (2087 lines) — waiting
+- [ ] 🟡 `intersect.point_class` (909 lines) — partial, 2511 cases
+- [ ] ▶️ `intersect.curve_class_p1` (2087 lines) — ready
 - [ ] ⏳ `intersect.surface_drop_lib_p1` (1478 lines) — waiting
 - [ ] 🔨 `intersect.surface_silhouette` (979 lines) — in progress: #45 @bherbruck (draft)
 - [ ] ⏳ `intersect.curve_class_p7` (2248 lines) — waiting
-- [ ] ⏳ `intersect.ray_tracer` (1246 lines) — waiting
+- [ ] ▶️ `intersect.ray_tracer` (1246 lines) — ready
 - [ ] ⏳ `intersect.surface_drop_curve` (2014 lines) — waiting
 - [ ] ⏳ `intersect.surface_drop_lib_p2` (1080 lines) — waiting
 - [ ] 🟡 `intersect.surface_intersector_p1` (1816 lines) — partial, 1510 cases
@@ -367,7 +365,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `intersect.adv_surface_intersector` (1646 lines) — in progress: #41 @bherbruck (ready for review)
 - [ ] ⏳ `intersect.curve_class_p2` (1928 lines) — waiting
 - [ ] ⏳ `intersect.surface_drop_lib_p3` (2062 lines) — waiting
-- [ ] 🔨 `intersect.surface_intersector_p2` (1677 lines) — in progress: #42 @bherbruck (draft)
+- [ ] 🔨 `intersect.surface_intersector_p2` (1677 lines) — in progress: #42 @bherbruck (ready for review)
 - [ ] ⏳ `intersect.curve_class_p3` (1986 lines) — waiting
 - [ ] ⏳ `intersect.curve_class_p4` (2022 lines) — waiting
 - [ ] ⏳ `intersect.surface_intersector_p3` (1932 lines) — waiting

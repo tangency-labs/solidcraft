@@ -963,7 +963,7 @@ mod tests {
         use crate::surface::volume::VolumeKind;
         let v = Volume::new(VolumeKind::Transform(Transform::IDENTITY));
         assert_eq!(scaled_zero_of_volume(&v), Ok(100.0 * EFF_ZERO));
-        let t = Volume::new(VolumeKind::Unbend);
+        let t = Volume::new(VolumeKind::Bend);
         assert!(matches!(
             scaled_zero_of_volume(&t),
             Err(SolidError::Unported { .. })

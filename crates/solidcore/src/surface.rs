@@ -17,4 +17,5 @@ pub mod surface;
 pub mod surface_cache;
 pub mod trim_srf_cache;
 pub mod twist_volume;
+pub mod unbend_volume;
 pub mod volume;
