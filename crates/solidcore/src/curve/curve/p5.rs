@@ -11,6 +11,7 @@
 //! | [`Curve::is_line`]                 | `IsLine` (virtual: base, B-spline and line) |
 //! | [`Curve::is_linear`], [`Linearity`] | `SmCurve::IsLinear`                        |
 //! | [`make_curve_cache`]               | `SmCurve::CacheMakeOrValidate` (building a new cache) |
+//! | [`find_additional_cc_tangent_guess`] | `sm_FindAdditionalCcTangentGuess` (static) |
 //!
 //! Deviations:
 //! - **Co-port.** Unit `curve.curve_p5` owns these functions. Unit
@@ -26,7 +27,9 @@
 //!   ([`make_curve_cache`]: `SmCurve::GlobalPointSolve` gets the curve's cache through
 //!   `SmCacheMgr::GetOrCreateObjectCache`). The rest of the unit is not ported yet;
 //!   its porter should route [`crate::geom::a_object::get_or_create_object_cache`]'s
-//!   `CacheMaker::Curve` through [`make_curve_cache`].
+//!   `CacheMaker::Curve` through [`make_curve_cache`]. Unit `curve.curve_p7` ported
+//!   [`find_additional_cc_tangent_guess`] because `SmCCIGlobalSolver::LocalSolve` calls
+//!   it for every curve/curve intersection found while more may follow.
 //! - **Caches.** Upstream keeps the cache on the curve and reuses it until the curve
 //!   changes; [`make_curve_cache`] builds a fresh one for the caller. The build is
 //!   deterministic, so a cache built per call holds the same spans and tree.
@@ -41,11 +44,17 @@
 //!   [`Vec3::UNDEF`]), except [`SolidError::Unported`](crate::SolidError), which is
 //!   propagated.
 
-use crate::curve::curve::p2::{Curve, CurveKind, BSPLINE_CURVE_TYPE};
+use crate::curve::curve::p2::{
+    convert_to_parameter_delta, evaluate_geometric, Curve, CurveEvaluate, CurveKind,
+    BSPLINE_CURVE_TYPE,
+};
 use crate::curve::curve_cache::{CurveCache, CurveCacheOptions};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
-use crate::geom::geom_utility::p1::line_point_distance;
+use crate::geom::geom_utility::p1::{
+    circle_coplanar_circle_intersect, line_coplanar_circle_intersect, line_point_distance,
+    CircleCircle,
+};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
@@ -428,4 +437,188 @@ impl Curve {
         }
         Ok(out)
     }
+}
+
+// ---- sm_FindAdditionalCcTangentGuess (co-ported by unit curve.curve_p7) -------------
+
+/// `sm_FindAdditionalCcTangentGuess`: a second guess `(t1, t2)` near the curve/curve
+/// intersection at `(t1, t2)` when the curves cross within 20 degrees: the curves
+/// are replaced by their osculating circles (a line where one has no curvature),
+/// whose other intersection, stepped back onto the curve tangents
+/// ([`convert_to_parameter_delta`]), is the guess, clamped to the intervals. `None`
+/// when the crossing is steep, both curves are straight, a circle normal vanishes,
+/// the circles do not cross twice, or the guess lies outside both intervals.
+///
+/// # Errors
+///
+/// Those of the evaluations, of the unitizations and of the line/circle and
+/// circle/circle intersections.
+pub fn find_additional_cc_tangent_guess<C1, C2>(
+    curve1: &C1,
+    interval1: &Extent1d,
+    curve2: &C2,
+    interval2: &Extent1d,
+    tsect_t1: f64,
+    tsect_t2: f64,
+) -> Result<Option<(f64, f64)>>
+where
+    C1: CurveEvaluate + ?Sized,
+    C2: CurveEvaluate + ?Sized,
+{
+    let pv1 = eval2(curve1, tsect_t1)?; // NonZeroTangent values
+    let pv2 = eval2(curve2, tsect_t2)?; // NonZeroTangent values
+
+    // First do a quick test to determine the angle of
+    // intersection between the curves and see if we need to look
+    // for a tangency.  If within 20 degrees look for tangency.
+    if !pv1[1].is_parallel_to(pv2[1], 20.0) {
+        return Ok(None);
+    }
+
+    // Get the geometric properties of the curves at the intersection
+    let geom1 = geom3(curve1, tsect_t1)?;
+    let mut curvature_vector1 = geom1[2];
+    let curve_curvature1 = curvature_vector1.length();
+    if curve_curvature1 > EFF_ZERO {
+        curvature_vector1 = curvature_vector1.unitize()?;
+    }
+
+    let geom2 = geom3(curve2, tsect_t2)?;
+    let mut curvature_vector2 = geom2[2];
+    let curve_curvature2 = curvature_vector2.length();
+    if curve_curvature2 > EFF_ZERO {
+        curvature_vector2 = curvature_vector2.unitize()?;
+    }
+
+    // If the normal curvature is zero then use a line instead of
+    // a circle for the surface.
+    let mut line_circle_intersection = false;
+    let mut circle2_radius = 0.0;
+    let mut line_point = Vec3::UNDEF;
+    let mut line_vec = Vec3::UNDEF;
+    let mut circle2_center = Vec3::UNDEF;
+    let mut circle2_normal = Vec3::UNDEF;
+    let scaled_tol = 1.0e-4 * (1.0 + curve_curvature1.abs() + curve_curvature2.abs());
+    let circle1_radius;
+    let circle1_center;
+    let mut circle1_normal;
+    if curve_curvature1.abs() < scaled_tol {
+        // If the curve2 also has zero curvature then we are done
+        if curve_curvature2.abs() < scaled_tol {
+            // Done with no new guesses needed
+            return Ok(None);
+        }
+        circle1_radius = (1.0 / curve_curvature2).abs();
+        circle1_center = pv2[0] + curvature_vector2 * circle1_radius;
+        circle1_normal = geom2[1].cross(geom2[2]);
+        if circle1_normal.length_squared() < EFF_ZERO_SQ {
+            return Ok(None);
+        }
+        circle1_normal = circle1_normal.unitize()?;
+        line_point = pv1[0];
+        line_vec = pv1[1].unitize()?;
+        line_circle_intersection = true;
+    } else {
+        // have curve with curvature
+        if curve_curvature2.abs() < scaled_tol {
+            line_point = pv2[0];
+            line_vec = pv2[1].unitize()?;
+            line_circle_intersection = true;
+        } else {
+            circle2_radius = (1.0 / curve_curvature2).abs();
+            circle2_center = pv2[0] + curvature_vector2 * circle2_radius;
+            circle2_normal = geom2[1].cross(geom2[2]);
+            if circle2_normal.length_squared() < EFF_ZERO_SQ {
+                return Ok(None);
+            }
+            circle2_normal = circle2_normal.unitize()?;
+        }
+        circle1_radius = (1.0 / curve_curvature1).abs();
+        circle1_center = pv1[0] + curvature_vector1 * circle1_radius;
+        circle1_normal = geom1[1].cross(geom1[2]);
+        if circle1_normal.length_squared() < EFF_ZERO_SQ {
+            return Ok(None);
+        }
+        circle1_normal = circle1_normal.unitize()?;
+    }
+    // (circle 2's normal is computed but not used, as upstream)
+    let _ = circle2_normal;
+
+    let found_vector = if line_circle_intersection {
+        let tsect = line_coplanar_circle_intersect(
+            line_point,
+            line_vec,
+            circle1_center,
+            circle1_normal,
+            circle1_radius,
+            EFF_ZERO,
+        )?;
+        // If only have one or zero intersections we are done without
+        // picking up extra guess
+        let [a0, a1] = match tsect.as_slice() {
+            [a0, a1] => [*a0, *a1],
+            _ => return Ok(None),
+        };
+        // Find the other intersection -- i.e. the one we don't have
+        // The one we have would be at param 0, so use the farther from zero.
+        let mut line_t = a0;
+        if a1.abs() > a0.abs() {
+            line_t = a1;
+        }
+        line_t * line_vec
+    } else {
+        // Do circle circle intersection
+        let tsect = circle_coplanar_circle_intersect(
+            circle1_normal,
+            circle1_center,
+            circle1_radius,
+            circle2_center,
+            circle2_radius,
+            EFF_ZERO,
+        )?;
+        // If only have one or zero intersections we are done without
+        // picking up extra guess
+        let CircleCircle::Crossing(p0, p1) = tsect else {
+            return Ok(None);
+        };
+        let mut found = p0 - pv1[0];
+        if found.length() < p1.distance(pv1[0]) {
+            found = p1 - pv1[0];
+        }
+        found
+    };
+
+    let guess1 = tsect_t1 + convert_to_parameter_delta(pv1[1], found_vector);
+    let guess2 = tsect_t2 + convert_to_parameter_delta(pv2[1], found_vector);
+
+    if !interval1.contains_value(guess1, 0.0) && !interval2.contains_value(guess2, 0.0) {
+        // If the guess is outside of the domain we'll be able to pick it up using
+        // another method.
+        return Ok(None);
+    }
+    Ok(Some((
+        interval1.clamp_value(guess1),
+        interval2.clamp_value(guess2),
+    )))
+}
+
+/// Position and first derivative (non-zero tangent, from the left).
+fn eval2<C: CurveEvaluate + ?Sized>(curve: &C, t: f64) -> Result<[Vec3; 2]> {
+    let v = curve.evaluate(t, 1, true, true)?;
+    let mut out = [Vec3::UNDEF; 2];
+    for (d, s) in out.iter_mut().zip(v) {
+        *d = s;
+    }
+    Ok(out)
+}
+
+/// `EvaluateGeometric(t, 2, TRUE, ...)`: position, tangent, curvature vector and
+/// (unwritten) torsion slot.
+fn geom3<C: CurveEvaluate + ?Sized>(curve: &C, t: f64) -> Result<[Vec3; 4]> {
+    let v = evaluate_geometric(curve, t, 2, true)?;
+    let mut out = [Vec3::UNDEF; 4];
+    for (d, s) in out.iter_mut().zip(v) {
+        *d = s;
+    }
+    Ok(out)
 }

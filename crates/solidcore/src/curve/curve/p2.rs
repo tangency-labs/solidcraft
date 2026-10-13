@@ -58,7 +58,7 @@
 //! | [`CcGlobalSolver`]                                | `SmCCGlobalSolver` (constructor, `BranchMayContainAnswers`) |
 //! | [`CpGlobalSolver`]                                | `SmCPGlobalSolver` (constructor, `BranchMayContainAnswers`; `LocalSolve` is unit `curve.curve_p1`) |
 //! | [`CurvePropertyGs`], [`CurvePropertyType`]        | `SmCurvePropertyGS` (constructor, `FindBestSubdivisionNode`, `BranchMayContainAnswers`), `SmCurvePropertyType` |
-//! | [`CciGlobalSolver`]                               | `SmCCIGlobalSolver` (constructor)                |
+//! | [`CciGlobalSolver`]                               | `SmCCIGlobalSolver` (constructor; `LocalSolve` is unit `curve.curve_p7`) |
 //! | [`LengthIntegrand`]                               | `SmLengthIFEO` (constructor, `Evaluate`)         |
 //! | [`FindCurveDistanceExtrema`]                      | `SmFindCurveDistanceExtremaEFO` (constructor, destructor) |
 //!
@@ -115,7 +115,9 @@
 //!   `curve.curve_p3` (`SmCurvePropertyGS`, ported there; the solver carries the
 //!   curve it evaluates, [`CurvePropertyGs::curve`], since a tree's owner object is
 //!   only the caller's handle) and `curve.curve_p7`
-//!   (`SmCCIGlobalSolver`); the unported ones return [`SolidError::Unported`]. Curve tree nodes
+//!   (`SmCCIGlobalSolver`, ported there; the solver carries its two curves and the
+//!   kernel, [`CciGlobalSolver::with_curves`]); the unported ones return
+//!   [`SolidError::Unported`]. Curve tree nodes
 //!   hold `SmBezierSpan` / `SmBezierAux1d` data built by the curve cache
 //!   ([`crate::curve::curve_cache`]), read from the tree
 //!   ([`Tree::curve_aux`], [`Tree::curve_span`]); the span end points are those the
@@ -3328,6 +3330,13 @@ pub struct CciGlobalSolver<'t, O> {
     pub projection_type: ProjectionType,
     /// `m_bSelfIntersection`: both trees are the same tree.
     pub self_intersection: bool,
+    /// The curves the two trees decompose (upstream reads them back as the tree
+    /// nodes' owner objects, `pCurveNode->GetOwnerObject()`); `None` until set with
+    /// [`CciGlobalSolver::with_curves`].
+    pub curves: Option<[&'t Curve; 2]>,
+    /// The kernel the local solves run in (upstream reaches it through the curves'
+    /// context); `None` until set with [`CciGlobalSolver::with_curves`].
+    pub kernel: Option<&'t Kernel>,
 }
 
 impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
@@ -3350,7 +3359,24 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
             do_projection,
             projection_type,
             self_intersection: core::ptr::eq(tree1, tree2),
+            curves: None,
+            kernel: None,
         }
+    }
+
+    /// The solver with `curve1` and `curve2`, the curves its trees were built for
+    /// (the owner objects of the trees' nodes upstream), and the kernel `k`, which
+    /// [`GlobalSolve::local_solve`] needs.
+    #[must_use]
+    pub const fn with_curves(
+        mut self,
+        curve1: &'t Curve,
+        curve2: &'t Curve,
+        k: &'t Kernel,
+    ) -> Self {
+        self.curves = Some([curve1, curve2]);
+        self.kernel = Some(k);
+        self
     }
 }
 
@@ -3363,12 +3389,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CciGlobalSolver<'t, O> {
         &mut self.base
     }
 
-    fn local_solve(&mut self, _branch: &Branch) -> Result<bool> {
-        // UNPORTED(curve.curve_p7): SmCCIGlobalSolver::LocalSolve
-        Err(SolidError::Unported {
-            upstream: "SmCCIGlobalSolver::LocalSolve",
-            unit: "curve.curve_p7",
-        })
+    fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
+        self.local_solve_branch(branch)
     }
 }
 

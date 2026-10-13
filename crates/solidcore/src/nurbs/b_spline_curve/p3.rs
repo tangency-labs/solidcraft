@@ -59,7 +59,8 @@
 //!   a gap tolerance; `SubdivideAtDiscontinuity` calls `CalculateContinuities`
 //!   (`SmCurve::EvaluateContinuity`);
 //!   `TrimGap` intersects with `SmCurve::GlobalCurveIntersect` (`curve.curve_p8`);
-//!   `AssertValid` calls `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`); its
+//!   `AssertValid` calls `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`, whose
+//!   span solves reach `SmCurve::LocalPropertyAnalysis` of `curve.curve_p5`); its
 //!   `SmCurve::AssertValid` is [`crate::curve::curve::p4::assert_valid_base`] for a
 //!   curve without owner. Those calls return
 //!   [`SolidError::Unported`] until the units are ported. `SmTol::IsDegenerate(this)`
@@ -68,6 +69,8 @@
 //!   `AssertValid` takes the [`Kernel`]; `SmCurve::IsAnalytic` / `IsBounded` are the
 //!   base `FALSE` / `TRUE`.
 
+use crate::curve::curve::p2::{Curve, CurvePropertyType};
+use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -77,7 +80,7 @@ use crate::geom::geom_utility::p1::{
     segment_point_distance,
 };
 use crate::geom::geom_utility::p2::ContinuityType;
-use crate::geom::solution_array::{SolutionEnd, SolutionType};
+use crate::geom::solution_array::{ObjectKind, SolutionEnd, SolutionObject, SolutionType};
 use crate::geom::tol::{
     is_zero_to_tol, tol3d, xsect_tol_3d_from_zones, zone_tol_3d, SmallTopoType, ZONE_TOL_3D,
 };
@@ -171,19 +174,37 @@ enum CurveProperty {
     MinimizeRadiusOfCurvature,
 }
 
+/// The analysed curve in the solutions of [`global_property_analysis`] (unread).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SelfCurve;
+
+impl SolutionObject for SelfCurve {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+}
+
 /// `SmCurve::GlobalPropertyAnalysis` of `curve` over `domain` (no extra arguments) with
-/// minimum separation `min_sep`: the solutions' start ends.
+/// minimum separation `min_sep`: the solutions' start ends. The status is ignored
+/// upstream: a failed analysis gives no solutions here (upstream keeps those found
+/// before the failure); [`SolidError::Unported`] is passed on.
 fn global_property_analysis(
-    _curve: &BSplineCurve,
-    _domain: &Extent1d,
-    _property: CurveProperty,
-    _min_sep: f64,
+    k: &Kernel,
+    curve: &BSplineCurve,
+    domain: &Extent1d,
+    property: CurveProperty,
+    min_sep: f64,
 ) -> Result<Vec<SolutionEnd>> {
-    // UNPORTED(curve.curve_p7): SmCurve::GlobalPropertyAnalysis
-    Err(SolidError::Unported {
-        upstream: "SmCurve::GlobalPropertyAnalysis",
-        unit: "curve.curve_p7",
-    })
+    let property = match property {
+        CurveProperty::MinimizeFirstDerivative => CurvePropertyType::MinimizeFirstDerivative,
+        CurveProperty::MinimizeRadiusOfCurvature => CurvePropertyType::MinimizeRadiusOfCurvature,
+    };
+    let crv = Curve::from(curve.clone());
+    let opts: PropertyAnalysisOptions<'_, SelfCurve> = PropertyAnalysisOptions::default();
+    let found = ignored(crv.global_property_analysis(k, domain, property, min_sep, &opts))?;
+    Ok(found.map_or_else(Vec::new, |r| {
+        r.solutions.as_slice().iter().map(|s| s.start).collect()
+    }))
 }
 
 /// `SmCurve::AssertValid(pAList, eTestLevel, SM_NO_WALK, pTestRequests)` of `curve`
@@ -956,7 +977,8 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// Past the knot checks [`SolidError::Unported`] from
-    /// `SmCurve::GlobalPropertyAnalysis` (`curve.curve_p7`). `k` gives the system zone tolerance of
+    /// `SmCurve::GlobalPropertyAnalysis` (its span solves reach
+    /// `SmCurve::LocalPropertyAnalysis`, `curve.curve_p5`). `k` gives the system zone tolerance of
     /// `SmTol::IsDegenerate(this)`.
     pub fn assert_valid(
         &self,
@@ -1193,6 +1215,7 @@ impl BSplineCurve {
             };
 
             let solutions = global_property_analysis(
+                k,
                 self,
                 &domain,
                 CurveProperty::MinimizeFirstDerivative,
@@ -1241,6 +1264,7 @@ impl BSplineCurve {
 
             // Another type of kink check: vanishing radius of curvature.
             let solutions = global_property_analysis(
+                k,
                 self,
                 &domain,
                 CurveProperty::MinimizeRadiusOfCurvature,

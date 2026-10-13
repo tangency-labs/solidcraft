@@ -131,8 +131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "DropCurveCurve_assert_given",
@@ -143,8 +143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "DropCurveCurve_assert_level0",
@@ -283,8 +283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "closedCurve_assert_given",
@@ -295,8 +295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "closedCurve_assert_level0",
@@ -435,8 +435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "crvToOffset_assert_given",
@@ -447,8 +447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "crvToOffset_assert_level0",
@@ -587,8 +587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "crvTrim1_assert_given",
@@ -599,8 +599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "crvTrim1_assert_level0",
@@ -739,8 +739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "crvTrim2_assert_given",
@@ -751,8 +751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "crvTrim2_assert_level0",
@@ -891,8 +891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "curve0_assert_given",
@@ -903,8 +903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "curve0_assert_level0",
@@ -1011,8 +1011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "curve_interface_joined_assert",
@@ -1487,8 +1487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "internal_pole_assert",
@@ -1751,8 +1751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -1819,8 +1819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0024",
@@ -2047,8 +2047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0052",
@@ -2155,8 +2155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0065",
@@ -2175,8 +2175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0067",
@@ -2479,8 +2479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0104",
@@ -2779,8 +2779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0140",
@@ -2983,8 +2983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0165",
@@ -3003,8 +3003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0167",
@@ -3047,8 +3047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0172",
@@ -3147,8 +3147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -3663,8 +3663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0248",
@@ -3699,8 +3699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0252",
@@ -3919,8 +3919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0279",
@@ -4019,8 +4019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0291",
@@ -4455,8 +4455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0345",
@@ -4799,8 +4799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0386",
@@ -4843,8 +4843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0391",
@@ -4895,8 +4895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0397",
@@ -4971,8 +4971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0406",
@@ -4983,8 +4983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0407",
@@ -5179,8 +5179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0431",
@@ -5519,8 +5519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0473",
@@ -5603,8 +5603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0483",
@@ -6059,8 +6059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0538",
@@ -6139,8 +6139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0547",
@@ -6375,8 +6375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0575",
@@ -6463,8 +6463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0585",
@@ -6735,8 +6735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0618",
@@ -6827,8 +6827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0629",
@@ -7339,8 +7339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0692",
@@ -7579,8 +7579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0721",
@@ -7639,8 +7639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0728",
@@ -7659,8 +7659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0730",
@@ -7671,8 +7671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0731",
@@ -7731,8 +7731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0738",
@@ -7783,8 +7783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0744",
@@ -7923,8 +7923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0761",
@@ -8007,8 +8007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0771",
@@ -8059,8 +8059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0777",
@@ -8239,8 +8239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0799",
@@ -8691,8 +8691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0854",
@@ -8759,8 +8759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0862",
@@ -8771,8 +8771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0863",
@@ -9055,8 +9055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0897",
@@ -9075,8 +9075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0899",
@@ -9359,8 +9359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0933",
@@ -9451,8 +9451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0944",
@@ -9511,8 +9511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0951",
@@ -9639,8 +9639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0966",
@@ -9707,8 +9707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0974",
@@ -9751,8 +9751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen0979",
@@ -10363,8 +10363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1054",
@@ -10463,8 +10463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1065",
@@ -10499,8 +10499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1069",
@@ -10559,8 +10559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1076",
@@ -10683,8 +10683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1091",
@@ -10719,8 +10719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1095",
@@ -10835,8 +10835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1109",
@@ -10847,8 +10847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1110",
@@ -10867,8 +10867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1112",
@@ -10927,8 +10927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1119",
@@ -11135,8 +11135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1144",
@@ -11359,8 +11359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1171",
@@ -11575,8 +11575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1197",
@@ -11783,8 +11783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1222",
@@ -11867,8 +11867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1232",
@@ -12131,8 +12131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1264",
@@ -12487,8 +12487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1307",
@@ -12627,8 +12627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1324",
@@ -12807,8 +12807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1346",
@@ -12927,8 +12927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1360",
@@ -13091,8 +13091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1380",
@@ -13167,8 +13167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1389",
@@ -13203,8 +13203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1393",
@@ -13391,8 +13391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1415",
@@ -13483,8 +13483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1426",
@@ -13511,8 +13511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1429",
@@ -13579,8 +13579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1437",
@@ -13739,8 +13739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1456",
@@ -13947,8 +13947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1481",
@@ -14195,8 +14195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1511",
@@ -14223,8 +14223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1514",
@@ -14343,8 +14343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1528",
@@ -14507,8 +14507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1548",
@@ -14527,8 +14527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1550",
@@ -14643,8 +14643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1564",
@@ -15251,8 +15251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1638",
@@ -15447,8 +15447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1661",
@@ -15927,8 +15927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1720",
@@ -16059,8 +16059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1736",
@@ -16199,8 +16199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1753",
@@ -16403,8 +16403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1778",
@@ -16695,8 +16695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1813",
@@ -16787,8 +16787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1824",
@@ -17043,8 +17043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1855",
@@ -17275,8 +17275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1883",
@@ -17335,8 +17335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1890",
@@ -17491,8 +17491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1909",
@@ -17591,8 +17591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1921",
@@ -17871,8 +17871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1954",
@@ -18039,8 +18039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GlobalPropertyAnalysis",
-        "unit": "curve.curve_p7"
+        "symbol": "SmCurve::LocalPropertyAnalysis",
+        "unit": "curve.curve_p5"
       },
       "max_rel_err": 0.0,
       "name": "gen1974",
@@ -18256,7 +18256,7 @@
   "cases_passed": 2023,
   "cases_total": 2195,
   "deferred_by_unit": {
-    "curve.curve_p7": 116,
+    "curve.curve_p5": 116,
     "curve.curve_p8": 56
   },
   "max_rel_err": 0.0,
