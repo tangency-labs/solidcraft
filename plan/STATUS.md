@@ -1,6 +1,6 @@
 # solidcore status
 
-Last updated: 2026-10-13, Wave 1 in progress (after `primitive.api_curves`). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
+Last updated: 2026-10-13, Wave 1 in progress (after `curve.composite_curve_p1`). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
 
@@ -11,9 +11,9 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 261 (65 layers), 387,903 upstream lines |
 | Green | **71** (83,534 lines): `geom.extent3d`, `geom.vector2d`, `nlib.knots`, `nlib.math`, `topology.database_io`, `geom.tol`, `nlib.geom`, `geom.assert_array`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.periodic_extent1d`, `geom.vector3d`, `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.polynomial`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box`, `nlib.crv_basic`, `geom.pseudo_box`, `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_fit_p2`, `nlib.crv_nurb`, `nlib.funcs_adv`, `nlib.srf_fit`, `nlib.crv_fit_p3`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv`, `topology.topology`, `nlib.crv_adv_p1`, `nlib.crv_common`, `nlib.spiral`, `nlib.crv_adv_p2`, `nlib.srf_common`, `nlib.crv_approx`, `nlib.crv_offset`, `nlib.srf_nurb`, `nlib.srf_tool_p2`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_srf`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nlib.srf_tool_p4`, `curve.conic`, `curve.projected_curve`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_adv_p6`, `nlib.srf_offset`, `curve.offset_curve`, `surface.b_spline_volume`, `nurbs.b_spline_curve_p1`, `curve.parabola`, `primitive.api_curves` |
-| Partial | **33** (47,117 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2`, `curve.line`, `nurbs.b_spline_surface_p2`, `curve.ellipse_p2`, `surface.volume_p1`, `curve.curve_p4`, `surface.twist_volume`, `curve.curve_p3`, `curve.curve_p1`, `curve.curve_p6`, `curve.curve_p7`, `curve.crv_on_surf`, `curve.ellipse_p1`, `curve.curve_p8` |
-| Ported (green + partial) | 104 units, 130,651 upstream lines (33.7%); about 128,000 Rust lines in `crates/solidcore/src` |
-| Claimed | 2 (4,098 lines): `curve.composite_curve_p1`, `surface.surface_p2` |
+| Partial | **34** (48,817 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2`, `curve.line`, `nurbs.b_spline_surface_p2`, `curve.ellipse_p2`, `surface.volume_p1`, `curve.curve_p4`, `surface.twist_volume`, `curve.curve_p3`, `curve.curve_p1`, `curve.curve_p6`, `curve.curve_p7`, `curve.crv_on_surf`, `curve.ellipse_p1`, `curve.curve_p8`, `curve.composite_curve_p1` |
+| Ported (green + partial) | 105 units, 132,351 upstream lines (34.1%); about 128,000 Rust lines in `crates/solidcore/src` |
+| Claimed | 1 (2,398 lines): `surface.surface_p2` |
 | Blocked | 0 |
 | Todo | 155 (253,154 lines) |
 
