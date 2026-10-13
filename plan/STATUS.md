@@ -12,10 +12,10 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 | Units planned | 261 (65 layers), 387,903 upstream lines |
 | Green | **71** (83,534 lines): `geom.extent3d`, `geom.vector2d`, `nlib.knots`, `nlib.math`, `topology.database_io`, `geom.tol`, `nlib.geom`, `geom.assert_array`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.periodic_extent1d`, `geom.vector3d`, `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.polynomial`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box`, `nlib.crv_basic`, `geom.pseudo_box`, `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_fit_p2`, `nlib.crv_nurb`, `nlib.funcs_adv`, `nlib.srf_fit`, `nlib.crv_fit_p3`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv`, `topology.topology`, `nlib.crv_adv_p1`, `nlib.crv_common`, `nlib.spiral`, `nlib.crv_adv_p2`, `nlib.srf_common`, `nlib.crv_approx`, `nlib.crv_offset`, `nlib.srf_nurb`, `nlib.srf_tool_p2`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_srf`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nlib.srf_tool_p4`, `curve.conic`, `curve.projected_curve`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_adv_p6`, `nlib.srf_offset`, `curve.offset_curve`, `surface.b_spline_volume`, `nurbs.b_spline_curve_p1`, `curve.parabola`, `primitive.api_curves` |
 | Partial | **35** (51,215 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2`, `curve.line`, `nurbs.b_spline_surface_p2`, `curve.ellipse_p2`, `surface.volume_p1`, `curve.curve_p4`, `surface.twist_volume`, `curve.curve_p3`, `curve.curve_p1`, `curve.curve_p6`, `curve.curve_p7`, `curve.crv_on_surf`, `curve.ellipse_p1`, `curve.curve_p8`, `curve.composite_curve_p1`, `surface.surface_p2` |
-| Ported (green + partial) | 106 units, 134,749 upstream lines (34.7%); about 128,000 Rust lines in `crates/solidcore/src` |
-| Claimed | 0 |
+| Ported (green + partial) | 106 units, 134,749 upstream lines (34.7%); about 143,000 Rust lines in `crates/solidcore/src` |
+| Claimed | 2 (3,644 lines): `curve.composite_curve_p2`, `curve.curve_p5` |
 | Blocked | 0 |
-| Todo | 155 (253,154 lines) |
+| Todo | 153 (249,510 lines) |
 
 ## What Wave 0 produced
 
@@ -152,16 +152,16 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 
 ## Ready set
 
-Empty (2026-10-13): every todo unit still waits on a claimed or todo dependency.
-Claimed and in progress: `curve.parabola`, `curve.ellipse_p1`,
-`curve.crv_on_surf`. `curve.curve_p5` (`LocalPropertyAnalysis`, `IsArc`, the CC
-evaluators) is the largest single blocker of the curve partials. New curve classes become
-`CurveKind` variants of `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a
-merge that adds a variant must also extend the exhaustive matches in `curve::curve_cache`.
+2026-10-13 (after style review batch #16): `surface.curve_bounded_surface`,
+`surface.surface_cache_p1`. Claimed and in progress: `curve.curve_p5`
+(`LocalPropertyAnalysis`, `IsArc`, the CC evaluators; the largest single blocker of the
+curve partials) and `curve.composite_curve_p2`. New curve classes become `CurveKind`
+variants of `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a merge that
+adds a variant must also extend the exhaustive matches in `curve::curve_cache`.
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 99 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 106 ported
   units is bit-identical (`max_rel_err = 0`).
 - `curve.curve_p7` ports the curve/curve intersection local solve and
   `GlobalPropertyAnalysis`; `CciGlobalSolver` now carries its curves and kernel
@@ -714,19 +714,53 @@ b_spline_volume 2333 green; all `max_rel_err` 0. fmt, clippy, tests and wasm32 p
   `OP_*` constants. `curve::curve::p2` still has local `EDGE_TYPE` / `EDGEUSE_TYPE`
   copies (outside this batch), and the private `fn invalid` helpers under `nurbs/` remain.
 
-## Resume note (2026-10-13, after style review batch #15)
+## Style review batch #16 (2026-10-13)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Counts: 69 green,
-  29 partial, 4 claimed (`curve.parabola`, `curve.ellipse_p1`, `curve.curve_p7`,
-  `curve.crv_on_surf`), 159 todo, 0 blocked. The ready set is empty until a claimed unit
-  lands.
-- Worktrees branched before batch #15 that touch `curve::curve::p1/p3/p4/p6`: the
-  private `keep`, `invalid`, `is_unported`, `eval_pv` and p4 `eval_n` are gone; use
-  `crate::error::ignored`, `SolidError::invalid_input`, `e.is_unported()` and
-  `curve::curve::p3::eval_n(curve, t, num_derivs, from_left, non_zero)`.
-- Next style review batch: `curve.parabola`, `curve.ellipse_p1`, `curve.curve_p7`,
-  `curve.crv_on_surf` once merged; also `curve::curve::p2`'s local type codes and the
-  `nurbs/` `fn invalid` copies.
+Workflow batch #8: reviewed `curve.curve_p7`, `curve.crv_on_surf`, `curve.ellipse_p1`,
+`curve.curve_p8`, `primitive.api_curves` and `curve.composite_curve_p1` against AGENTS.md
+(commits `bff8a69`, `e06dbd7`, merged in `1d80f47`). Numerics and operation order were
+not changed. difftest counts and status are unchanged: curve_p7 3027 (1311 deferred),
+curve_p8 3058 (1090), ellipse_p1 2028 (132), composite_curve_p1 3093 (312), crv_on_surf
+2094 (541) partial; api_curves 1629, parabola 3044, geom.tol 3440, geom_utility_p1 4185,
+geom_utility_p2 3270 green; all `max_rel_err` 0. fmt, clippy, tests and wasm32 pass.
+
+- **Shared `SmMath.h` helpers:** `math::rad_to_deg` (`SM_RAD2DEG`) and `math::min4`
+  (`smos_4Min`) replace private copies in `curve::curve::{p7, p8}`, `geom::tol` and
+  `geom::geom_utility::{p1, p2}`.
+- **Shared crate helpers:** `curve::curve::p3::set_param`, `curve::curve::p4::point_or_undef`
+  and `geom::vector3d::is_valid_double` are `pub(crate)`; the copies in `p7`, `p8` and
+  `primitive::api_curves` are gone. `curve::curve::p2::at` replaces
+  `.get(i).copied().unwrap_or(Vec3::UNDEF)` in `p7`, `p8` and `composite_curve::p1`;
+  `ellipse::p1` reads its polar tables with `nurbs::index::at` (private `table` gone).
+- **Type codes:** `curve::curve::p2::CURV_BASE_TYPE` is `pub(crate)`; `composite_curve::p1`
+  and `parabola` dropped their private copies (`Parabola::TYPE` is `PARABOLA_TYPE`).
+- **Unported propagation:** `ellipse::p1::read_from_db` and `p7`'s line/line guess point use
+  `error::ignored` instead of hand-written three-arm matches.
+- **Dead code:** `Ellipse::convert_to_2d` no longer computes the unused `theta_y_rad`
+  (upstream computes it and uses ThetaX for both vectors; noted in a comment);
+  `join_with` picks the common/end points directly instead of swapping and discarding.
+- **Lints:** removed `#[allow(clippy::too_many_arguments / too_many_lines)]` in `p7`, `p8`
+  and `composite_curve::p1` (allowed workspace-wide).
+- Judged fine and left alone: `crv_on_surf` (back-edge stubs carry `UNPORTED` tags, lift
+  formulas keep upstream order), `api_curves`' `#[allow(clippy::neg_cmp_op_on_partial_ord)]`
+  (the negated test rejects NaN, as upstream), the remaining three-arm matches whose
+  failure arm returns or `continue`s, and `let _ = extent.set_min_max(..)` (never
+  `Unported`). `curve::hyperbola` and `ellipse::p1` still each have a private `extract`
+  (`is >> double`); a shared `InputStream` method would remove both.
+
+## Resume note (2026-10-13, after style review batch #16)
+
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). Counts: 71 green,
+  35 partial, 2 claimed (`curve.curve_p5`, `curve.composite_curve_p2`), 153 todo,
+  0 blocked. Ready set: `surface.curve_bounded_surface`, `surface.surface_cache_p1`.
+- Worktrees branched before batch #16: private `rad_to_deg`, `min4`, `set_param`,
+  `point_or_undef`, `is_valid_double` and `CURV_BASE_TYPE` copies are gone; use
+  `crate::math::{rad_to_deg, min4}`, `curve::curve::p3::set_param`,
+  `curve::curve::p4::point_or_undef`, `geom::vector3d::is_valid_double` and
+  `curve::curve::p2::CURV_BASE_TYPE`.
+- Next style review batch: `surface.surface_p2` and `curve.parabola`; also
+  `curve::curve::p2`'s local `EDGE_TYPE` / `EDGEUSE_TYPE`, the `nurbs/` `fn invalid`
+  copies and the two private `extract` helpers.
 
 ## Known problems
 
