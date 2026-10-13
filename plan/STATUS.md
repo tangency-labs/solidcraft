@@ -1,7 +1,7 @@
 # solidcore status
 
-Last updated: 2026-10-12, Wave 1 in progress (after `curve.curve_cache` and style review
-batch #12). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
+Last updated: 2026-10-12, Wave 1 in progress (after `curve.crv_in_volume` and style review
+batch #13). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
 
 ## Progress
 
@@ -12,11 +12,11 @@ Counts are from `plan/modules.toml`. Line counts are the upstream function-body 
 |---|---|
 | Units planned | 260 (65 layers), 387,903 upstream lines |
 | Green | **67** (79,324 lines): `geom.extent3d`, `geom.vector2d`, `nlib.knots`, `nlib.math`, `topology.database_io`, `geom.tol`, `nlib.geom`, `geom.assert_array`, `geom.context`, `geom.extent1d`, `geom.matrix`, `geom.periodic_extent1d`, `geom.vector3d`, `nlib.basis_basic`, `nlib.srf_basic`, `geom.axis2_placement`, `geom.extent2d`, `geom.geom_utility_p2`, `geom.hash_table`, `geom.local_solve1d`, `geom.local_solve_nd`, `geom.polynomial`, `nlib.basis_adv`, `nlib.bezier`, `nlib.funcs_basic`, `geom.geom_utility_p1`, `geom.polar_box`, `nlib.crv_basic`, `geom.pseudo_box`, `nlib.crv_fit_p1`, `nlib.crv_tool_p1`, `nlib.iges`, `nlib.srf_tool_p1`, `curve.hermite_curve`, `geom.point_set`, `nlib.crv_fit_p2`, `nlib.crv_nurb`, `nlib.funcs_adv`, `nlib.srf_fit`, `nlib.crv_fit_p3`, `nlib.crv_geom`, `nlib.crv_tool_p2`, `nurbs.nurbs_crv`, `topology.topology`, `nlib.crv_adv_p1`, `nlib.crv_common`, `nlib.spiral`, `nlib.crv_adv_p2`, `nlib.srf_common`, `nlib.crv_approx`, `nlib.crv_offset`, `nlib.srf_nurb`, `nlib.srf_tool_p2`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_srf`, `nlib.srf_adv_p2`, `nlib.srf_adv_p3`, `nlib.srf_tool_p3`, `nlib.srf_tool_p4`, `curve.conic`, `curve.projected_curve`, `nlib.srf_adv_p4`, `nlib.srf_adv_p1`, `nlib.srf_adv_p5`, `nlib.srf_adv_p6`, `nlib.srf_offset`, `curve.offset_curve` |
-| Partial | **20** (24,345 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2` |
-| Ported (green + partial) | 87 units, 103,669 upstream lines (26.7%); about 104,600 Rust lines in `crates/solidcore/src` |
-| Claimed | 3 (3,274 lines): `curve.crv_in_volume`, `curve.line`, `curve.parabola` |
+| Partial | **21** (25,294 lines): `geom.attribute`, `geom.tree`, `geom.object`, `geom.grid`, `geom.solution_array`, `geom.global_solver`, `geom.tools`, `geom.transform`, `geom.a_object`, `nurbs.b_spline_curve_p1`, `nurbs.b_spline_curve_p2`, `nurbs.b_spline_surface_p1`, `curve.curve_p2`, `nurbs.b_spline_curve_p3`, `curve.crv_in_volume`, `curve.curve_cache`, `curve.hyperbola`, `curve.tangent_field`, `nurbs.b_spline_surface_n_lib_p1`, `curve.iso_curve`, `nurbs.b_spline_surface_n_lib_p2` |
+| Ported (green + partial) | 88 units, 104,618 upstream lines (27.0%); about 109,200 Rust lines in `crates/solidcore/src` |
+| Claimed | 3 (3,663 lines): `curve.line`, `curve.parabola`, `nurbs.b_spline_surface_p2` |
 | Blocked | 0 |
-| Todo | 170 (280,960 lines) |
+| Todo | 169 (279,622 lines) |
 
 ## What Wave 0 produced
 
@@ -133,19 +133,25 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `curve.hyperbola` | `curve::hyperbola` | 2062 cases (62 fixture: smCurveTest.cpp my_test_analytic_curves hyperbola (CreateCanonical, AdjustSTEPInterval(-1,2), evaluation, GlobalPointSolveSTEP, ReverseParameterization), the smSurfaceTest.cpp extrusion-generator hyperbola, edge cases, ReadFromDB records + 2000 generated), 1960 bit-identical; `--perturb` SENSITIVE | 102 (`curve.curve_p1` 70: `SmCurve::GlobalPointSolve`; `curve.curve_p5` 32: `SmCurve::EvaluateSTEPPoint` in classifying `STEPInversion`) |
 | `curve.curve_cache` | `curve::curve_cache` | 638 cases (38 fixture: lines, cubics, C0 quadratic, closed, degenerate, 2D, rational arc and Hermite curves through `Tessellate` with every option, sub/beyond/disjoint/reversed intervals, `GetAnalyticCurve`, type queries + 600 generated), 635 bit-identical | 3 (`curve.curve_p5` 2: `SmCurve::IsArc`; `curve.line` 1: `SmLine` in `GetAnalyticCurve`) |
 | `curve.tangent_field` | `curve::tangent_field` | 655 cases, 389 bit-identical | 266 (`surface.surface_p2` 143, `surface.surface_p7` 110, `surface.surface_p1` 11, `curve.crv_on_surf` 2) |
-| `curve.iso_curve` | `curve::iso_curve` | 2874 cases (874 fixture: iso curves of Surface.sms / offset_nurb.sms / DropCurveSurface.sms, bilinear and NURB-less edge cases, ReadFromDB streams + 2000 generated), 2234 bit-identical; `--perturb` SENSITIVE | 640 (`nurbs.b_spline_surface_n_lib_p2` 355, `surface.surface_p6` 120, `surface.surface_p2` 101, `curve.line` 64) |
+| `curve.iso_curve` | `curve::iso_curve` | 2874 cases (874 fixture: iso curves of Surface.sms / offset_nurb.sms / DropCurveSurface.sms, bilinear and NURB-less edge cases, ReadFromDB streams + 2000 generated), 2589 bit-identical; `--perturb` SENSITIVE | 285 (`surface.surface_p6` 120, `surface.surface_p2` 101, `curve.line` 64); the `SmBSplineSurface::Evaluate` back-edge was wired in style review batch #13 |
+| `curve.crv_in_volume` | `curve::crv_in_volume` | 2030 cases, 1426 bit-identical | 604 (`surface.volume_p1` 603, `surface.volume_p2` 1) |
 
 ## Ready set
 
 empty: every todo unit still waits on a claimed or todo dependency. Claimed and in
-progress: `curve.crv_in_volume`, `curve.line`, `curve.parabola`. New curve classes become `CurveKind` variants of
+progress: `curve.line`, `curve.parabola`, `nurbs.b_spline_surface_p2`. New curve classes become `CurveKind` variants of
 `curve::curve::Curve` (see `plan/findings.md`, curve.curve_p2); a merge that adds a
 variant must also extend the exhaustive matches in `curve::curve_cache`.
 
 ## Recent findings (details in `plan/findings.md`)
 
-- No Rust-vs-C++ disagreement so far: every non-deferred case of the 84 ported
+- No Rust-vs-C++ disagreement so far: every non-deferred case of the 88 ported
   units is bit-identical (`max_rel_err = 0`).
+- `curve.iso_curve`: `SmIsoCurve::Evaluate` writes the surface's `[nu + 1][nv + 1]`
+  derivative array (one order zero) straight into the curve's array; the port flattens
+  `BSplineSurface::evaluate`'s rows. The 355 cases deferred on
+  `nurbs.b_spline_surface_n_lib_p2` now pass bit-identical (that unit's porter had found
+  no stub because `curve.iso_curve` merged later).
 - `curve.curve_cache` co-ported `SmFindCurveDistanceExtremaEFO::Evaluate`
   (`curve.curve_p4`) and `SmCurve::IsLine` (`curve::curve::p5::is_line_base`); porters of
   `curve.curve_p4` / `_p5` must not port them twice. `sm_ComputeConstants` stops at the
@@ -578,24 +584,57 @@ status, plus fmt, clippy, tests and the wasm32 check.
   `CURV_BASE_TYPE` copies in `hermite_curve`, `hyperbola` and `b_spline_curve/p1`
   (use `curve::curve::p2::*_TYPE` next time those files are touched).
 
-## Resume note (2026-10-12, after style review batch #12)
+## Style review batch #13 (2026-10-12)
 
-- `main` is pushed to `origin` (github.com/bherbruck/solidcore). 66 green, 18 partial,
-  6 claimed (`curve.crv_in_volume`, `curve.iso_curve`, `curve.line`, `curve.offset_curve`, `curve.parabola`, `nurbs.b_spline_surface_n_lib_p2`), 170 todo, 0 blocked. The ready set is empty until a
-  claimed unit lands.
-- For worktrees branched before batch #12: `SM_ERR_NULL_POINTER` lives in
-  `crate::error` (the `topology::database_io` and `b_spline_surface_n_lib::p1` exports
-  are gone); build the error with `SolidError::null_pointer(OP)`. Earlier changes still
-  apply: `nurbs::index::{get, set, at, put, at2, put2, oob}`, `SolidError::{sm_err,
-  nl_ser, nlib}`, `srf_adv::p3::KNOT_TOL`, `BSplineCurve::nurb_ref(_mut)`,
-  `nurbs::math::BIGD`.
-- Adding a `CurveKind` variant: extend the exhaustive matches in `curve::curve::p2` and
-  `curve::curve_cache` (main was briefly broken when `curve.projected_curve` and
-  `curve.curve_cache` merged back to back; fixed in `d65651e`).
-- Next style review batch: `curve.parabola` (once merged), `curve.hyperbola`,
-  `curve.projected_curve`, `curve.curve_cache`, `curve.tangent_field`, and the
-  remaining private `CURV_BASE_TYPE` / `oob` / `at` copies
-  (`grep -rn "CURV_BASE_TYPE: i64\|^fn oob(\|^fn at<" crates/solidcore/src`).
+Workflow batch #5: reviewed `curve.tangent_field`, `curve.hyperbola`,
+`curve.projected_curve`, `curve.curve_cache`, `curve.iso_curve` and `curve.offset_curve`
+against AGENTS.md (merges `16559c3`, `a0b635d`). Numerics and operation order were not
+changed. Every touched unit (also `curve.hermite_curve`, `nurbs.b_spline_curve_p1`,
+`curve.curve_p2`, `nurbs.b_spline_surface_n_lib_p2`) re-ran difftest with unchanged
+counts and status, except `curve.iso_curve` (see below), plus fmt, clippy, tests and
+the wasm32 check.
+
+- **Back-edge wired:** `curve.iso_curve`'s `UNPORTED(nurbs.b_spline_surface_n_lib_p2)`
+  stub for `SmBSplineSurface::Evaluate` now calls `BSplineSurface::evaluate`
+  (`EvaluateFlags`, rows flattened). Deferred dropped from 640 to 285, still partial.
+- **Type codes:** `Hyperbola::TYPE`, `HermiteCurve::TYPE` and `BSplineCurve::TYPE` use
+  `curve::curve::p2::{HYPERBOLA,HERMITE_CURVE,BSPLINE_CURVE}_TYPE`; the hyperbola's
+  owner-surface codes come from `geom::assert_array::labels`. No private
+  `CURV_BASE_TYPE` remains outside `curve::curve::p2`.
+- **Shared helpers:** `curve::curve::p2::at` (an evaluation entry or `UNDEF`) is
+  `pub(crate)` and replaces copies in `curve_cache`, `hyperbola` and `tangent_field`
+  (`crv_in_volume` still has one); `curve_cache` uses `SolidError::nl_ser` instead of its
+  private `gw_ser`; `offset_curve` builds its null-base error with
+  `SolidError::null_pointer`.
+- **Enum codes:** `SurfParamType::from_code` and `ProjectionType::from_code` (returning
+  `Option`) replace the ad hoc matches in `iso_curve` and `projected_curve`.
+- Smaller fixes: `curve_cache` gets a `max_step` helper (was computed twice) and an
+  `OP_PARENT` operation constant; redundant `#[allow(too_many_arguments /
+  too_many_lines)]` attributes were removed (both lints are allowed workspace-wide);
+  fully qualified paths became imports.
+- Not changed (judged faithful or out of scope): `offset_curve`'s raw `SmBoolean`
+  `i32` flags and no-op `set_context`; `tangent_field`'s generic surface `S`;
+  `hyperbola`'s `global_point_solve_step` unused arguments (consumed once
+  `curve.curve_p1` lands); the private `ignored` / `ignore_status` copies in
+  `curve_cache`, `hyperbola`, `curve::curve::p2`, `b_spline_curve/p3` and
+  `geom_utility/p2`. A shared `error` helper would remove them, but that touches
+  units outside this batch.
+
+## Resume note (2026-10-12, after style review batch #13)
+
+- `main` is pushed to `origin` (github.com/bherbruck/solidcore). 67 green, 21 partial,
+  3 claimed (`curve.line`, `curve.parabola`, `nurbs.b_spline_surface_p2`), 169 todo,
+  0 blocked. The ready set is empty until a claimed unit lands.
+- For worktrees branched before batch #13: `HermiteCurve::TYPE` /
+  `BSplineCurve::TYPE` / `Hyperbola::TYPE` are unchanged in value. `curve::curve::p2::at`
+  is now `pub(crate)`, so use it instead of adding another copy. Use
+  `SurfParamType::from_code` / `ProjectionType::from_code` to decode stored enum values.
+- When a unit lands, grep `UNPORTED(<unit>)` again after merging main: stubs in units
+  merged after your own check (as `curve.iso_curve` was for
+  `nurbs.b_spline_surface_n_lib_p2`) are easy to miss.
+- Next style review batch: `curve.crv_in_volume`, `curve.parabola` and `curve.line`
+  (once merged), `nurbs.b_spline_surface_n_lib_p2`, and a shared `ignore_status`
+  helper in `crate::error` for the five private copies.
 
 ## Known problems
 
