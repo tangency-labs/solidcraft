@@ -1,5 +1,7 @@
 //! Primitive solids: box, sphere, cylinder, cone, torus, pyramid and their
-//! partial variants.
+//! partial variants, and the high-level `SM_API` curve constructors.
 //!
 //! Upstream: `SmPrimitiveCreation` in `source/SMLib`, and
 //! `SM_API/SmApiPrimitives`.
+
+pub mod api_curves;
