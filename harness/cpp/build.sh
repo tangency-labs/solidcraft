@@ -14,7 +14,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-OUT="$ROOT/bin/cpp"
+OUT="${SOLIDCORE_CPP_DIR:-$ROOT/bin/cpp}"   # same override solidcore-ffi honours
 BUILD="$OUT/build"
 JOBS=6
 TESTS=ON

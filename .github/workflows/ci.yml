@@ -60,6 +60,8 @@ jobs:
   difftest:
     runs-on: ubuntu-latest
     needs: [test]
+    env:
+      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
     steps:
       - uses: actions/checkout@v4
 
@@ -86,19 +88,24 @@ jobs:
         if: steps.green.outputs.any == 'true'
         run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
 
+      # The C++ build lives outside cargo's target dir (bin/): rust-cache's post-step
+      # cleans bin/ before this cache saves, which once cached an empty bin/cpp.
       - name: Cache C++ reference build
         if: steps.green.outputs.any == 'true'
-        id: cpp-cache
         uses: actions/cache@v4
         with:
-          path: bin/cpp
-          # Shims are compiled by solidcore-ffi, not by build.sh, so they stay out of the key
-          # (every port PR adds one; including them rebuilt the C++ on almost every run).
-          key: cpp-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
+          path: .cpp
+          # Shims are compiled by solidcore-ffi, not by build.sh, so they stay out of the key.
+          key: cpp-v2-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
 
-      - name: Build C++ reference
-        if: steps.green.outputs.any == 'true' && steps.cpp-cache.outputs.cache-hit != 'true'
-        run: harness/cpp/build.sh --jobs "$(nproc)"
+      - name: Build C++ reference (when the cache did not provide the libs)
+        if: steps.green.outputs.any == 'true'
+        run: |
+          if [ -f .cpp/lib/libSMLib.a ] && [ -f .cpp/lib/libSM_API.a ] && [ -f .cpp/ffi.env ]; then
+            echo "C++ reference restored from cache"
+          else
+            harness/cpp/build.sh --jobs "$(nproc)"
+          fi
 
       - uses: Swatinem/rust-cache@v2
         if: steps.green.outputs.any == 'true'
