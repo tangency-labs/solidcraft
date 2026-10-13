@@ -8,6 +8,7 @@
 pub mod b_spline_curve;
 pub mod b_spline_curve_n_lib;
 pub mod b_spline_surface;
+pub mod b_spline_surface_n_lib;
 pub mod basis_adv;
 pub mod basis_basic;
 pub mod bezier;
