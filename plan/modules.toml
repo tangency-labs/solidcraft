@@ -1232,10 +1232,10 @@ depends_on = ["geom.extent1d", "geom.extent2d", "geom.object", "geom.tol", "geom
 est_lines = 2033
 layer = 17
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-nurbs.b_spline_surface_n_lib_p1-a1"
 claimed_at = "2026-10-13T00:47:51Z"
-notes = "23 fns; largest: sm_CreateCoonsSrf, SmBSplineSurface::CreateExtendedSurface, SmBSplineSurface::CreateCoonsPatch, SmBSplineSurface::CreateNSidedPatch; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(4), curve.curve_p2(1), intersect.surface_drop_lib_p3(1), surface.surface_p5(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "difftest: 665 cases (65 fixtures + 600 generated), 638 pass bit-identical, 27 deferred (surface.surface_p5: SmSurface::IsSingularity in CreateExtendedSurface; then surface.surface_p7 IsClosed); DropCurve path of sm_CreateNonRationalCurve not diffed (upstream crash, see findings). 23 fns; largest: sm_CreateCoonsSrf, SmBSplineSurface::CreateExtendedSurface, SmBSplineSurface::CreateCoonsPatch, SmBSplineSurface::CreateNSidedPatch; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(4), curve.curve_p2(1), intersect.surface_drop_lib_p3(1), surface.surface_p5(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_p1"
