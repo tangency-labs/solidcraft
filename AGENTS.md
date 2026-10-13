@@ -165,7 +165,8 @@ into `upstream/` (see README), build the C++ reference with
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test -p solidcore
    cargo check -p solidcore --target wasm32-unknown-unknown
-   cargo run -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
+   cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
+   cargo run --profile difftest -p difftest --features cpp -- --green            # what CI runs (~2 min)
    ```
 5. **Finish the PR**: merge the latest `origin/main` into your branch (never rebase a
    pushed branch), re-verify, set the unit's `status` to `"green"` or `"partial"` in

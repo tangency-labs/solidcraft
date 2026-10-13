@@ -58,3 +58,12 @@ missing_errors_doc = "allow"
 module_name_repetitions = "allow"
 # - thousands of ported getters; #[must_use] is added deliberately where it matters
 must_use_candidate = "allow"
+
+# difftest runs optimised (FP results are unchanged: Rust never contracts or reassociates
+# floating point) but keeps overflow checks and debug assertions as a safety net.
+[profile.difftest]
+inherits = "release"
+opt-level = 1
+overflow-checks = true
+debug-assertions = true
+incremental = true

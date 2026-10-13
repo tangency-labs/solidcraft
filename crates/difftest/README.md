@@ -11,11 +11,12 @@ compares the results. A unit may be marked `status = "green"` in
 ```sh
 harness/cpp/build.sh                      # once: builds bin/cpp/lib/libSM_API.a, libSMLib.a (owner: agent A)
 export CARGO_BUILD_JOBS=2                 # shared machine
-nice -n 10 cargo run -p difftest --features cpp -- --list
-nice -n 10 cargo run -p difftest --features cpp -- --unit harness.selftest
-nice -n 10 cargo run -p difftest --features cpp -- --unit harness.selftest --perturb   # sensitivity check
-nice -n 10 cargo run -p difftest --features cpp -- --green          # every status=green|partial unit
-nice -n 10 cargo run -p difftest --features cpp -- --status-of nlib.knots   # prints green|partial|fail
+# --profile difftest: optimised build with overflow checks; same results as debug, ~20x faster.
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --list
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest --perturb   # sensitivity check
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green          # every status=green|partial unit
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --status-of nlib.knots   # prints green|partial|fail
 nice -n 10 cargo test -p difftest --features cpp                     # harness self-tests
 ```
 
@@ -242,8 +243,8 @@ units).
 ### 5. Run, then go green
 
 ```sh
-nice -n 10 cargo run -p difftest --features cpp -- --unit foo.bar
-nice -n 10 cargo run -p difftest --features cpp -- --unit foo.bar --perturb   # must say SENSITIVE
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit foo.bar
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit foo.bar --perturb   # must say SENSITIVE
 cargo clippy -p difftest -p solidcore-ffi --features difftest/cpp --all-targets -- -D warnings
 git add harness/cpp/shim/foo_bar.cpp crates/solidcore-ffi/src/units/foo_bar.rs \
         crates/difftest/src/units/foo_bar.rs fixtures/foo.bar reports/difftest/foo.bar.json

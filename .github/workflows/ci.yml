@@ -92,7 +92,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bin/cpp
-          key: cpp-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/**') }}
+          # Shims are compiled by solidcore-ffi, not by build.sh, so they stay out of the key
+          # (every port PR adds one; including them rebuilt the C++ on almost every run).
+          key: cpp-${{ runner.os }}-${{ env.UPSTREAM_COMMIT }}-${{ hashFiles('harness/cpp/CMakeLists.txt', 'harness/cpp/build.sh', 'harness/cpp/stubs/**', 'harness/cpp/patches/**') }}
 
       - name: Build C++ reference
         if: steps.green.outputs.any == 'true' && steps.cpp-cache.outputs.cache-hit != 'true'
@@ -106,4 +108,6 @@ jobs:
 
       - name: Difftest green units
         if: steps.green.outputs.any == 'true'
-        run: cargo run -p difftest --features cpp -- --green
+        # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
+        # faster than the debug build that used to take ~35 min here.
+        run: cargo run --profile difftest -p difftest --features cpp -- --green
