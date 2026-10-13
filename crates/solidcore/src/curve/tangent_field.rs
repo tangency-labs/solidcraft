@@ -51,6 +51,7 @@
 
 use crate::curve::curve::p2::{self as curve_base, Curve, CRV_ON_SURF_TYPE, TANGENT_FIELD_TYPE};
 use crate::error::{Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -296,7 +297,7 @@ impl<'a, S> TangentField<'a, S> {
 
     /// The natural parameter interval: the UV curve's (`GetNaturalInterval`).
     #[must_use]
-    pub fn natural_interval(&self) -> crate::geom::extent1d::Extent1d {
+    pub fn natural_interval(&self) -> Extent1d {
         // CO-PORT(curve.crv_on_surf): SmCrvOnSurf::GetNaturalInterval
         self.uv_curve.natural_interval()
     }

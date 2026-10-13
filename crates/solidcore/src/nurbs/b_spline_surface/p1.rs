@@ -241,6 +241,27 @@ pub enum SurfParamType {
     Out = 9,
 }
 
+impl SurfParamType {
+    /// The enumerator of a stored value (`(SmSurfParamType) lValue`), `None` outside
+    /// the enum.
+    #[must_use]
+    pub const fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::U,
+            1 => Self::V,
+            2 => Self::Unknown,
+            3 => Self::Both,
+            4 => Self::Neither,
+            5 => Self::UMin,
+            6 => Self::VMin,
+            7 => Self::UMax,
+            8 => Self::VMax,
+            9 => Self::Out,
+            _ => return None,
+        })
+    }
+}
+
 /// `SmLocationType`: where a point lies on a surface; discriminants are the upstream
 /// values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

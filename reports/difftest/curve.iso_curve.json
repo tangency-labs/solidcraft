@@ -34,16 +34,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_lo_clamp_eval_0.0634211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -54,16 +50,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_lo_clamp_eval_0.350585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#6 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -74,16 +66,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_lo_clamp_eval_0.637749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#8 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -206,16 +194,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_hi_clamp_eval_0.0634211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#23 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -226,16 +210,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_hi_clamp_eval_0.350585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#25 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -246,16 +226,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_hi_clamp_eval_0.637749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#27 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -378,16 +354,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_mid_clamp_eval_0.0634211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#42 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -398,16 +370,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_mid_clamp_eval_0.350585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#44 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -418,16 +386,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_mid_clamp_eval_0.637749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#46 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -550,16 +514,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_below_clamp_eval_0.0634211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#61 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -570,16 +530,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_below_clamp_eval_0.350585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#63 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -590,16 +546,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_below_clamp_eval_0.637749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#65 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -722,16 +674,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_above_clamp_eval_0.0634211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#80 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -742,16 +690,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_above_clamp_eval_0.350585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#82 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -762,16 +706,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_above_clamp_eval_0.637749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#84 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -894,16 +834,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_knot_clamp_eval_0.0634211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#99 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -914,16 +850,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_knot_clamp_eval_0.350585",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#101 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -934,16 +866,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp0_knot_clamp_eval_0.637749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#103 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1066,16 +994,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_lo_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#118 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1086,16 +1010,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_lo_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#120 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1106,16 +1026,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_lo_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#122 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1234,16 +1150,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_hi_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#137 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1254,16 +1166,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_hi_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#139 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1274,16 +1182,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_hi_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#141 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1402,16 +1306,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_mid_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#156 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1422,16 +1322,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_mid_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#158 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1442,16 +1338,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_mid_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#160 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1570,16 +1462,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_below_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#175 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1590,16 +1478,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_below_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#177 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1610,16 +1494,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_below_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#179 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1738,16 +1618,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_above_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#194 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1758,16 +1634,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_above_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#196 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1778,16 +1650,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_sp1_above_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#198 (upstream tests/prog_test/src/smSurfaceTest.cpp:4117 (Surface.sms, my_test_surface_closest_point))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1954,16 +1822,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_lo_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#217 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1974,16 +1838,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_lo_clamp_eval_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#219 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1994,16 +1854,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_lo_clamp_eval_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#221 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2126,16 +1982,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_hi_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#236 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2146,16 +1998,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_hi_clamp_eval_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#238 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2166,16 +2014,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_hi_clamp_eval_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#240 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2298,16 +2142,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_mid_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#255 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2318,16 +2158,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_mid_clamp_eval_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#257 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2338,16 +2174,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_mid_clamp_eval_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#259 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2470,16 +2302,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_below_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#274 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2490,16 +2318,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_below_clamp_eval_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#276 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2510,16 +2334,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_below_clamp_eval_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#278 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2642,16 +2462,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_above_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#293 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2662,16 +2478,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_above_clamp_eval_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#295 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2682,16 +2494,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_above_clamp_eval_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#297 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2814,16 +2622,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_knot_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#312 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2834,16 +2638,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_knot_clamp_eval_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#314 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2854,16 +2654,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp0_knot_clamp_eval_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#316 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -2986,16 +2782,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_lo_clamp_eval_-5.4753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#331 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3006,16 +2798,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_lo_clamp_eval_-2.73765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#333 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3026,16 +2814,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_lo_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#335 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3154,16 +2938,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_hi_clamp_eval_-5.4753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#350 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3174,16 +2954,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_hi_clamp_eval_-2.73765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#352 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3194,16 +2970,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_hi_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#354 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3322,16 +3094,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_mid_clamp_eval_-5.4753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#369 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3342,16 +3110,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_mid_clamp_eval_-2.73765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#371 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3362,16 +3126,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_mid_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#373 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3490,16 +3250,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_below_clamp_eval_-5.4753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#388 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3510,16 +3266,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_below_clamp_eval_-2.73765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#390 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3530,16 +3282,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_below_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#392 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3658,16 +3406,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_above_clamp_eval_-5.4753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#407 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3678,16 +3422,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_above_clamp_eval_-2.73765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#409 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3698,16 +3438,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sp1_above_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#411 (upstream tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3874,16 +3610,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_lo_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#430 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3894,16 +3626,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_lo_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#432 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -3914,16 +3642,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_lo_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#434 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4046,16 +3770,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_hi_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#449 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4066,16 +3786,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_hi_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#451 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4086,16 +3802,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_hi_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#453 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4218,16 +3930,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_mid_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#468 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4238,16 +3946,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_mid_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#470 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4258,16 +3962,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_mid_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#472 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4390,16 +4090,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_below_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#487 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4410,16 +4106,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_below_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#489 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4430,16 +4122,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_below_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#491 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4562,16 +4250,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_above_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#506 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4582,16 +4266,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_above_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#508 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4602,16 +4282,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp0_above_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#510 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4734,16 +4410,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_lo_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#525 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4754,16 +4426,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_lo_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#527 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4774,16 +4442,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_lo_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#529 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4902,16 +4566,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_hi_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#544 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4922,16 +4582,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_hi_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#546 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -4942,16 +4598,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_hi_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#548 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5070,16 +4722,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_mid_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#563 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5090,16 +4738,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_mid_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#565 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5110,16 +4754,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_mid_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#567 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5238,16 +4878,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_below_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#582 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5258,16 +4894,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_below_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#584 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5278,16 +4910,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_below_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#586 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5406,16 +5034,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_above_clamp_eval_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#601 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5426,16 +5050,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_above_clamp_eval_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#603 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5446,16 +5066,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_sp1_above_clamp_eval_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.iso_curve/cases.json#605 (upstream TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface input))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -7726,28 +7342,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063788",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063789",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7782,16 +7390,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063794",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -7850,40 +7454,28 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063802",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0024",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063803",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0025",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063804",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8018,16 +7610,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0042",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063821",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8098,16 +7686,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0051",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063830",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -8194,16 +7778,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0062",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063841",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8226,16 +7806,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0065",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063844",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -8510,16 +8086,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0097",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063876",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -8582,16 +8154,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0105",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063884",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8670,16 +8238,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0115",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063894",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -8758,16 +8322,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0125",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063904",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -8814,16 +8374,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0131",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063910",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -8890,16 +8446,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0140",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063919",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9018,16 +8570,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0154",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063933",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -9126,16 +8674,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0166",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063945",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -9154,16 +8698,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0169",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063948",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -9346,16 +8886,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0192",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063971",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9366,16 +8902,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0194",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063973",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -9454,16 +8986,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0204",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915063983",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -9666,16 +9194,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0227",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064006",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -9758,16 +9282,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0237",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064016",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -9786,16 +9306,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0240",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064019",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -9822,16 +9338,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0244",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064023",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -9874,16 +9386,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0250",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064029",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -9934,16 +9442,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0257",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064036",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -9982,16 +9486,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0262",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064041",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -10002,28 +9502,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0264",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064043",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064044",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10082,16 +9574,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0273",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064052",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -10146,16 +9634,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0280",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064059",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -10186,16 +9670,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0284",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064063",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -10206,16 +9686,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0286",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064065",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -10270,16 +9746,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0293",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064072",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10362,16 +9834,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064083",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10382,16 +9850,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0306",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064085",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10418,16 +9882,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0310",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064089",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10438,16 +9898,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0312",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064091",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -10670,16 +10126,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0339",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064118",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10726,16 +10178,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0345",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064124",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -10786,16 +10234,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0352",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064131",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10830,16 +10274,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0357",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064136",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -10918,28 +10358,20 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0367",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064146",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0368",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064147",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -11094,16 +10526,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064166",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -11226,16 +10654,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0402",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064181",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -11402,16 +10826,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0423",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064202",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -11594,16 +11014,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0445",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064224",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -11718,16 +11134,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0459",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064238",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -11766,16 +11178,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0464",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064243",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -11866,16 +11274,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0475",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064254",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -11886,16 +11290,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064256",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -11914,16 +11314,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0480",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064259",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -11954,16 +11350,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0484",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064263",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -12038,16 +11430,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0494",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064273",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -12082,28 +11470,20 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064278",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0500",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064279",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12170,28 +11550,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0509",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064288",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0510",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064289",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -12306,40 +11678,28 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0523",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064302",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0524",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064303",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0525",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064304",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -12358,16 +11718,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0528",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064307",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12402,16 +11758,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0533",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064312",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12430,16 +11782,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0536",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064315",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12594,16 +11942,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0554",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064333",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12614,28 +11958,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0556",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064335",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0557",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064336",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -12674,16 +12010,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0562",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064341",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12718,16 +12050,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0567",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064346",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12754,28 +12082,20 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0571",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064350",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0572",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064351",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -12918,16 +12238,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0590",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064369",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -12962,16 +12278,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0594",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064373",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -12990,16 +12302,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0597",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064376",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -13010,16 +12318,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0599",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064378",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -13066,16 +12370,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0605",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064384",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -13298,16 +12598,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064412",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -13358,28 +12654,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064419",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0641",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064420",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -13478,16 +12766,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0653",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064432",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -13566,16 +12850,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0663",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064442",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -13658,16 +12938,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0673",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064452",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -13734,16 +13010,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0682",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064461",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -13770,16 +13042,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0685",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064464",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -13798,16 +13066,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0688",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064467",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -13918,16 +13182,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0702",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064481",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -13938,16 +13198,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0704",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064483",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -14050,16 +13306,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0717",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064496",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -14070,16 +13322,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0719",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064498",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -14150,28 +13398,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0728",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064507",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0729",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064508",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -14182,16 +13422,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064510",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -14238,16 +13474,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0737",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064516",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -14274,16 +13506,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0741",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064520",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -14310,16 +13538,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0745",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064524",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -14362,16 +13586,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0750",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064529",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -14530,16 +13750,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0769",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064548",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -14558,16 +13774,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0772",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064551",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -14662,16 +13874,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0784",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064563",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -14842,16 +14050,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0805",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064584",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -15006,16 +14210,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0824",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064603",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -15094,16 +14294,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0834",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064613",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -15166,16 +14362,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0842",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064621",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -15350,16 +14542,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0864",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064643",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -15530,28 +14718,20 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0885",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064664",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0886",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064665",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -15578,16 +14758,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0890",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064669",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -15682,16 +14858,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0902",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064681",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -15702,16 +14874,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0904",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064683",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -15766,16 +14934,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0911",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064690",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -15874,16 +15038,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0923",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064702",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -15942,16 +15102,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0931",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064710",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -16006,16 +15162,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0938",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064717",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -16074,16 +15226,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0946",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064725",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -16262,16 +15410,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0968",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064747",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -16358,16 +15502,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0979",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064758",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -16442,16 +15582,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0988",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064767",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -16538,16 +15674,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0999",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064778",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -16602,28 +15734,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064784",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064785",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -16758,16 +15882,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064802",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -16806,16 +15926,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1028",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064807",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -16834,16 +15950,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1031",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064810",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -16862,28 +15974,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1034",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064813",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1035",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064814",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -16974,16 +16078,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1046",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064825",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -17078,16 +16178,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1058",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064837",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17114,16 +16210,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1062",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064841",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -17226,16 +16318,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064853",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17314,28 +16402,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1084",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064863",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1085",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064864",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -17410,28 +16490,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1094",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064873",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1095",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064874",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -17466,16 +16538,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1100",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064879",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -17782,16 +16850,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1135",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064914",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17826,28 +16890,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1140",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064919",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1141",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064920",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -17866,16 +16922,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1144",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064923",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17918,28 +16970,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1150",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064929",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1151",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064930",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -17974,16 +17018,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1156",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064935",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -18050,16 +17090,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1164",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064943",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -18126,16 +17162,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1173",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064952",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -18154,16 +17186,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1176",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064955",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -18182,16 +17210,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064958",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -18230,16 +17254,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1184",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064963",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -18258,16 +17278,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1187",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064966",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -18394,16 +17410,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064982",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -18462,16 +17474,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1211",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064990",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -18534,16 +17542,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1219",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915064998",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -18634,16 +17638,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1230",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065009",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -18698,16 +17698,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1237",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065016",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -18850,40 +17846,28 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1255",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065034",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065035",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1257",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065036",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -18906,16 +17890,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1260",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065039",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -19030,16 +18010,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1274",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065053",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -19078,28 +18054,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1279",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065058",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1280",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065059",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -19158,16 +18126,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1287",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065066",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -19194,16 +18158,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1291",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065070",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -19386,16 +18346,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1313",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065092",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19414,16 +18370,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065095",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -19446,28 +18398,20 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1319",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065098",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1320",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065099",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19602,16 +18546,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065116",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -19706,16 +18646,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1348",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065127",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19726,16 +18662,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1350",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065129",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19838,16 +18770,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1363",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065142",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -19962,16 +18890,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1377",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065156",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19990,16 +18914,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1380",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065159",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -20062,16 +18982,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065167",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -20178,16 +19094,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1402",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065181",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -20298,28 +19210,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1416",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065195",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1417",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065196",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -20354,16 +19258,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1422",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065201",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -20478,16 +19378,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1436",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065215",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -20546,16 +19442,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1444",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065223",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -20582,40 +19474,28 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1448",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065227",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1449",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065228",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1450",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065229",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -20630,16 +19510,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1452",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065231",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -20746,16 +19622,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1465",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065244",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -20918,16 +19790,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1484",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065263",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -20998,16 +19866,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1493",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065272",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -21050,16 +19914,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065278",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -21258,16 +20118,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1524",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065303",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -21314,16 +20170,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1530",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065309",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -21390,16 +20242,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1539",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065318",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -21434,28 +20282,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1544",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065323",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1545",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065324",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -21498,16 +20338,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1551",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065330",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -21646,16 +20482,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1567",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065346",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -21666,16 +20498,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1569",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065348",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -21722,16 +20550,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1575",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065354",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -21754,16 +20578,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1578",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065357",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -21782,28 +20602,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1581",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065360",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1582",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065361",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -21942,16 +20754,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1597",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065376",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22074,28 +20882,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1613",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065392",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1614",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065393",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22138,16 +20938,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1620",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065399",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -22258,16 +21054,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065412",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -22278,16 +21070,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1635",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065414",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22422,16 +21210,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1652",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065431",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -22482,28 +21266,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1659",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065438",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1660",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065439",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -22514,16 +21290,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1662",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065441",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -22550,16 +21322,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1666",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065445",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -22674,16 +21442,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1681",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065460",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -22778,28 +21542,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1693",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065472",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1694",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065473",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -22814,16 +21570,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1696",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065475",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -23026,16 +21778,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1720",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065499",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -23118,16 +21866,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1730",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065509",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -23138,16 +21882,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1732",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065511",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -23158,16 +21898,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1734",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065513",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -23218,16 +21954,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1741",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065520",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -23286,16 +22018,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065528",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -23350,16 +22078,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1756",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065535",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -23470,16 +22194,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1770",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065549",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -23526,16 +22246,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1776",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065555",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -23546,16 +22262,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1778",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065557",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -23606,16 +22318,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1785",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065564",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -23658,28 +22366,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1791",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065570",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1792",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065571",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -23730,28 +22430,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1799",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065578",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1800",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065579",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -23826,16 +22518,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1809",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065588",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -23946,16 +22634,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1823",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065602",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -24066,40 +22750,28 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1837",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065616",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1838",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065617",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1839",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065618",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -24122,28 +22794,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1842",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065621",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1843",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065622",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -24234,16 +22898,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1855",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065634",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -24326,28 +22986,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1865",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065644",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1866",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065645",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -24366,28 +23018,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1869",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065648",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1870",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065649",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -24474,16 +23118,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1881",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065660",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -24502,16 +23142,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1884",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065663",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -24546,16 +23182,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1889",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065668",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -24778,16 +23410,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1915",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065694",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -24806,28 +23434,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1918",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065697",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1919",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065698",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -24858,16 +23478,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1923",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065702",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -24878,16 +23494,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1925",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065704",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -25130,16 +23742,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1955",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065734",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -25194,16 +23802,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1962",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065741",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -25262,16 +23866,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1970",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065749",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -25326,16 +23926,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1976",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065755",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -25346,16 +23942,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1978",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065757",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -25394,16 +23986,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1983",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065762",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -25474,28 +24062,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065771",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::Evaluate",
-        "unit": "nurbs.b_spline_surface_n_lib_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1993",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2931082588915065772",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
@@ -25555,13 +24135,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 640,
+  "cases_deferred": 285,
   "cases_failed": 0,
-  "cases_passed": 2234,
+  "cases_passed": 2589,
   "cases_total": 2874,
   "deferred_by_unit": {
     "curve.line": 64,
-    "nurbs.b_spline_surface_n_lib_p2": 355,
     "surface.surface_p2": 101,
     "surface.surface_p6": 120
   },

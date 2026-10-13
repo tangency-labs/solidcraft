@@ -115,6 +115,7 @@ const OP_BLOCK: &str = "curve::curve_cache::create_bezier_segment_block";
 const OP_BUILD: &str = "curve::curve_cache::build_bezier_spans";
 const OP_SPLIT: &str = "curve::curve_cache::split_segment";
 const OP_SPAN: &str = "curve::curve_cache::CurveCache::span";
+const OP_PARENT: &str = "curve::curve_cache::CurveCache::parent";
 
 /// True for `SmCurveCache_TYPE` and its base `SmObject_TYPE`
 /// (`SmCurveCache::IsKindOf`).
@@ -134,15 +135,6 @@ fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(e @ SolidError::Unported { .. }) => Err(e),
         Err(_) => Ok(None),
-    }
-}
-
-/// `if (NL_YES == ...) SER(SM_ERR)` / `GW_SER(...)`: a failed NLib routine is
-/// `SM_ERR`; [`SolidError::Unported`] passes through.
-fn gw_ser(operation: &'static str) -> impl Fn(SolidError) -> SolidError {
-    move |e| match e {
-        SolidError::Unported { .. } => e,
-        _ => SolidError::sm_err(operation),
     }
 }
 
@@ -452,12 +444,9 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     ///
     /// `InvalidInput` for an index out of range (upstream `SM_ASSERT`).
     pub fn parent(&self, index: usize) -> Result<&BezierAux1d> {
-        self.parents().get(index).ok_or_else(|| {
-            invalid(
-                "curve::curve_cache::CurveCache::parent",
-                "parent index out of range",
-            )
-        })
+        self.parents()
+            .get(index)
+            .ok_or_else(|| invalid(OP_PARENT, "parent index out of range"))
     }
 
     /// The curve itself when analytic, else a line or circle equal to it over the
@@ -490,7 +479,6 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// Appends the next leaf span made from `bez` and its properties, returning the
     /// Bezier for the leaf list (`OutputSegment`; `copy` is upstream's
     /// `pSegmentBeziersMgr`: copy the Bezier out of scratch memory).
-    #[allow(clippy::too_many_arguments)] // upstream's argument list
     pub fn output_segment(
         &mut self,
         bez: &Nurb,
@@ -539,7 +527,6 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// without spans, failing NLib splits and trims or an empty decomposition;
     /// those of the control polygon, continuity and evaluation queries;
     /// [`SolidError::Unported`] for unported callees.
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub fn tessellate(&mut self, k: &Kernel) -> Result<()> {
         // check state: need at least one stored tessellation parameter
         if is_zero(self.opts.chord_height_tolerance) && is_zero(self.opts.angle_tol_deg) {
@@ -603,11 +590,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         };
 
         // max step size
-        let max_step = if self.opts.min_segments > 1 {
-            (self.interval.max() - self.interval.min()) / self.opts.min_segments as f64
-        } else {
-            self.interval.max() - self.interval.min()
-        };
+        let max_step = self.max_step();
 
         let dim = self.curve.dim();
         let num_beziers = beziers.len();
@@ -635,7 +618,8 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                     continue;
                 }
 
-                bez = crv_trim(&bez, span_ivl.min(), span_ivl.max()).map_err(gw_ser(OP_TESS))?;
+                bez = crv_trim(&bez, span_ivl.min(), span_ivl.max())
+                    .map_err(SolidError::nl_ser(OP_TESS))?;
             }
 
             // control-polygon properties while checking all tolerances
@@ -697,7 +681,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             // split pBez into two equal halves: the stack holds [max, min]
             let mut stack: Vec<Nurb> = Vec::new();
             let (bez_min, bez_max) = if is_bspline {
-                crv_split(&bez, span_ivl.mid()).map_err(gw_ser(OP_TESS))?
+                crv_split(&bez, span_ivl.mid()).map_err(SolidError::nl_ser(OP_TESS))?
             } else {
                 split_segment(&bez, &self.curve)?
             };
@@ -767,7 +751,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
                 // split the current span in half, children onto the stack
                 let (bez_min, bez_max) = if is_bspline {
-                    crv_split(&top, ivl.mid()).map_err(gw_ser(OP_TESS))?
+                    crv_split(&top, ivl.mid()).map_err(SolidError::nl_ser(OP_TESS))?
                 } else {
                     split_segment(&top, &self.curve)?
                 };
@@ -778,6 +762,16 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
         // combine the ordered leaf spans into a binary tree
         self.build_tree(&leaf_beziers)
+    }
+
+    /// The largest leaf interval: the cache interval split into
+    /// `min_segments` (when above one).
+    fn max_step(&self) -> f64 {
+        if self.opts.min_segments > 1 {
+            (self.interval.max() - self.interval.min()) / self.opts.min_segments as f64
+        } else {
+            self.interval.max() - self.interval.min()
+        }
     }
 
     /// The tessellation tests of `Tessellate` (`bPassTests1` / `bPassTests2`).
@@ -820,7 +814,6 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// `SM_ERR` without spans (the empty tree is kept);
     /// `InvalidInput` for fewer Beziers than spans; [`SolidError::Unported`] from
     /// the box and evaluation callees.
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub fn build_tree(&mut self, leaf_beziers: &[Nurb]) -> Result<()> {
         let mut tree: Tree<O> = Tree::new(Some(TreeOwner::CurveCache));
         let dim = self.curve.dim();
@@ -836,11 +829,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         let angle_tol_deg = self.opts.angle_tol_deg;
 
         // the maximum allowable step size
-        let max_step = if self.opts.min_segments > 1 {
-            (self.interval.max() - self.interval.min()) / self.opts.min_segments as f64
-        } else {
-            self.interval.max() - self.interval.min()
-        };
+        let max_step = self.max_step();
 
         // leaf generation: one node per span
         let mut curr: Vec<NodeId> = Vec::with_capacity(span_count);
@@ -1134,7 +1123,6 @@ pub fn bezier_polygon(leaf_beziers: &[Nurb], left: usize, right: usize) -> Resul
 /// `SM_ERR` for a polygon of fewer than two vertices or a `bez` that is not a
 /// B-spline; those of the control polygon; [`SolidError::Unported`] from the
 /// evaluations.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream function
 pub fn compute_constants(
     bez: &Curve,
     original: &Curve,
@@ -1394,7 +1382,7 @@ pub fn create_bezier_segment_block(nurb: Option<&Nurb>, curve: &Curve) -> Result
         if span_count < 1 {
             return Err(SolidError::sm_err(OP_BLOCK));
         }
-        create_bez_segments(n).map_err(gw_ser(OP_BLOCK))
+        create_bez_segments(n).map_err(SolidError::nl_ser(OP_BLOCK))
     } else {
         // the knot vector matches CalculateContinuities
         let (knots, _) = curve.knots(None)?;

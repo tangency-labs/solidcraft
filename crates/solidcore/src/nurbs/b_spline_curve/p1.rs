@@ -213,6 +213,21 @@ pub enum ProjectionType {
     Unknown = 3,
 }
 
+impl ProjectionType {
+    /// The enumerator of a stored value (`(SmProjectionType) lValue`), `None` outside
+    /// the enum.
+    #[must_use]
+    pub const fn from_code(code: u64) -> Option<Self> {
+        Some(match code {
+            0 => Self::Parallel,
+            1 => Self::Perspective,
+            2 => Self::Rotation,
+            3 => Self::Unknown,
+            _ => return None,
+        })
+    }
+}
+
 /// End points and end weights of a curve ([`BSplineCurve::ends`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ends {

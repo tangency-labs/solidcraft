@@ -78,7 +78,7 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::ProjectionType;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::topology::database_io::{DatabaseReader, FileType};
+use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP: &str = "curve::projected_curve::ProjectedCurve";
 const OP_READ: &str = "curve::projected_curve::ProjectedCurve::read_from_db";
@@ -366,11 +366,7 @@ impl ProjectedCurve {
         };
 
         // count the knots
-        let mut cnt = 0usize;
-        for m in mults {
-            cnt += m;
-        }
-        Ok(cnt)
+        Ok(mults.iter().sum())
     }
 
     /// The continuities of the base curve (`CalculateContinuities`).
@@ -635,9 +631,7 @@ impl ProjectedCurve {
                 }
                 db.go_to_next_line();
             }
-            let pt = db
-                .in_stream_mut()
-                .and_then(crate::topology::database_io::InputStream::extract_ulong);
+            let pt = db.in_stream_mut().and_then(InputStream::extract_ulong);
             db.go_to_next_line();
             pt.ok_or_else(undefined)?
         } else {
@@ -668,12 +662,7 @@ impl ProjectedCurve {
             proj_point,
             proj_vec,
             aux_data,
-            proj_type: match proj_type {
-                0 => ProjectionType::Parallel,
-                1 => ProjectionType::Perspective,
-                2 => ProjectionType::Rotation,
-                _ => ProjectionType::Unknown,
-            },
+            proj_type: ProjectionType::from_code(proj_type).unwrap_or(ProjectionType::Unknown),
             owns_curve: OwnsCurve::Yes,
         })
     }

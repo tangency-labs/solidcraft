@@ -65,8 +65,10 @@
 //!   (`harness/callgraph/unused_functions.txt`); the field accessors
 //!   ([`Hyperbola::position`], ...) give the canonical data.
 
+use crate::curve::curve::p2::{self as curve_base, HYPERBOLA_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
+use crate::geom::assert_array::labels::{SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{line_line_closest_point, point_project_to_plane};
@@ -78,14 +80,6 @@ use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
-
-/// `CURV_BASE_TYPE` (`SmCurveTypes.h`).
-const CURV_BASE_TYPE: i64 = 14000;
-
-/// `SmSurfOfRevolution_TYPE` (`SURF_BASE_TYPE + 20`).
-const SURF_OF_REVOLUTION_TYPE: i64 = 15020;
-/// `SmSurfOfExtrusion_TYPE` (`SURF_BASE_TYPE + 30`).
-const SURF_OF_EXTRUSION_TYPE: i64 = 15030;
 
 const OP_MAKE_NURB: &str = "curve::hyperbola::Hyperbola::make_nurb";
 const OP_EVAL_STEP: &str = "curve::hyperbola::Hyperbola::evaluate_step";
@@ -138,8 +132,8 @@ fn ignore_status<T>(r: Result<T>) -> Result<()> {
 }
 
 impl Hyperbola {
-    /// `SmHyperbola_TYPE`.
-    pub const TYPE: i64 = CURV_BASE_TYPE + 24;
+    /// `SmHyperbola_TYPE` (`CURV_BASE_TYPE + 24`).
+    pub const TYPE: i64 = HYPERBOLA_TYPE;
 
     /// A hyperbola centred at `center` with semi axis `semi_axis` along `x_axis`,
     /// semi imaginary axis `semi_image_axis` along `y_axis` (axes made orthonormal by
@@ -266,7 +260,7 @@ impl Hyperbola {
     /// True for `SmHyperbola_TYPE` and the types of its bases (`IsKindOf`).
     #[must_use]
     pub const fn is_kind_of(t: i64) -> bool {
-        t == Self::TYPE || t == BSplineCurve::TYPE || crate::curve::curve::p2::is_kind_of(t)
+        t == Self::TYPE || t == BSplineCurve::TYPE || curve_base::is_kind_of(t)
     }
 
     // ---- comparison and copies --------------------------------------------------------
@@ -404,7 +398,6 @@ impl Hyperbola {
     /// Those of [`Hyperbola::adjust_step_interval`]; then
     /// [`SolidError::Unported`]: the solve is `SmCurve::GlobalPointSolve` (unit
     /// `curve.curve_p1`).
-    #[allow(clippy::too_many_arguments)]
     pub fn global_point_solve_step(
         &mut self,
         interval: &Extent1d,

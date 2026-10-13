@@ -67,7 +67,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
+use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_EVAL: &str = "curve::offset_curve::OffsetCurve::evaluate";
@@ -145,7 +145,7 @@ impl OffsetCurve {
             dim: 3,
             base: None,
             normal: Vec3::UNDEF,
-            distance: crate::math::UNDEF_DOUBLE,
+            distance: UNDEF_DOUBLE,
             interval: Extent1d::new(),
             reversed: UNSURE,
             owns_curve: UNSURE,
@@ -207,11 +207,9 @@ impl OffsetCurve {
     /// The base curve, or `SM_ERR_NULL_POINTER` for an empty curve (upstream
     /// dereferences a null pointer).
     fn base(&self) -> Result<&Curve> {
-        self.base.as_deref().ok_or(SolidError::Upstream {
-            operation: OP_BASE,
-            code: 1006,
-            entity: None,
-        })
+        self.base
+            .as_deref()
+            .ok_or(SolidError::null_pointer(OP_BASE))
     }
 
     /// `operator==`: same dimension, equal base curves, normals and intervals, offset
@@ -544,12 +542,7 @@ impl OffsetCurve {
     #[must_use]
     pub fn reverse_parameterization(&mut self, old_interval: &Extent1d) -> Extent1d {
         // Calculate the return argument.
-        let inv = |v: f64| {
-            self.interval
-                .inversion(v)
-                .parameter
-                .unwrap_or(crate::math::UNDEF_DOUBLE)
-        };
+        let inv = |v: f64| self.interval.inversion(v).parameter.unwrap_or(UNDEF_DOUBLE);
         let old_t_min = inv(old_interval.min());
         let old_t_max = inv(old_interval.max());
 

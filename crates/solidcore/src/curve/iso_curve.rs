@@ -26,10 +26,10 @@
 //!   (a copy of the caller's surface; `m_bOwnsSurface` and the destructor's `delete`
 //!   have no counterpart). The surface virtuals then resolve to the B-spline
 //!   overrides: `GetNaturalUVDomain` and `GetKnots` are ported
-//!   ([`BSplineSurface::natural_uv_domain`], [`BSplineSurface::knots`]); `Evaluate`
-//!   `EvaluatePoint` resolves to [`BSplineSurface::evaluate_point`]; `Evaluate`
-//!   (`SmBSplineSurface::Evaluate`, unit `nurbs.b_spline_surface_n_lib_p2`),
-//!   `CalculateContinuities` (not overridden:
+//!   ([`BSplineSurface::natural_uv_domain`], [`BSplineSurface::knots`]),
+//!   `EvaluatePoint` to [`BSplineSurface::evaluate_point`] and `Evaluate` to
+//!   [`BSplineSurface::evaluate`] (whose `[nu + 1][nv + 1]` result is flattened, as
+//!   upstream writes it into the curve's array); `CalculateContinuities` (not overridden:
 //!   `SmSurface::CalculateContinuities`, unit `surface.surface_p6`) and
 //!   `SmSurface::ReadFromDB` (unit `surface.surface_p2`) return
 //!   [`SolidError::Unported`]. `CreateUVIsoLine` builds an `SmLine` (unit
@@ -64,6 +64,8 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::knots::Side;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_UV_ISO_LINE: &str = "curve::iso_curve::IsoCurve::create_uv_iso_line";
@@ -236,7 +238,7 @@ impl IsoCurve {
     ///
     /// # Errors
     ///
-    /// Those of the surface evaluation ([`SolidError::Unported`] for now).
+    /// Those of the surface evaluation ([`BSplineSurface::evaluate`]).
     pub fn evaluate(
         &self,
         t: f64,
@@ -244,32 +246,28 @@ impl IsoCurve {
         from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
+        let side = |left: bool| if left { Side::Left } else { Side::Right };
         let uv = self.uv(t);
-        if self.surf_param == SurfParamType::U {
+        let (num_u, num_v, u_left, v_left) = if self.surf_param == SurfParamType::U {
             // Constant U curve
-            surface_evaluate(
-                &self.surface,
-                uv,
-                0,
-                num_derivs,
-                self.from_left,
-                from_left,
-                false,
-                non_zero_tangents,
-            )
+            (0, num_derivs, self.from_left, from_left)
         } else {
             // Constant V curve
-            surface_evaluate(
-                &self.surface,
-                uv,
-                num_derivs,
-                0,
-                from_left,
-                self.from_left,
-                false,
+            (num_derivs, 0, from_left, self.from_left)
+        };
+        let d = self.surface.evaluate(
+            uv,
+            num_u,
+            num_v,
+            EvaluateFlags {
+                u_side: side(u_left),
+                v_side: side(v_left),
+                only_upper_half: false,
                 non_zero_tangents,
-            )
-        }
+            },
+        )?;
+        // one of the orders is zero: the flat `[nu + 1][nv + 1]` array is the curve's
+        Ok(d.into_iter().flatten().collect())
     }
 
     /// The point at `t` (`EvaluatePoint`).
@@ -344,7 +342,8 @@ impl IsoCurve {
         // load obj
         Ok(Self {
             surface: Box::new(surface),
-            surf_param: surf_param_from_code(surf_param),
+            // a code outside the enum behaves as a non-`SM_SP_U` value everywhere here
+            surf_param: SurfParamType::from_code(surf_param).unwrap_or(SurfParamType::Unknown),
             iso_parameter,
             from_left: from_left != 0,
             // m_bOwnsSurface = TRUE
@@ -376,45 +375,7 @@ impl IsoCurve {
     }
 }
 
-/// The `SmSurfParamType` of a stored code (`(SmSurfParamType) lSurfParam`); a code
-/// outside the enum behaves as a non-`SM_SP_U` value everywhere here and is stored as
-/// [`SurfParamType::Unknown`].
-fn surf_param_from_code(code: u64) -> SurfParamType {
-    match code {
-        0 => SurfParamType::U,
-        1 => SurfParamType::V,
-        3 => SurfParamType::Both,
-        4 => SurfParamType::Neither,
-        5 => SurfParamType::UMin,
-        6 => SurfParamType::VMin,
-        7 => SurfParamType::UMax,
-        8 => SurfParamType::VMax,
-        9 => SurfParamType::Out,
-        _ => SurfParamType::Unknown,
-    }
-}
-
 // ---- unported callees -------------------------------------------------------------
-
-/// `SmSurface::Evaluate(uv, nu, nv, from_left_u, from_left_v, only_upper_half, ..,
-/// non_zero_tangents)` of a B-spline surface.
-#[allow(clippy::fn_params_excessive_bools)]
-fn surface_evaluate(
-    _srf: &BSplineSurface,
-    _uv: Point2,
-    _num_u_derivs: usize,
-    _num_v_derivs: usize,
-    _from_left_u: bool,
-    _from_left_v: bool,
-    _only_upper_half: bool,
-    _non_zero_tangents: bool,
-) -> Result<Vec<Vec3>> {
-    // UNPORTED(nurbs.b_spline_surface_n_lib_p2): SmBSplineSurface::Evaluate
-    Err(SolidError::Unported {
-        upstream: "SmBSplineSurface::Evaluate",
-        unit: "nurbs.b_spline_surface_n_lib_p2",
-    })
-}
 
 /// `SmSurface::CalculateContinuities(eSurfParam, ..)` (not overridden by
 /// `SmBSplineSurface`).
@@ -522,18 +483,18 @@ mod tests {
     }
 
     #[test]
-    fn unported_and_errors() {
+    fn evaluation_and_errors() {
         let a = IsoCurve::new(patch(), SurfParamType::V, 1.0, false, true);
         assert!(matches!(
             a.create_uv_iso_line(),
             Err(SolidError::InvalidInput { .. })
         ));
-        assert!(matches!(
-            a.evaluate(0.5, 1, false, true),
-            Err(SolidError::Unported { .. })
-        ));
-        // constant v = 1 on the patch: y = (v + 1) / 4
+        // constant v = 1 on the patch: x = u / 2, y = (v + 1) / 4
         let p = a.evaluate_point(0.5).expect("point");
         assert!((p.y - 0.5).abs() < 1e-12);
+        let d = a.evaluate(0.5, 1, false, true).expect("evaluate");
+        assert_eq!(d.len(), 2);
+        assert!(d[0].distance(p) < 1e-12);
+        assert!((d[1].x - 0.5).abs() < 1e-12 && d[1].y.abs() < 1e-12);
     }
 }
