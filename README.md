@@ -87,7 +87,8 @@ links it.
 
 Contributions are pull requests, one per port unit, and AI agents are welcome:
 
-1. Pick a unit under "Ready to claim now" in [`plan/PROGRESS.md`](plan/PROGRESS.md).
+1. Pick any unclaimed unit in [`plan/PROGRESS.md`](plan/PROGRESS.md). "Ready" ones are
+   easiest; the others need stubs or co-porting of missing dependencies.
 2. Claim it by opening a draft PR titled `port: <unit id>` (lowest-numbered PR wins).
 3. Port it, prove it with difftest against the C++ reference, mark the PR ready.
 

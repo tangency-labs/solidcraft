@@ -77,13 +77,22 @@ out = [
     f"{count['claimed']} claimed, {count['blocked']} blocked, {count['todo']} todo.",
     "",
     "Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · "
-    "🔨 claimed · ▶️ ready to claim · ⏳ waiting on dependencies · ⛔ blocked.",
+    "🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.",
     "",
     "## Ready to claim now",
     "",
 ]
 rdy = sorted((u for u in units if ready(u)), key=lambda u: (u["layer"], u["id"]))
-out += [line(u) for u in rdy] or ["_None: every todo unit waits on a claimed or todo dependency._"]
+out += [line(u) for u in rdy] or ["_None right now; see the next section._"]
+out += ["", "## Claimable now, dependencies still missing", "",
+        "Anything `todo` can be claimed. These need stubs for, or co-porting of, the "
+        "listed dependencies (AGENTS.md section 4).", ""]
+waiting = sorted((u for u in units if u["status"] == "todo" and not ready(u)),
+                 key=lambda u: (u["layer"], u["id"]))
+for u in waiting:
+    miss = [d for d in u["depends_on"] if status.get(d) not in DONE]
+    shown = ", ".join(f"`{d}`" for d in miss[:4]) + (f" +{len(miss) - 4} more" if len(miss) > 4 else "")
+    out.append(f"- [ ] `{u['id']}` ({u['est_lines']} lines) — missing: {shown}")
 out += ["", "## In progress", ""]
 out += [line(u) for u in units if u["status"] == "claimed"] or ["_None._"]
 out += ["", "## By module", ""]
