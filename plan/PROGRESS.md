@@ -14,7 +14,7 @@ Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on
 
 ## In progress
 
-- [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (draft)
+- [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (ready for review)
 - [ ] 🔨 `surface.trim_srf_cache` (966 lines) — in progress: #4 @0xlillith (ready for review)
 
 ## By module
@@ -140,7 +140,7 @@ Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on
 - [ ] 🟡 `surface.surface_cache_p1` (1944 lines) — partial, 872 cases
 - [ ] ▶️ `surface.plane_p1` (1934 lines) — ready
 - [ ] ▶️ `surface.surf_of_revolution_p1` (1522 lines) — ready
-- [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (draft)
+- [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (ready for review)
 - [ ] 🔨 `surface.trim_srf_cache` (966 lines) — in progress: #4 @0xlillith (ready for review)
 - [ ] ⏳ `surface.b_spline_volume_n_lib` (310 lines) — waiting
 - [ ] ⏳ `surface.bend_volume` (945 lines) — waiting

@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" width="140" alt="solidcore logo: an isometric solid with one filleted edge and a NURBS curve on its top face"></p>
+
 # solidcore
 
 solidcore is a Rust port of NVIDIA's SMLib: a boundary-representation (B-rep) solid
