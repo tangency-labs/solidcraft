@@ -481,7 +481,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-geom.transform-a1"
 claimed_at = "2026-10-12T20:43:11Z"
-notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 3042 cases (42 fixtures + 3000 generated), 2786 pass, 256 deferred (surface.volume_p1 253, surface.volume_p2 3; geom.pseudo_box wired), max_rel_err 0; 20k-seed run clean"
+notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 3042 cases (42 fixtures + 3000 generated), 3039 pass, 3 deferred (surface.volume_p2 3; geom.pseudo_box and surface.volume_p1 wired), max_rel_err 0; 20k-seed run clean"
 
 [[unit]]
 id = "nlib.crv_fit_p1"
@@ -975,7 +975,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-curve.crv_in_volume-a1"
 claimed_at = "2026-10-13T01:00:34Z"
-notes = "difftest 2030 cases (1426 pass, 604 deferred: surface.volume_p1 603, surface.volume_p2 1); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest 2030 cases (1822 pass, 208 deferred: intersect.curve_class_p4 175, surface.volume_p2 33; surface.volume_p1 wired); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_cache"
@@ -1141,10 +1141,10 @@ depends_on = ["curve.crv_in_volume", "curve.line", "geom.a_object", "geom.axis2_
 est_lines = 2014
 layer = 15
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "claimed"
+status = "partial"
 claimed_by = "swarm-surface.volume_p1-a1"
 claimed_at = "2026-10-13T02:16:42Z"
-notes = "63 fns; largest: smvol_LiftThirdDerivative, SmFindPVIntersectENFO::Evaluate, SmVolume::Map, SmVolume::Evaluate; cycle back-edges (call into later units; stub or co-port): surface.b_spline_volume(2), surface.bend_volume(2), surface.twist_volume(2), surface.unbend_volume(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "63 fns; largest: smvol_LiftThirdDerivative, SmFindPVIntersectENFO::Evaluate, SmVolume::Map, SmVolume::Evaluate; cycle back-edges (call into later units; stub or co-port): surface.b_spline_volume(2), surface.bend_volume(2), surface.twist_volume(2), surface.unbend_volume(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 2886 cases (886 fixtures + 2000 generated), 2787 pass, 99 deferred (surface.twist_volume 60, surface.unbend_volume 39), max_rel_err 0; 20k-seed run clean; --perturb SENSITIVE; wired: curve.crv_in_volume (deferred 604 -> 208), geom.transform (256 -> 3), geom.tol GetScaledZero(SmVolume); geom.solution_array volume stub stays (opaque handle)"
 
 [[unit]]
 id = "curve.curve_p4"
