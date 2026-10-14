@@ -3,3 +3,5 @@
 //!
 //! Upstream: `SmPointClass`, `SmRayTracer`, `SmExtent*`, `SmPseudoBox`,
 //! `SmTopologyTraverser` in `source/SMLib`, and `SM_API/SmApiQueries`.
+
+pub mod r#loop;

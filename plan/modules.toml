@@ -2506,7 +2506,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "48 fns; largest: SmLoopuse::IsClosed3d, SmLoop::GetUVCornerBoundaries, SmLoop::FlipLoopOrientation, SmLoopuse::IsMissingSeamAtVertices; cycle back-edges (call into later units; stub or co-port): topology.edge(6), topology.edgeuse_p3(1), topology.face_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmLoopuse members (owner face use, m_pL, m_pLUMate, m_tLoopuseType/m_pEUorVU) -> topology::{Loopuse, LoopuseStart}, SmLoop::m_pLU -> topology::Loop::loopuse; SmLoopuse::GetEdgeuses (no filters), GetShell -> topology::edgeuse::p1::{loopuse_edgeuses, loopuse_shell}"
+notes = "48 fns; largest: SmLoopuse::IsClosed3d, SmLoop::GetUVCornerBoundaries, SmLoop::FlipLoopOrientation, SmLoopuse::IsMissingSeamAtVertices; cycle back-edges (call into later units; stub or co-port): topology.edge(6), topology.edgeuse_p3(1), topology.face_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmLoopuse members (owner face use, m_pL, m_pLUMate, m_tLoopuseType/m_pEUorVU) -> topology::{Loopuse, LoopuseStart}, SmLoop::m_pLU -> topology::Loop::loopuse; SmLoopuse::GetEdgeuses (no filters), GetShell -> topology::edgeuse::p1::{loopuse_edgeuses, loopuse_shell}; CO-PORTED in query.loop (PR #63): SmLoop::GetUVCornerBoundaries, sm_CalcQuadNum -> query::r#loop::uv_corner_boundaries, query::r#loop::calc_quad_num (private); they read the borrowed FaceLoop view of query::r#loop until the topology binds geometry."
 
 [[unit]]
 id = "topology.brep_p8"
@@ -2615,10 +2615,10 @@ soft_depends_on = ["curve.curve_p3", "curve.curve_p5", "curve.curve_p6", "geom.g
 est_lines = 830
 layer = 42
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "1 fns; largest: SmLoop::ContainsUVPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "PARTIAL (PR #63): difftest 3040 cases (40 fixture re-expressing the TestSmCreateRectangle / TestSmCreateRegularPolygon loops (CCW, CW, mixed edge use orientations, far-centre thin rectangle, tiny and large tolerances) and smTopoTest my_test_single_periodic_vertexuse (a seamless circle loop on a cylinder) + 3000 generated over real SmPlane / SmBSplineSurface / SmSurfOfRevolution (cylinder, cone, sphere, torus-like) faces with SmLine / SmCircle / SmBSplineCurve edges and 2D B-spline UV trims (lines, collinear polylines, rational arcs, wiggly and cusp-like curves, extended trims with sub-interval edges), seam edges used twice, open and star (winding 2) loops, vertex loops, 1e-3/1e3 scales, points on and near edges, vertices and domain sides), 2780 pass bit-identical, 260 deferred (surface.surface_p3 260: SmSurface::GetSingularities for a point and a loop end on a side of the natural domain), max_rel_err 0; 20k-seed run clean; --perturb SENSITIVE. The loop is passed as a borrowed FaceLoop view (query::r#loop::{FaceLoop, LoopEdgeuse, LoopFace}) since the arena topology binds no geometry yet; an edge use without UV trim curve is UNPORTED(topology.edgeuse_p3) GetOrCreateUVTrimCurve. 1 fns; largest: SmLoop::ContainsUVPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "topology.face_p4"
