@@ -533,8 +533,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` without trim curve; those of the curve box, the curve
-    /// cache and the tree; [`SolidError::Unported`] for `GetSingularities`,
-    /// `FindUVNodes` and `SubdivideNode`.
+    /// cache and the tree; [`SolidError::Unported`] for `FindUVNodes` and
+    /// `SubdivideNode`.
     #[allow(clippy::too_many_lines)]
     pub fn implant_edgeuse(
         &mut self,
@@ -579,7 +579,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
             // eliminate boundaries which are not poles
             if poles != 0 {
-                let srf_poles = surface_singularities(self.base.surface())?;
+                let srf_poles = surface_singularities(k, self.base.surface())?;
                 poles &= srf_poles;
             }
             (poles, u_ivl, v_ivl, u_tol, v_tol)
@@ -922,9 +922,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// Those of the tree, of `Evaluate1stDerivatives` and of
-    /// [`SurfaceCache::find_uv_nodes`]; [`SolidError::Unported`]: `GetSingularities`
-    /// (`surface.surface_p3`).
+    /// Those of the tree and of `Evaluate1stDerivatives`; [`SolidError::Unported`]:
+    /// `FindUVNodes` (`surface.surface_cache_p3`).
     pub fn implant_vertexuse(
         &mut self,
         k: &Kernel,
@@ -982,7 +981,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         // when sUV is close enough to boundaries for a pole check
         if poles != SS_NONE {
             // only check those boundaries which are poles
-            poles &= surface_singularities(self.base.surface())?;
+            poles &= surface_singularities(k, self.base.surface())?;
 
             // when UV point is in constant U singular side
             if (poles & SS_UMIN) != 0 || (poles & SS_UMAX) != 0 {
@@ -1061,11 +1060,9 @@ fn find_uv_nodes<O: Copy + PartialEq>(
 }
 
 /// `SmSurface::GetSingularities`: the `SM_SS_*` sides that are poles.
-fn surface_singularities(_surface: &Surface) -> Result<u64> {
-    // UNPORTED(surface.surface_p3): SmSurface::GetSingularities
-    Err(SolidError::unported(
-        "SmSurface::GetSingularities",
-        "surface.surface_p3",
+fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u64> {
+    Ok(u64::from(
+        surface.get_singularities(k, false, false)?.singular,
     ))
 }
 

@@ -264,12 +264,15 @@ fn evaluate_normal(surface: &BSplineSurface, uv: Point2) -> Result<Vec3> {
 
 /// `SmSurface::EvaluateNormalSection(uv, TRUE, TRUE, direction, ..)`: the cross
 /// tangent (the unit projection of `direction` into the tangent plane).
-fn evaluate_normal_section(_surface: &BSplineSurface, _uv: Point2, _dir: Vec3) -> Result<Vec3> {
-    // UNPORTED(surface.surface_p3): SmSurface::EvaluateNormalSection
-    Err(SolidError::Unported {
-        upstream: "SmSurface::EvaluateNormalSection",
-        unit: "surface.surface_p3",
-    })
+fn evaluate_normal_section(surface: &BSplineSurface, uv: Point2, dir: Vec3) -> Result<Vec3> {
+    Ok(crate::surface::surface::p3::evaluate_normal_section_of(
+        surface,
+        uv,
+        Side::Left,
+        Side::Left,
+        dir,
+    )?
+    .tangent)
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: `(Su, Sv)`.

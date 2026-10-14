@@ -329,6 +329,18 @@ impl Plane {
         &self.base
     }
 
+    /// Whether out-of-bounds evaluation is enabled (`GetOutOfBoundsEnabled` of the
+    /// `SmBSplineSurface` part).
+    #[must_use]
+    pub fn is_out_of_bounds_enabled(&self) -> bool {
+        self.base.is_out_of_bounds_enabled()
+    }
+
+    /// Sets out-of-bounds evaluation (through `GetOutOfBoundsEnabled`'s reference).
+    pub fn set_out_of_bounds_enabled(&mut self, enabled: bool) {
+        *self.base.out_of_bounds_enabled_mut() = enabled;
+    }
+
     /// The B-spline part with a NURB: the stored one, or one made on a copy when the
     /// plane has none (`GetOrCreateGwNurbPointer` from a `const` method).
     ///

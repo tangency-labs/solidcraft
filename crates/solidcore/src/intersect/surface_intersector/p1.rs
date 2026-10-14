@@ -1758,12 +1758,14 @@ struct Principal {
 }
 
 /// `crSurface.EvaluateGeometric(uv, TRUE, TRUE, ..)`.
-fn surface_evaluate_geometric(_surface: &Surface, _uv: Point2) -> Result<Principal> {
-    // UNPORTED(surface.surface_p3): SmSurface::EvaluateGeometric
-    Err(SolidError::unported(
-        "SmSurface::EvaluateGeometric",
-        "surface.surface_p3",
-    ))
+fn surface_evaluate_geometric(surface: &Surface, uv: Point2) -> Result<Principal> {
+    let g = surface.evaluate_geometric(uv, Side::Left, Side::Left)?;
+    Ok(Principal {
+        k1: g.principle_curvature1,
+        k2: g.principle_curvature2,
+        kv1: g.principle_curvature_vector1,
+        kv2: g.principle_curvature_vector2,
+    })
 }
 
 /// `smsurf_EvaluateNormalSection(eval, direction, ..)`: the curvature in `direction`.
@@ -1857,21 +1859,31 @@ pub(crate) fn surface_local_surface_intersect(
 /// `pOffSet1->LocalPlaneSurfaceIntersect(..)`: found flag and the solution's start
 /// parameters `[u0, v0, u1, v1]`.
 fn surface_local_plane_surface_intersect(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _other: &Surface,
-    _other_domain: &Extent2d,
-    _tol: f64,
-    _uv0: Point2,
-    _uv1: Point2,
-    _plane_origin: Point3,
-    _plane_normal: Vec3,
+    surface: &Surface,
+    domain: &Extent2d,
+    other: &Surface,
+    other_domain: &Extent2d,
+    tol: f64,
+    uv0: Point2,
+    uv1: Point2,
+    plane_origin: Point3,
+    plane_normal: Vec3,
 ) -> Result<(bool, [f64; 4])> {
-    // UNPORTED(surface.surface_p3): SmSurface::LocalPlaneSurfaceIntersect
-    Err(SolidError::unported(
-        "SmSurface::LocalPlaneSurfaceIntersect",
-        "surface.surface_p3",
-    ))
+    Ok(
+        match surface.local_plane_surface_intersect(
+            domain,
+            other,
+            other_domain,
+            tol,
+            uv0,
+            uv1,
+            plane_origin,
+            plane_normal,
+        )? {
+            Some(s) => (true, [s.uv.x, s.uv.y, s.other_uv.x, s.other_uv.y]),
+            None => (false, [0.0; 4]),
+        },
+    )
 }
 
 /// `crLawCurve.Evaluate(parameter, interval, orient, values)`: the fillet radius and
