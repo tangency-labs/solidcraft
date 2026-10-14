@@ -107,8 +107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "surface_sms_singular_0",
@@ -199,8 +199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "surface_sms_singular_1",
@@ -291,8 +291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "surface_sms_singular_2",
@@ -383,8 +383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "surface_sms_singular_3",
@@ -523,8 +523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "drop_curve_singular_0",
@@ -615,8 +615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "drop_curve_singular_1",
@@ -707,8 +707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "drop_curve_singular_2",
@@ -847,8 +847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_singular_0",
@@ -939,8 +939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_singular_1",
@@ -1031,8 +1031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::EvaluateNormalAtSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_singular_2",
@@ -4552,8 +4552,7 @@
   "cases_passed": 469,
   "cases_total": 535,
   "deferred_by_unit": {
-    "surface.surface_p3": 56,
-    "surface.surface_p5": 10
+    "surface.surface_p3": 66
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -248,12 +248,16 @@ fn create_iso_parametric_curve(
             "SmSurfOfRevolution::CreateIsoParametricCurve",
             "surface.surface_cache_p1",
         )),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::CreateIsoParametricCurve
-            Err(SolidError::unported(
-                "SmSurface::CreateIsoParametricCurve",
-                "surface.surface_p5",
-            ))
+        // the SmSurface body (surface.surface_p5); tolerance 0.0 as upstream's callers
+        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+            let r =
+                surface.create_iso_parametric_curve(k, param, iso, 0.0, domain.as_ref(), false)?;
+            match r.curve.kind() {
+                CurveKind::BSpline(b) => Ok(b.clone()),
+                _ => Err(SolidError::sm_err(
+                    "surface::surface_cache::p1::create_iso_parametric_curve",
+                )),
+            }
         }
     }
 }
@@ -316,9 +320,10 @@ pub(super) fn calculate_bounding_box(
 fn is_singularity(surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
-            Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular)
-        }
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::CurveBounded(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::Step(_) => Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular),
     }
 }
 

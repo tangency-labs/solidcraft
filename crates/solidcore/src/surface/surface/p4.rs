@@ -90,14 +90,10 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 
-use super::p1::{
-    evaluate_1st_derivatives, evaluate_2nd_derivatives, evaluate_directional_derivs,
-    evaluate_normal_section, map_to_2d_dir, zone_tol_3d, CsIntersectEnfo, CsNormalizeEnfo,
-    SsNormalizeEnfo, SsiNormalizeEnfo, SspIntersectEnfo,
-};
+use super::p1::get_surface_cache;
+use super::p1::{evaluate_1st_derivatives, evaluate_2nd_derivatives, evaluate_directional_derivs};
 use super::p2::{
-    convert_to_parameter_delta, evaluate_geometric, surface_cache, LocalSurfaceType, SurfaceEval,
-    TsectCurveType,
+    convert_to_parameter_delta, evaluate_geometric, LocalSurfaceType, SurfaceEval, TsectCurveType,
 };
 use super::{Surface, SurfaceKind};
 
@@ -1271,7 +1267,7 @@ impl Surface {
         if op == SolverOperation::Intersect || op == SolverOperation::Minimize {
             // upstream ignores a failing status and tries the solvers
             let fast = ignored(self.drop_point_fast::<O>(
-                k,
+                &Kernel::default(),
                 uv_domain,
                 op,
                 test_point,
@@ -1304,7 +1300,7 @@ impl Surface {
                 // values are within the trim boundaries of the face, unless flags in its
                 // surface cache indicate otherwise.
                 if self.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
-                    surface_cache::<NoObject>(k, self, None)?;
+                    get_surface_cache(&Kernel::default(), self, None::<NoObject>)?;
                     // UNPORTED(query.face_p2): SmFace::PointClassify
                     // NOTE for the face_p2 porter: upstream callers disable the surface
                     // cache's point test (`m_bPointTestEnabled`, SmTemporaryChangeValue)

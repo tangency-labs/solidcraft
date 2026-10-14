@@ -527,16 +527,23 @@ fn surface_is_degenerate_curve(
 /// `SmSurface::LocalPointSolve(domain, SM_SO_INTERSECT, point, guess, ..)`: whether it
 /// succeeded and the solution's start parameters.
 fn local_point_solve(
-    _srf: &BSplineSurface,
-    _domain: &Extent2d,
-    _point: Point3,
-    _guess: Point2,
+    srf: &BSplineSurface,
+    domain: &Extent2d,
+    point: Point3,
+    guess: Point2,
 ) -> Result<(bool, Point2)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::Unported {
-        upstream: "SmSurface::LocalPointSolve",
-        unit: "surface.surface_p5",
-    })
+    // the SmSurface body (surface.surface_p5), on a surface holding a copy
+    let surface = crate::surface::surface::Surface::from(srf.clone());
+    let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
+        domain,
+        crate::geom::global_solver::SolverOperation::Intersect,
+        point,
+        guess,
+    )?;
+    Ok((
+        r.found,
+        Point2::new(r.solution.start.param(0)?, r.solution.start.param(1)?),
+    ))
 }
 
 /// `SmSurface::GlobalPointSolve(domain, SM_SO_INTERSECT, point, tol, NULL,

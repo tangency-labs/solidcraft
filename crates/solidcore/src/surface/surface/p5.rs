@@ -34,8 +34,8 @@
 //!   `surface.surface_p1`) instead of the tree node and Bezier patch.
 //! - **Iso curves** (`SmIsoCurve`) hold a B-spline surface only: planes are queried
 //!   through their NURB, and the iso curve of a curve-bounded surface is
-//!   [`SolidError::Unported`] (`SmSurface::EvaluateSimple`, `surface.surface_p1`, which its
-//!   evaluation needs; `curve.iso_curve`'s Deviations record the limit).
+//!   [`SolidError::Unported`] (`curve.iso_curve`, whose Deviations record the limit;
+//!   plan/findings.md has an entry).
 //! - **`m_bUseNewPointSolvers`** has no field: its upstream default (`TRUE`) is used and
 //!   the only setter (`SetUseNewPointSolvers`) has no caller. `LocalPointSolve` therefore
 //!   runs `LocalPointSolve_0` only for [`SolverOperation::Maximize`].
@@ -45,7 +45,7 @@
 //!   `SM_SP_NEITHER`; the port does the same ([`Singularity::singular`]).
 //! - **Debug-only work** (drawing, dumps, assertions) is not ported.
 //! - **Unported callees** (return [`SolidError::Unported`]): `SmSurface::GetFace`,
-//!   `SmFace::GetTolerance`, `LocalPointSolve_1`, `SmFindPSNormalENFO`,
+//!   `SmFace::GetTolerance`, `LocalPointSolve_1`, `SmFindPSNormalENFO::Evaluate`,
 //!   `SmSurface::GetSingularities`, `sm_GetSurfaceToEvaluate`,
 //!   `SmSurface::CoverCoincidentSurface`, `SmSurface::EvaluateNormalSection`, the STEP
 //!   domain conversions, the surface cache
@@ -74,9 +74,11 @@ use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 
-use super::p2::{surface_cache, LsiGlobalSolver, SurfaceEval};
+use super::p1::{evaluate_1st_derivatives, get_surface_cache, FindPsNormalEnfo};
+use super::p2::{LsiGlobalSolver, SurfaceEval};
 use super::p4::is_point_on_normal;
-use super::p7::{evaluate_1st_derivatives, good_drop_result, load_guesses, SpGlobalSolver};
+use super::p4::NoObject;
+use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
@@ -85,7 +87,6 @@ const OP_LPS0: &str = "surface::surface::p5::Surface::local_point_solve_0";
 const OP_DROP: &str = "surface::surface::p5::Surface::drop_point";
 const OP_SP_LOCAL: &str = "surface::surface::p5::sp_local_solve";
 const OP_FILTER: &str = "surface::surface::p5::filter_solution";
-const OP_COVER: &str = "surface::surface::p5::Surface::cover_other_coincident_surface";
 
 /// `SM_SS_NONE` (`SmTypes.h`): no singular sides.
 pub const SS_NONE: u64 = 0;
@@ -130,34 +131,6 @@ impl SurfaceEval<'_> {
     pub fn sect_curvature(&mut self) -> Result<f64> {
         crate::error::ignore_status(self.eval_normal_section())?;
         Ok(self.stored_section().1)
-    }
-}
-
-// ---- SmSurface::EvaluateSimple (dispatch over the ported kinds) ---------------------------------
-
-/// `EvaluateSimple`: the derivatives without zero-tangent adjustments.
-fn evaluate_simple(
-    surface: &Surface,
-    uv: Point2,
-    highest_u: usize,
-    highest_v: usize,
-    u_side: Side,
-    v_side: Side,
-    only_upper_half: bool,
-) -> Result<Vec<Vec<Vec3>>> {
-    match surface.kind() {
-        SurfaceKind::BSpline(s) => s.evaluate_simple(
-            uv,
-            highest_u,
-            highest_v,
-            u_side == Side::Left,
-            v_side == Side::Left,
-            only_upper_half,
-        ),
-        SurfaceKind::CurveBounded(s) => {
-            s.evaluate_simple(uv, highest_u, highest_v, u_side, v_side, only_upper_half)
-        }
-        SurfaceKind::Plane(s) => s.evaluate_simple(uv, highest_u, highest_v, only_upper_half),
     }
 }
 
@@ -240,11 +213,12 @@ impl Surface {
             singular: true,
             direction: SurfParamType::Neither,
         };
-        let simple = match evaluate_simple(self, uv, 1, 1, Side::Left, Side::Left, true) {
-            Ok(m) => m,
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => return Ok(failed),
-        };
+        let simple =
+            match self.evaluate_simple(uv, 1, 1, upper_flags(Side::Left, Side::Left, false)) {
+                Ok(m) => m,
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => return Ok(failed),
+            };
         let su = at(&simple, 1, 0, OP_SING)?;
         let sv = at(&simple, 0, 1, OP_SING)?;
 
@@ -470,14 +444,13 @@ fn iso_curve_of(
             from_left,
             false,
         )),
-        SurfaceKind::CurveBounded(_) => {
-            // An SmIsoCurve over an SmCurveBoundedSurface evaluates through the surface's
-            // EvaluateSimple/Evaluate, whose curve-bounded override needs
-            // SmSurface::EvaluateSimple; SmIsoCurve holds B-spline surfaces only.
-            // UNPORTED(surface.surface_p1): SmSurface::EvaluateSimple
+        SurfaceKind::CurveBounded(_) | SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Step(_) => {
+            // `SmIsoCurve` holds an `SmBSplineSurface` only (see plan/findings.md,
+            // surface.surface_p5), so these kinds have no iso curve to build.
+            // UNPORTED(curve.iso_curve): SmIsoCurve::SmIsoCurve over a non-B-spline surface
             Err(SolidError::unported(
-                "SmSurface::EvaluateSimple",
-                "surface.surface_p1",
+                "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+                "curve.iso_curve",
             ))
         }
     }
@@ -528,7 +501,16 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
-            SurfaceKind::CurveBounded(_) => {}
+            SurfaceKind::SurfOfRevolution(s) => {
+                // (the Rust override has no UV iso line option: `uv_iso_curve` is `None`)
+                let r = s.create_iso_parametric_curve(k, param, iso_parameter, domain)?;
+                return Ok(IsoParametricCurve {
+                    curve: r.curve,
+                    max_gap_3d: r.max_gap_3d,
+                    uv_iso_curve: r.uv_iso_curve,
+                });
+            }
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {}
         }
 
         // define the isoParameter Curve as an object
@@ -687,17 +669,19 @@ struct PsSolve {
 
 /// `SmLocalSolveNd::SolveIt` of an `SmFindPSNormalENFO` over `domain` from `guess`.
 fn find_ps_normal_solve(
-    _surface: &Surface,
-    _test_point: Point3,
+    surface: &Surface,
+    test_point: Point3,
     _domain: &Extent2d,
-    _op: SolverOperation,
+    op: SolverOperation,
     _guess: Point2,
 ) -> Result<PsSolve> {
-    // UNPORTED(surface.surface_p1): SmFindPSNormalENFO::SmFindPSNormalENFO (then
-    // SmFindPSNormalENFO::Evaluate, unit surface.surface_p3)
+    // SmFindPSNormalENFO sEvalFun(crTestPoint, *this, SM_EFF_ZERO * SM_EFF_ZERO, eSolverOperation)
+    let _equations = FindPsNormalEnfo::new(test_point, surface, EFF_ZERO * EFF_ZERO, op);
+    // UNPORTED(surface.surface_p3): SmFindPSNormalENFO::Evaluate (the equations
+    // SmLocalSolveNd::SolveIt iterates)
     Err(SolidError::unported(
-        "SmFindPSNormalENFO::SmFindPSNormalENFO",
-        "surface.surface_p1",
+        "SmFindPSNormalENFO::Evaluate",
+        "surface.surface_p3",
     ))
 }
 
@@ -983,12 +967,11 @@ impl Surface {
         let mut answer_in_array = false;
 
         // We need a tolerance value.
-        let dist_tol = if self.owner().is_some() {
-            // UNPORTED(surface.surface_p1): SmSurface::GetFace (then
-            // SmFace::GetTolerance, unit topology.face_p2)
+        let dist_tol = if self.face()?.is_some() {
+            // UNPORTED(topology.face_p2): SmFace::GetTolerance
             return Err(SolidError::unported(
-                "SmSurface::GetFace",
-                "surface.surface_p1",
+                "SmFace::GetTolerance",
+                "topology.face_p2",
             ));
         } else {
             XSECT_TOL_3D
@@ -996,6 +979,7 @@ impl Surface {
 
         // first try DropPointFast(), to catch special cases.
         if let Some(fast) = ignored(self.drop_point_fast::<O>(
+            &Kernel::default(),
             domain,
             op,
             pt_to_drop,
@@ -1221,12 +1205,11 @@ impl Surface {
     ) -> Result<(bool, Solution<O>)> {
         // GWC:TODO - upstream's magic numbers for the tolerance
         let face_tol = |s: &Self| -> Result<f64> {
-            if s.owner().is_some() {
-                // UNPORTED(surface.surface_p1): SmSurface::GetFace (then
-                // SmFace::GetTolerance, unit topology.face_p2)
+            if s.face()?.is_some() {
+                // UNPORTED(topology.face_p2): SmFace::GetTolerance
                 Err(SolidError::unported(
-                    "SmSurface::GetFace",
-                    "surface.surface_p1",
+                    "SmFace::GetTolerance",
+                    "topology.face_p2",
                 ))
             } else {
                 Ok(1e-05)
@@ -1238,9 +1221,10 @@ impl Surface {
         let new_tol = 10.0 * (tol1 + tol2 + tol3);
 
         // when surfaces are trimmmed - turn off GlobalPointSolve PointTesting
-        surface_cache(self)?;
-        surface_cache(surface2)?;
-        surface_cache(surface3)?;
+        let kernel = Kernel::default();
+        get_surface_cache(&kernel, self, None::<NoObject>)?;
+        get_surface_cache(&kernel, surface2, None::<NoObject>)?;
+        get_surface_cache(&kernel, surface3, None::<NoObject>)?;
 
         // nearest point of each surface (statuses ignored)
         let nearest =
@@ -1339,24 +1323,6 @@ fn cover_coincident_surface(
     ))
 }
 
-/// `ConvertDomainFromNURBSToSTEP(domain, step_domain)`.
-fn convert_domain_nurbs_to_step(_surface: &Surface, _domain: &Extent2d) -> Result<Extent2d> {
-    // UNPORTED(surface.surface_p1): SmSurface::ConvertDomainFromNURBSToSTEP
-    Err(SolidError::unported(
-        "SmSurface::ConvertDomainFromNURBSToSTEP",
-        "surface.surface_p1",
-    ))
-}
-
-/// `ConvertDomainFromSTEPToNURBS(step_domain, domain)`.
-fn convert_domain_step_to_nurbs(_surface: &Surface, _domain: &Extent2d) -> Result<Extent2d> {
-    // UNPORTED(surface.surface_p1): SmSurface::ConvertDomainFromSTEPToNURBS
-    Err(SolidError::unported(
-        "SmSurface::ConvertDomainFromSTEPToNURBS",
-        "surface.surface_p1",
-    ))
-}
-
 /// The state `CoverOtherCoincidentSurface`'s `Cover` lambda updates.
 struct CoverState {
     /// `sDomain0`: this surface's domain (reduced when it is covered).
@@ -1410,7 +1376,8 @@ fn try_cover(
     // STEP coordinates survive rebuilding an analytic surface's NURBS form. Save the
     // retained subset before coverage changes the surface, union it with the projected
     // subset, then map back using the final parameters.
-    let this_step = match convert_domain_nurbs_to_step(cover, &cover_domain) {
+    let this_step = match cover.convert_domain_from_nurbs_to_step(&Kernel::default(), &cover_domain)
+    {
         Ok(d) => d,
         Err(e) if e.is_unported() => return Err(e),
         Err(_) => return Ok(false),
@@ -1424,14 +1391,10 @@ fn try_cover(
     if !r.success {
         return Ok(false);
     }
-    let Some(other_step) = r.step_domain else {
-        return Err(SolidError::invalid_input(
-            OP_COVER,
-            "no STEP domain from CoverCoincidentSurface",
-        ));
-    };
+    // (upstream's sOtherSTEPDomain is default constructed when none is written)
+    let other_step = r.step_domain.unwrap_or_else(Extent2d::new);
     let merged_step = this_step.union(&other_step);
-    match convert_domain_step_to_nurbs(cover, &merged_step) {
+    match cover.convert_domain_from_step_to_nurbs(&Kernel::default(), &merged_step) {
         Ok(d) => {
             st.merged = Some(d);
             Ok(true)

@@ -110,6 +110,7 @@ use super::p1::{
     CsNormalizeEnfo, SecondDerivatives,
 };
 use super::p2::{derivative_limit, drop_vectors, normal_limit, SurfaceEvaluate};
+use super::p4::CsNormalize;
 use super::{Surface, SurfaceKind};
 
 const OP_DEGEN: &str = "surface::surface::p7::Surface::find_degen_param_for_direction";
