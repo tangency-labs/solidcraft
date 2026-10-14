@@ -1663,10 +1663,10 @@ soft_depends_on = ["curve.curve_p1", "curve.curve_p4", "curve.curve_p5", "curve.
 est_lines = 1865
 layer = 24
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "37 fns; largest: sm_IntersectGenerators, SmSurfOfExtrusion::STEPInversion, SmSurfOfExtrusion::DropPointFast, SmSurfOfExtrusion::MakeNurb; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2055 cases (1255 fixture, incl. 1082 second-review cases in review2_extra_cases.json: TestSmCreateExtrude, the my_ssi_analytic_demo cylinders, seams, orientations, tolerance-limit tilts, tiny/huge scales, SmHyperbola/SmParabola generators; 800 generated over B-spline, SmLine, SmCircle, SmEllipse, SmHyperbola, SmParabola generators), 1958 pass bit-identical (max_rel_err 0), 0 failed, 97 deferred: surface.surface_p1 56 (STEPInversion of a non-perpendicular generator: SmBSplineSurface::STEPInversion solves), curve.curve_p9 41 (sm_IntersectGenerators: SmCurve::GlobalCurveSolve); --perturb SENSITIVE. UNPORTED(surface.surf_of_extrusion_p1) owner stubs in SmLine/SmEllipse/SmHyperbola/SmParabola::MakeNurb not wired (curves hold only an ObjectRef owner; see plan/findings.md); the SmLine, SmHyperbola and SmParabola owner steps are applied by SurfOfExtrusion itself. Review fixes: hyperbola/parabola owner step, InvalidInput->1007 status mapping, conversions/DropPointFast return SM_ERR without NURB; second review: STEPInversion owner step for hyperbola/parabola GlobalPointSolveSTEP (rel. err up to 9e-3 before), FFI circle/ellipse/line size guards relaxed to > 0; 20000 seeds 0 failed, max_rel_err 1.7e-16. 37 fns; largest: sm_IntersectGenerators, SmSurfOfExtrusion::STEPInversion, SmSurfOfExtrusion::DropPointFast, SmSurfOfExtrusion::MakeNurb; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surf_of_revolution_p3"
