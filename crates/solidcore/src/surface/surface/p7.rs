@@ -73,13 +73,15 @@
 //!   result distances with swapped names; `FindDegenParamForDirection` compares a
 //!   sample fraction with the parameter `dS`.
 //! - **Unported callees** (return [`SolidError::Unported`]): the surface cache and its
-//!   tree (`smsurf_GetSurfaceCache`, `SmSurfaceCache::GetTree`: units
-//!   `surface.surface_p1`, `surface.surface_cache_p3`) for the global solves and the
+//!   tree (`smsurf_GetSurfaceCache` through `SmSurface::CacheMakeOrValidate`, unit
+//!   `surface.surface_p1`; `SmSurfaceCache::GetTree` is
+//!   [`crate::surface::surface_cache::SurfaceCache::get_tree`] once a cache handle
+//!   resolves) for the global solves and the
 //!   parallel projection; the solver constructors, `SmCSNormalizeENFO`,
 //!   `SmFindSingularParamWithGivenTangentDirEFO`, `sm_IsNodeValid`, `IsFlatCorner`,
 //!   `EvaluateSTEP`, `GetFace` and the base `CalculateBoundingBox`
-//!   (`surface.surface_p1`); the patch data of a tree node
-//!   (`surface.surface_cache_p3`); `SmAdvSurfaceIntersector`
+//!   (`surface.surface_p1`; the solver constructors also hand over the caches holding
+//!   the patch data of tree nodes); `SmAdvSurfaceIntersector`
 //!   (`intersect.adv_surface_intersector`).
 
 use crate::curve::curve::Curve;
@@ -2107,8 +2109,8 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `sm_IsNodeValid` (`surface.surface_p1`) and the patch
-    /// data (`surface.surface_cache_p3`).
+    /// [`SolidError::Unported`]: `sm_IsNodeValid` and the patch data (the solver's
+    /// cache, from its constructor) (`surface.surface_p1`).
     pub fn may_contain_answers(&self, branch: &Branch) -> Result<bool> {
         let surface_node = self.base.branch_node(branch, 1)?;
         if !is_node_valid(surface_node)? {
@@ -2122,14 +2124,15 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             && surface_node.child1.is_some()
         {
             // SmBezierPatch::GetPseudoBox / GetPolarBox are ported (BezierPatch::pseudo_box,
-            // SurfaceCache::polar_box), but the patch (the node's m_pData) lives in the
-            // surface cache, which the tree reaches once the tree construction hands it over.
-            // UNPORTED(surface.surface_cache_p3): the SmBezierPatch of a tree node
+            // SurfaceCache::polar_box), and the patch (the node's m_pData) is
+            // SurfaceCache::patch(node) of the surface's cache, but the solver holds no
+            // cache until its constructor (surface.surface_p1) hands one over.
+            // UNPORTED(surface.surface_p1): SmSPGlobalSolver::SmSPGlobalSolver
             // (then the point inside the pseudo box, else the polar box of the vectors to
             // its 8 corners against the patch's polar box)
             return Err(SolidError::unported(
-                "SmBezierPatch::GetPseudoBox",
-                "surface.surface_cache_p3",
+                "SmSPGlobalSolver::SmSPGlobalSolver",
+                "surface.surface_p1",
             ));
         }
 
@@ -2195,8 +2198,8 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for two patch nodes when normalizing
-    /// (`surface.surface_cache_p3`, `surface.surface_p1`).
+    /// [`SolidError::Unported`] for two patch nodes when normalizing (the patch data
+    /// needs the solver's caches, from its constructor: `surface.surface_p1`).
     pub fn may_contain_answers(&self, branch: &Branch) -> Result<bool> {
         if self.base.operation == SolverOperation::Normalize {
             let node1 = self.base.branch_node(branch, 0)?;
@@ -2204,14 +2207,15 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
             if node1.aux_type == AuxDataType::BezierSurface
                 && node2.aux_type == AuxDataType::BezierSurface
             {
-                // The patches (the nodes' m_pData) live in the surface caches, which the
-                // trees reach once the tree construction hands them over.
-                // UNPORTED(surface.surface_cache_p3): the SmBezierPatch of a tree node
+                // The patches (the nodes' m_pData) are SurfaceCache::patch(node) of the
+                // two surface caches, but the solver holds no caches until its
+                // constructor (surface.surface_p1) hands them over.
+                // UNPORTED(surface.surface_p1): SmSSGlobalSolver::SmSSGlobalSolver
                 // (then sm_IsNodeValid of both nodes, returning SM_SUCCESS = FALSE when
                 // outside, ComputeConeBoundTo and the polar box cone tests)
                 return Err(SolidError::unported(
-                    "SmBezierPatch::GetPolarBox",
-                    "surface.surface_cache_p3",
+                    "SmSSGlobalSolver::SmSSGlobalSolver",
+                    "surface.surface_p1",
                 ));
             }
         }
@@ -2258,10 +2262,13 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for SsGlobalSolver<'t, '_, O
 
 /// `SmSurfaceCache::GetTree` of a surface cache.
 fn surface_tree<C>(_cache: &C) -> Result<()> {
-    // UNPORTED(surface.surface_cache_p3): SmSurfaceCache::GetTree
+    // GetTree is SurfaceCache::get_tree, but no cache store resolves a surface cache's
+    // handle yet: smsurf_GetSurfaceCache makes the caches through
+    // SmSurface::CacheMakeOrValidate.
+    // UNPORTED(surface.surface_p1): SmSurface::CacheMakeOrValidate
     Err(SolidError::unported(
-        "SmSurfaceCache::GetTree",
-        "surface.surface_cache_p3",
+        "SmSurface::CacheMakeOrValidate",
+        "surface.surface_p1",
     ))
 }
 

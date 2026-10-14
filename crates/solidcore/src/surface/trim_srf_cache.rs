@@ -920,9 +920,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// Those of the tree; [`SolidError::Unported`]: `Evaluate1stDerivatives`
-    /// (`surface.surface_p1`), `GetSingularities` (`surface.surface_p3`), and those of
-    /// [`SurfaceCache::find_uv_nodes`].
+    /// Those of the tree, of `Evaluate1stDerivatives` and of
+    /// [`SurfaceCache::find_uv_nodes`]; [`SolidError::Unported`]: `GetSingularities`
+    /// (`surface.surface_p3`).
     pub fn implant_vertexuse(
         &mut self,
         k: &Kernel,
@@ -1344,23 +1344,27 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_surface_operations_are_explicit_and_preserve_state() {
+    fn implant_vertexuse_away_from_poles_marks_the_leaf() {
         let k = Kernel::default();
         let mut c = cache();
         let mut ext = Extent2d::new();
-        let before = ext;
         let vu = VertexuseInput {
             vertexuse: 7,
             uv_point: Point2::new(0.4, 0.4),
             vertex_tolerance: 0.001,
         };
-        // past Evaluate1stDerivatives (surface::surface::p7): the singularities or the
-        // UV node search are unported
-        assert!(matches!(
-            c.implant_vertexuse(&k, vu, &mut ext),
-            Err(SolidError::Unported { .. })
-        ));
-        assert_eq!(ext, before);
+        // away from the domain sides no pole check (GetSingularities) is made
+        c.implant_vertexuse(&k, vu, &mut ext).unwrap();
+        assert_eq!(ext, Extent2d::from_bounds(0.399, 0.399, 0.401, 0.401));
+        let leaf = c.base().aux(NodeId(1)).unwrap();
+        assert_eq!(leaf.vertex_list.len(), 1);
+        assert_eq!(leaf.vertex_list[0].vertexuse, Some(7));
+        assert!(c.base().aux(NodeId(2)).unwrap().vertex_list.is_empty());
+    }
+
+    #[test]
+    fn unavailable_surface_operations_are_explicit_and_preserve_state() {
+        let mut c = cache();
         let surface = plane();
         let edge = PolyEdgeInput {
             poly_edge: 8,

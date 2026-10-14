@@ -15,7 +15,7 @@
 //! `InvalidInput`, `-1` for one upstream cannot return); `Unported` defers the case.
 //!
 //! Deferred cases: the global solves and the parallel projection (surface cache,
-//! `surface.surface_p1` / `surface.surface_cache_p3`), the local curve solve
+//! `surface.surface_p1`), the local curve solve
 //! (`SmCSNormalizeENFO`), the Newton step of `FindDegenParamForDirection`, `GetFlatCorners`
 //! (`IsFlatCorner`) and `sm_CheckSeamDrop` on a seam (`EvaluateSTEP`). Planes are compared
 //! (`SmPlane::IsClosed` and `EvaluateNormal` overrides). The solvers'

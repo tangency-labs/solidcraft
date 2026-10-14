@@ -61,10 +61,10 @@
 //!   [`SolidError::Unported`] for `surface.surface_p1`) cannot hand out a cache yet,
 //!   so [`SurfaceTrace::do_trace`], [`SurfaceTrace::find_boundary_start_points`] and
 //!   [`SurfaceTrace::find_interior_curves`] take the cache it returns for the
-//!   surface as an argument. The constructor's `GetTree` is made where the tree is
-//!   used (the global solve of [`find_interior_curves_base`]); a cache without tree
-//!   is [`SolidError::Unported`] (`SmSurfaceCache::GetTree` builds it,
-//!   `surface.surface_cache_p3`). `SmCacheCheckOutIn` has no counterpart (the cache
+//!   surface as an argument. The constructor's `GetTree`
+//!   ([`SurfaceCache::get_tree`], which builds the tree when needed) is made where the
+//!   tree is used (the global solve of [`find_interior_curves_base`]).
+//!   `SmCacheCheckOutIn` has no counterpart (the cache
 //!   is borrowed for the whole trace), the `SmTemporaryChangeValue`s of
 //!   `DoTrace` are restored on every exit.
 //! - **Global solver.** The tracer's `SmGlobalSolver` base is made for the solve in
@@ -747,7 +747,7 @@ pub trait SurfaceTrace<'s> {
     fn find_interior_curves<O: SolutionObject>(
         &mut self,
         k: &Kernel,
-        cache: &SurfaceCache<O>,
+        cache: &mut SurfaceCache<O>,
         out: &mut TraceOutput,
     ) -> Result<()> {
         find_interior_curves_base(self, k, cache, out)
@@ -1871,24 +1871,26 @@ where
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] when the cache has no tree yet
-/// (`SmSurfaceCache::GetTree`, `surface.surface_cache_p3`); those of the global
-/// solve, the curve caches and the curve queries. Failures of a single start
+/// Those of building the tree (`SmSurfaceCache::GetTree`, [`SurfaceCache::get_tree`]),
+/// of the global solve, the curve caches and the curve queries. Failures of a single start
 /// point skip it, as upstream.
 pub fn find_interior_curves_base<'s, T, O>(
     t: &mut T,
     k: &Kernel,
-    cache: &SurfaceCache<O>,
+    cache: &mut SurfaceCache<O>,
     out: &mut TraceOutput,
 ) -> Result<()>
 where
     T: SurfaceTrace<'s> + ?Sized,
     O: SolutionObject,
 {
-    let tree: &Tree<O> = cache.tree().ok_or(
-        // UNPORTED(surface.surface_cache_p3): SmSurfaceCache::GetTree
-        SolidError::unported("SmSurfaceCache::GetTree", "surface.surface_cache_p3"),
-    )?;
+    // the constructor's m_pTree = pCache->GetTree() (built if needed)
+    cache.get_tree(k)?;
+    let cache: &SurfaceCache<O> = cache;
+    let tree: &Tree<O> = cache.tree().ok_or(SolidError::invalid_input(
+        "intersect::surface_tracer::find_interior_curves",
+        "surface cache without tree",
+    ))?;
 
     // Find pairs of tree nodes containing possible solutions from which StartPoints can be found
     let mut solutions = SolutionArray::new();
