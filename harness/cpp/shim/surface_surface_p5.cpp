@@ -1370,6 +1370,7 @@ enum : int32_t
     OP_FILTER = 8,
     OP_SP_LOCAL = 9,
     OP_IDENT = 10,
+    OP_MAXDIST = 11,
 };
 
 void put_solution(std::vector<double>& o, const SmSolution& s, int n)
@@ -1634,6 +1635,28 @@ void run(int32_t op, Rd& rd, std::vector<double>& o)
         o.push_back(0.0);
         o.push_back((double)pr);
         o.push_back(pref == NULL ? -1.0 : (pref == &a ? 0.0 : 1.0));
+        break;
+    }
+    case OP_MAXDIST:
+    {
+        SmExtent2d d = rd.dom();
+        SmBSplineCurve* c = read_curve(rd, ctx);
+        double a = rd.num(), b = rd.num();
+        ULONG ns = (ULONG)rd.idx();
+        bool has_needed = rd.flag();
+        double needed = rd.num();
+        double found = 0.0, ct = 0.0;
+        SmPoint2d sp(0.0, 0.0);
+        SmStatus r = c->SurfaceMaxDistanceBetween(SmExtent1d(a, b), *s, d, ns, has_needed ? &needed : NULL, found, &ct, &sp);
+        o.push_back(st(r));
+        if (r == SM_SUCCESS)
+        {
+            o.push_back(found);
+            o.push_back(ct);
+            o.push_back(sp.x);
+            o.push_back(sp.y);
+        }
+        delete c;
         break;
     }
     default:

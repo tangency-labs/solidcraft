@@ -2296,9 +2296,9 @@ Upstream behaviour worth knowing (all kept by the port unless noted):
   also needs `surface.surface_p7`) and the `SmTangentField` arm of `SmCurve::ReadFromDB`
   in `curve/curve/p2.rs` (no tangent-field curve kind; unreachable for now: the
   `SmCrvOnSurf` part of the record defers on `SmSurface::ReadFromDB` first). The
-  `DeformToEndPointTargets` branch for curves on surfaces is a "NOT PORTED" comment
-  (the blocker is curve_p6's dropped arguments, not surface_p5): it is taken only with the `pOptSurfCrvOnSurf` argument
-  the port drops, and needs `SmSurface::DropPoint`.
+  `DeformToEndPointTargets` branch for curves on surfaces is retagged
+  not ported (curve_p6's own limit, no longer tagged to surface.surface_p5): it is taken only with the
+  `pOptSurfCrvOnSurf` argument the port drops, and needs `SmSurface::DropPoint`.
 - **Wired.** `SmCurve::ReadFromDB(SmCrvOnSurf_TYPE)` (curve.curve_p2) and the
   `SmCrvOnSurf` part of `SmTangentField::ReadFromDB` (curve.tangent_field: its 2
   `curve.crv_on_surf` deferrals now pass; that read's status is ignored upstream).
@@ -3819,7 +3819,11 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   `Unported` (`curve.iso_curve`) for those kinds. Upstream builds the iso curve over the
   surface itself; fixing it means `IsoCurve` holding a `Surface` (a change to
   `curve.iso_curve` and its users).
-- **Still unported, blocked on `curve.curve_p6`'s port (a "NOT PORTED" comment in curve_p6, not a surface_p5 stub):** the `SmCrvOnSurf` branch of `curve_p6` needs the dropped
+- **Plane iso curves.** Upstream's `SmIsoCurve` over an `SmPlane` evaluates through the plane's analytic
+  `Evaluate`; the Rust `IsoCurve` holds the plane's NURB, and the two differ in the last bits (a
+  difftest of `sm_SpLocalSolve`'s boundary solves on planes disagreed at 1e-9 on values that converge to
+  zero). `iso_curve_of` therefore defers on planes (`curve.iso_curve`) until `IsoCurve` holds a `Surface`.
+- **Not wired (no stub tagged to surface.surface_p5 is left):** the `SmCrvOnSurf` branch of `curve_p6` needs the dropped
   `pOptSurfCrvOnSurf` and `pOptCrvOrientation` arguments of `DropPoint`; `SmSurface::DropPoint` and
   `LocalPointSolve` of the generic callers (`curve::curve::p2`, `nurbs::b_spline_curve_n_lib`) go through
   `SurfaceEvaluate::{drop_point_minimize, local_point_solve_minimize}`.

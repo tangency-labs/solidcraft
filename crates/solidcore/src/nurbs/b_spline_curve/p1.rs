@@ -487,6 +487,21 @@ impl BSplineCurve {
         }
     }
 
+    /// A copy that keeps the NURB exactly as it is: [`BSplineCurve::copy`] fixes the
+    /// knot vector up, which can move near-coincident knots. For wrappers that stand in
+    /// for upstream using the original object.
+    #[must_use]
+    pub fn clone_exact(&self) -> Self {
+        Self {
+            dim: self.dim,
+            nurb: self.nurb.as_ref().map(copy_nurb_curve),
+            nurb_is_borrowed: false,
+            out_of_bounds_enabled: self.out_of_bounds_enabled,
+            knot_type: self.knot_type,
+            form: self.form,
+        }
+    }
+
     /// A copy (copy constructor, `Copy`): dimension, out-of-bounds flag, knot type and
     /// form are copied; the NURB (if any) is copied compactly and its knots are fixed
     /// up; the copy owns its NURB.

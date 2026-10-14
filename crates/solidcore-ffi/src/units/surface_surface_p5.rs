@@ -23,6 +23,7 @@
 //! | `Filter`       | `sm_FilterSolution` (verbatim copy)          | `dom curve ivl uc[2] vc[2] tc[2] value t u v`         | `keep` |
 //! | `SpLocal`      | `sm_SpLocalSolve` (verbatim copy, adapted)   | `dom uc[2] vc[2] P tol sop solve_surf proc_bnd`       | `n (value u v)*n` |
 //! | `Ident`        | `Sm{SP,LSI,CS,CSI}GlobalSolver::IdenticalSolutions` | `kind tol sol1 sol2`                           | `pair preferred` (`-1` none) |
+//! | `MaxDist`     | `SmCurve::SurfaceMaxDistanceBetween`         | `dom curve ivl samples has_needed needed`             | `max_distance t u v` on success |
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour or runaway work:
 //! well-formed clamped B-splines and planes (curve-bounded surfaces for the singularity
@@ -59,6 +60,7 @@ pub enum Op {
     Filter,
     SpLocal,
     Ident,
+    MaxDist,
 }
 
 impl Op {
@@ -497,6 +499,19 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             sop(&mut rd, &[SO_INTERSECT, SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE])?;
             rd.flag()?;
             rd.flag()?;
+        }
+        Op::MaxDist => {
+            let d = solve_surface(dom)?;
+            domain_in(&mut rd, d)?;
+            let (a, b) = curve(&mut rd)?;
+            let x = rd.finite()?;
+            let y = rd.finite()?;
+            if x < a || y > b || x >= y {
+                return Err(bad("interval outside the curve's range"));
+            }
+            rd.index(32)?;
+            rd.flag()?;
+            rd.finite()?;
         }
         Op::Ident => {
             let kind = rd.index(3)?;

@@ -40,6 +40,7 @@ use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use solidcore::nurbs::crv_basic::Curve;
+use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
@@ -222,6 +223,7 @@ enum OpIn {
         proc_bnd: bool,
     },
     Ident { kind: u8, tol: f64, a: SolIn, b: SolIn },
+    MaxDist { dom: [f64; 4], curve: CrvIn, ivl: [f64; 2], n: usize, needed: Option<f64> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,6 +369,13 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             o.extend_from_slice(p);
             o.extend([*tol, f64::from(*sop), b(*solve_surf), b(*proc_bnd)]);
             Op::SpLocal
+        }
+        OpIn::MaxDist { dom, curve, ivl, n, needed } => {
+            o.extend_from_slice(dom);
+            push_crv(&mut o, curve);
+            o.extend_from_slice(ivl);
+            o.extend([*n as f64, b(needed.is_some()), needed.unwrap_or(0.0)]);
+            Op::MaxDist
         }
         OpIn::Ident { kind, tol, a, b: sb } => {
             o.extend([f64::from(*kind), *tol]);
@@ -692,6 +701,19 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Err(c) => o.extend([c, 0.0]),
             }
         }
+        OpIn::MaxDist { dom, curve, ivl, n, needed } => {
+            let c = curve_of(curve)?;
+            match st(c.surface_max_distance_between(
+                &Extent1d::from_min_max(ivl[0], ivl[1]),
+                &s,
+                &dom_of(*dom),
+                *n,
+                *needed,
+            ))? {
+                Ok(g) => o.extend([0.0, g.max_distance, g.curve_param, g.surface_param.x, g.surface_param.y]),
+                Err(code) => o.push(code),
+            }
+        }
         OpIn::Ident { kind, tol, a, b: sb } => {
             let (sa, sb) = (sol_of(a)?, sol_of(sb)?);
             let tree: Tree<Obj> = Tree::new_spatial(&Extent3d::from_points(
@@ -927,13 +949,8 @@ fn natural(s: &SrfIn) -> [f64; 4] {
             bs.u.last().copied().unwrap_or(1.0),
             bs.v.last().copied().unwrap_or(1.0),
         ],
-        SrfIn::Plane { .. } => {
-            let d = surface_of(s).map_or_else(
-                |_| Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
-                |x| x.natural_uv_domain(),
-            );
-            [d.min().x, d.min().y, d.max().x, d.max().y]
-        }
+        // the natural domain of a plane is about +-1.2e6: generated cases use a small window
+        SrfIn::Plane { .. } => [-4.0, -4.0, 4.0, 4.0],
     }
 }
 
@@ -1036,7 +1053,9 @@ fn unit_scale(s: &SrfIn) -> bool {
                 .fold(0.0, f64::max);
             (0.5..=100.0).contains(&max)
         }
-        _ => false,
+        // planes drop analytically (and generated ones work in a small window); files are unit sized
+        SrfIn::Plane { .. } | SrfIn::Sms(_) => true,
+        SrfIn::Bounded { basis, .. } => unit_scale(basis),
     }
 }
 
@@ -1075,9 +1094,49 @@ fn gen_sol(rng: &mut Rng, kind: u8, dom: [f64; 4]) -> SolIn {
     }
 }
 
+/// A straight segment as a B-spline curve (`SmLine`-like: degree 1, four natural knots).
+fn gen_line(rng: &mut Rng) -> CrvIn {
+    let a = rng.point3(-3.0, 3.0);
+    let b = rng.point3(-3.0, 3.0);
+    CrvIn {
+        dim: 3,
+        cpts: vec![[a[0], a[1], a[2], NOW], [b[0], b[1], b[2], NOW]],
+        p: 1,
+        u: vec![0.0, 0.0, 1.0, 1.0],
+    }
+}
+
+/// A point `offset` above or below a random interior point of the surface along its
+/// normal, where a plane's analytic drop stays inside the domain.
+fn gen_point_over(rng: &mut Rng, s: &SrfIn, offset: f64) -> Option<[f64; 3]> {
+    let surface = surface_of(s).ok()?;
+    let dom = surface.natural_uv_domain();
+    let uv = dom.evaluate(rng.uniform(0.1, 0.9), rng.uniform(0.1, 0.9));
+    let p = surface.evaluate_point(uv).ok()?;
+    let n = surface.evaluate_normal(uv, Side::Left, Side::Left).ok()?;
+    let q = p + n * offset;
+    Some([q.x, q.y, q.z])
+}
+
+fn gen_maxdist(rng: &mut Rng, s: &SrfIn) -> OpIn {
+    let curve = if rng.chance(0.7) { gen_line(rng) } else { gen_curve(rng) };
+    let (a, bb) = (curve.u.first().copied().unwrap_or(0.0), curve.u.last().copied().unwrap_or(1.0));
+    let ivl = if rng.chance(0.5) { [a, bb] } else { [a, a + (bb - a) * rng.uniform(0.3, 1.0)] };
+    OpIn::MaxDist {
+        dom: gen_dom(rng, s),
+        curve,
+        ivl,
+        n: rng.below(12) as usize,
+        needed: rng.chance(0.3).then(|| rng.uniform(0.0, 5.0)),
+    }
+}
+
 #[allow(clippy::too_many_lines)] // one arm per op
 fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
     let nat = natural(s);
+    if rng.chance(0.06) {
+        return gen_maxdist(rng, s);
+    }
     let uv = gen_uv_any(rng, s);
     match rng.below(100) {
         0..=13 => OpIn::IsSing {
@@ -1123,7 +1182,13 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
         },
         54..=67 => OpIn::Drop {
             dom: if rng.chance(0.6) { nat } else { gen_dom(rng, s) },
-            p: gen_point_near(rng, s),
+            p: {
+                let off = rng.uniform(-2.0, 2.0);
+                (matches!(s, SrfIn::Plane { .. }) && rng.chance(0.7))
+                    .then(|| gen_point_over(rng, s, off))
+                    .flatten()
+                    .unwrap_or_else(|| gen_point_near(rng, s))
+            },
             guess: rng.chance(0.5).then_some(uv),
             sop: gen_sop(rng, &[0, 3, 5]),
             tgt: rng.chance(0.2).then(|| rng.point3(-1.0, 1.0)),
@@ -1207,12 +1272,27 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
 fn gen_case(rng: &mut Rng) -> Inputs {
     let surface = gen_surface(rng);
     let op = gen_op(rng, &surface);
+    // curve/plane gaps are the ones the harness can compare (planes drop analytically; the
+    // other surfaces defer on the point solves, and a curve-bounded surface has no GetKnots here)
+    if matches!(op, OpIn::MaxDist { .. }) {
+        let surface = gen_plane(rng);
+        let op = gen_maxdist(rng, &surface);
+        return Inputs { surface, op };
+    }
     Inputs { surface, op }
 }
 
 /// Ops whose C++ side builds a surface cache decomposition: keep them at modest scales.
 fn is_heavy(op: &OpIn) -> bool {
-    matches!(op, OpIn::Lssi { .. } | OpIn::Cover { .. } | OpIn::Drop { .. } | OpIn::Lps { .. } | OpIn::SpLocal { .. })
+    matches!(
+        op,
+        OpIn::Lssi { .. }
+            | OpIn::Cover { .. }
+            | OpIn::Drop { .. }
+            | OpIn::Lps { .. }
+            | OpIn::SpLocal { .. }
+            | OpIn::MaxDist { .. }
+    )
 }
 
 impl UnitDiff for Runner {

@@ -437,13 +437,16 @@ fn iso_curve_of(
 ) -> Result<IsoCurve> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Ok(IsoCurve::new(b.clone_exact(), param, iso, from_left, false)),
-        SurfaceKind::Plane(p) => Ok(IsoCurve::new(
-            p.base_for_query().clone_exact(),
-            param,
-            iso,
-            from_left,
-            false,
-        )),
+        SurfaceKind::Plane(_) => {
+            // upstream's SmIsoCurve evaluates through SmPlane::Evaluate (analytic); the
+            // Rust SmIsoCurve holds the plane's NURB, whose rounding differs, so a solve
+            // over it would not be comparable (plan/findings.md, surface.surface_p5)
+            // UNPORTED(curve.iso_curve): SmIsoCurve over an SmPlane
+            Err(SolidError::unported(
+                "SmIsoCurve::SmIsoCurve(SmPlane)",
+                "curve.iso_curve",
+            ))
+        }
         SurfaceKind::CurveBounded(_) | SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Step(_) => {
             // `SmIsoCurve` holds an `SmBSplineSurface` only (see plan/findings.md,
             // surface.surface_p5), so these kinds have no iso curve to build.
