@@ -240,7 +240,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-fn wrapped_of(wrap: bool, s: &SurfIn) -> Result<Surface, HarnessError> {
+pub(crate) fn wrapped_of(wrap: bool, s: &SurfIn) -> Result<Surface, HarnessError> {
     let s = surface_in(s)?;
     Ok(if wrap {
         Surface::from(StepSurface::new(s, true))
@@ -249,15 +249,15 @@ fn wrapped_of(wrap: bool, s: &SurfIn) -> Result<Surface, HarnessError> {
     })
 }
 
-fn p2(uv: [f64; 2]) -> Point2 {
+pub(crate) fn p2(uv: [f64; 2]) -> Point2 {
     Point2::new(uv[0], uv[1])
 }
 
-fn push2(o: &mut Vec<f64>, v: Point2) {
+pub(crate) fn push2(o: &mut Vec<f64>, v: Point2) {
     o.extend([v.x, v.y]);
 }
 
-fn solver_op(code: u8) -> Result<SolverOperation, HarnessError> {
+pub(crate) fn solver_op(code: u8) -> Result<SolverOperation, HarnessError> {
     SolverOperation::ALL
         .get(usize::from(code))
         .copied()
@@ -485,10 +485,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generated cases ----------------------------------------------------------------
 
 /// The supported solver operations.
-const SOLVERS: [u8; 5] = [0, 3, 4, 5, 10];
+pub(crate) const SOLVERS: [u8; 5] = [0, 3, 4, 5, 10];
 
 /// A point of `d`: a corner, a point on a side, or inside.
-fn gen_uv(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
+pub(crate) fn gen_uv(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
     let pick = |rng: &mut Rng, a: f64, b: f64| -> f64 {
         match rng.below(6) {
             0 => a,
@@ -500,7 +500,7 @@ fn gen_uv(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
 }
 
 /// A point in `d` or, half the time, somewhat outside it.
-fn gen_uv_any(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
+pub(crate) fn gen_uv_any(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
     let [u, v] = gen_uv(rng, d);
     if rng.chance(0.5) {
         return [u, v];
@@ -514,7 +514,7 @@ fn gen_uv_any(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
 
 /// A test point for the surface: on it, slightly or well off it along its normal, or
 /// anywhere around it.
-fn gen_test(rng: &mut Rng, s: &Surface, d: [f64; 4], size: f64) -> [f64; 3] {
+pub(crate) fn gen_test(rng: &mut Rng, s: &Surface, d: [f64; 4], size: f64) -> [f64; 3] {
     let uv = gen_uv(rng, d);
     let Ok((p, su, sv)) = s.evaluate_1st_derivatives(p2(uv), false, false) else {
         return gvec(rng, size * 2.0);
@@ -539,7 +539,7 @@ fn gen_test(rng: &mut Rng, s: &Surface, d: [f64; 4], size: f64) -> [f64; 3] {
 
 /// A test point on the surface normal at `uv`: on the surface, or off it on either
 /// side by a small to large distance.
-fn test_on_normal(rng: &mut Rng, s: &Surface, uv: [f64; 2], size: f64) -> [f64; 3] {
+pub(crate) fn test_on_normal(rng: &mut Rng, s: &Surface, uv: [f64; 2], size: f64) -> [f64; 3] {
     let Ok((p, su, sv)) = s.evaluate_1st_derivatives(p2(uv), false, false) else {
         return gvec(rng, size);
     };
@@ -555,7 +555,7 @@ fn test_on_normal(rng: &mut Rng, s: &Surface, uv: [f64; 2], size: f64) -> [f64; 
 }
 
 /// A closed B-spline: a full rational circle (or a closed polygon) in u swept in v.
-fn gen_closed(rng: &mut Rng) -> InlineSrf {
+pub(crate) fn gen_closed(rng: &mut Rng) -> InlineSrf {
     let r = rng.uniform(0.5, 5.0);
     let h = rng.uniform(0.5, 5.0);
     let v_rows = 2 + rng.below(2) as usize;
@@ -623,7 +623,7 @@ fn gen_closed(rng: &mut Rng) -> InlineSrf {
 }
 
 /// A bilinear (2 x 2) surface, sometimes twisted.
-fn gen_bilinear(rng: &mut Rng) -> InlineSrf {
+pub(crate) fn gen_bilinear(rng: &mut Rng) -> InlineSrf {
     let tw = if rng.chance(0.5) { 0.0 } else { rng.uniform(-1.0, 1.0) };
     let net = vec![
         vec![[0.0, 0.0, 0.0, NOW], [0.0, 1.0, 0.0, NOW]],
@@ -675,7 +675,7 @@ fn gen_zigzag(rng: &mut Rng) -> InlineSrf {
     }
 }
 
-fn gen_surface(rng: &mut Rng) -> SurfIn {
+pub(crate) fn gen_surface(rng: &mut Rng) -> SurfIn {
     let bss = |s: InlineSrf| BssIn {
         oob: false,
         form: default_form(),
@@ -690,7 +690,7 @@ fn gen_surface(rng: &mut Rng) -> SurfIn {
 }
 
 /// The control-net counts of a surface input (a plane's net is 2 x 2).
-fn net_counts(s: &SurfIn) -> Result<(usize, usize), HarnessError> {
+pub(crate) fn net_counts(s: &SurfIn) -> Result<(usize, usize), HarnessError> {
     match s {
         SurfIn::Plane(_) => Ok((2, 2)),
         SurfIn::Bspline(b) | SurfIn::CurveBounded(b) => {
@@ -845,7 +845,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
 
 /// The test points of `my_test_surface_closest_point` on `Surface.sms`
 /// (`tests/prog_test/src/smSurfaceTest.cpp:4117`).
-const SURFACE_SMS_POINTS: [[f64; 3]; 15] = [
+pub(crate) const SURFACE_SMS_POINTS: [[f64; 3]; 15] = [
     [-1.0616429349692744, -20.167126109553802, 20.020823739437560],
     [-1.1583434957685239, -19.953438722680168, 20.005921768970701],
     [-4.5941574701649142, -9.6528635542995485, 19.290949275641431],

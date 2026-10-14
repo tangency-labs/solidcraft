@@ -108,7 +108,7 @@ impl Op {
 pub const MAX_HIT_STEPS: usize = 64;
 
 /// The solver operations the file's classes accept.
-const OPS: [usize; 5] = [0, 3, 4, 5, 10];
+pub(crate) const OPS: [usize; 5] = [0, 3, 4, 5, 10];
 
 mod sys {
     extern "C" {
@@ -124,13 +124,13 @@ mod sys {
 }
 
 /// The problem `P`: the surface domain and the control-net counts (`2 x 2` for a plane).
-struct Problem {
-    srf: Srf,
-    num_u: usize,
-    num_v: usize,
+pub(crate) struct Problem {
+    pub(crate) srf: Srf,
+    pub(crate) num_u: usize,
+    pub(crate) num_v: usize,
 }
 
-fn problem(rd: &mut Reader<'_>) -> Result<Problem, FfiError> {
+pub(crate) fn problem(rd: &mut Reader<'_>) -> Result<Problem, FfiError> {
     rd.flag()?;
     let at = rd.at;
     let (kind, srf, _) = sized_surface(rd)?;
@@ -151,7 +151,7 @@ fn problem(rd: &mut Reader<'_>) -> Result<Problem, FfiError> {
 }
 
 /// A point `uv` inside the surface domain.
-fn uv_in(rd: &mut Reader<'_>, srf: &Srf) -> Result<(), FfiError> {
+pub(crate) fn uv_in(rd: &mut Reader<'_>, srf: &Srf) -> Result<(), FfiError> {
     let u = rd.finite()?;
     let v = rd.finite()?;
     let d = srf.dom;
@@ -162,7 +162,7 @@ fn uv_in(rd: &mut Reader<'_>, srf: &Srf) -> Result<(), FfiError> {
 }
 
 /// A point `uv` within a domain size of the surface domain.
-fn uv_near(rd: &mut Reader<'_>, srf: &Srf) -> Result<(), FfiError> {
+pub(crate) fn uv_near(rd: &mut Reader<'_>, srf: &Srf) -> Result<(), FfiError> {
     let u = rd.finite()?;
     let v = rd.finite()?;
     let d = srf.dom;
@@ -174,7 +174,7 @@ fn uv_near(rd: &mut Reader<'_>, srf: &Srf) -> Result<(), FfiError> {
 }
 
 /// Control-net indices `i j` with `i + du < num_u`, `j + dv < num_v`.
-fn net_index(rd: &mut Reader<'_>, p: &Problem, d: usize) -> Result<(), FfiError> {
+pub(crate) fn net_index(rd: &mut Reader<'_>, p: &Problem, d: usize) -> Result<(), FfiError> {
     let i = rd.index(1 << 20)?;
     let j = rd.index(1 << 20)?;
     if i + d >= p.num_u || j + d >= p.num_v {
