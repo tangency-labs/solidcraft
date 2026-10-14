@@ -2184,7 +2184,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "180 fns; largest: sm_AreOverlapping, SmProtoTopologyManager::CanCombineEdgeDefinitions, SmProtoTopologyManager::RemoveCoincidentNoEdgeProtoVertex, sm_TransformIndependentObject; entry points: SmApiRotate, SmApiScale, SmApiScaleByPt, SmApiTransform, SmApiTranslate; cycle back-edges (call into later units; stub or co-port): query.poly(9), topology.edge(7), query.face_p2(4), blend.fillet_geom_p1(3), topology.edgeuse_p1(3), topology.vertex(3), topology.shell(2), boolean.topology_intersector_p1(1), topology.brep_p1(1), topology.brep_p2(1), topology.brep_p3(1), topology.brep_p4(1), topology.brep_p5(1), topology.face_p4(1), topology.vertexuse(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "180 fns; largest: sm_AreOverlapping, SmProtoTopologyManager::CanCombineEdgeDefinitions, SmProtoTopologyManager::RemoveCoincidentNoEdgeProtoVertex, sm_TransformIndependentObject; entry points: SmApiRotate, SmApiScale, SmApiScaleByPt, SmApiTransform, SmApiTranslate; cycle back-edges (call into later units; stub or co-port): query.poly(9), topology.edge(7), query.face_p2(4), blend.fillet_geom_p1(3), topology.edgeuse_p1(3), topology.vertex(3), topology.shell(2), boolean.topology_intersector_p1(1), topology.brep_p1(1), topology.brep_p2(1), topology.brep_p3(1), topology.brep_p4(1), topology.brep_p5(1), topology.face_p4(1), topology.vertexuse(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmOwningTopology::IsKindOf -> topology::edgeuse::p1::owning_topology_is_kind_of"
 
 [[unit]]
 id = "intersect.adv_surface_intersector"
@@ -2265,10 +2265,10 @@ soft_depends_on = ["geom.vector2d", "nurbs.b_spline_curve_p1", "surface.surface_
 est_lines = 1157
 layer = 33
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "57 fns; largest: SmEdgeuse::SetUVTrimCurve, SmEdgeuse::CalcMaxEdgeFaceGap, SmFaceuse::CollectAdjacentFaceuses, SmFindStepOffENFO::Evaluate; cycle back-edges (call into later units; stub or co-port): heal.gap(14), topology.edge(13), topology.loopuse(9), topology.vertexuse(4), topology.face_p2(2), topology.shell(2), topology.edgeuse_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2722 cases (2706 fixture: 1155 on 15 upstream .smb B-reps read by SmBrep::ReadFromFile, with and without RebuildUVTrimCurves; 1115 on prog_test my_test_topology's wire network, wire edges and faces from B-spline curves/surfaces and real SmPlanes, plus the geometry statics on B-splines and SmPlanes; 436 review adversarial in fixtures/topology.edgeuse_p1/adversarial.json: pole/pinch, tiny and huge scale (to 1e200), uv up to 100 domain lengths outside, 1% seam tolerance edge, null/drop-curve SetUVTrimCurve, rebuilt .smb gaps; 16 generated, 6000 more checked once), 2449 pass, 273 deferred (heal.gap 206, topology.edge 32, surface.surface_p5 28, topology.edgeuse_p3 7), max_rel_err 0; --perturb SENSITIVE. There is no Rust B-rep reader/builder yet, so the runner imports the graph the shim exports (raw members, traversal order) into topology::Brep. Co-ports the minimal use records into the topology skeleton (see CO-PORTED notes of topology.edge, topology.loopuse, topology.vertexuse, topology.shell, topology.vertex, topology.face_p2, topology.brep_p1, heal.gap, topology.proto_topology_p1); adds curve::line::Line::from_parts (raw constructor for the import). SmBrep::ReadFromFile crashes on SmallBox.smb and Platform.smb (plan/findings.md), so they are not used. Back-edge stubs UNPORTED(topology.edgeuse_p1) in surface::trim_srf_cache (GetUVTrimCurve), intersect::point_class (GetBrep, GetEdge) and geom::tol (GetZoneTol3d dispatch) are not wired: those callers hold opaque object handles without a Brep (plan/findings.md). Plan notes: 57 fns; largest: SmEdgeuse::SetUVTrimCurve, SmEdgeuse::CalcMaxEdgeFaceGap, SmFaceuse::CollectAdjacentFaceuses, SmFindStepOffENFO::Evaluate; cycle back-edges (call into later units; stub or co-port): heal.gap(14), topology.edge(13), topology.loopuse(9), topology.vertexuse(4), topology.face_p2(2), topology.shell(2), topology.edgeuse_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "intersect.curve_class_p3"
@@ -2380,7 +2380,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "32 fns; largest: sm_FixUVTrimCurves, SmFace::GetPointsInFace, SmODEIsoCurveLengthIFEO::Evaluate, SmFace::CreateCurvesByTrimming; cycle back-edges (call into later units; stub or co-port): topology.edge(9), topology.vertexuse(5), topology.vertex(4), topology.loopuse(3), mass.integrator(2), query.face_p2(2), topology.edgeuse_p3(2), heal.gap(1), query.face_p3(1), topology.face_p1(1); unit-SCC #22 (220 units); hazards: clock,rng; 319 upstream test entry points reach this unit"
+notes = "32 fns; largest: sm_FixUVTrimCurves, SmFace::GetPointsInFace, SmODEIsoCurveLengthIFEO::Evaluate, SmFace::CreateCurvesByTrimming; cycle back-edges (call into later units; stub or co-port): topology.edge(9), topology.vertexuse(5), topology.vertex(4), topology.loopuse(3), mass.integrator(2), query.face_p2(2), topology.edgeuse_p3(2), heal.gap(1), query.face_p3(1), topology.face_p1(1); unit-SCC #22 (220 units); hazards: clock,rng; 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmFace::m_pSurface -> topology::Face::surface"
 
 [[unit]]
 id = "intersect.curve_class_p5"
@@ -2436,7 +2436,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "37 fns; largest: SmShell::RayFire, SmShell::TransferChildrenTo, SmShell::GetWireEdges, SmRegion::OrderShells; cycle back-edges (call into later units; stub or co-port): topology.edge(5), query.face_p1(2), topology.brep_p1(2), query.brep(1), topology.brep_p2(1), topology.topology_traverser(1), topology.vertex(1), topology.vertexuse(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "37 fns; largest: SmShell::RayFire, SmShell::TransferChildrenTo, SmShell::GetWireEdges, SmRegion::OrderShells; cycle back-edges (call into later units; stub or co-port): topology.edge(5), query.face_p1(2), topology.brep_p1(2), query.brep(1), topology.brep_p2(1), topology.topology_traverser(1), topology.vertex(1), topology.vertexuse(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmRegion (m_pListOwner != NULL only) -> topology::Region, SmShell::m_pListOwner -> topology::Shell::region; SmShell::GetRegion, GetBrep -> topology::edgeuse::p1::{shell_region, shell_brep}"
 
 [[unit]]
 id = "intersect.curve_class_p8"
@@ -2478,7 +2478,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "29 fns; largest: SmVertexuse::ComputeUVSector, SmVertexuse::ComputeUVPoint, SmVertexuse::CalcVertexFaceGap, SmVertexuse::Notify; cycle back-edges (call into later units; stub or co-port): heal.gap(11), topology.edge(6), topology.vertex(5), topology.loopuse(4), blend.fillet_geom_p1(1), topology.edgeuse_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "29 fns; largest: SmVertexuse::ComputeUVSector, SmVertexuse::ComputeUVPoint, SmVertexuse::CalcVertexFaceGap, SmVertexuse::Notify; cycle back-edges (call into later units; stub or co-port): heal.gap(11), topology.edge(6), topology.vertex(5), topology.loopuse(4), blend.fillet_geom_p1(1), topology.edgeuse_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmVertexuse members (owner vertex, m_tVertexuseType/m_pSorLUorEU, m_sVertexFaceGap3d) -> topology::{Vertexuse, VertexuseOwner}; SmVertexuse::GetEdgeuse -> topology::edgeuse::p1::vertexuse_edgeuse"
 
 [[unit]]
 id = "topology.vertex"
@@ -2492,7 +2492,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "38 fns; largest: SmVertex::IsTopologicalVertex, SmVertex::Notify, SmVertex::IsConnectedTo, SmVertex::GetMaxUpDimGap3d; cycle back-edges (call into later units; stub or co-port): topology.edge(12), heal.gap(4), topology.loopuse(2), blend.fillet_geom_p1(1), topology.face_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "38 fns; largest: SmVertex::IsTopologicalVertex, SmVertex::Notify, SmVertex::IsConnectedTo, SmVertex::GetMaxUpDimGap3d; cycle back-edges (call into later units; stub or co-port): topology.edge(12), heal.gap(4), topology.loopuse(2), blend.fillet_geom_p1(1), topology.face_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmVertex::m_sZoneTol3d -> topology::Vertex::tolerance"
 
 [[unit]]
 id = "topology.loopuse"
@@ -2506,7 +2506,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "48 fns; largest: SmLoopuse::IsClosed3d, SmLoop::GetUVCornerBoundaries, SmLoop::FlipLoopOrientation, SmLoopuse::IsMissingSeamAtVertices; cycle back-edges (call into later units; stub or co-port): topology.edge(6), topology.edgeuse_p3(1), topology.face_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "48 fns; largest: SmLoopuse::IsClosed3d, SmLoop::GetUVCornerBoundaries, SmLoop::FlipLoopOrientation, SmLoopuse::IsMissingSeamAtVertices; cycle back-edges (call into later units; stub or co-port): topology.edge(6), topology.edgeuse_p3(1), topology.face_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmLoopuse members (owner face use, m_pL, m_pLUMate, m_tLoopuseType/m_pEUorVU) -> topology::{Loopuse, LoopuseStart}, SmLoop::m_pLU -> topology::Loop::loopuse; SmLoopuse::GetEdgeuses (no filters), GetShell -> topology::edgeuse::p1::{loopuse_edgeuses, loopuse_shell}"
 
 [[unit]]
 id = "topology.brep_p8"
@@ -2534,7 +2534,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "60 fns; largest: SmEdge::IsTopological, SmEdge::FindRadialSector, SmEdge::GetBlendEdgeuse, SmEdge::OrientEdgeSequence; cycle back-edges (call into later units; stub or co-port): heal.gap(12), topology.edgeuse_p3(3), query.edge(2), topology.brep_p2(2), blend.fillet_geom_p1(1), topology.brep_p1(1), topology.face_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "60 fns; largest: SmEdge::IsTopological, SmEdge::FindRadialSector, SmEdge::GetBlendEdgeuse, SmEdge::OrientEdgeSequence; cycle back-edges (call into later units; stub or co-port): heal.gap(12), topology.edgeuse_p3(3), query.edge(2), topology.brep_p2(2), blend.fillet_geom_p1(1), topology.brep_p1(1), topology.face_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmEdge members m_pList (edge use list, primary first), m_vInterval, m_sZoneTol3d, m_pCurve -> topology::Edge::{edgeuses, interval, tolerance, curve}; SmEdge::GetPrimaryEdgeuse, IsLamina, GetBrep -> topology::edgeuse::p1::{primary_edgeuse, edge_is_lamina, edge_brep}"
 
 [[unit]]
 id = "blend.fillet_custom_solver"
@@ -2604,7 +2604,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "119 fns; largest: SmGapFunction::BuildSampleSet, SmCrvSrfGapFunction::Evaluate, SmCrvCrvGapFunction::Evaluate, SmSrfCrvGapFunction::Evaluate; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "119 fns; largest: SmGapFunction::BuildSampleSet, SmCrvSrfGapFunction::Evaluate, SmCrvCrvGapFunction::Evaluate, SmSrfCrvGapFunction::Evaluate; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmEdgeFaceGap, SmEdgeEdgeGap, SmVertexFaceGap data members, ReSet, IsInit, SmEdgeFaceGap::SetEdgeuse -> heal::gap::{EdgeFaceGap, EdgeEdgeGap, VertexFaceGap}"
 
 [[unit]]
 id = "query.loop"
@@ -2800,7 +2800,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "50 fns; largest: SmBrep::HealBrep, SmBrep::CreateCornerBlend, SmBrep::CreateEdgeEdgeBlend, sm_MakeVertexSplitUVTrimCurve; cycle back-edges (call into later units; stub or co-port): query.brep(3), heal.heal_data_p1(2); unit-SCC #22 (220 units); hazards: ptr-hash; 319 upstream test entry points reach this unit"
+notes = "50 fns; largest: SmBrep::HealBrep, SmBrep::CreateCornerBlend, SmBrep::CreateEdgeEdgeBlend, sm_MakeVertexSplitUVTrimCurve; cycle back-edges (call into later units; stub or co-port): query.brep(3), heal.heal_data_p1(2); unit-SCC #22 (220 units); hazards: ptr-hash; 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmBrep::m_bValidateOnly, the region/face use/loop use/edge use/vertex use arenas -> topology::Brep (validate_only, regions(), faceuses(), ..., add_*_record, *_mut)"
 
 [[unit]]
 id = "topology.brep_p6"

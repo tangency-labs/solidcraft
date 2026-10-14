@@ -25,7 +25,10 @@
 //! of the failing function, e.g. `"geom::vector3d::Vec3::unitize"`) so that errors surfaced to
 //! callers stay actionable without a backtrace.
 
-use crate::topology::{BrepId, EdgeId, FaceId, LoopId, ShellId, VertexId};
+use crate::topology::{
+    BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
+    VertexuseId,
+};
 
 /// Shorthand for `core::result::Result<T, SolidError>`.
 pub type Result<T, E = SolidError> = core::result::Result<T, E>;
@@ -61,6 +64,16 @@ pub enum EntityRef {
     Edge(EdgeId),
     /// A vertex.
     Vertex(VertexId),
+    /// A region.
+    Region(RegionId),
+    /// A face use.
+    Faceuse(FaceuseId),
+    /// A loop use.
+    Loopuse(LoopuseId),
+    /// An edge use.
+    Edgeuse(EdgeuseId),
+    /// A vertex use.
+    Vertexuse(VertexuseId),
 }
 
 impl core::fmt::Display for EntityRef {
@@ -72,6 +85,11 @@ impl core::fmt::Display for EntityRef {
             Self::Loop(id) => write!(f, "loop {}", id.index()),
             Self::Edge(id) => write!(f, "edge {}", id.index()),
             Self::Vertex(id) => write!(f, "vertex {}", id.index()),
+            Self::Region(id) => write!(f, "region {}", id.index()),
+            Self::Faceuse(id) => write!(f, "faceuse {}", id.index()),
+            Self::Loopuse(id) => write!(f, "loopuse {}", id.index()),
+            Self::Edgeuse(id) => write!(f, "edgeuse {}", id.index()),
+            Self::Vertexuse(id) => write!(f, "vertexuse {}", id.index()),
         }
     }
 }

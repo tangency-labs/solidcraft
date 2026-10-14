@@ -4,15 +4,21 @@
 //! `SmLoop.h`, `SmEdge.h`, `SmVertex.h`, the use records `SmFaceuse.h`, `SmLoopuse.h`,
 //! `SmEdgeuse.h`, `SmVertexuse.h`, and `SmTopology.h` / `SmOwningTopology.h`.
 //!
-//! | Rust                    | Upstream                                              |
-//! |-------------------------|-------------------------------------------------------|
-//! | [`Brep`]                | `SmBrep` (face/edge/vertex lists `m_p*ListHead`)      |
-//! | [`Shell`] / [`ShellId`] | `SmShell`                                             |
-//! | [`Face`] / [`FaceId`]   | `SmFace`                                              |
-//! | [`Loop`] / [`LoopId`]   | `SmLoop`                                              |
-//! | [`Edge`] / [`EdgeId`]   | `SmEdge`                                              |
-//! | [`Vertex`] / [`VertexId`] | `SmVertex`                                          |
-//! | [`Arena`]               | upstream's intrusive `SmListNode` linked lists        |
+//! | Rust                        | Upstream                                              |
+//! |-----------------------------|-------------------------------------------------------|
+//! | [`Brep`]                    | `SmBrep` (face/edge/vertex lists `m_p*ListHead`, `m_bValidateOnly`) |
+//! | [`Region`] / [`RegionId`]   | `SmRegion` (minimal: its list owner)                  |
+//! | [`Shell`] / [`ShellId`]     | `SmShell`                                             |
+//! | [`Faceuse`] / [`FaceuseId`] | `SmFaceuse` (unit `topology.edgeuse_p1`)              |
+//! | [`Face`] / [`FaceId`]       | `SmFace`                                              |
+//! | [`Loopuse`] / [`LoopuseId`] | `SmLoopuse` (minimal)                                 |
+//! | [`Loop`] / [`LoopId`]       | `SmLoop`                                              |
+//! | [`Edgeuse`] / [`EdgeuseId`] | `SmEdgeuse` (unit `topology.edgeuse_p1`)              |
+//! | [`Edge`] / [`EdgeId`]       | `SmEdge`                                              |
+//! | [`Vertexuse`] / [`VertexuseId`] | `SmVertexuse` (minimal)                           |
+//! | [`Vertex`] / [`VertexId`]   | `SmVertex`                                            |
+//! | [`ObjectHandle`]            | an `SmObject*` a record keeps but never dereferences  |
+//! | [`Arena`]                   | upstream's intrusive `SmListNode` linked lists        |
 //!
 //! Upstream links entities with raw pointers in intrusive lists; the port stores each
 //! kind in a flat [`Arena`] owned by the [`Brep`] and links them with typed ids, so
@@ -21,16 +27,34 @@
 //! below are the minimum the scaffolding needs. The topology units in
 //! `plan/modules.toml` (regions, face/loop/edge/vertex uses, geometry binding,
 //! tolerances, attributes) extend these records; keep the id/arena/accessor shape.
+//!
+//! The use records and the fields marked "CO-PORTED" were added by unit
+//! `topology.edgeuse_p1` (the minimum its functions read). An owner's circular
+//! `m_pList` / `m_pNext` / `m_pLast` list is a `Vec` of ids in list order from the
+//! head (`m_pList`); an object's `m_pNext` / `m_pLast` are its neighbours in that
+//! `Vec` (cyclically). The low-level `add_*_record` and `*_mut` accessors are the
+//! friend writes of `SmBrepConstructor`: they link records without validation (a
+//! B-rep graph is cyclic, so a record may name ids added later).
 
 pub mod brep_data;
 pub mod database_io;
+pub mod edgeuse;
 #[allow(clippy::module_inception)]
 pub mod topology;
 
 use core::marker::PhantomData;
 
+use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::attribute::ObjectKey;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::geom::tol::ZONE_TOL_3D;
+use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexFaceGap};
 use crate::math::Point3;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::p2::DropCurveFail;
+use crate::surface::surface::Surface;
 
 /// Implemented by every typed id: conversion to and from a dense arena index.
 pub trait ArenaId: Copy + Eq + core::fmt::Debug {
@@ -100,6 +124,26 @@ typed_id!(
 typed_id!(
     /// Identifies a [`Vertex`] within its [`Brep`].
     VertexId => Vertex
+);
+typed_id!(
+    /// Identifies a [`Region`] within its [`Brep`].
+    RegionId => Region
+);
+typed_id!(
+    /// Identifies a [`Faceuse`] within its [`Brep`].
+    FaceuseId => Faceuse
+);
+typed_id!(
+    /// Identifies a [`Loopuse`] within its [`Brep`].
+    LoopuseId => Loopuse
+);
+typed_id!(
+    /// Identifies an [`Edgeuse`] within its [`Brep`].
+    EdgeuseId => Edgeuse
+);
+typed_id!(
+    /// Identifies a [`Vertexuse`] within its [`Brep`].
+    VertexuseId => Vertexuse
 );
 
 /// A dense, append-only store of `T` addressed by typed id `I`.
@@ -172,18 +216,46 @@ impl<I: ArenaId, T> Arena<I, T> {
     }
 }
 
+/// An `SmObject*` a topology record keeps but never dereferences (the surface,
+/// curve and B-rep pointers of an `SmDropCurveFail`): the object's kind and the
+/// identity it is attributed and notified under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectHandle {
+    /// What the object is.
+    pub kind: ObjectKind,
+    /// Its identity.
+    pub key: ObjectKey,
+}
+
+impl SolutionObject for ObjectHandle {
+    fn kind(&self) -> ObjectKind {
+        self.kind
+    }
+}
+
 /// A vertex (`SmVertex`): a point where edges meet.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
     /// Position in model space.
     pub point: Point3,
+    /// `m_sZoneTol3d` (CO-PORTED, `SM_USE_OLDTOL`): the vertex tolerance.
+    pub tolerance: f64,
 }
 
 /// An edge (`SmEdge`): a bounded curve between two vertices.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Edge {
     /// Start and end vertex (equal for a closed edge).
     pub vertices: [VertexId; 2],
+    /// `m_pList` (CO-PORTED): the edge's edge uses in radial list order; the first is
+    /// the primary edge use (`GetPrimaryEdgeuse`).
+    pub edgeuses: Vec<EdgeuseId>,
+    /// `m_vInterval` (CO-PORTED): the used parameter interval of the curve.
+    pub interval: Extent1d,
+    /// `m_sZoneTol3d` (CO-PORTED, `SM_USE_OLDTOL`): the edge tolerance.
+    pub tolerance: f64,
+    /// `m_pCurve` (CO-PORTED): the edge's 3D curve.
+    pub curve: Option<Curve>,
 }
 
 /// One oriented use of an edge in a loop (upstream `SmEdgeuse`, simplified).
@@ -202,15 +274,19 @@ pub struct Loop {
     pub face: FaceId,
     /// Edges in traversal order.
     pub edges: Vec<LoopEdge>,
+    /// `m_pLU` (CO-PORTED): the primary loop use (`GetLoopuse`).
+    pub loopuse: Option<LoopuseId>,
 }
 
 /// A face (`SmFace`): a bounded region of a surface.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Face {
     /// Shell containing this face.
     pub shell: ShellId,
     /// Boundary loops; upstream keeps the outer loop first.
     pub loops: Vec<LoopId>,
+    /// `m_pSurface` (CO-PORTED): the face's surface (`GetSurface`).
+    pub surface: Option<Surface>,
 }
 
 /// A shell (`SmShell`): a connected set of faces.
@@ -218,17 +294,180 @@ pub struct Face {
 pub struct Shell {
     /// Faces of the shell, in insertion order.
     pub faces: Vec<FaceId>,
+    /// `m_pListOwner` (CO-PORTED): the region owning the shell (`GetRegion`).
+    pub region: Option<RegionId>,
+}
+
+/// A region (`SmRegion`, CO-PORTED minimal record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Region {
+    /// `m_pListOwner != NULL`: the region is on the B-rep's region list, so
+    /// `GetBrep` reaches the B-rep.
+    pub in_brep: bool,
+}
+
+/// One use of a face (`SmFaceuse`): the face seen from one side.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Faceuse {
+    /// `m_pListOwner`: the shell owning the face use (`GetShell`).
+    pub shell: Option<ShellId>,
+    /// `m_pF`: the face used (`GetFace`).
+    pub face: Option<FaceId>,
+    /// `m_pFUMate`: the face's other face use (`GetMate`).
+    pub mate: Option<FaceuseId>,
+    /// `m_eOrientation`: [`OrientType::Same`] when the face use normal is the
+    /// surface normal.
+    pub orientation: OrientType,
+    /// `m_pList`: the loop uses, outer loop use first.
+    pub loopuses: Vec<LoopuseId>,
+}
+
+/// What a loop use starts from (`m_tLoopuseType` and `m_pEUorVU`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LoopuseStart {
+    /// `SmUnknown_TYPE` (a loop use not yet built).
+    #[default]
+    Unknown,
+    /// `SmEdgeuse_TYPE`: the loop's start edge use.
+    Edgeuse(Option<EdgeuseId>),
+    /// `SmVertexuse_TYPE`: the single vertex use of a vertex loop.
+    Vertexuse(Option<VertexuseId>),
+}
+
+/// One use of a loop (`SmLoopuse`, CO-PORTED minimal record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Loopuse {
+    /// `m_pListOwner` as an `SmFaceuse` (`GetFaceuse`).
+    pub faceuse: Option<FaceuseId>,
+    /// `m_pL`: the loop used (`GetLoop`).
+    pub loop_: Option<LoopId>,
+    /// `m_pLUMate`: the loop use on the face's other side (`GetOtherLoopuse`).
+    pub mate: Option<LoopuseId>,
+    /// `m_tLoopuseType` and `m_pEUorVU`.
+    pub start: LoopuseStart,
+}
+
+/// What an edge use connects to (`m_tEdgeuseType` and `m_pSorLU`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EdgeuseOwner {
+    /// `SmUnknown_TYPE` (the constructor's value).
+    #[default]
+    Unknown,
+    /// `SmLoopuse_TYPE`: an edge in a face, connected through a loop use.
+    Loopuse(Option<LoopuseId>),
+    /// `SmShell_TYPE`: a wire edge, connected to a region through a shell.
+    Shell(Option<ShellId>),
+}
+
+/// One use of an edge (`SmEdgeuse`): the edge seen from one face side or one wire
+/// end.
+#[derive(Debug, Clone)]
+pub struct Edgeuse {
+    /// `m_pListOwner`: the edge used (`GetEdge`).
+    pub edge: Option<EdgeId>,
+    /// `m_tEdgeuseType` and `m_pSorLU`.
+    pub owner: EdgeuseOwner,
+    /// `m_pCCW`: the next edge use counter-clockwise in the loop.
+    pub ccw: Option<EdgeuseId>,
+    /// `m_pCW`: the next edge use clockwise in the loop.
+    pub cw: Option<EdgeuseId>,
+    /// `m_pVU`: the vertex use at the edge use's start.
+    pub vertexuse: Option<VertexuseId>,
+    /// `m_eOrientation`: [`OrientType::Same`] when the edge use runs with its edge's
+    /// curve.
+    pub orientation: OrientType,
+    /// `m_pUVTrimCurve`: the 2D trim curve, kept on the [`OrientType::Same`] member
+    /// of a mated pair (the edge use is its owner). Upstream's `SmBSplineCurve*`: a
+    /// B-spline curve or one of its derived kinds (`SmLine`, ...).
+    pub uv_trim_curve: Option<Curve>,
+    /// `m_sMaxEdgeFaceGap3d`: the cached largest edge/face gap.
+    pub max_edge_face_gap: EdgeFaceGap,
+    /// `m_sEdgeCCWEdgeGap3d`: the cached gap to the counter-clockwise edge use.
+    pub edge_ccw_edge_gap: EdgeEdgeGap,
+    /// `m_pDropCurveFail`: what the last `CreateUVTrimCurve` recorded.
+    pub drop_curve_fail: Option<Box<DropCurveFail<ObjectHandle>>>,
+}
+
+impl Default for Edgeuse {
+    /// `SmEdgeuse()`: unlinked, unknown type and orientation, gaps reset.
+    fn default() -> Self {
+        Self {
+            edge: None,
+            owner: EdgeuseOwner::Unknown,
+            ccw: None,
+            cw: None,
+            vertexuse: None,
+            orientation: OrientType::Unknown,
+            uv_trim_curve: None,
+            max_edge_face_gap: EdgeFaceGap::new(),
+            edge_ccw_edge_gap: EdgeEdgeGap::new(),
+            drop_curve_fail: None,
+        }
+    }
+}
+
+/// What a vertex use connects to (`m_tVertexuseType` and `m_pSorLUorEU`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VertexuseOwner {
+    /// `SmUnknown_TYPE`.
+    #[default]
+    Unknown,
+    /// `SmEdgeuse_TYPE`: the vertex at an edge use's start.
+    Edgeuse(Option<EdgeuseId>),
+    /// `SmLoopuse_TYPE`: the vertex of a vertex loop.
+    Loopuse(Option<LoopuseId>),
+    /// `SmShell_TYPE`: a vertex alone in a region.
+    Shell(Option<ShellId>),
+}
+
+/// One use of a vertex (`SmVertexuse`, CO-PORTED minimal record).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Vertexuse {
+    /// `m_pListOwner`: the vertex used (`GetVertex`).
+    pub vertex: Option<VertexId>,
+    /// `m_tVertexuseType` and `m_pSorLUorEU`.
+    pub owner: VertexuseOwner,
+    /// `m_sVertexFaceGap3d`: the cached vertex/face gap.
+    pub vertex_face_gap: VertexFaceGap,
 }
 
 /// A boundary representation (`SmBrep`): arenas of shells, faces, loops, edges and
 /// vertices linked by typed ids.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone)]
 pub struct Brep {
     shells: Arena<ShellId, Shell>,
     faces: Arena<FaceId, Face>,
     loops: Arena<LoopId, Loop>,
     edges: Arena<EdgeId, Edge>,
     vertices: Arena<VertexId, Vertex>,
+    regions: Arena<RegionId, Region>,
+    faceuses: Arena<FaceuseId, Faceuse>,
+    loopuses: Arena<LoopuseId, Loopuse>,
+    edgeuses: Arena<EdgeuseId, Edgeuse>,
+    vertexuses: Arena<VertexuseId, Vertexuse>,
+    /// `m_bValidateOnly`.
+    validate_only: bool,
+    /// The identity the B-rep is attributed and notified under (`SmBrep*`).
+    key: ObjectKey,
+}
+
+impl Default for Brep {
+    fn default() -> Self {
+        Self {
+            shells: Arena::default(),
+            faces: Arena::default(),
+            loops: Arena::default(),
+            edges: Arena::default(),
+            vertices: Arena::default(),
+            regions: Arena::default(),
+            faceuses: Arena::default(),
+            loopuses: Arena::default(),
+            edgeuses: Arena::default(),
+            vertexuses: Arena::default(),
+            validate_only: false,
+            key: ObjectKey(0),
+        }
+    }
 }
 
 fn not_found<I: ArenaId>(operation: &'static str, id: I) -> SolidError {
@@ -310,6 +549,215 @@ impl Brep {
             .ok_or_else(|| not_found("topology::Brep::vertex", id))
     }
 
+    /// All regions.
+    #[must_use]
+    pub fn regions(&self) -> &Arena<RegionId, Region> {
+        &self.regions
+    }
+
+    /// All face uses.
+    #[must_use]
+    pub fn faceuses(&self) -> &Arena<FaceuseId, Faceuse> {
+        &self.faceuses
+    }
+
+    /// All loop uses.
+    #[must_use]
+    pub fn loopuses(&self) -> &Arena<LoopuseId, Loopuse> {
+        &self.loopuses
+    }
+
+    /// All edge uses.
+    #[must_use]
+    pub fn edgeuses(&self) -> &Arena<EdgeuseId, Edgeuse> {
+        &self.edgeuses
+    }
+
+    /// All vertex uses.
+    #[must_use]
+    pub fn vertexuses(&self) -> &Arena<VertexuseId, Vertexuse> {
+        &self.vertexuses
+    }
+
+    /// The region `id`.
+    pub fn region(&self, id: RegionId) -> Result<&Region> {
+        self.regions
+            .get(id)
+            .ok_or_else(|| not_found("topology::Brep::region", id))
+    }
+
+    /// The face use `id`.
+    pub fn faceuse(&self, id: FaceuseId) -> Result<&Faceuse> {
+        self.faceuses
+            .get(id)
+            .ok_or_else(|| not_found("topology::Brep::faceuse", id))
+    }
+
+    /// The loop use `id`.
+    pub fn loopuse(&self, id: LoopuseId) -> Result<&Loopuse> {
+        self.loopuses
+            .get(id)
+            .ok_or_else(|| not_found("topology::Brep::loopuse", id))
+    }
+
+    /// The edge use `id`.
+    pub fn edgeuse(&self, id: EdgeuseId) -> Result<&Edgeuse> {
+        self.edgeuses
+            .get(id)
+            .ok_or_else(|| not_found("topology::Brep::edgeuse", id))
+    }
+
+    /// The vertex use `id`.
+    pub fn vertexuse(&self, id: VertexuseId) -> Result<&Vertexuse> {
+        self.vertexuses
+            .get(id)
+            .ok_or_else(|| not_found("topology::Brep::vertexuse", id))
+    }
+
+    /// Mutable access to the shell `id`.
+    pub fn shell_mut(&mut self, id: ShellId) -> Result<&mut Shell> {
+        self.shells
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::shell_mut", id))
+    }
+
+    /// Mutable access to the face `id`.
+    pub fn face_mut(&mut self, id: FaceId) -> Result<&mut Face> {
+        self.faces
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::face_mut", id))
+    }
+
+    /// Mutable access to the loop `id`.
+    pub fn loop_mut(&mut self, id: LoopId) -> Result<&mut Loop> {
+        self.loops
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::loop_mut", id))
+    }
+
+    /// Mutable access to the edge `id`.
+    pub fn edge_mut(&mut self, id: EdgeId) -> Result<&mut Edge> {
+        self.edges
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::edge_mut", id))
+    }
+
+    /// Mutable access to the vertex `id`.
+    pub fn vertex_mut(&mut self, id: VertexId) -> Result<&mut Vertex> {
+        self.vertices
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::vertex_mut", id))
+    }
+
+    /// Mutable access to the region `id`.
+    pub fn region_mut(&mut self, id: RegionId) -> Result<&mut Region> {
+        self.regions
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::region_mut", id))
+    }
+
+    /// Mutable access to the face use `id`.
+    pub fn faceuse_mut(&mut self, id: FaceuseId) -> Result<&mut Faceuse> {
+        self.faceuses
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::faceuse_mut", id))
+    }
+
+    /// Mutable access to the loop use `id`.
+    pub fn loopuse_mut(&mut self, id: LoopuseId) -> Result<&mut Loopuse> {
+        self.loopuses
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::loopuse_mut", id))
+    }
+
+    /// Mutable access to the edge use `id`.
+    pub fn edgeuse_mut(&mut self, id: EdgeuseId) -> Result<&mut Edgeuse> {
+        self.edgeuses
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::edgeuse_mut", id))
+    }
+
+    /// Mutable access to the vertex use `id`.
+    pub fn vertexuse_mut(&mut self, id: VertexuseId) -> Result<&mut Vertexuse> {
+        self.vertexuses
+            .get_mut(id)
+            .ok_or_else(|| not_found("topology::Brep::vertexuse_mut", id))
+    }
+
+    /// `m_bValidateOnly`: while set, tolerances must not change.
+    #[must_use]
+    pub const fn validate_only(&self) -> bool {
+        self.validate_only
+    }
+
+    /// Sets `m_bValidateOnly`.
+    pub fn set_validate_only(&mut self, validate_only: bool) {
+        self.validate_only = validate_only;
+    }
+
+    /// The identity the B-rep is attributed and notified under (an `SmBrep*`).
+    #[must_use]
+    pub const fn key(&self) -> ObjectKey {
+        self.key
+    }
+
+    /// Sets the identity the B-rep is attributed and notified under.
+    pub fn set_key(&mut self, key: ObjectKey) {
+        self.key = key;
+    }
+
+    /// Appends a region record as is (no validation).
+    pub fn add_region_record(&mut self, region: Region) -> Result<RegionId> {
+        self.regions.insert(region)
+    }
+
+    /// Appends a shell record as is (no validation).
+    pub fn add_shell_record(&mut self, shell: Shell) -> Result<ShellId> {
+        self.shells.insert(shell)
+    }
+
+    /// Appends a face record as is (no validation; the shell's face list is not
+    /// touched).
+    pub fn add_face_record(&mut self, face: Face) -> Result<FaceId> {
+        self.faces.insert(face)
+    }
+
+    /// Appends a loop record as is (no validation; the face's loop list is not
+    /// touched).
+    pub fn add_loop_record(&mut self, loop_: Loop) -> Result<LoopId> {
+        self.loops.insert(loop_)
+    }
+
+    /// Appends an edge record as is (no validation).
+    pub fn add_edge_record(&mut self, edge: Edge) -> Result<EdgeId> {
+        self.edges.insert(edge)
+    }
+
+    /// Appends a vertex record as is.
+    pub fn add_vertex_record(&mut self, vertex: Vertex) -> Result<VertexId> {
+        self.vertices.insert(vertex)
+    }
+
+    /// Appends a face use record as is (no validation).
+    pub fn add_faceuse_record(&mut self, faceuse: Faceuse) -> Result<FaceuseId> {
+        self.faceuses.insert(faceuse)
+    }
+
+    /// Appends a loop use record as is (no validation).
+    pub fn add_loopuse_record(&mut self, loopuse: Loopuse) -> Result<LoopuseId> {
+        self.loopuses.insert(loopuse)
+    }
+
+    /// Appends an edge use record as is (no validation).
+    pub fn add_edgeuse_record(&mut self, edgeuse: Edgeuse) -> Result<EdgeuseId> {
+        self.edgeuses.insert(edgeuse)
+    }
+
+    /// Appends a vertex use record as is (no validation).
+    pub fn add_vertexuse_record(&mut self, vertexuse: Vertexuse) -> Result<VertexuseId> {
+        self.vertexuses.insert(vertexuse)
+    }
+
     /// Adds an empty shell.
     pub fn add_shell(&mut self) -> Result<ShellId> {
         self.shells.insert(Shell::default())
@@ -317,7 +765,10 @@ impl Brep {
 
     /// Adds a vertex at `point`.
     pub fn add_vertex(&mut self, point: Point3) -> Result<VertexId> {
-        self.vertices.insert(Vertex { point })
+        self.vertices.insert(Vertex {
+            point,
+            tolerance: ZONE_TOL_3D,
+        })
     }
 
     /// Adds an edge from `start` to `end`; both vertices must exist.
@@ -330,6 +781,10 @@ impl Brep {
         }
         self.edges.insert(Edge {
             vertices: [start, end],
+            edgeuses: Vec::new(),
+            interval: Extent1d::new(),
+            tolerance: ZONE_TOL_3D,
+            curve: None,
         })
     }
 
@@ -342,6 +797,7 @@ impl Brep {
         let face = self.faces.insert(Face {
             shell,
             loops: Vec::new(),
+            surface: None,
         })?;
         self.shells
             .get_mut(shell)
@@ -377,7 +833,11 @@ impl Brep {
                 reason: "loop edges do not close",
             });
         }
-        let id = self.loops.insert(Loop { face, edges })?;
+        let id = self.loops.insert(Loop {
+            face,
+            edges,
+            loopuse: None,
+        })?;
         self.faces
             .get_mut(face)
             .ok_or_else(|| not_found(OP, face))?
