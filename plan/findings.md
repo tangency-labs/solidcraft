@@ -2827,6 +2827,61 @@ with `CreateCanonical`, `MakeNurb` and `MakeNurbWithSweepParams` co-ported (unit
   `Point2dMapToDomain` / `ConvertToPolarParameter` succeed; if either C++ call wrote its
   out-parameter partway before failing, such a caller would see a different value. No
   input found reaches a failure there.
+- **Review fixes, round 2 (PR #29).** The FFI frame guard rejected scale vectors with any
+  component below `1e-6` in magnitude, for both `Transform` and the rebuild edit. Upstream
+  handles all of them without undefined behaviour: `Transform` has its own
+  `cpOptScale->x < SM_EFF_ZERO` -> `SM_ERR` branch, and `SmBSplineSurface::Transform`
+  accepts zero and negative components. Because of the guard, the boundary of that branch
+  (`0 < s < 1e-12` against `1e-12 <= s < 1e-6`) was never compared. The guard now only
+  requires finite values. `review2_scale.json` has 1092 cases: scales 1e-7, 1e-9, 1e-11,
+  1e-13, -1e-7, 2e-7, zero, mixed zero and tiny components and +-1e-300, on every test
+  surface at model scales 1, 1e-4 and 1e5. All are bit-identical and none crash.
+  `review2_extra_adversarial.json` (4654 cases) is a subset of the reviewer's 11010-case
+  second adversarial set: every case other than drops and `ToNurbs` conversions, plus every
+  third drop and every third conversion. All 11010 were bit-identical or deferred. It
+  covers coincident generators with an apex end, flipped axes, wrapped and partial sweeps,
+  swapped surfaces, a tangent torus and cylinder, drops at seams, poles and generator
+  seams with pointing vectors, out-of-range `ToNurbs` angles, tiny and huge
+  reparameterisations, and near-identity transforms and rebuilds. A missing bounding box
+  in `IntersectWithSurfOfRevolution` now reports the intersection's operation path.
+- **`SmSurface` dispatch after `surface.surface_p7`.** `EvaluateNormal`, `IsClosed` and
+  `IsPlanar` are not overridden by `SmSurfOfRevolution`, so a surface of revolution
+  runs the base bodies like a B-spline surface. `IsPlanar` reaches
+  `SmBSplineSurface::CalculateBoundingBox` on the surface's NURB.
+  Likewise `EvaluateGeometric` / `EvaluateNormalSection` in `intersect.surface_silhouette`
+  (stubbed to `surface.surface_p3`, as for a B-spline surface), and `BuildTreeBase` in
+  `surface.surface_cache_p3` decomposes the surface's NURB (`GetOrCreateGwNurbPointer`:
+  `MakeNurb` on a copy when it has none).
+- **Review fixes, round 3 (PR #29).** The runner reused p1's `status()`, which reports
+  every Rust error other than `Upstream` as `-1`. `UpdateAnalyticalDomain` on a swapped
+  surface with a B-spline generator and a zero-width U domain (`[0.5, 0, 0.5, 1]`)
+  reaches `SmBSplineCurve::Trim` through `AdjustSTEPInterval`, which returns
+  `SM_ERR_INVALID_INPUT` (1007, "trim points too close together"); Rust returns
+  `SolidError::InvalidInput` (faithful), but the case was reported as a failure. The p3
+  runner now maps `InvalidInput` to 1007, as the `nurbs.b_spline_curve_p2` and
+  `intersect.surface_tracer` runners do. Fixtures: `review3_update_bspline_generator.json`
+  (240 update cases), `review3_adversarial.json` (5829: coaxial cone / cylinder / sphere /
+  torus / disk / axis-line intersections at tolerances None, 0, 1e-15, 1e-9, 1e-3 and 10,
+  off-axis and tilt sweeps up to 1e-5, 1e8 scale, transform scales at the `SM_EFF_ZERO`
+  boundary, seam / axis / pole drops) and `review3b_adversarial.json` (10240: B-spline and
+  arc generators on five sweeps, swapped and unswapped, every op including `read_db`
+  ascii / binary v30 / v33; the 240 cases duplicated in the update fixture were dropped).
+  All are bit-identical or deferred.
+- **Self-tagged iso-curve stubs.** The `UNPORTED(surface.surface_cache_p1)` stubs for
+  `SmPlane` / `SmSurfOfRevolution::CreateIsoParametricCurve` name a unit that is already
+  `partial`, against AGENTS 4a. This is deliberate (see "Surface cache iso curves"
+  above): the cache stores iso curves as `BSplineCurve`, so the `SmLine` / `SmCircle`
+  results cannot be stored until it stores `Curve`s. Whoever changes that storage must
+  wire both stubs.
+- **Not reachable today (3).** `SwapUV` of a surface of revolution toggles the swap bit
+  after the inherited base swap; upstream toggles it between `GetCanonical` and
+  `SetCanonical`. These differ only if `SetCanonical` fails, which is not modelled.
+- **Tiny-scale coverage (follow-up for `surface.surf_of_revolution_p1`).** p1's FFI guard
+  rejects generator lines shorter than `1e-6` and circles with radius `<= 1e-6`
+  (absolute thresholds), so no surface below about `1e-6` model scale can be compared
+  (the reviewer's `1e-8` scale cases were rejected). If upstream handles such inputs
+  without undefined behaviour, the thresholds should become relative.
+
 ## surface.bend_volume (`SmBendVolume`)
 
 All non-deferred difftest cases agree bit for bit with upstream (`max_rel_err = 0`, 2347
@@ -3508,6 +3563,13 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   plane's NURB (`GetGwNurbPointer` on an `SmBSplineSurface`); the port's plane makes its
   NURB lazily, so the test uses `Plane::base_for_query`. Found once the generator put
   planes on aux start nodes (the FFI had rejected them; upstream handles them).
+
+## surface.surf_of_revolution_p2 (`SmSurfOfRevolution`, part 2)
+
+- `CreateOffsetSurface` merges the near-duplicate axis intersections through the solutions' curve objects (their natural intervals), so the port names the two curves with handles that carry their intervals ([`CurveHandle`]); without them 5 point solutions stay unmerged and the offset generator is not trimmed at the axis.
+- `BSplineSurface::create_surf_of_revolution` with a given sweep circle ignores the status of the circle's `Transform` (it refuses `|scale| < SM_EFF_ZERO` before changing anything, so the untransformed copy is used).
+- Upstream quirks recorded in `plan/upstream-issues.md`: WR-67 (`GetControlPolygon` zeroes the weights a polar conversion then reads) and WR-68 (`IsNurbSurfaceSurfOfRevolution` returns a status as `TRUE`).
+- `Surface::global_surface_intersect` for a surface of revolution dispatches to `SurfOfRevolution::global_surface_intersect`, which falls back to the free `base_global_surface_intersect(this, ..)` (shared with `surface.plane_p2`, PR #40).
 
 ## surface.surface_p1 (`SmSurface` part 1 and `SmSTEPSurface`, 2026-10-14)
 

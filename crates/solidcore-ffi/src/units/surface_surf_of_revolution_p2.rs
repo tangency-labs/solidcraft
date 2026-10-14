@@ -22,7 +22,7 @@
 //! extents for the NURB reparameterisations `Adjust` and `Trim` run: a zero-width one
 //! divides by zero in NLib; the STEP domain of `Adjust` must also have its sweep inside
 //! `[-360, 360]` and at most 360 long), non-negative tolerances, independent plane axes,
-//! and positive finite tolerance scales.
+//! and finite non-negative tolerance scales.
 
 use super::surface_surf_of_revolution_p1::{check_surface, push_surf, SurfaceData, Surf};
 use crate::{call_with_buffer, FfiError};
@@ -302,7 +302,7 @@ pub enum Test {
 /// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
 /// for a shim failure.
 pub fn is_nurb_surface_surf_of_revolution(test: &Test, scale: f64) -> Result<Vec<f64>, FfiError> {
-    if !(scale.is_finite() && scale > 0.0) {
+    if !(scale.is_finite() && scale >= 0.0) {
         return Err(bad("is nurb: tolerance scale"));
     }
     let mut input = Vec::new();

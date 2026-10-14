@@ -932,12 +932,8 @@ impl Surface {
     pub fn trim_with_domain(&mut self, k: &Kernel, trim_domain: &mut Extent2d) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.trim_with_domain(trim_domain),
-            SurfaceKind::CurveBounded(_) => base_edit(),
-            // UNPORTED(surface.plane_p2): SmPlane::TrimWithDomain
-            SurfaceKind::Plane(_) => Err(SolidError::unported(
-                "SmPlane::TrimWithDomain",
-                "surface.plane_p2",
-            )),
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),
+            SurfaceKind::Plane(s) => s.trim_with_domain(trim_domain),
             SurfaceKind::SurfOfRevolution(s) => s.trim_with_domain(k, trim_domain),
         }
     }
@@ -1126,11 +1122,12 @@ impl Surface {
 
     /// The intersection curves of this surface over `uv_domain` with `other` over
     /// `other_uv_domain` (`GlobalSurfaceIntersect`): the `SmPlane` override (the
-    /// plane/plane special case first), else [`base_global_surface_intersect`].
+    /// plane/plane special case first) or the `SmSurfOfRevolution` override, else
+    /// [`base_global_surface_intersect`].
     ///
     /// # Errors
     ///
-    /// Those of the plane/plane intersection and of [`base_global_surface_intersect`].
+    /// Those of the overrides and of [`base_global_surface_intersect`].
     pub fn global_surface_intersect(
         &self,
         k: &Kernel,
@@ -1140,42 +1137,6 @@ impl Surface {
         use_surface_edges: [bool; 2],
         approx_tol_3d: Option<f64>,
         ang_tol_rad: Option<f64>,
-    ) -> Result<SurfaceIntersection> {
-        match &self.kind {
-            SurfaceKind::SurfOfRevolution(s) => s.global_surface_intersect(
-                k,
-                uv_domain,
-                other,
-                other_uv_domain,
-                use_surface_edges,
-                approx_tol_3d,
-                ang_tol_rad,
-            ),
-            _ => Self::global_surface_intersect_base(
-                uv_domain,
-                other,
-                other_uv_domain,
-                use_surface_edges,
-                approx_tol_3d,
-                ang_tol_rad,
-            ),
-        }
-    }
-
-    /// `SmSurface::GlobalSurfaceIntersect` itself (the general intersection of the
-    /// kinds without an override, and the fall-back of the overrides).
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`]: `SmAdvSurfaceIntersector`
-    /// (`intersect.adv_surface_intersector`).
-    pub fn global_surface_intersect_base(
-        _uv_domain: &Extent2d,
-        _other: &Self,
-        _other_uv_domain: &Extent2d,
-        _use_surface_edges: [bool; 2],
-        _approx_tol_3d: Option<f64>,
-        _ang_tol_rad: Option<f64>,
     ) -> Result<SurfaceIntersection> {
         match &self.kind {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect(
@@ -1189,11 +1150,9 @@ impl Surface {
                 approx_tol_3d,
                 ang_tol_rad,
             ),
-            SurfaceKind::BSpline(_)
-            | SurfaceKind::CurveBounded(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::Step(_) => base_global_surface_intersect(
+            SurfaceKind::SurfOfRevolution(s) => s.global_surface_intersect(
                 self,
+                k,
                 uv_domain,
                 other,
                 other_uv_domain,
@@ -1201,6 +1160,17 @@ impl Surface {
                 approx_tol_3d,
                 ang_tol_rad,
             ),
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+                base_global_surface_intersect(
+                    self,
+                    uv_domain,
+                    other,
+                    other_uv_domain,
+                    use_surface_edges,
+                    approx_tol_3d,
+                    ang_tol_rad,
+                )
+            }
         }
     }
 
@@ -1532,7 +1502,9 @@ pub const fn base_number_control_points() -> usize {
 }
 
 /// `SmSurface::GlobalSurfaceIntersect`: the intersection curves of `this` over
-/// `uv_domain` with `other` over `other_uv_domain`, through `SmAdvSurfaceIntersector`.
+/// `uv_domain` with `other` over `other_uv_domain`, through `SmAdvSurfaceIntersector`
+/// (the general intersection of the kinds without an override, and the fall-back of the
+/// overrides).
 ///
 /// # Errors
 ///

@@ -2082,7 +2082,17 @@ pub(crate) fn set_up_polar_conversion(
     let _pnt2 = e.base.evaluate_point(nurb_ivl.evaluate(0.4567))?;
 
     // get curve control points and weights
-    let (_control_polygon, weights) = e.base.control_polygon()?;
+    let (control_polygon, weights) = e.base.control_polygon()?;
+
+    // UPSTREAM QUIRK: for a non-rational NURB, SmBSplineCurve::GetControlPolygon sizes the
+    // weights array and then resets it, which zeroes the buffer and sets its size to 0;
+    // the loop below still reads the buffer, so it sees weights of 0.0 (a constant span,
+    // an exact conversion).
+    let weights = if weights.is_empty() {
+        vec![0.0; control_polygon.len()]
+    } else {
+        weights
+    };
 
     // Clear cached array values
     pc.angles.clear();

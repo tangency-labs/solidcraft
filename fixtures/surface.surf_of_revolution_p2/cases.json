@@ -13591,6 +13591,140 @@
     ],
     "tol": 1e-06
    }
+  },
+  {
+   "name": "review_offset_axis_crossing_merge",
+   "upstream_ref": "PR #51 review (adversarial difftest)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        -0.5,
+        0,
+        1
+       ],
+       [
+        1,
+        0,
+        2
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "offset",
+    "dist": -0.25,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "review_offset_tiny_radius_sweep_scale",
+   "upstream_ref": "PR #51 review (adversarial difftest)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       5e-12,
+       0,
+       0
+      ],
+      "b": [
+       100,
+       0,
+       100
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "offset",
+    "dist": 0.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "review_trim_tiny_sweep_polar_weights",
+   "upstream_ref": "PR #51 review (adversarial difftest)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.5,
+       0,
+       1
+      ],
+      "b": [
+       3,
+       0,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "trim",
+    "dom": [
+     0,
+     0.5,
+     1,
+     0.5000001
+    ]
+   }
   }
  ]
 }

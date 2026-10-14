@@ -72,7 +72,7 @@ use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
 use crate::curve::curve::CurveKind;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -819,7 +819,9 @@ impl BSplineSurface {
                 let move_vec = (-scale) * origin_of_sweep + center;
                 let mut move_frame = Axis2Placement::IDENTITY;
                 move_frame.translate(move_vec);
-                cir.transform(k, &move_frame, Some(Vec3::new(scale, scale, scale)))?;
+                // (the status is ignored upstream: SmEllipse::Transform refuses a scale
+                // below SM_EFF_ZERO before changing anything, so the copy is used as it is)
+                ignore_status(cir.transform(k, &move_frame, Some(Vec3::new(scale, scale, scale))))?;
                 cir.base().polygon(&cir.base().natural_interval())?
             } else {
                 // generate a sweep circle from scratch

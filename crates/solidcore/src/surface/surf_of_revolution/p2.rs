@@ -42,6 +42,7 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -55,12 +56,12 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::LocationType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
 use crate::surface::surface::p2::{
-    Surface, SurfaceIntersection, SurfaceKind, B_SPLINE_SURFACE_TYPE,
+    base_global_surface_intersect, Surface, SurfaceIntersection, SurfaceKind, B_SPLINE_SURFACE_TYPE,
 };
 
 use super::p1::{
     gen_adjust_step_interval, gen_base, gen_base_mut, gen_max_analytic_domain, gen_step_interval,
-    not_b_spline, SurfOfRevolution,
+    not_b_spline, SurfOfRevolution, SweepIsoFn,
 };
 
 const OP_ADJUST: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::adjust_step_uv_domain";
@@ -83,6 +84,32 @@ impl SolutionObject for NoHandle {
     }
 }
 
+/// The outputs of [`SurfOfRevolution::step_inversion_with_outputs`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct StepInversionOutputs {
+    /// STEP parameters: angle in degrees, generator parameter (`rdAnalUVParameter`).
+    pub(crate) uv: Point2,
+    /// The point's location (`reLocation`).
+    pub(crate) location: LocationType,
+    /// The point is in the sweep interval (upstream returns `SM_ERR` otherwise).
+    pub(crate) inside: bool,
+}
+
+/// A curve named by the solutions of a curve intersection: its natural interval (the
+/// solvers' duplicate tests read it through the object, as upstream does).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CurveHandle(Extent1d);
+
+impl SolutionObject for CurveHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        Some(self.0)
+    }
+}
+
 impl SurfOfRevolution {
     // ---- domain edits ---------------------------------------------------------------
 
@@ -99,6 +126,23 @@ impl SurfOfRevolution {
         &mut self,
         k: &Kernel,
         new_step_uv_domain: &Extent2d,
+    ) -> Result<()> {
+        self.adjust_step_uv_domain_using(k, new_step_uv_domain, &Self::own_sweep_iso)
+    }
+
+    /// [`Self::adjust_step_uv_domain`] with the polar converter rebuilt from the sweep
+    /// iso curves of `iso` (upstream's virtual `Reparameterize` / `MakeNurb` /
+    /// `CreateIsoParametricCurve`: a derived class such as `SmCone` passes its
+    /// override).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::adjust_step_uv_domain`].
+    pub(crate) fn adjust_step_uv_domain_using(
+        &mut self,
+        k: &Kernel,
+        new_step_uv_domain: &Extent2d,
+        iso: SweepIsoFn<'_>,
     ) -> Result<()> {
         // no work - input domain = current domain
         if new_step_uv_domain.is_contained_by(&self.anal_uv_domain, EFF_ZERO)
@@ -127,10 +171,10 @@ impl SurfOfRevolution {
         }
 
         // set Surface and GenCurve nurb domain (status ignored)
-        ignore_status(self.reparameterize(k, &nurb_domain))?;
+        ignore_status(self.reparameterize_using(k, &nurb_domain, iso))?;
 
         // rebuild the associated m_pNurb and PolarConverter
-        self.make_nurb(k)?;
+        self.make_nurb_with_sweep_params_using(k, None, iso)?;
         Ok(())
     }
 
@@ -174,7 +218,7 @@ impl SurfOfRevolution {
         ignore_status(self.reparameterize(k, new_nurb_uv_domain))?;
 
         // rebuild the sweep polar converter
-        ignore_status(self.rebuild_polar_converter(k))?;
+        ignore_status(self.rebuild_polar_converter(k, &Self::own_sweep_iso))?;
         Ok(())
     }
 
@@ -204,6 +248,30 @@ impl SurfOfRevolution {
         tol_3d: f64,
         uv_guess: Option<Point2>,
     ) -> Result<(Point2, LocationType)> {
+        let r =
+            self.step_inversion_with_outputs(k, anal_domain, point_on_surf, tol_3d, uv_guess)?;
+        if r.inside {
+            Ok((r.uv, r.location))
+        } else {
+            Err(SolidError::sm_err(OP_STEP_INV))
+        }
+    }
+
+    /// [`Self::step_inversion`] with the outputs upstream writes before returning
+    /// `SM_ERR` for a point outside the sweep interval (`inside` is `false` then),
+    /// for derived classes that read them (`SmCone`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::step_inversion`] except the outside-the-sweep `SM_ERR`.
+    pub(crate) fn step_inversion_with_outputs(
+        &self,
+        k: &Kernel,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+    ) -> Result<StepInversionOutputs> {
         // pass call along for nonPlanar generator curves
         if !self.planar_generator {
             // Not planar, must use the general solver.
@@ -224,7 +292,11 @@ impl SurfOfRevolution {
                 self.base
                     .step_inversion(&nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
             let step = self.convert_uv_from_nurbs_to_step(k, nurbs_parameter)?;
-            return Ok((step, location));
+            return Ok(StepInversionOutputs {
+                uv: step,
+                location,
+                inside: true,
+            });
         }
 
         // Generator curve is planar, so we can solve it analytically.
@@ -325,11 +397,11 @@ impl SurfOfRevolution {
         }
 
         // all done
-        if sp.inside {
-            Ok((Point2::new(u, v), location))
-        } else {
-            Err(SolidError::sm_err(OP_STEP_INV))
-        }
+        Ok(StepInversionOutputs {
+            uv: Point2::new(u, v),
+            location,
+            inside: sp.inside,
+        })
     }
 
     // ---- offsets --------------------------------------------------------------------
@@ -445,13 +517,17 @@ impl SurfOfRevolution {
             None,
         )?);
         let axis_ivl = axis_line.natural_interval();
-        let solutions = ignored(off_curve.global_curve_intersect::<NoHandle>(
+        let opts = CurveIntersectOptions {
+            handles: [Some(CurveHandle(domain)), Some(CurveHandle(axis_ivl))],
+            ..CurveIntersectOptions::default()
+        };
+        let solutions = ignored(off_curve.global_curve_intersect::<CurveHandle>(
             k,
             &domain,
             &axis_line,
             &axis_ivl,
             approx_tol_3d,
-            &CurveIntersectOptions::default(),
+            &opts,
         ))?;
         if let Some(sols) = solutions {
             if sols.len() == 1 {
@@ -500,7 +576,7 @@ impl SurfOfRevolution {
     /// `other_uv_domain` (`GlobalSurfaceIntersect`): the special cases of a plane or
     /// another surface of revolution ([`Self::intersect_with_plane`],
     /// [`Self::intersect_with_surf_of_revolution`]) and, where they need more, the
-    /// general surface intersection ([`Surface::global_surface_intersect_base`]) whose
+    /// general surface intersection ([`base_global_surface_intersect`]) whose
     /// curves follow the special cases' (upstream appends to the same arrays).
     ///
     /// # Errors
@@ -509,6 +585,7 @@ impl SurfOfRevolution {
     /// intersection (`SmAdvSurfaceIntersector`).
     pub fn global_surface_intersect(
         &self,
+        this: &Surface,
         k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
@@ -521,7 +598,8 @@ impl SurfOfRevolution {
         let mut out = SurfaceIntersection::default();
         match other.kind() {
             SurfaceKind::Plane(p) => {
-                let (more, found) = self.intersect_with_plane(p, other_uv_domain, approx_tol_3d)?;
+                let (more, found) =
+                    self.intersect_with_plane(k, p, other_uv_domain, approx_tol_3d)?;
                 need_nurb_intersection = more;
                 out = found;
             }
@@ -537,12 +615,13 @@ impl SurfOfRevolution {
                 out = found;
             }
             // (IntersectWithSphere / IntersectWithCone once those kinds exist)
-            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {}
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {}
         }
 
         // If we're here, then analytic intersections were not found
         if need_nurb_intersection {
-            let more = Surface::global_surface_intersect_base(
+            let more = base_global_surface_intersect(
+                this,
                 uv_domain,
                 other,
                 other_uv_domain,
@@ -597,7 +676,9 @@ impl SurfOfRevolution {
                 plane_base = p.base_for_query();
                 &plane_base
             }
-            SurfaceKind::SurfOfRevolution(_) | SurfaceKind::CurveBounded(_) => return Ok(None),
+            SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_) => return Ok(None),
         };
         Self::is_nurb_surface_surf_of_revolution_base(k, tgt, tolerance_scale)
     }

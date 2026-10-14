@@ -114,9 +114,8 @@ use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p1::{line_closest_point, line_point_distance};
-use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::geom::geom_utility::p1::line_closest_point;
+use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::{approx_tol3d, are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -126,9 +125,7 @@ use crate::nurbs::b_spline_surface::{
     BSplineSurfaceForm, IsoCurveOptions, LocationType, SurfParamType,
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
-use crate::surface::surf_of_revolution::p1::{
-    gen_base_mut, gen_max_analytic_domain, gen_step_interval,
-};
+use crate::surface::surf_of_revolution::p1::gen_max_analytic_domain;
 use crate::surface::surf_of_revolution::{RevolutionIsoCurve, SurfOfRevolution};
 use crate::surface::surface::p2::{scale_step_angular_derivatives, CONE_TYPE, CYLINDER_TYPE};
 use crate::topology::database_io::{DatabaseReader, FileType};
@@ -142,7 +139,6 @@ const OP_TO_STEP: &str = "surface::cone::p1::Cone::convert_uv_from_nurbs_to_step
 const OP_EVAL: &str = "surface::cone::p1::Cone::evaluate";
 const OP_EVAL_STEP: &str = "surface::cone::p1::Cone::evaluate_step";
 const OP_GEN: &str = "surface::cone::p1::Cone::gen_curve";
-const OP_INVERSION: &str = "surface::cone::p1::Cone::step_inversion";
 const OP_TRANSFORM: &str = "surface::cone::p1::Cone::transform";
 const OP_COINCIDENCE: &str = "surface::cone::p1::total_coincidence_checker";
 
@@ -435,16 +431,6 @@ fn cone_iso_curve(
         max_gap_3d: iso.max_gap_3d,
         uv_iso_curve: iso.uv_iso_curve,
     })
-}
-
-/// A solution handle naming nothing (`NULL` objects of `GlobalPointSolveSTEP`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct NoObject;
-
-impl SolutionObject for NoObject {
-    fn kind(&self) -> ObjectKind {
-        ObjectKind::Curve
-    }
 }
 
 impl Cone {
@@ -1057,7 +1043,11 @@ impl Cone {
     ///
     /// `SM_ERR_INVALID_INPUT` past the apex; otherwise [`SolidError::Unported`]
     /// (`SmSurfOfRevolution::AdjustSTEPUVDomain`, unit `surface.surf_of_revolution_p2`).
-    pub fn adjust_step_uv_domain(&mut self, new_step_uv_domain: &Extent2d) -> Result<()> {
+    pub fn adjust_step_uv_domain(
+        &mut self,
+        k: &Kernel,
+        new_step_uv_domain: &Extent2d,
+    ) -> Result<()> {
         // Method: just call the parent's version,
         // unless the new domain would result in going past the apex.
         let v_domain = new_step_uv_domain.v_interval();
@@ -1068,11 +1058,12 @@ impl Cone {
             return Err(status(OP_ADJUST, SM_ERR_INVALID_INPUT));
         }
 
-        // UNPORTED(surface.surf_of_revolution_p2): SmSurfOfRevolution::AdjustSTEPUVDomain
-        Err(SolidError::unported(
-            "SmSurfOfRevolution::AdjustSTEPUVDomain",
-            "surface.surf_of_revolution_p2",
-        ))
+        // the parent's version, with this cone's iso curves for the polar converter
+        let inside_out = self.inside_out;
+        self.rev
+            .adjust_step_uv_domain_using(k, new_step_uv_domain, &|s, k, p, t| {
+                Ok(cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve)
+            })
     }
 
     /// The apex (`GetApex`): for a cylinder (a semi-angle zero to the scaled zero) the
@@ -1620,8 +1611,9 @@ impl Cone {
         Ok(inv)
     }
 
-    /// `SmSurfOfRevolution::STEPInversion` (co-ported from unit
-    /// `surface.surf_of_revolution_p2`) on the cone's base parts.
+    /// `SmSurfOfRevolution::STEPInversion` on the cone's base parts
+    /// ([`SurfOfRevolution::step_inversion_with_outputs`], unit
+    /// `surface.surf_of_revolution_p2`), over the cone's STEP domain.
     fn rev_step_inversion(
         &self,
         k: &Kernel,
@@ -1630,112 +1622,17 @@ impl Cone {
         uv_guess: Option<Point2>,
     ) -> Result<ConeStepInversion> {
         let rev = &self.rev;
-        if !rev.planar_generator {
-            // UNPORTED(surface.surf_of_revolution_p2): SmSurfOfRevolution::STEPInversion
-            return Err(SolidError::unported(
-                "SmSurfOfRevolution::STEPInversion",
-                "surface.surf_of_revolution_p2",
-            ));
-        }
-
-        let sp = rev.transform_point_to_start_plane(point_on_surf, tol_3d, false)?;
-        let angle = |i: usize| sp.angles_deg.get(i).copied().unwrap_or(0.0);
-
-        let u_domain = rev.anal_uv_domain.u_interval();
-        let mut uv = Point2::new(
-            if sp.angles_deg.len() > 1 && angle(1) < u_domain.max() - EFF_ZERO {
-                angle(1)
-            } else {
-                angle(0)
-            },
-            0.0,
-        );
-
-        let (dist, _) =
-            line_point_distance(rev.position.origin(), rev.position.z_axis(), point_on_surf);
-
-        let mut location = if dist < tol_3d {
-            LocationType::Pole
-        } else if sp.angles_deg.len() == 2 {
-            LocationType::USeam
-        } else if sp.inside {
-            LocationType::Interior
-        } else {
-            LocationType::Exterior
-        };
-
-        if location == LocationType::USeam {
-            if let Some(g) = uv_guess {
-                if g.x > u_domain.mid() {
-                    uv.x = u_domain.max();
-                }
-            }
-        }
-
-        let gen = self.gen()?;
-        let mut ivl = gen_step_interval(gen)?;
-        let mut solve_gen = gen.clone();
-        if rev.is_out_of_bounds_enabled() {
-            ivl = gen_max_analytic_domain(gen)?;
-            if let Some(b) = gen_base_mut(&mut solve_gen) {
-                b.set_out_of_bounds_enabled(true);
-            }
-        }
-        let params: Vec<f64> = match solve_gen.kind() {
-            CurveKind::Line(l) => l
-                .global_point_solve_step::<()>(
-                    &ivl,
-                    SolverOperation::Intersect,
-                    sp.point,
-                    tol_3d,
-                    None,
-                )
-                .iter()
-                .map(|s| s.start.param(0))
-                .collect::<Result<_>>()?,
-            _ => solve_gen
-                .global_point_solve_step::<NoObject>(
-                    k,
-                    &ivl,
-                    SolverOperation::Intersect,
-                    sp.point,
-                    tol_3d,
-                    None,
-                    None,
-                    SolutionRequested::All,
-                    None,
-                    None,
-                )?
-                .iter()
-                .map(|s| s.start.param(0))
-                .collect::<Result<_>>()?,
-        };
-
-        let Some(&first) = params.first() else {
-            return Err(SolidError::sm_err(OP_INVERSION));
-        };
-        uv.y = first;
-
-        if params.len() > 1
-            && gen.is_closed(&ivl, tol_3d)?
-            && ivl.is_value_on_boundary(uv.y, EFF_ZERO).0
-        {
-            location = match location {
-                LocationType::Interior => LocationType::VSeam,
-                LocationType::USeam => LocationType::UvSeam,
-                l => l,
-            };
-            if let Some(g) = uv_guess {
-                let v_domain = rev.anal_uv_domain.v_interval();
-                if g.y > v_domain.mid() {
-                    uv.y = v_domain.max();
-                }
-            }
-        }
+        let r = rev.step_inversion_with_outputs(
+            k,
+            &rev.anal_uv_domain,
+            point_on_surf,
+            tol_3d,
+            uv_guess,
+        )?;
         Ok(ConeStepInversion {
-            uv,
-            location,
-            inside: sp.inside,
+            uv: r.uv,
+            location: r.location,
+            inside: r.inside,
         })
     }
 
@@ -2251,16 +2148,16 @@ mod tests {
     fn statuses_and_unported() {
         let mut c = cone123();
         assert!(matches!(
-            c.adjust_step_uv_domain(&Extent2d::from_bounds(0.0, -4.0, 360.0, 3.0)),
+            c.adjust_step_uv_domain(&k(), &Extent2d::from_bounds(0.0, -4.0, 360.0, 3.0)),
             Err(SolidError::Upstream {
                 code: SM_ERR_INVALID_INPUT,
                 ..
             })
         ));
+        // the parent's AdjustSTEPUVDomain is ported (surf_of_revolution_p2)
         assert!(c
-            .adjust_step_uv_domain(&Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
-            .unwrap_err()
-            .is_unported());
+            .adjust_step_uv_domain(&k(), &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
+            .is_ok());
         assert!(c.transform(&k(), &Axis2Placement::IDENTITY, None).is_ok());
         assert!(matches!(
             c.transform(

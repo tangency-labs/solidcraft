@@ -903,7 +903,7 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
         OpIn::Adjust { dom } => {
             let [a, b, c, e] = *dom;
             let mut t = s.clone();
-            t.adjust_step_uv_domain(&Extent2d::from_bounds(a, b, c, e))
+            t.adjust_step_uv_domain(&Kernel::default(), &Extent2d::from_bounds(a, b, c, e))
                 .and_then(|()| {
                     o.push(SUCCESS);
                     put_state(k, o, &t)

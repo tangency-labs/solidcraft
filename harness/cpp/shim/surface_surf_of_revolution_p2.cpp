@@ -509,7 +509,9 @@ void is_nurb(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     }
     SmSurfOfRevolution* rev = NULL;
     SmBoolean found = SmSurfOfRevolution::IsNurbSurfaceSurfOfRevolution(ctx, test, rev, scale);
-    o.push_back(flg(found));
+    // SmBoolean is an int: a failed `SER(sm_TestForIsoCircles(..))` returns SM_ERR (1001) as a
+    // truthy "found" with no surface, so the value is recorded as is.
+    o.push_back((double)found);
     if (found && rev)
         put_state(o, rev);
     delete rev;
