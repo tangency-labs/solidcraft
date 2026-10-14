@@ -248,8 +248,10 @@ impl SurfaceIntersector<'_> {
         let surf2 = self.surface(SrfIndex::Second);
 
         // Control polygons are not available for general surfaces: bail out if not
-        // a BSplineSurface
-        let is_bss = |s: &Surface| !matches!(s.kind(), SurfaceKind::CurveBounded(_));
+        // a BSplineSurface (SM_CAST_PTR(SmBSplineSurface, ..): B-splines and planes;
+        // curve-bounded and STEP surfaces derive from SmSurface only)
+        let is_bss =
+            |s: &Surface| matches!(s.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_));
         if !is_bss(surf1) || !is_bss(surf2) {
             return Ok(BoundaryPlaneTestResult::Unknown);
         }
@@ -1508,7 +1510,7 @@ fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
 fn is_singularity(surface: &Surface, _uv: Point2) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
             Err(SolidError::unported(
                 "SmSurface::IsSingularity",

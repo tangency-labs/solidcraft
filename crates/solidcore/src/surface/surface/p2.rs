@@ -171,6 +171,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p1::StepSurface;
+use crate::surface::torus::Torus;
 use crate::topology::database_io::DatabaseReader;
 
 // ---- type codes ---------------------------------------------------------------------

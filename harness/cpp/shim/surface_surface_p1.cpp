@@ -760,7 +760,7 @@ void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     bool want_n = rd.flag();
     bool want_p = rd.flag();
     SmBoolean expand = rd.flag() ? TRUE : FALSE;
-    // the FFI asks for a polar box only of B-splines and planes (UB-81)
+    // the FFI asks for a polar box only of B-splines and planes (UB-84)
     bool want_pl = rd.flag();
     SmExtent3d nb;
     SmPseudoBox pb;

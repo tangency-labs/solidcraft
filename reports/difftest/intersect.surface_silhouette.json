@@ -1218,16 +1218,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0035",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7001637241035863945",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "deferred": {
@@ -4926,16 +4922,12 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0444",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7001637241035864354",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -5182,16 +5174,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0472",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7001637241035864382",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -5670,16 +5658,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0527",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7001637241035864437",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -5798,16 +5782,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0542",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7001637241035864452",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "deferred": {
@@ -5838,16 +5818,12 @@
       "values_compared": 139
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0546",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7001637241035864456",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
@@ -6351,12 +6327,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 169,
+  "cases_deferred": 163,
   "cases_failed": 0,
-  "cases_passed": 540,
+  "cases_passed": 546,
   "cases_total": 709,
   "deferred_by_unit": {
-    "surface.plane_p1": 6,
     "surface.surface_p3": 163
   },
   "max_rel_err": 0.0,

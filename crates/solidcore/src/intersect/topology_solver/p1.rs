@@ -68,10 +68,10 @@
 //!   (`curve.curve_p9`), `SmSurface::GlobalLineIntersect` (`surface.surface_p8`),
 //!   `SmSurface::GlobalPointSolve` (`surface.surface_p4`), the face point
 //!   classifications (`query.face_p1`, `query.face_p2`), the vertex zone tolerance
-//!   (`topology.brep_p1`) and the surface cache behind the face silhouettes
-//!   (`smsurf_GetSurfaceCache`, ported as `surface_cache` but reaching
-//!   `SmSurface::CacheMakeOrValidate` of `surface.surface_p1`) return [`SolidError::Unported`] (see the `UNPORTED`
-//!   markers). The face-silhouette loop names its temporary curves by no handle.
+//!   (`topology.brep_p1`) and the face trim behind the face silhouettes
+//!   (`SmFace::CreateCurvesByTrimming`, `topology.face_p2`; the surface cache build
+//!   before it needs `SmSurface::CalculateContinuities`, `surface.surface_p6`) return
+//!   [`SolidError::Unported`] (see the `UNPORTED` markers). The face-silhouette loop names its temporary curves by no handle.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
@@ -93,8 +93,9 @@ use crate::geom::tree::Tree;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
-use crate::surface::surface::p2::{surface_cache, Surface};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::surface::surface::p2::{surface_cache, Surface, SurfaceKind};
+use crate::surface::surface_cache::p1::{AltCacheKey, AltSrfCacheType};
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
 
 const OP_MAY: &str = "intersect::topology_solver::p1::TopologySolver::may_contain_answer";
@@ -108,6 +109,7 @@ const OP_CE: &str = "intersect::topology_solver::p1::LocalSolver::solve_curve_ed
 const OP_CC: &str = "intersect::topology_solver::p1::LocalSolver::solve_curve_curve";
 const OP_EE: &str = "intersect::topology_solver::p1::LocalSolver::solve_edge_edge";
 const OP_BASE: &str = "intersect::topology_solver::p1::LocalSolver::solve_it";
+const OP_FACE_SIL: &str = "intersect::topology_solver::p1::face_silhouettes";
 
 /// Error for a pointer upstream would dereference while null.
 const fn null_deref(operation: &'static str, reason: &'static str) -> SolidError {
@@ -1440,7 +1442,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         } else if ts.base.projected_operation {
             let opt_vectors = ts.base.opt_vectors.clone();
             let (trim_3d_curves, trim_uv_curves) =
-                face_silhouettes(objects, face, &opt_vectors, tol)?;
+                face_silhouettes(ts.kernel, objects, face, &opt_vectors, tol)?;
             // When we reach here there should be silhouette curves in sTrim3DCurves
             // We can use these to do measurement to the surface.  Please note that
             // the edges bounding the face would have already been measured.
@@ -1720,29 +1722,64 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// vector `opt_vectors[0]` (3D curves and their UV trim curves), taken from the
 /// surface cache's alternate caches or made and cached there (silhouette curves of
 /// the surface to ten times `tolerance_3d` and 20 degrees, trimmed by the face).
-fn face_silhouettes<O>(
+fn face_silhouettes<O: Copy + PartialEq>(
+    k: &Kernel,
     objects: &dyn TopologyObjects<O>,
     face: O,
-    _opt_vectors: &[Vec3],
-    _tolerance_3d: f64,
+    opt_vectors: &[Vec3],
+    tolerance_3d: f64,
 ) -> Result<(Vec<Curve>, Vec<Curve>)> {
     // locals and temporaries
     let surface = objects.face_surface(face)?;
-    let _cache = surface_cache(objects.surface(surface)?)?;
-    // (approximation tolerance tolerance_3d * 10, angle tolerance 20 degrees)
+    let srf = objects.surface(surface)?;
+    let cache = surface_cache(k, srf, Some(surface))?;
+    let view = *opt_vectors
+        .first()
+        .ok_or(null_deref(OP_FACE_SIL, "no view vector"))?;
 
-    // smsurf_GetSurfaceCache (`surface_cache`, unit surface.surface_p2) makes the
-    // cache through SmSurface::CacheMakeOrValidate and returns Unported until
-    // surface.surface_p1 lands. The rest needs the cache that call makes:
-    // SmSurfaceCache::HasCachedCurves(SM_AS_TRIMMED_SILHOUETTE, ..) on it (ported
-    // as SurfaceCache::has_cached_curves, reached through the kernel's cache store
-    // by the cache id), and when not cached SmBSplineSurface::CreateSilhouetteCurves
-    // over the face's UV domain, SmFace::CreateCurvesByTrimming,
-    // SmSurfaceCache::AddCurvesToCache and HasCachedCurves again.
-    // UNPORTED(surface.surface_p1): SmBSplineSurface::CreateSilhouetteCurves
+    let approx_tol = tolerance_3d * 10.0;
+    let angle_tol = 20.0 * PI / 180.0;
+    let key = AltCacheKey {
+        vec: Some(view),
+        boolean: Some(false),
+        ..AltCacheKey::default()
+    };
+
+    // when silhouette curves to these tolerances have been made - get copies
+    if let Some(copies) = cache.has_cached_curves(
+        AltSrfCacheType::TrimmedSilhouette,
+        approx_tol,
+        angle_tol,
+        &key,
+        true,
+        true,
+    )? {
+        return Ok((
+            copies.curves_3d.unwrap_or_default(),
+            copies.curves_uv.unwrap_or_default(),
+        ));
+    }
+
+    // No cached trimmed silhouette curves in existance -- create them
+    // (SM_CAST_PTR(SmBSplineSurface, pSurface): upstream dereferences NULL for any
+    // other kind)
+    if !matches!(srf.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_)) {
+        return Err(null_deref(
+            OP_FACE_SIL,
+            "face surface is not a B-spline surface",
+        ));
+    }
+
+    // Create the planar section curves from the brep and the plane
+    let (_curves_3d, _curves_uv) =
+        srf.create_silhouette_curves(k, &objects.face_uv_domain(face)?, view, false)?;
+
+    // Now trim the curves (then SmSurfaceCache::AddCurvesToCache(SM_AS_TRIMMED_SILHOUETTE,
+    // ..) and HasCachedCurves again, SM_ERR when they are not found).
+    // UNPORTED(topology.face_p2): SmFace::CreateCurvesByTrimming
     Err(SolidError::unported(
-        "SmBSplineSurface::CreateSilhouetteCurves",
-        "surface.surface_p1",
+        "SmFace::CreateCurvesByTrimming",
+        "topology.face_p2",
     ))
 }
 

@@ -2834,6 +2834,59 @@ default cases, a 30,847-case run clean, `--perturb` SENSITIVE). The 75 deferred 
   `IsCurveIn*Domain` / `IsLineInParamDomain` volume entry points take a `&Kernel` for the
   curve bounding boxes the B-spline override computes.
 
+## intersect.topology_solver_p1
+
+- Upstream issues UB-80 (`MayContainAnswer` reads uninitialised `IntersectLine`
+  results for a ray shorter than `SM_EFF_ZERO`), UB-81 (edge solvers dereference a free
+  curve's missing edge) and WR-61 (`SmTLSPointVertex::SolveIt` ray firing falls through
+  into the 3D signed case; still unconfirmed against the C++: even single-call fixtures
+  are deferred because `add_sorted_solution` reaches the `SmTol::GetZoneTol3d` stub of
+  `topology.brep_p1` for vertex objects). The port keeps the WR-61 fall-through as
+  written. (Renumbered when other units took the numbers on `main` first: filed as
+  UB-73, UB-74 and WR-48, then UB-77, UB-78 and WR-52, then UB-78, UB-79 and WR-55,
+  then UB-80, UB-81 and WR-59.)
+- The FFI guard refuses an option vector shorter than `1e-6` only where upstream is
+  undefined or unverified: the ray of `MayContainAnswer` (`Op::May` and tree solves with
+  `SM_SO_RAYFIRE`) and every vector the curve solvers hand to
+  `SmCurve::GlobalPointSolve` / `GlobalCurveSolve`. Zero and tiny vectors for the vertex
+  solvers and the other `MayContainAnswer` branches are defined (`smgu_LineClosestPoint`
+  gives `0`, `smgu_PointProjectToPlane` NaN) and match bit for bit
+  (`zero_vectors.json`, 156 cases).
+- Wiring notes for later porters: the `curve_global_curve_solve` stub
+  (`UNPORTED(curve.curve_p9)`) receives both solvers' intervals (`m_vInterval`,
+  `m_vInterval2`, swapped under `m_bSwapOrder`) and the operation, tolerance, best
+  answer, option vectors and `SM_SR_ALL` exactly as upstream passes them; the
+  `face_point_classify` stub must return the class even when `PointClassify` fails
+  (every caller ignores its status); `face_silhouettes` calls `surface_cache`
+  (`surface.surface_p2`) through `TopologyObjects::surface`, and resolving the cache
+  id to `SurfaceCache::has_cached_curves` is left for `surface.surface_p1`.
+- Untested until their callees land: `SmTLSPointFace`, `sm_GetFaceSilhouettes` and
+  every tree case reaching `SmTopologySolver::LocalSolve` (`surface.surface_p4`,
+  `surface.surface_p8`, `intersect.topology_solver_p2`); the upstream tests only reach
+  the curve and vertex paths.
+
+## sweep.api_surfaces: review fixes (PR #37, 2026-10-13)
+
+- The FFI guard (`crates/solidcore-ffi/src/units/sweep_api_surfaces.rs`) used to reject
+  2D NURB data (`z = NL_NOZ`) and any `dim != 3` for the `Sweep`, `Ruled`, `Skin` and
+  `Revolution` curves. Upstream `CreateSweepSurface`, `CreateRuledSurface`,
+  `CreateSkinnedSurface` and `SmApiCreateSurfaceRevolution` take these curves without
+  crashing (reviewer probe: 4081 generated cases plus explicit 2D fixtures, 0 failures,
+  0 crashes). The guard now only requires positive weights (non-positive weights stay
+  rejected outside `Extrude`); the sweep, ruled and skin generators produce 2D curves.
+  This was lost coverage, not a numerical disagreement: the Rust port already agreed.
+- 2D NURB revolution (`adv_rev_2d_nurb`, `adv_rev_dim2_3ddata`) runs through the C++
+  without crashing; the Rust side is deferred on `CreateRotationalSweep`
+  (`primitive.primitive_creation_p3`), so it is compared once that unit lands.
+- `SmApiCreateSurfaceRevolution` returns `SM_ERR` when `SmCurve::Copy` fails (allocation
+  failure only); the Rust `BSplineCurve::copy` is infallible, so the port has no such
+  path (documented in the module's Deviations).
+- `fixtures/sweep.api_surfaces/adversarial.json` (59 cases): sweep vectors at and just
+  above `SM_EFF_ZERO`, scales 1e-9..1e9, 1D/2D/rational extrudes, degree 17, rational
+  and point-degenerate sweep paths, ruled surfaces across degree/domain, 12-profile and
+  mixed-kind skins, coincident profiles, skin-primitive validation (counts of 2^20,
+  all-NULL curves, zero profiles), 2D ruled/skin/sweep/revolution. All pass or defer.
+
 ## surface.surface_p7 (`SmSurface`, part 7)
 
 - **Co-ported callees.** `SmSurface::Evaluate1stDerivatives`, `Evaluate2ndDerivatives` and
@@ -2925,6 +2978,140 @@ default cases, a 30,847-case run clean, `--perturb` SENSITIVE). The 75 deferred 
   `GetClassType` / `GetClassTypeString` (an instance needs the unported bend units); the
   `IsKindOf` chains are unit-tested only.
 
+## surface.surf_of_extrusion_p1 (`SmSurfOfExtrusion`, part 1, 2026-10-13)
+
+PARTIAL: 973 difftest cases (173 fixture, 800 generated), 880 bit-identical, 93 deferred
+(52 `STEPInversion` of non-perpendicular generators, `SmBSplineSurface::STEPInversion` ->
+`surface.surface_p1` solves; 41 `sm_IntersectGenerators` of parallel sweeps,
+`SmCurve::GlobalCurveSolve` -> `curve.curve_p9`). The shim builds B-spline, `SmLine`,
+`SmCircle`, `SmEllipse`, `SmHyperbola` and `SmParabola` generators and every orientation (`SM_CO_LINEAR`,
+`_PERPENDICULAR`, `_INDEPENDENT`, `_COPLANAR`, `_NOT_PLANAR`) is reached.
+
+- **Generator owner step.** The C++ constructors make the surface its generator's owner.
+  `SmLine::MakeNurb` (run by `AdjustSTEPInterval` when the interval changes and the line has
+  a NURB) then reparameterises the line's NURB to the owner's `GetGenDirParamExtent`.
+  `AdjustSTEPUVDomain` with an unswapped surface keeps that (its `Reparameterize` call
+  returns early because it compares the new STEP domain with the equal NURB domain), so the
+  rebuilt surface's generator knots are the old interval's. The Rust curves only hold an
+  `ObjectRef` owner, so the `UNPORTED(surface.surf_of_extrusion_p1)` stubs in the line,
+  ellipse, hyperbola and parabola `MakeNurb` stay (as for `surface.surf_of_revolution_p1`);
+  `SurfOfExtrusion` leaves its generator unowned and applies the line step itself
+  (`adjust_gen_step_interval`; disabling it fails `linear_adjust_owner_step` and 5 generated
+  cases). `SmHyperbola` and `SmParabola` take the same step at the end of every `MakeNurb`
+  (nothing overwrites it), so the surface applies it for them too (without it, `adjust` of
+  a hyperbola or parabola extrusion disagrees: 31 of 6000 generated cases, rel. err ~1). The ellipse's owner step is overwritten upstream by `AdjustSTEPInterval`'s own
+  `EditParameterization`, so it is not repeated (one affine reparameterisation instead of
+  two: the knots then agree within rounding).
+- **Curve solve handles.** The generator solves (`GlobalPointSolve`, `GlobalPointSolveSTEP`,
+  `GlobalCurveIntersect`) name the generator with a handle that answers
+  `GetNaturalInterval`; without it the solution merge keeps near-duplicate minima (a tiny
+  scale `DropPointFast` returned 2 solutions against upstream's 1).
+- **Upstream defects** (in `plan/upstream-issues.md`): `EvaluateSTEP` order 5 of a B-spline
+  generator smashes the stack (UB-80, confirmed; the FFI rejects it), `sm_IntersectGenerators`
+  reads unset offsets (UB-81), constructor / copy hazards (UB-82), the unused clamp in
+  `EvaluateSTEP` / `EvaluateSTEPPoint` (WR-61, ported as is).
+- With a full-circle `SmCircle` generator a seam point gives one solution, so `STEPInversion`
+  reports `SM_LT_INTERIOR`; the U-seam branch is reached with a closed tangent-continuous
+  B-spline (fixtures `closed_seam_*`), as are `DropPointFast`'s in-pointing seam skips.
+- **Review fixes (PR #28).** The hyperbola / parabola owner step above was missing (only
+  `SmLine` had it): the shim then built no hyperbola or parabola generator, so the
+  `CurveKind::Hyperbola` / `Parabola` branches were never compared. The shim, FFI and runner
+  now build both (88 adversarial fixtures in `review_extra_cases.json`). The runner mapped
+  `SolidError::InvalidInput` to `-1` instead of `SM_ERR_INVALID_INPUT` (1007): 14 of 6000
+  seeds failed falsely on directrices of a zero extrusion vector. After the fixes 6000
+  seeds give 0 failed (max rel. err 2.1e-13, ellipse rounding).
+- **Lazy NURB.** Upstream's `const` `ConvertUVFromSTEPToNURBS`, `ConvertUVFromNURBSToSTEP`,
+  `DropPointFast` and `GetGenDirParamExtent` make a missing NURB; the Rust `&self` methods
+  cannot. The conversions and `DropPointFast` now return `SM_ERR` without a NURB (they used
+  to read a `(0, 0, 0, 0)` domain silently); `gen_dir_param_extent` still reads it as is.
+  The shim always calls `MakeNurb`, so this is not compared.
+- **Not yet compared.** `sm_IntersectGenerators` (all deferred on `curve.curve_p9`) is
+  checked only by reading; it needs a real difftest once that unit lands. The FFI's guards
+  on `v0 == v1` constructor domains hides inputs the C++ handles (both sides then fail the
+  build; not relaxed).
+- **Second review (PR #28).** `SmHyperbola` / `SmParabola::GlobalPointSolveSTEP` start with
+  `AdjustSTEPInterval(crInterval)`; with out-of-bounds evaluation on, `STEPInversion` passes
+  the generator's maximum analytic domain, so the owned generator is rebuilt and its
+  `MakeNurb` owner step reparameterises the NURB to `GetGenDirParamExtent`. The port solved
+  on an unowned copy without that step: the solve converged elsewhere within tolerance
+  (STEP u rel. err up to 9.4e-3 near `u = 0`, 3.8e-10 in the generated cases). The copy now
+  takes the owner step before the solve (bit-identical after). Upstream leaves the owned
+  generator adjusted to the solve interval after this `const` call; the port does not.
+  The FFI's circle / ellipse radius and line length guards (`<= 1e-6`) hid valid tiny
+  generators (radii down to `5e-324` agree); they now reject only non-positive sizes.
+  Tiny hyperbolas and parabolas (`a`, `b`, `f` of `1e-7` and below) crash the C++ build
+  (segfault), so their `1e-6` guards stay. 1082 cases in `review2_extra_cases.json`.
+
+## intersect.surface_intersector_p2 (`SmSurfaceIntersector`, part 2, 2026-10-14)
+
+- **Gap walk bound.** `ClassifyBoundaryStartPointIntersection` walks the gap function
+  with steps growing by 5 until a sample leaves a domain. With a zero UV tangent on both
+  surfaces the samples never move until `delta` overflows to `inf`; then `0 * inf` is
+  NaN and `ContainsPoint2d` treats a NaN point as inside, so upstream never ends. The
+  port stops with `SM_ERR` after `MAX_GAP_SAMPLES` (2000) samples. The shim's
+  `is_rejected_classify` rejects every point with both UV tangents zero (or a non-finite
+  UV value), so the early returns before the walk (tangent point, both steps leaving the
+  domain, tangent-curve / singularity / coincidence points off a tangent natural
+  boundary) are not compared for such points. Narrowing the guard to the walk itself
+  would need the shim to replay the pre-walk classification; not done. A review run
+  with the zero-tangent part of the guard disabled finished normally (46 more classify
+  ops agreed, 9 more deferred, the C++ never hung on those inputs), so the guard is
+  wider than needed; the pre-walk branches are already covered by points with non-zero
+  tangents, so this costs input coverage, not branch coverage.
+- **DoBoundaryPlaneTest Tangent/Coincident unreachable.** The interval branch only
+  produces `SM_TC_CROSSING` in the difftest: with the base intersector, endpoint point
+  types of `TangentCurve` or higher cannot be reached (`ComputeSingularityPoint`
+  returns `SM_ERR`), so the Tangent and Coincident classifications are uncompared. They
+  are unreachable here, not skipped by a guard.
+- **Re-run when dependencies land.** `ComputePointValues` step 7 (the "found" branch
+  and the else branch) and the gap walk past its first in-domain sample are fully
+  deferred on `surface.surface_p3` and `surface.surface_p5`; re-run this unit's
+  difftest when those units become green/partial.
+- **NaN curve intersection tolerance.** `DoBoundaryPlaneTest` with a zero tolerance and
+  an empty box divides 0 by 0. The C++ and the Rust agree on the result (fixture
+  `adv_graze_nan`), so the generator no longer excludes it.
+- **FlushCurve not guarded.** Curve parameters that do not increase reach
+  `SmBSplineCurve::CreateCanonical`, whose `N_IgesValidate` rejects decreasing knots
+  with `SM_ERR` (equal knots pass); both sides agree, so the shim runs every `Flush`
+  (the earlier `is_rejected_flush` hid about a fifth of the generated flushes and the
+  whole `sm_FlushCrv` error path).
+- **Input bound.** The FFI accepts finite inputs up to `MAX_COORD = 1e9` (as other
+  units do), so huge-scale inputs beyond 1e9 are not compared.
+- **EvaluateNormal wired.** With `surface.surface_p7` partial on `main`,
+  `surface_evaluate_normal` now calls `Surface::evaluate_normal` (B-spline, plane and
+  curve-bounded over either basis); the 77 cases previously deferred on it are compared
+  and pass. `SmCurveBoundedSurface` does not override `IsSingularity`, so a curve-bounded
+  surface runs the base `SmSurface::IsSingularity` and stays deferred on
+  `surface.surface_p5` (correctly, not an over-deferral).
+
+## intersect.surface_silhouette (`SmSurfaceSilhouette`, PR #45 review, 2026-10-14)
+
+No Rust-vs-C++ disagreement: 540 of 540 non-deferred difftest cases bit-identical (709
+cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
+`surface.surface_p7` port).
+
+- **Planes outside their extent.** `SmPlane` evaluates linearly everywhere, so
+  `ComputePointValues` / `DoesPointLieOnCurve` points and tracer domains outside the
+  plane's `SmExtent2d` are valid in C++. The ffi guard only bounds them to the natural
+  domain for B-splines (upstream evaluates those unclamped); six `advx_plane_outside_*`
+  fixtures (parallel, perspective, eye above) cover it and match exactly.
+- **Plane prev-point singularity.** `adv_plane_prev_*` fixtures view along or near a
+  plane axis with `use_prev`, and `adv_plane_persp_*` put the eye in the plane or exactly
+  on the surface point (`Unitize` of a zero vector gives `(0,0,1)`); all match. Tiny
+  (1e-6) and huge (1e5) planes, a parabolic cylinder viewed along its rulings (parabolic
+  branch, "hit singularity directly" recursion) and saddle chains with angle tolerance
+  None/1e-3/1.5/0 are covered too; 3 of the 31 defer on `surface.surface_p3`.
+- **`UNPORTED(surface.plane_p1)` stub (pre-existing on `main`).**
+  `surface/surface_cache/p1.rs` (~line 272) stubs `SmBSplineSurface::CalculateBoundingBox`
+  on a plane as `UNPORTED(surface.plane_p1)`, although `surface.plane_p1` is already
+  `partial`: the inherited B-spline body re-dispatches to plane overrides the port has no
+  hook for yet. It causes this unit's 6 `surface.plane_p1` deferrals; whoever wires it
+  should re-run this difftest.
+- **`SurfaceCache::polar_box_unstored`** rebuilds the polar box from the nearest stored
+  ancestor on every query instead of storing the chain as `SmBezierAux2d::GetPolarBox`
+  does. Same values (checked against `surface.surface_cache_p1` and
+  `intersect.surface_tracer` difftests); only repeated work differs.
+
 ## surface.surface_cache_p3 (`SmSurfaceCache`, part 3: tree build and subdivision, 2026-10-14)
 
 - **Patch boxes of ownerless surfaces.** The construction Bezier patches get their
@@ -2982,7 +3169,7 @@ default cases, a 30,847-case run clean, `--perturb` SENSITIVE). The 75 deferred 
 ## surface.surface_p1 (`SmSurface` part 1 and `SmSTEPSurface`, 2026-10-14)
 
 - **Shim guard.** The base `GetDomainWithContinuity` dereferences a `NULL` surface cache
-  when none can be built (upstream-issues UB-80). The shim checks
+  when none can be built (upstream-issues UB-83). The shim checks
   `smsurf_GetSurfaceCache` first and reports `SM_ERR`, which is what the Rust port returns
   (the cache error). The check builds and stores the cache, so the call that follows uses
   the same cache.

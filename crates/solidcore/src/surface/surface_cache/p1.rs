@@ -273,7 +273,7 @@ pub(super) fn calculate_bounding_box(
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
             // SmSurface::CalculateBoundingBox (surface::surface::p1). Its polar box asks the
             // surface's own cache for it, whose build asks this function again: upstream
-            // recurses without bound (UB-81), so the request is refused.
+            // recurses without bound (UB-84), so the request is refused.
             if req.polar {
                 return Err(SolidError::invalid_input(
                     "surface::surface_cache::p1::calculate_bounding_box",

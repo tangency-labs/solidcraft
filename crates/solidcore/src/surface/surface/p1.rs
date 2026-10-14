@@ -135,7 +135,7 @@ const OP_DOMAIN: &str = "surface::surface::p1::Surface::convert_domain";
 const OP_BOX: &str = "surface::surface::p1::Surface::calculate_bounding_box";
 
 /// Why a polar box of a curve-bounded or STEP surface is refused.
-pub(crate) const POLAR_RECURSION: &str = "SmSurface::CalculateBoundingBox of a polar box on a curve-bounded or STEP surface recurses without bound upstream (plan/upstream-issues.md UB-81)";
+pub(crate) const POLAR_RECURSION: &str = "SmSurface::CalculateBoundingBox of a polar box on a curve-bounded or STEP surface recurses without bound upstream (plan/upstream-issues.md UB-84)";
 
 /// The default `d3DTolerance` of `IsDegeneratePoint` and `dOpt3DTol` of
 /// `IsDegenerateCurve` (`SM_ZONE_TOL_3D / 10.0`).

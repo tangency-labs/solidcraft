@@ -812,7 +812,7 @@ by area within each severity.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput` where upstream would read past the arrays.
 
-#### UB-80. `SmSurface::GetDomainWithContinuity` dereferences a missing surface cache
+#### UB-83. `SmSurface::GetDomainWithContinuity` dereferences a missing surface cache
 - **Location:** `SmSurface.cpp:12056`, `SmSurface::GetDomainWithContinuity` (base body).
 - **What happens:** When `smsurf_GetSurfaceCache` returns `NULL` (neither a trimmed surface cache nor a surface cache can be built), `SE(SM_ERR)` only reports it and the body goes on to call `GetUContinuitiesArray()` through the null pointer.
 - **Trigger:** `GetDomainWithContinuity` on a curve-bounded surface or plane whose cache build fails (generated `surface.surface_p1` `dom_cont` cases).
@@ -821,7 +821,7 @@ by area within each severity.
 - **Severity:** crash/UB.
 - **Rust port:** Returns the cache build error.
 
-#### UB-81. `SmSurface::CalculateBoundingBox` of a polar box recurses without bound
+#### UB-84. `SmSurface::CalculateBoundingBox` of a polar box recurses without bound
 - **Location:** `SmSurface.cpp:5397`, `SmSurface::CalculateBoundingBox` (base body), with `SmSurfaceCache.cpp:1184`, `SmBezierAux2d::BuildPolarBox`.
 - **What happens:** For a polar box, the base body asks the top node of the surface's own cache for it (`SmBezierAux2d::GetPolarBox`). Building that box calls the node surface's `CalculateBoundingBox`, which for a curve-bounded or STEP surface is the same base body again. Nothing ends the cycle, so the stack overflows.
 - **Trigger:** `CalculateBoundingBox` with `pPolarBox != NULL` on an `SmCurveBoundedSurface` or `SmSTEPSurface` (any surface kind that does not override `CalculateBoundingBox`).
@@ -830,6 +830,14 @@ by area within each severity.
 - **Severity:** crash/UB.
 - **Rust port:** `Surface::base_calculate_bounding_box` and the surface caches' `calculate_bounding_box` refuse a polar box of those kinds with `InvalidInput` (bounded on wasm). The `surface.surface_p1` FFI never asks the C++ for it.
 
+#### UB-78. `SmApiCreateSkinFromFaces` with no faces crashes
+- **Location:** `source/SM_API/src/SmApiPrimitives.cpp:1335` `SmApiCreateSkinFromFaces` -> `source/SMLib/src/SmPrimitiveCreation.cpp:6711` `SmPrimitiveCreation::CreateSkinFromFaces` -> `SmBSplineSurfaceNLib.cpp` `SmBSplineSurface::CreateSkinnedSurface`.
+- **What happens:** With an empty face array (and no curves, which the API always passes), `CreateSkinFromFaces` still runs one layer and calls `CreateSkinnedSurface` with zero cross sections, which has no check for that and segfaults.
+- **Trigger:** `SmApiCreateSkinFromFaces` with an empty `rFaces`.
+- **How found:** crash in the C++ reference run (`sweep.api_surfaces` probe case).
+- **Confirmed:** yes.
+- **Severity:** crash/UB.
+- **Rust port:** `create_skin_from_faces` is a stub until `primitive.primitive_creation_p3` lands; `BSplineSurface::create_skinned_surface` returns `InvalidInput` for no cross sections. The harness passes at least one face.
 ### Intersection
 
 #### UB-74. `PointBasedSurfaceIntersect` writes past its 20-point array

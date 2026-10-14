@@ -161,7 +161,7 @@ enum OpIn {
         pseudo: bool,
         expand: bool,
         /// Only for unwrapped B-splines and planes (upstream recurses on the others,
-        /// UB-81).
+        /// UB-84).
         #[serde(default)]
         polar: bool,
     },
@@ -861,7 +861,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
         SurfIn::Plane(_) => true,
         SurfIn::CurveBounded(_) => false,
     };
-    // upstream's base CalculateBoundingBox recurses on a polar box (UB-81)
+    // upstream's base CalculateBoundingBox recurses on a polar box (UB-84)
     let polar_ok = !wrap && !matches!(surf, SurfIn::CurveBounded(_));
     let op = match rng.below(46) {
         0..=5 => OpIn::Eval {
