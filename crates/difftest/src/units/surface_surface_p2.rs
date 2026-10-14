@@ -76,7 +76,7 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 
 /// A solution object handle (the solutions name no objects here).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Handle;
+pub(crate) struct Handle;
 
 impl SolutionObject for Handle {
     fn kind(&self) -> ObjectKind {
@@ -2060,7 +2060,7 @@ fn gen_bss(rng: &mut Rng) -> BssIn {
     }
 }
 
-fn gen_curve(rng: &mut Rng, dim: u64) -> CrvIn {
+pub(crate) fn gen_curve(rng: &mut Rng, dim: u64) -> CrvIn {
     let p = 1 + rng.below(3) as usize;
     let n = p + rng.below(4) as usize;
     let rational = rng.chance(0.15);

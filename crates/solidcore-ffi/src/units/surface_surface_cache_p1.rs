@@ -324,7 +324,7 @@ pub(crate) fn bspline_block(rd: &mut Reader<'_>) -> Result<Srf, FfiError> {
 }
 
 /// A 3D or 2D curve `dim n p m cpts knots`.
-fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+pub(crate) fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve: dimension must be 2 or 3"));

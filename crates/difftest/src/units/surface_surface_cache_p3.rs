@@ -64,19 +64,19 @@ const SURFACE_HANDLE: i64 = -7;
 
 /// A bounded plane `SmPlane(o, x, y, scale, dom)`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PlaneIn {
-    o: [f64; 3],
-    x: [f64; 3],
-    y: [f64; 3],
-    scale: [f64; 2],
-    dom: [f64; 4],
+pub(crate) struct PlaneIn {
+    pub(crate) o: [f64; 3],
+    pub(crate) x: [f64; 3],
+    pub(crate) y: [f64; 3],
+    pub(crate) scale: [f64; 2],
+    pub(crate) dom: [f64; 4],
 }
 
 /// A surface: a B-spline, a plane, or a curve-bounded surface (implicit outer boundary, no
 /// boundary curves) over a B-spline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum SurfIn {
+pub(crate) enum SurfIn {
     Bspline(BssIn),
     Plane(PlaneIn),
     CurveBounded(BssIn),
@@ -200,7 +200,7 @@ struct Inputs {
 
 // ---- C++ side -----------------------------------------------------------------------
 
-fn push_surf(o: &mut Vec<f64>, s: &SurfIn) -> Result<(), HarnessError> {
+pub(crate) fn push_surf(o: &mut Vec<f64>, s: &SurfIn) -> Result<(), HarnessError> {
     match s {
         SurfIn::Bspline(b) => {
             o.push(0.0);
@@ -295,7 +295,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-fn surface_in(s: &SurfIn) -> Result<Surface, HarnessError> {
+pub(crate) fn surface_in(s: &SurfIn) -> Result<Surface, HarnessError> {
     Ok(match s {
         SurfIn::Bspline(b) => Surface::from(bss_of(b)?),
         SurfIn::Plane(p) => Surface::from(Plane::new(
@@ -660,7 +660,7 @@ fn gen_plane(rng: &mut Rng) -> PlaneIn {
     }
 }
 
-fn gen_surf(rng: &mut Rng) -> SurfIn {
+pub(crate) fn gen_surf(rng: &mut Rng) -> SurfIn {
     match rng.below(10) {
         0 | 1 => SurfIn::Plane(gen_plane(rng)),
         2 => {
@@ -674,7 +674,7 @@ fn gen_surf(rng: &mut Rng) -> SurfIn {
     }
 }
 
-fn surf_domain(s: &SurfIn) -> Result<[f64; 4], HarnessError> {
+pub(crate) fn surf_domain(s: &SurfIn) -> Result<[f64; 4], HarnessError> {
     Ok(match s {
         SurfIn::Bspline(b) | SurfIn::CurveBounded(b) => domain_of_srf(&srf(&b.srf)?),
         SurfIn::Plane(p) => p.dom,
@@ -682,7 +682,7 @@ fn surf_domain(s: &SurfIn) -> Result<[f64; 4], HarnessError> {
 }
 
 /// The largest coordinate magnitude of a surface (as the ffi bounds it).
-fn surf_size(s: &SurfIn) -> Result<f64, HarnessError> {
+pub(crate) fn surf_size(s: &SurfIn) -> Result<f64, HarnessError> {
     Ok(match s {
         SurfIn::Bspline(b) | SurfIn::CurveBounded(b) => srf(&b.srf)?
             .net

@@ -285,18 +285,24 @@ impl CurveBoundedSurface {
     /// [`SolidError::Unported`]: `SmSurface::EvaluateSimple` (`surface.surface_p1`).
     pub fn evaluate_simple(
         &self,
-        _uv: Point2,
-        _highest_u_deriv: usize,
-        _highest_v_deriv: usize,
-        _u_side: Side,
-        _v_side: Side,
-        _only_upper_half: bool,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        u_side: Side,
+        v_side: Side,
+        only_upper_half: bool,
     ) -> Result<Vec<Vec<Vec3>>> {
-        // UNPORTED(surface.surface_p1): SmSurface::EvaluateSimple
-        Err(SolidError::unported(
-            "SmSurface::EvaluateSimple",
-            "surface.surface_p1",
-        ))
+        self.basis.evaluate_simple(
+            uv,
+            highest_u_deriv,
+            highest_v_deriv,
+            EvaluateFlags {
+                u_side,
+                v_side,
+                only_upper_half,
+                non_zero_tangents: false,
+            },
+        )
     }
 
     /// The basis surface's normal at a singular `uv` (`EvaluateNormalAtSingularity`;
@@ -374,18 +380,24 @@ impl CurveBoundedSurface {
     /// [`SolidError::Unported`]: `SmSurface::EvaluateSTEP` (`surface.surface_p1`).
     pub fn evaluate_step(
         &self,
-        _uv: Point2,
-        _highest_u_deriv: usize,
-        _highest_v_deriv: usize,
-        _u_side: Side,
-        _v_side: Side,
-        _only_upper_half: bool,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        u_side: Side,
+        v_side: Side,
+        only_upper_half: bool,
     ) -> Result<Vec<Vec<Vec3>>> {
-        // UNPORTED(surface.surface_p1): SmSurface::EvaluateSTEP
-        Err(SolidError::unported(
-            "SmSurface::EvaluateSTEP",
-            "surface.surface_p1",
-        ))
+        self.basis.evaluate_step(
+            uv,
+            highest_u_deriv,
+            highest_v_deriv,
+            EvaluateFlags {
+                u_side,
+                v_side,
+                only_upper_half,
+                non_zero_tangents: true,
+            },
+        )
     }
 
     /// The basis surface's point at `uv` in its STEP parameterisation
@@ -394,12 +406,8 @@ impl CurveBoundedSurface {
     /// # Errors
     ///
     /// [`SolidError::Unported`]: `SmSurface::EvaluateSTEPPoint` (`surface.surface_p1`).
-    pub fn evaluate_step_point(&self, _uv: Point2) -> Result<Point3> {
-        // UNPORTED(surface.surface_p1): SmSurface::EvaluateSTEPPoint
-        Err(SolidError::unported(
-            "SmSurface::EvaluateSTEPPoint",
-            "surface.surface_p1",
-        ))
+    pub fn evaluate_step_point(&self, uv: Point2) -> Result<Point3> {
+        self.basis.evaluate_step_point(uv)
     }
 
     // ---- database -------------------------------------------------------------------
@@ -424,21 +432,14 @@ impl CurveBoundedSurface {
 }
 
 /// `SmSurface::operator==(crOther)` on `this` (the base-class test).
-fn surface_base_eq(_this: &CurveBoundedSurface, _other: &Surface) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): SmSurface::operator==
-    Err(SolidError::unported(
-        "SmSurface::operator==",
-        "surface.surface_p1",
-    ))
+fn surface_base_eq(this: &CurveBoundedSurface, other: &Surface) -> Result<bool> {
+    // (the same object was handled by the caller; the same type)
+    Ok(this.type_code() == other.type_code())
 }
 
 /// `*a == *b` for two surfaces (the virtual `operator==`).
-fn surface_eq(_a: &Surface, _b: &Surface) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): SmSurface::operator==
-    Err(SolidError::unported(
-        "SmSurface::operator==",
-        "surface.surface_p1",
-    ))
+fn surface_eq(a: &Surface, b: &Surface) -> Result<bool> {
+    a.approx_eq(b)
 }
 
 /// An ASCII count or flag: `0` when the extraction fails (C++11 `operator>>`).

@@ -2049,14 +2049,32 @@ fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
 // ---- unported callees ---------------------------------------------------------------------
 
 /// `crOther.IsPlanar(tol)`: a plane is planar; other kinds run `SmSurface::IsPlanar`.
-fn surface_is_planar(s: &Surface, tol: f64) -> Result<bool> {
-    Ok(s.is_planar(tol)?.is_planar)
+fn surface_is_planar(s: &Surface, _tol: f64) -> Result<bool> {
+    match s.kind() {
+        SurfaceKind::Plane(_) => Ok(true),
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+            // UNPORTED(surface.surface_p7): SmSurface::IsPlanar
+            Err(SolidError::unported(
+                "SmSurface::IsPlanar",
+                "surface.surface_p7",
+            ))
+        }
+    }
 }
 
 /// `crOther.EvaluateNormal(uv, TRUE, TRUE, ..)`: the plane override; other kinds run
 /// `SmSurface::EvaluateNormal`.
-fn surface_evaluate_normal(s: &Surface, uv: Point2) -> Result<Vec3> {
-    s.evaluate_normal(uv, Side::Left, Side::Left)
+fn surface_evaluate_normal(s: &Surface, _uv: Point2) -> Result<Vec3> {
+    match s.kind() {
+        SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+            // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
+            Err(SolidError::unported(
+                "SmSurface::EvaluateNormal",
+                "surface.surface_p7",
+            ))
+        }
+    }
 }
 
 /// `SmSurface::CreateNaturalUVTrimCurves(ctx, domain, SM_SP_V, FALSE, ..)`: the 3D

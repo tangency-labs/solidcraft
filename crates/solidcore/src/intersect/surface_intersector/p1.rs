@@ -1741,8 +1741,17 @@ fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Ve
 
 /// `crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)`: the plane override; other kinds
 /// run `SmSurface::EvaluateNormal`.
-fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
-    surface.evaluate_normal(uv, Side::Left, Side::Left)
+fn surface_evaluate_normal(surface: &Surface, _uv: Point2) -> Result<Vec3> {
+    match surface.kind() {
+        SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+            // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
+            Err(SolidError::unported(
+                "SmSurface::EvaluateNormal",
+                "surface.surface_p7",
+            ))
+        }
+    }
 }
 
 /// The principal curvatures and directions of `SmSurface::EvaluateGeometric`.
@@ -1764,12 +1773,11 @@ fn surface_evaluate_geometric(_surface: &Surface, _uv: Point2) -> Result<Princip
 }
 
 /// `smsurf_EvaluateNormalSection(eval, direction, ..)`: the curvature in `direction`.
-fn evaluate_normal_section(_eval: &[[Vec3; 3]; 3], _direction: Vec3) -> Result<f64> {
-    // UNPORTED(surface.surface_p1): smsurf_EvaluateNormalSection
-    Err(SolidError::unported(
-        "smsurf_EvaluateNormalSection",
-        "surface.surface_p1",
-    ))
+fn evaluate_normal_section(eval: &[[Vec3; 3]; 3], direction: Vec3) -> Result<f64> {
+    // (upstream may rebuild a vanishing first derivative of the caller's matrix in
+    // place; the caller only reads the curvature, so a copy is evaluated)
+    let mut eval = *eval;
+    Ok(crate::surface::surface::p1::evaluate_normal_section(&mut eval, direction)?.1)
 }
 
 /// `crSurface.LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, ..)`: found flag

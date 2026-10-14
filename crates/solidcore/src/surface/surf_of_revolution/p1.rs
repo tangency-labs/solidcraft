@@ -1124,10 +1124,12 @@ impl SurfOfRevolution {
 
         // when conversion was not exact - use solution as input to a local solve
         if !exact_conversion {
-            // UNPORTED(surface.surface_p1): SmSTEPSurface::SmSTEPSurface
+            // (an SmSTEPSurface of this surface, then a local point solve on it; the
+            // surface of revolution is not a Surface kind yet)
+            // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
             return Err(SolidError::unported(
-                "SmSTEPSurface::SmSTEPSurface",
-                "surface.surface_p1",
+                "SmSurface::LocalPointSolve",
+                "surface.surface_p5",
             ));
         }
         Ok(step_uv)

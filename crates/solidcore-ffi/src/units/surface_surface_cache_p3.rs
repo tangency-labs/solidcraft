@@ -87,7 +87,7 @@ const AUX_DATA: usize = 6;
 
 /// The surface kinds of an `S` block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     BSpline,
     Plane,
     CurveBounded,
@@ -197,7 +197,7 @@ fn net_size(input: &[f64], at: usize) -> f64 {
 
 /// An `S` block and its size ([`net_size`]; a plane: its origin plus its scaled axes
 /// over the domain).
-fn sized_surface(rd: &mut Reader<'_>) -> Result<(Kind, Srf, f64), FfiError> {
+pub(crate) fn sized_surface(rd: &mut Reader<'_>) -> Result<(Kind, Srf, f64), FfiError> {
     let at = rd.at;
     let (kind, srf) = surface_spec(rd)?;
     let size = match kind {

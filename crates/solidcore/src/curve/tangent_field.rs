@@ -316,9 +316,11 @@ impl<'a, S> TangentField<'a, S> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] when the surfaces are different objects
-    /// (`SmSurface::operator==`).
-    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
+    /// Those of the curve and surface comparisons.
+    pub fn approx_eq(&self, other: &Self) -> Result<bool>
+    where
+        S: SurfaceEvaluate,
+    {
         // low work
         if core::ptr::eq(self, other) {
             return Ok(true);
@@ -499,12 +501,8 @@ fn read_crv_on_surf(k: &Kernel, db: &mut DatabaseReader, _dim: u64, version: u64
 }
 
 /// `*m_pSurface == *rOther.m_pSurface`.
-fn surface_eq<S>(_a: &S, _b: &S) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): SmSurface::operator==
-    Err(SolidError::Unported {
-        upstream: "SmSurface::operator==",
-        unit: "surface.surface_p1",
-    })
+fn surface_eq<S: SurfaceEvaluate>(a: &S, b: &S) -> Result<bool> {
+    a.surface_approx_eq(b)
 }
 
 /// `m_pSurface->EvaluateNormal(uv, TRUE, TRUE, normal)`.
