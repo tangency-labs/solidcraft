@@ -3276,7 +3276,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "24 fns; largest: SmMerge::BooleanPostProcess, SmMerge::FixFoundFaceCoincidence, sm_FindBrepRegionOfOtherFace, SmMerge::PropagateOtherSrcRegionAttribs; cycle back-edges (call into later units; stub or co-port): blend.fillet_executive_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "CO-PORTED in boolean.api_brep (PR #81): SmMergeOptions (fields, ctor, defaults, copy ctor, getters/setters) -> solidcore::boolean::merge::p1::MergeOptions (crates/solidcore/src/boolean/merge/p1.rs; extend it, keep boolean/merge.rs as the split root); 24 fns; largest: SmMerge::BooleanPostProcess, SmMerge::FixFoundFaceCoincidence, sm_FindBrepRegionOfOtherFace, SmMerge::PropagateOtherSrcRegionAttribs; cycle back-edges (call into later units; stub or co-port): blend.fillet_executive_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "primitive.primitive_creation_p3"
@@ -3385,10 +3385,10 @@ soft_depends_on = ["boolean.merge_p1", "boolean.merge_p2", "boolean.merge_p4", "
 est_lines = 410
 layer = 58
 tests = ["SM_API_test:TestSmMaterialCensus", "SM_API_test:TestSmPiecewiseMerge", "SM_API_test:TestSmBooleanLists", "SM_API_test:TestApiMergeBrepsInvalidOperation", "SM_API_test:TestMergeBrepsOperation", "SM_API_test:TestSmMergeBreps"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "12 fns; largest: SmApiMergeBreps, SmApiBoolean, SmApiBooleanDifference, SmApiBooleanIntersection; entry points: SmApiBoolean, SmApiBooleanDifference, SmApiBooleanIntersection, SmApiBooleanLists, SmApiBooleanMerge, SmApiBooleanTrees, SmApiBooleanUnion, SmApiBooleanWithOptions, SmApiMergeBreps; 13 upstream test entry points reach this unit"
+notes = "partial (PR #81): difftest cases=284 passed=142 deferred=142 (blocked_by boolean.merge_p2(81): SmMerge::SmMerge for SmApiBoolean/Union/Difference/Intersection/Merge/WithOptions; boolean.merge_p3(61): SmMerge::merge_breps / BooleanLists / BooleanTrees); compared: SmApiValidateBooleanOperands (EXTRACT_SEPARATE), SmApiMergeBreps list/operation validation incl. non-consumption; NULL/aliased operands are unrepresentable with owned Breps; C++ shim runs real box/sphere booleans for the deferred cases (record = status, faces/edges/vertices/regions/manifold) so they compare once merge lands; Rust operands are empty Breps until primitive.api_primitives (SmApiCreateBox/Sphere) is ported; 12 fns; largest: SmApiMergeBreps, SmApiBoolean, SmApiBooleanDifference, SmApiBooleanIntersection; entry points: SmApiBoolean, SmApiBooleanDifference, SmApiBooleanIntersection, SmApiBooleanLists, SmApiBooleanMerge, SmApiBooleanTrees, SmApiBooleanUnion, SmApiBooleanWithOptions, SmApiMergeBreps; 13 upstream test entry points reach this unit"
 
 [[unit]]
 id = "primitive.primitive_creation_p2"

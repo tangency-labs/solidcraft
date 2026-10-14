@@ -1,0 +1,372 @@
+// SPDX-License-Identifier: Apache-2.0
+// difftest shim for unit `boolean.api_brep`: the boolean entry points of
+// source/SM_API/src/SmApiBrep.cpp (SmApiBoolean, SmApiBooleanUnion, SmApiBooleanDifference,
+// SmApiBooleanIntersection, SmApiBooleanMerge, SmApiMergeBreps, SmApiBooleanWithOptions,
+// SmApiBooleanLists, SmApiBooleanTrees), called exactly as a caller of the API would.
+//
+// One entry point, sc_boolean_api_brep_run(in, n_in, out, cap, out_len). `in` is
+// `op args...`; layouts are documented in crates/solidcore-ffi/src/units/boolean_api_brep.rs,
+// which validates every input so upstream only touches valid memory. Every read is bounds
+// checked here as well (a malformed program is SC_ERR_ARG). The whole program is parsed before
+// any upstream object is built. Operand B-reps are boxes (SmApiCreateBox) or spheres
+// (SmApiCreateSphere); a failing constructor is SC_ERR_ARG. `out` receives the API status
+// (0 = SM_SUCCESS, else the SmStatus) and, on success, the op's outputs.
+//
+// Ownership follows source/SM_API/inc/SmApiBrep.h: a rejected or failed two-B-rep call leaves
+// both operands with the caller (deleted here); on success the result is deleted and the second
+// operand is deleted here only when upstream keeps it. A failed N-ary call after validation
+// may have consumed some operands, so those are leaked rather than risk a double delete.
+#include "sc_shim.h"
+
+#include "StdAfx.h"
+#include <SmApiBrep.h>
+#include <SmApiGeneral.h>
+#include <SmApiPrimitives.h>
+#include <SmBrep.h>
+#include <SmContext.h>
+#include <SmRegion.h>
+#include <SmSurface.h>
+#include <SmTArray.h>
+#include <SmVector3d.h>
+
+#include <stdexcept>
+#include <vector>
+
+namespace
+{
+// Ops (keep in sync with crates/solidcore-ffi/src/units/boolean_api_brep.rs).
+enum : int32_t
+{
+    OP_BOOLEAN = 1,
+    OP_UNION = 2,
+    OP_DIFFERENCE = 3,
+    OP_INTERSECTION = 4,
+    OP_MERGE = 5,
+    OP_WITH_OPTIONS = 6,
+    OP_MERGE_BREPS = 7,
+    OP_LISTS = 8,
+    OP_TREES = 9,
+};
+
+// Operand kinds.
+enum : int32_t
+{
+    BK_BOX = 1,    // SmApiCreateBox(origin, length, width, height)
+    BK_SPHERE = 2, // SmApiCreateSphere(center, radius)
+};
+
+struct Bad : std::runtime_error
+{
+    Bad() : std::runtime_error("bad program") {}
+};
+
+struct Rd
+{
+    const double* in;
+    int64_t n;
+    int64_t at;
+    double num()
+    {
+        if (at >= n)
+            throw Bad();
+        return in[at++];
+    }
+    int64_t idx(int64_t lo, int64_t hi)
+    {
+        double d = num();
+        if (!(d >= (double)lo && d <= (double)hi) || d != (double)(int64_t)d)
+            throw Bad();
+        return (int64_t)d;
+    }
+    bool flag() { return idx(0, 1) != 0; }
+};
+
+struct BrepSpec
+{
+    int32_t kind = BK_BOX;
+    double d[6] = {0, 0, 0, 0, 0, 0};
+};
+
+BrepSpec read_spec(Rd& rd)
+{
+    BrepSpec s;
+    s.kind = (int32_t)rd.idx(1, 2);
+    int k = s.kind == BK_BOX ? 6 : 4;
+    for (int i = 0; i < k; i++)
+        s.d[i] = rd.num();
+    return s;
+}
+
+std::vector<BrepSpec> read_specs(Rd& rd, int64_t max)
+{
+    int64_t k = rd.idx(0, max);
+    std::vector<BrepSpec> v;
+    for (int64_t i = 0; i < k; i++)
+        v.push_back(read_spec(rd));
+    return v;
+}
+
+SmBrep* build(const BrepSpec& s)
+{
+    SmVector3d o(s.d[0], s.d[1], s.d[2]);
+    SmBrep* r = NULL;
+    SmApiStatus stat = s.kind == BK_BOX ? SmApiCreateBox(o, s.d[3], s.d[4], s.d[5], r)
+                                        : SmApiCreateSphere(o, s.d[3], r);
+    if (stat != SM_SUCCESS || r == NULL)
+    {
+        delete r;
+        throw Bad();
+    }
+    return r;
+}
+
+// Builds every spec; on failure deletes what was built and rethrows.
+std::vector<SmBrep*> build_all(const std::vector<BrepSpec>& specs)
+{
+    std::vector<SmBrep*> v;
+    try
+    {
+        for (size_t i = 0; i < specs.size(); i++)
+            v.push_back(build(specs[i]));
+    }
+    catch (...)
+    {
+        for (size_t i = 0; i < v.size(); i++)
+            delete v[i];
+        throw;
+    }
+    return v;
+}
+
+double st(SmStatus s)
+{
+    return s == SM_SUCCESS ? 0.0 : (double)s;
+}
+
+double flg(bool b)
+{
+    return b ? 1.0 : 0.0;
+}
+
+// `faces edges vertices regions manifold_solid` of a B-rep.
+void put_brep(std::vector<double>& o, const SmBrep* b)
+{
+    SmTArray<SmRegion*> regions;
+    b->GetRegions(regions);
+    o.push_back((double)b->GetNumFaces());
+    o.push_back((double)b->GetNumEdges());
+    o.push_back((double)b->GetNumVertices());
+    o.push_back((double)regions.GetSize());
+    o.push_back(flg(b->IsManifoldSolid() != FALSE));
+}
+
+// Whether upstream keeps the second operand of a successful two-B-rep boolean
+// (source/SM_API/inc/SmApiBrep.h).
+bool keeps_other(int32_t op, bool keep_option)
+{
+    return op == SM_BO_PARTIAL_MERGE || op == SM_BO_IMPRINT_CLASSIFY || keep_option;
+}
+
+void run_two(Rd& rd, int32_t api, std::vector<double>& o)
+{
+    BrepSpec a = read_spec(rd);
+    BrepSpec b = read_spec(rd);
+    int32_t op = SM_BO_UNKNOWN;
+    bool flags[5] = {false, false, true, false, false};
+    switch (api)
+    {
+    case OP_BOOLEAN: op = (int32_t)rd.idx(0, 10); break;
+    case OP_UNION: op = SM_BO_UNION; break;
+    case OP_DIFFERENCE: op = SM_BO_DIFFERENCE; break;
+    case OP_INTERSECTION: op = SM_BO_INTERSECTION; break;
+    case OP_MERGE: op = SM_BO_MERGE; break;
+    case OP_WITH_OPTIONS:
+        op = (int32_t)rd.idx(0, 10);
+        for (int i = 0; i < 5; i++)
+            flags[i] = rd.flag();
+        break;
+    default: throw Bad();
+    }
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<BrepSpec> specs;
+    specs.push_back(a);
+    specs.push_back(b);
+    std::vector<SmBrep*> bs = build_all(specs);
+    SmBrep* b1 = bs[0];
+    SmBrep* b2 = bs[1];
+    SmBrep* res = b1; // stale output: every entry point must clear it
+    SmBooleanOperationType eop = (SmBooleanOperationType)op;
+    SmApiStatus stat = SM_ERR;
+    switch (api)
+    {
+    case OP_BOOLEAN: stat = SmApiBoolean(b1, b2, eop, res); break;
+    case OP_UNION: stat = SmApiBooleanUnion(b1, b2, res); break;
+    case OP_DIFFERENCE: stat = SmApiBooleanDifference(b1, b2, res); break;
+    case OP_INTERSECTION: stat = SmApiBooleanIntersection(b1, b2, res); break;
+    case OP_MERGE: stat = SmApiBooleanMerge(b1, b2, res); break;
+    case OP_WITH_OPTIONS:
+        stat = SmApiBooleanWithOptions(b1, b2, eop, flags[0], flags[1], flags[2], flags[3],
+                                       flags[4], res);
+        break;
+    }
+    o.push_back(st(stat));
+    if (stat != SM_SUCCESS)
+    {
+        // Both operands remain allocated on failure.
+        if (res != NULL && res != b1 && res != b2)
+            delete res;
+        delete b1;
+        delete b2;
+        return;
+    }
+    bool kept = keeps_other(op, api == OP_WITH_OPTIONS && flags[4]);
+    o.push_back(flg(res != NULL));
+    if (res == NULL)
+        return;
+    o.push_back(flg(res == b1));
+    o.push_back(flg(kept));
+    put_brep(o, res);
+    if (kept && b2 != res)
+    {
+        put_brep(o, b2);
+        delete b2;
+    }
+    delete res; // b1 itself on the documented path; any other b1 is left (ownership unknown)
+}
+
+void run_merge_breps(Rd& rd, std::vector<double>& o)
+{
+    std::vector<BrepSpec> specs = read_specs(rd, 16);
+    int32_t op = (int32_t)rd.idx(0, 10);
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<SmBrep*> bs = build_all(specs);
+    SmTArray<SmBrep*> arr;
+    for (size_t i = 0; i < bs.size(); i++)
+        arr.Add(bs[i]);
+    SmBrep* res = bs.empty() ? NULL : bs[0]; // stale output
+    SmApiStatus stat = SmApiMergeBreps(arr, (SmBooleanOperationType)op, res);
+    o.push_back(st(stat));
+    if (stat == SM_ERR_INVALID_INPUT)
+    {
+        // Rejected before anything is consumed.
+        o.push_back(flg(res == NULL));
+        o.push_back((double)arr.GetSize());
+        for (size_t i = 0; i < bs.size(); i++)
+            delete bs[i];
+        return;
+    }
+    if (stat != SM_SUCCESS)
+        return; // consumed in part; leak
+    o.push_back((double)arr.GetSize());
+    o.push_back(flg(res != NULL));
+    if (res == NULL)
+        return;
+    put_brep(o, res);
+    delete res;
+}
+
+void run_lists(Rd& rd, std::vector<double>& o)
+{
+    std::vector<BrepSpec> s1 = read_specs(rd, 8);
+    std::vector<BrepSpec> s2 = read_specs(rd, 8);
+    int64_t op = rd.idx(-(int64_t)1 << 31, ((int64_t)1 << 31) - 1);
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<BrepSpec> all(s1);
+    all.insert(all.end(), s2.begin(), s2.end());
+    std::vector<SmBrep*> bs = build_all(all);
+    SmTArray<SmBrep*> b1, b2;
+    for (size_t i = 0; i < bs.size(); i++)
+        (i < s1.size() ? b1 : b2).Add(bs[i]);
+    SmTArray<SmSurface*> srf1, srf2;
+    SmTArray<SmBrep*> rb;
+    SmTArray<SmSurface*> rs;
+    SmApiStatus stat = SmApiBooleanLists(b1, srf1, b2, srf2, (int)op, rb, rs);
+    o.push_back(st(stat));
+    if (stat == SM_SUCCESS)
+    {
+        o.push_back((double)rb.GetSize());
+        for (ULONG i = 0; i < rb.GetSize(); i++)
+        {
+            o.push_back(flg(rb[i] != NULL));
+            if (rb[i] != NULL)
+                put_brep(o, rb[i]);
+        }
+        o.push_back((double)rs.GetSize());
+    }
+    // The inputs are never modified; outputs are new objects.
+    for (ULONG i = 0; i < rb.GetSize(); i++)
+        delete rb[i];
+    for (ULONG i = 0; i < rs.GetSize(); i++)
+        delete rs[i];
+    for (size_t i = 0; i < bs.size(); i++)
+        delete bs[i];
+}
+
+void run_trees(Rd& rd, std::vector<double>& o)
+{
+    std::vector<BrepSpec> specs = read_specs(rd, 16);
+    int64_t t = rd.idx(0, 64);
+    SmTArray<long> tree;
+    for (int64_t i = 0; i < t; i++)
+        tree.Add((long)rd.idx(-64, 64));
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<SmBrep*> bs = build_all(specs);
+    SmTArray<SmBrep*> arr;
+    for (size_t i = 0; i < bs.size(); i++)
+        arr.Add(bs[i]);
+    SmApiStatus stat = SmApiBooleanTrees(arr, tree);
+    o.push_back(st(stat));
+    if (stat != SM_SUCCESS)
+        return; // consumed in part; leak
+    o.push_back((double)arr.GetSize());
+    for (ULONG i = 0; i < arr.GetSize(); i++)
+    {
+        o.push_back(flg(arr[i] != NULL));
+        if (arr[i] != NULL)
+            put_brep(o, arr[i]);
+    }
+    for (ULONG i = 0; i < arr.GetSize(); i++)
+        delete arr[i];
+}
+
+void run(Rd& rd, std::vector<double>& o)
+{
+    int32_t api = (int32_t)rd.idx(1, 9);
+    switch (api)
+    {
+    case OP_BOOLEAN:
+    case OP_UNION:
+    case OP_DIFFERENCE:
+    case OP_INTERSECTION:
+    case OP_MERGE:
+    case OP_WITH_OPTIONS: run_two(rd, api, o); break;
+    case OP_MERGE_BREPS: run_merge_breps(rd, o); break;
+    case OP_LISTS: run_lists(rd, o); break;
+    case OP_TREES: run_trees(rd, o); break;
+    default: throw Bad();
+    }
+}
+} // namespace
+
+SC_EXPORT int32_t sc_boolean_api_brep_run(const double* in, int64_t n_in, double* out,
+                                          int64_t cap, int64_t* out_len)
+{
+    SC_TRY
+    SmApiGetOrCreateContext();
+    Rd rd{in, n_in, 0};
+    std::vector<double> o;
+    try
+    {
+        run(rd, o);
+    }
+    catch (const Bad&)
+    {
+        return SC_ERR_ARG;
+    }
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}

@@ -1,0 +1,2860 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "boolean_extract_separate_rejected",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#0 (upstream tests/SM_API_test/src/TestSmBrep.cpp:66)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_minus_sphere",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#1 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#2 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#3 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#4 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#5 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#6 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op5",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#7 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#8 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op7",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#9 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#10 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "boolean_box_sphere_op10",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#11 (upstream tests/SM_API_test/src/TestSmBrep.cpp:88)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "with_options_difference",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#12 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2300)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "with_options_extract_separate_rejected",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#13 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2300)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "with_options_keep_other",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#14 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2300)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "with_options_cookie_cutter",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#15 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2300)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#16 (upstream tests/SM_API_test/src/TestSmBrep.cpp:941)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_singleton",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#17 (upstream tests/SM_API_test/src/TestSmBrep.cpp:958)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_unknown",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#18 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_exclusive_or",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#19 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_partial_merge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#20 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_imprint",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#21 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_imprint_classify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#22 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_extract_separate",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#23 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "merge_breps_bad_operation_slice",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#24 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1033)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_breps_union",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#25 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1038)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_breps_intersection",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#26 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1038)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_breps_difference",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#27 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1038)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_breps_merge",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#28 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1038)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_breps_three_union",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#29 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1068)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_breps_three_difference",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#30 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1105)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "census_difference_cavity",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#31 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3309)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "census_union_disjoint",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#32 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3315)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "intersection_overlap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#33 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3309)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "merge_nested",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#34 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3326)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "lists_op0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#35 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "lists_op1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#36 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "lists_op2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#37 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "lists_op3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#38 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "lists_op4",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#39 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "lists_empty",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#40 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2537)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "trees_union",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#41 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1068)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "trees_two_trees",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#42 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1068)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "trees_not_binary",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.api_brep/upstream_tests.json#43 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1068)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744899",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744900",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744901",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744902",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744903",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744904",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744905",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744906",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744907",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744908",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744909",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744910",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744911",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744912",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744913",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744914",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744915",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744916",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744917",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744918",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744919",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744920",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744921",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744922",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744923",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744924",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744925",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744926",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744927",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744928",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744929",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744930",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744931",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744932",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744933",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744934",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744935",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744936",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744937",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744938",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744939",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744940",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744941",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744942",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744943",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744944",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744945",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744946",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744947",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744948",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744949",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744950",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744951",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744952",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744953",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744954",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744955",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744956",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744957",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744958",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744959",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744960",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744961",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744962",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744963",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744964",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744965",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744966",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744967",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744968",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744969",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744970",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744971",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744972",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744973",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744974",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744975",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744976",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744977",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744978",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744979",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744980",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744981",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744982",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744983",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744984",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744985",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744986",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744987",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744988",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744989",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744990",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744991",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224744992",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744993",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744994",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744995",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744996",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744997",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744998",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224744999",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745000",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745001",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745002",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745003",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745004",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745005",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745006",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745007",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745008",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745009",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745010",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745011",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745012",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745013",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745014",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745015",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745016",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745017",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745018",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745019",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745020",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745021",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745022",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745023",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745024",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745025",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745026",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745027",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745028",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745029",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745030",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745031",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745032",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745033",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745034",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745035",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745036",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745037",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745038",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745039",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745040",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745041",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745042",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745043",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745044",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745045",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745046",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745047",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745048",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745049",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745050",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745051",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745052",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745053",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745054",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745055",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745056",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745057",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745058",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745059",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745060",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745061",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745062",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745063",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745064",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745065",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745066",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745067",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745068",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745069",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745070",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745071",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745072",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745073",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745074",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745075",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745076",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745077",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745078",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745079",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745080",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745081",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745082",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745083",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745084",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745085",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745086",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745087",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745088",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745089",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745090",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745091",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745092",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745093",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745094",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745095",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745096",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745097",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745098",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745099",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745100",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745101",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745102",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745103",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745104",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745105",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745106",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745107",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745108",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745109",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745110",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745111",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745112",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745113",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745114",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745115",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745116",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745117",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745118",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745119",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745120",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745121",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::merge_breps",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745122",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745123",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745124",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745125",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745126",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745127",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745128",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745129",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745130",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745131",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745132",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745133",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanTrees",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745134",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::BooleanLists",
+        "unit": "boolean.merge_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745135",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745136",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=13617184360224745137",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmMerge::SmMerge",
+        "unit": "boolean.merge_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=13617184360224745138",
+      "values_compared": 0
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 142,
+  "cases_failed": 0,
+  "cases_passed": 142,
+  "cases_total": 284,
+  "deferred_by_unit": {
+    "boolean.merge_p2": 81,
+    "boolean.merge_p3": 61
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "boolean.api_brep"
+}
