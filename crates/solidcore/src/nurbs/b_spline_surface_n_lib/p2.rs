@@ -40,9 +40,8 @@
 //!   curves (the same data, not a copy-constructed curve).
 //! - **Unported callees** return [`SolidError::Unported`]:
 //!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`),
-//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`),
-//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`),
-//!   `SmSurface::Evaluate1stDerivatives` (`surface.surface_p1`). Upstream ignores the status of
+//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`). (`SmSurface::EvaluateNormal`
+//!   and `Evaluate1stDerivatives` are those of `surface::surface::p7`.) Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
 //! - Status values upstream ignores stay ignored (`EditParameterization` before
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
@@ -259,12 +258,8 @@ fn interpolated_tangent_field_curve(
 }
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn evaluate_normal(_surface: &BSplineSurface, _uv: Point2) -> Result<Vec3> {
-    // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-    Err(SolidError::Unported {
-        upstream: "SmSurface::EvaluateNormal",
-        unit: "surface.surface_p7",
-    })
+fn evaluate_normal(surface: &BSplineSurface, uv: Point2) -> Result<Vec3> {
+    crate::surface::surface::p7::base_evaluate_normal(surface, uv, Side::Left, Side::Left)
 }
 
 /// `SmSurface::EvaluateNormalSection(uv, TRUE, TRUE, direction, ..)`: the cross
@@ -278,12 +273,10 @@ fn evaluate_normal_section(_surface: &BSplineSurface, _uv: Point2, _dir: Vec3) -
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: `(Su, Sv)`.
-fn evaluate_1st_derivatives(_surface: &BSplineSurface, _uv: Point2) -> Result<(Vec3, Vec3)> {
-    // UNPORTED(surface.surface_p1): SmSurface::Evaluate1stDerivatives
-    Err(SolidError::Unported {
-        upstream: "SmSurface::Evaluate1stDerivatives",
-        unit: "surface.surface_p1",
-    })
+fn evaluate_1st_derivatives(surface: &BSplineSurface, uv: Point2) -> Result<(Vec3, Vec3)> {
+    let (_, du, dv) =
+        crate::surface::surface::p7::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)?;
+    Ok((du, dv))
 }
 
 /// `SmCurve::LocalCurveIntersect(domain, other, other_domain, tol, guess, other_guess,

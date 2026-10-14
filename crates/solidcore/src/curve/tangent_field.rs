@@ -31,8 +31,8 @@
 //!   `GetNaturalInterval` (the UV curve's interval), `IsKindOf`, and `operator==`
 //!   (same UV curve, same surface, same UV domain).
 //! - **Unported callees.** Comparing two different surfaces needs `SmSurface::operator==`
-//!   (`surface.surface_p1`); evaluating inside the interval needs
-//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`). Reading the `SmCrvOnSurf`
+//!   (`surface.surface_p1`); evaluating inside the interval uses the surface's
+//!   `EvaluateNormal` (`SurfaceEvaluate::evaluate_normal`). Reading the `SmCrvOnSurf`
 //!   part of a database record ([`CrvOnSurf::read_from_db`]) reads its surface with
 //!   `SmSurface::ReadFromDB`, whose non-B-spline types are unported.
 //! - **Arguments.** Out-params become return values; the `SmContext` of `Create` and
@@ -354,8 +354,11 @@ impl<'a, S> TangentField<'a, S> {
     /// # Errors
     ///
     /// Those of the UV curve's evaluation; [`SolidError::Unported`] inside the
-    /// interval (`SmSurface::EvaluateNormal`).
-    pub fn evaluate_point(&self, t: f64) -> Result<Point3> {
+    /// interval (`EvaluateNormal` of the surface).
+    pub fn evaluate_point(&self, t: f64) -> Result<Point3>
+    where
+        S: SurfaceEvaluate,
+    {
         // locals
         let param_tol = 1.0e-8;
         let ivl = self.natural_interval();
@@ -398,7 +401,10 @@ impl<'a, S> TangentField<'a, S> {
     /// # Errors
     ///
     /// `SM_ERR` for `num_derivs > 1`; those of [`TangentField::evaluate_point`].
-    pub fn evaluate(&self, t: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
+    pub fn evaluate(&self, t: f64, num_derivs: usize) -> Result<Vec<Vec3>>
+    where
+        S: SurfaceEvaluate,
+    {
         if num_derivs == 0 {
             return Ok(vec![self.evaluate_point(t)?]);
         }
@@ -502,12 +508,12 @@ fn surface_eq<S>(_a: &S, _b: &S) -> Result<bool> {
 }
 
 /// `m_pSurface->EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn surface_evaluate_normal<S>(_surface: &S, _uv: Point2) -> Result<Vec3> {
-    // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-    Err(SolidError::Unported {
-        upstream: "SmSurface::EvaluateNormal",
-        unit: "surface.surface_p7",
-    })
+fn surface_evaluate_normal<S: SurfaceEvaluate>(surface: &S, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(
+        uv,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )
 }
 
 #[cfg(test)]
@@ -572,10 +578,8 @@ mod tests {
         let d = tf.evaluate(1.0, 1).unwrap();
         assert_eq!(d[1], Vec3::new(0.0, 0.0, 0.0));
         assert!(tf.evaluate(0.0, 2).is_err());
-        assert!(matches!(
-            tf.evaluate_point(0.5),
-            Err(SolidError::Unported { .. })
-        ));
+        // inside the interval: the surface normal (surface::surface::p7) is available
+        assert!(tf.evaluate_point(0.5).is_ok());
         // without a domain: the surface's natural UV domain
         let n = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, None).unwrap();
         assert_eq!(n.evaluate_point(0.0).unwrap(), s);

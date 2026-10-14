@@ -1423,6 +1423,33 @@ by area within each severity.
 - **Severity:** wrong result (unit mix-up).
 - **Rust port:** Faithful.
 
+#### WR-55. `SmSurface::GetFlatCorners` destroys its return value while filling the corner points
+- **Location:** `SmSurface.cpp:12691`, `SmSurface::GetFlatCorners` (def. `:12655`).
+- **What happens:** The optional-output block tests `if(lRtn &= SM_FC_UMIN_VMIN)` (and so on) with `&=`, so asking for the points masks the flags down to at most one bit (usually none), and later corners are evaluated only if all earlier masks kept a bit.
+- **Trigger:** `GetFlatCorners(&points)` on a surface with two or more flat corners.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Reproduces it (`Surface::flat_corners`; `IsFlatCorner` is not ported yet).
+
+#### WR-56. `sm_GoodDropResult` swaps the guess and result distances
+- **Location:** `SmSurface.cpp:10349`, `sm_GoodDropResult` (file static, def. `:10256`).
+- **What happens:** `dDsqGuess` holds the distance to the result point and `dDsqResult` the distance to the guess point, so the final "result farther than the guess" test rejects drops that improved on the guess. The caller then runs the expensive global solve.
+- **Trigger:** A local drop whose result is closer to the point than the guess, with a small residual that passes the earlier tests.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result (performance: an unneeded global solve).
+- **Rust port:** Reproduces it (`good_drop_result`).
+
+#### WR-57. `SmSurface::FindDegenParamForDirection` compares a sample fraction with a parameter
+- **Location:** `SmSurface.cpp:6948`, `SmSurface::FindDegenParamForDirection` (def. `:6757`).
+- **What happens:** The "nearly as good and closer to the input" tie-break compares `dThisParam` (a fraction in `[0, 1]` of the sample domain) with `dS` (the actual parameter), so it only means "closer" when the singular parameter runs over `[0, 1]`.
+- **Trigger:** A degenerate boundary whose singular parameter interval is not `[0, 1]`, with two nearly equally good samples.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result (start guess of the Newton solve).
+- **Rust port:** Reproduces it.
+
 #### WR-58. `SmPointClassification::GetGap3d` returns `SM_ERR` as a distance
 - **Location:** `SmPointClass.cpp:464`, `SmPointClassification::GetGap3d` (def. `:418`).
 - **What happens:** When the object point has no single drop point on the given surface (even at 100x the zone tolerance), the function, which returns a `double` gap, returns `SM_ERR` (1001.0), which callers read as a large gap.

@@ -43,8 +43,8 @@
 //!   [`BSplineSurface`], so the curve holds one, by value. The surface virtuals resolve
 //!   to its overrides (`GetNaturalUVDomain`, `Evaluate`, `EvaluatePoint`,
 //!   `operator==`, `Copy`, `Transform`); the base-class `SmSurface` methods it needs
-//!   return [`SolidError::Unported`]: `EvaluateNormal` (unit `surface.surface_p7`),
-//!   and `Evaluate2ndDerivatives` (`surface.surface_p1`); `ReadFromDB` reads the
+//!   (`EvaluateNormal`, `Evaluate2ndDerivatives`) are those of `surface::surface::p7`;
+//!   `ReadFromDB` reads the
 //!   surface through `SmSurface::ReadFromDB` ([`Surface::read_from_db`]), whose other
 //!   surface types are unported. The derivative lifts are those of
 //!   [`crate::surface::surface::p2`].
@@ -87,8 +87,8 @@
 //!   zero fill never runs upstream (`for (ii = 2; ii > lNumDers; ii++)` inside
 //!   `if (lNumDers > 1)`); the port returns the two derivatives it computes.
 //! - **`SurfaceCurveMaxDistanceBetween`** forces `bDoPrecise = FALSE` before its
-//!   precise refinement upstream, so that code (`SmSurface::LocalCurveSolve`, unit
-//!   `surface.surface_p7`, and `SmCurve::LocalCurveSolve`) is dead and not ported.
+//!   precise refinement upstream, so that code (`SmSurface::LocalCurveSolve` and
+//!   `SmCurve::LocalCurveSolve`) is dead and not called.
 //!   Object identity (`&crOtherCurve == this`) is [`core::ptr::eq`].
 //! - **`ReadFromDB`** always builds a new object (the "fill the curve passed in"
 //!   branch and its `IsKindOf` check have no counterpart; `lType`, `lDim` and the
@@ -147,26 +147,21 @@ pub const CONTINUITY_ANGLE: f64 = 0.5;
 
 /// `SmSurface::EvaluateNormal(uv, from_left, from_left, normal)` (not overridden by
 /// `SmBSplineSurface`).
-fn surface_evaluate_normal(_srf: &BSplineSurface, _uv: Point2, _from_left: bool) -> Result<Vec3> {
-    // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-    Err(SolidError::unported(
-        "SmSurface::EvaluateNormal",
-        "surface.surface_p7",
-    ))
+fn surface_evaluate_normal(srf: &BSplineSurface, uv: Point2, from_left: bool) -> Result<Vec3> {
+    let side = if from_left { Side::Left } else { Side::Right };
+    crate::surface::surface::p7::base_evaluate_normal(srf, uv, side, side)
 }
 
 /// The second derivatives of `SmSurface::Evaluate2ndDerivatives(uv, from_left,
 /// from_left, S, Su, Sv, Suv, Suu, Svv)`: `[S, Su, Sv, Suv, Suu, Svv]`.
 fn surface_evaluate_2nd_derivatives(
-    _srf: &BSplineSurface,
-    _uv: Point2,
-    _from_left: bool,
+    srf: &BSplineSurface,
+    uv: Point2,
+    from_left: bool,
 ) -> Result<[Vec3; 6]> {
-    // UNPORTED(surface.surface_p1): SmSurface::Evaluate2ndDerivatives
-    Err(SolidError::unported(
-        "SmSurface::Evaluate2ndDerivatives",
-        "surface.surface_p1",
-    ))
+    let side = if from_left { Side::Left } else { Side::Right };
+    let d = crate::surface::surface::p7::evaluate_2nd_derivatives(srf, uv, side, side)?;
+    Ok([d.point, d.du, d.dv, d.duv, d.duu, d.dvv])
 }
 
 /// `SmSurface::ReadFromDB(type, db, .., version)`: the surface of the record (the

@@ -68,14 +68,10 @@
 //! - **`AddStartPoint`** keeps upstream's "replace a bounded start point by the exact
 //!   one" branch, which only reassigns a local pointer: the exact candidate is
 //!   dropped and the bounded point stays.
-//! - **Co-ported callees.** `SmSurface::IsClosed` (unit `surface.surface_p7`) is
-//!   ported here for the call the constructor makes (default tolerance, no
-//!   continuity): the `SmPlane` override, else the base body. Its callees
-//!   `SmSurface::EvaluateDirectionalDerivs` and `SmSurface::Evaluate1stDerivatives`
-//!   (unit `surface.surface_p1`) are one-line wrappers of the virtual `Evaluate`
-//!   and are ported here as well.
-//! - **Unported callees.** `SmSurface::EvaluateNormal` of a surface that is not a
-//!   plane (`surface.surface_p7`), `SmSurface::EvaluateGeometric`
+//! - **Surface calls.** `SmSurface::IsClosed`, `SmSurface::EvaluateNormal` and
+//!   `SmSurface::Evaluate1stDerivatives` go through `surface::surface::p7` (the
+//!   last co-ported there from unit `surface.surface_p1`).
+//! - **Unported callees.** `SmSurface::EvaluateGeometric`
 //!   (`surface.surface_p3`), `smsurf_EvaluateNormalSection` (`surface.surface_p1`),
 //!   `SmSurface::LocalPointSolve` and `SmSurface::DropPoint` (`surface.surface_p5`),
 //!   `SmSurface::GlobalPointSolve` (`surface.surface_p4`),
@@ -95,20 +91,17 @@ use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
-use crate::geom::geom_utility::p1::directional_derivs;
-use crate::geom::geom_utility::p2::frenet_from_derivatives;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, PI};
+use crate::math::{max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::SurfParamType;
-use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::TsectCurveType;
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::Surface;
 
 const OP_POINT: &str = "intersect::surface_intersector::p1::SurfaceIntersector::point";
 const OP_LIST: &str = "intersect::surface_intersector::p1::SurfaceIntersector::add_to_list";
@@ -126,9 +119,6 @@ pub const MAX_USER_DOUBLES: usize = 4;
 
 /// `NUM_TEST_POINTS` of `TestSpanAccuracy`.
 const NUM_SPAN_TEST_POINTS: usize = 5;
-
-/// `NUM_TEST_POINTS` of `SmSurface::IsClosed`.
-const NUM_CLOSED_TEST_POINTS: usize = 5;
 
 // ---- intersection point ------------------------------------------------------------------
 
@@ -1705,200 +1695,27 @@ pub fn flush_crv(
 // ---- co-ported callees ----------------------------------------------------------------------
 
 /// `crSurface.IsClosed(crUVDomain, eSurfParam)` (default tolerance, no continuity):
-/// the `SmPlane` override (never closed), else `SmSurface::IsClosed` (co-ported from
-/// `surface.surface_p7`): at six points along the domain diagonal the iso-line end
-/// points must coincide within `1000 * SM_EFF_ZERO * (1 + |P(max)|)`, and an iso-line
-/// whose mid point is that close to its ends must be a small circle.
+/// [`Surface::is_closed`] (`surface::surface::p7`, with the `SmPlane` override).
 fn surface_is_closed(
     surface: &Surface,
     domain: &Extent2d,
     surf_param: SurfParamType,
 ) -> Result<bool> {
-    if let SurfaceKind::Plane(p) = surface.kind() {
-        return Ok(p.is_closed().0);
-    }
-
-    let count = if surf_param == SurfParamType::Both {
-        2
-    } else {
-        1
-    };
-    // eMinContinuity starts at SM_CT_CINFINITY and is only lowered when a
-    // continuity is asked for, so the extra short-curve test always runs.
-    let mut p_min = Vec3::UNDEF;
-    let mut p_max = Vec3::UNDEF;
-    let mut p_mid = [Vec3::UNDEF; 4];
-    let mut g_mid = [Vec3::UNDEF; 4];
-    let mut uv_min = Vec2::UNDEF;
-    let mut uv_max = Vec2::UNDEF;
-    let mut uv_mid = Vec2::UNDEF;
-
-    for ii in 0..count {
-        let this_param = if surf_param == SurfParamType::Both && ii == 0 {
-            SurfParamType::U
-        } else if surf_param == SurfParamType::Both && ii == 1 {
-            SurfParamType::V
-        } else {
-            surf_param
-        };
-        let uv_dir = if this_param == SurfParamType::U {
-            Vec2::new(1.0, 0.0)
-        } else {
-            Vec2::new(0.0, 1.0)
-        };
-
-        for jj in 0..=NUM_CLOSED_TEST_POINTS {
-            // get next UVPoint on UVDomain diagonal - avoid endPoints
-            let e = (jj as f64 + 1.0) / (2.0 + NUM_CLOSED_TEST_POINTS as f64);
-            let uv = domain.evaluate(e, e);
-
-            if this_param == SurfParamType::U {
-                uv_min.x = domain.min().x;
-                uv_max.x = domain.max().x;
-                uv_mid.x = (uv_min.x + uv_max.x) / 2.0;
-                uv_min.y = uv.y;
-                uv_max.y = uv.y;
-                uv_mid.y = uv.y;
-            } else {
-                uv_min.y = domain.min().y;
-                uv_max.y = domain.max().y;
-                uv_mid.y = (uv_min.y + uv_max.y) / 2.0;
-                uv_min.x = uv.x;
-                uv_max.x = uv.x;
-                uv_mid.x = uv.x;
-            }
-
-            // evaluate isoParameter endPoints (statuses ignored: the old value stays)
-            p_min = or_keep(surface.evaluate_point(uv_min), p_min)?;
-            p_max = or_keep(surface.evaluate_point(uv_max), p_max)?;
-
-            // pick a tolerance
-            let tol = EFF_ZERO * 1000.0 * (1.0 + p_max.max_dimension());
-
-            // when the gap is too big - not closed
-            let vec_diff = p_min - p_max;
-            if vec_diff.length_squared() > tol * tol {
-                return Ok(false);
-            }
-
-            // filter out very short curve passing as closed curves
-            if let Some(d) = or_keep(
-                evaluate_directional_derivs(surface, uv_mid, uv_dir, 2).map(Some),
-                None,
-            )? {
-                for (dst, src) in p_mid.iter_mut().zip(d) {
-                    *dst = src;
-                }
-            }
-
-            let gap1_sq = (p_mid[0] - p_min).length_squared();
-            let gap2_sq = (p_mid[0] - p_max).length_squared();
-            let mid_gap_sq = max2(gap1_sq, gap2_sq);
-
-            // cheesy one point test for a short curve
-            if mid_gap_sq < 4.0 * tol * tol {
-                // status ignored: a zero tangent leaves a zero curvature vector
-                g_mid[0] = p_mid[0];
-                g_mid[1] = p_mid[1];
-                g_mid[2] = Vec3::ZERO;
-                if let Ok(g) = frenet_from_derivatives(&p_mid, 2) {
-                    for (dst, src) in g_mid.iter_mut().zip(g) {
-                        *dst = src;
-                    }
-                }
-
-                // get curvature and radius of curvature
-                let mid_curv_sq = g_mid[2].length_squared();
-                let mid_radius = if mid_curv_sq > EFF_ZERO_SQ {
-                    1.0 / sqrt(mid_curv_sq)
-                } else {
-                    BIG_DOUBLE
-                };
-
-                // small circles can be closed - short large radius arcs can't be
-                if mid_radius > tol {
-                    return Ok(false);
-                }
-            }
-        }
-    }
-    Ok(true)
+    Ok(surface.is_closed(domain, surf_param, None, false)?.0)
 }
 
-/// From the left in both directions.
-const fn left_flags(only_upper_half: bool, non_zero_tangents: bool) -> EvaluateFlags {
-    EvaluateFlags {
-        u_side: Side::Left,
-        v_side: Side::Left,
-        only_upper_half,
-        non_zero_tangents,
-    }
-}
-
-/// `SmSurface::Evaluate` as the flat array upstream writes (`D[i][j]` at
-/// `i * (highest_v + 1) + j`; entries not computed are uninitialised).
-fn evaluate_flat(
-    surface: &Surface,
-    uv: Point2,
-    highest: usize,
-    flags: EvaluateFlags,
-) -> Result<Vec<Vec3>> {
-    let m = surface.evaluate(uv, highest, highest, flags)?;
-    let mut flat = Vec::new();
-    for i in 0..=highest {
-        for j in 0..=highest {
-            flat.push(
-                m.get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .unwrap_or(Vec3::UNDEF),
-            );
-        }
-    }
-    Ok(flat)
-}
-
-/// `SmSurface::EvaluateDirectionalDerivs(uv, dir, highest, ..)` (co-ported from
-/// `surface.surface_p1`): `Evaluate(uv, h, h, TRUE, TRUE, TRUE, .., FALSE)` (exact
-/// tangents), then `smgu_DirectionalDerivs`.
-fn evaluate_directional_derivs(
-    surface: &Surface,
-    uv: Point2,
-    dir: Vec2,
-    highest: usize,
-) -> Result<Vec<Vec3>> {
-    let derivs = evaluate_flat(surface, uv, highest, left_flags(true, false))?;
-    directional_derivs(dir, highest, highest, &derivs)
-}
-
-/// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` (co-ported from
-/// `surface.surface_p1`): `Evaluate(uv, 1, 1, TRUE, TRUE, TRUE, .., TRUE)`.
+/// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`
+/// (`surface::surface::p7::evaluate_1st_derivatives`).
 fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    let m = surface.evaluate(uv, 1, 1, left_flags(true, true))?;
-    let at = |i: usize, j: usize| {
-        m.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .unwrap_or(Vec3::UNDEF)
-    };
-    Ok((at(0, 0), at(1, 0), at(0, 1)))
+    crate::surface::surface::p7::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)
 }
 
 // ---- unported callees ---------------------------------------------------------------------------
 
 /// `crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)`: the plane override; other kinds
 /// run `SmSurface::EvaluateNormal`.
-fn surface_evaluate_normal(surface: &Surface, _uv: Point2) -> Result<Vec3> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
-            // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-            Err(SolidError::unported(
-                "SmSurface::EvaluateNormal",
-                "surface.surface_p7",
-            ))
-        }
-    }
+fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(uv, Side::Left, Side::Left)
 }
 
 /// The principal curvatures and directions of `SmSurface::EvaluateGeometric`.

@@ -1143,6 +1143,17 @@ pub trait SurfaceEvaluate {
     ///
     /// Those of the type query.
     fn is_kind_of(&self, t: i64) -> Result<bool>;
+
+    /// `EvaluateNormal` (virtual): by default the `SmSurface` body
+    /// ([`base_evaluate_normal`](super::p7::base_evaluate_normal), unit
+    /// `surface.surface_p7`), which `SmBSplineSurface` does not override.
+    ///
+    /// # Errors
+    ///
+    /// Only [`SolidError::Unported`].
+    fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
+        super::p7::base_evaluate_normal(self, uv, u_side, v_side)
+    }
 }
 
 impl SurfaceEvaluate for Surface {
@@ -1174,6 +1185,10 @@ impl SurfaceEvaluate for Surface {
 
     fn is_kind_of(&self, t: i64) -> Result<bool> {
         Self::is_kind_of(self, t)
+    }
+
+    fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
+        Self::evaluate_normal(self, uv, u_side, v_side)
     }
 }
 

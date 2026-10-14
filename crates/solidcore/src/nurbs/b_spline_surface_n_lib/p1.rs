@@ -79,9 +79,9 @@
 //! - **`sm_check_zero_surface_derivs`** takes `Su` / `Sv` mutably and returns the
 //!   flag; its unused point argument is dropped.
 //! - **Back-edges.** `CreateExtendedSurface` calls `SmSurface::IsSingularity`
-//!   (`surface.surface_p5`) and `SmSurface::IsClosed` (`surface.surface_p7`);
+//!   (`surface.surface_p5`) and `SmSurface::IsClosed` (`surface::surface::p7`);
 //!   `sm_CreateNonRationalCurve` drops its curve with `SmSurface::DropCurve`
-//!   (`intersect.surface_drop_lib_p3`). Those calls return [`SolidError::Unported`]
+//!   (`intersect.surface_drop_lib_p3`). The unported calls return [`SolidError::Unported`]
 //!   until the units are ported. `sm_CreateNonRationalCurve` takes a
 //!   [`BSplineCurve`] (upstream casts its `SmCurve` with `SM_CAST_PTR`, failing with
 //!   `NER` for other curve types) and a [`BSplineSurface`] base surface (the only
@@ -203,12 +203,8 @@ fn is_singularity(_srf: &BSplineSurface, _uv: Point2) -> Result<(bool, SurfParam
 }
 
 /// `SmSurface::IsClosed(domain, dir)`.
-fn is_closed(_srf: &BSplineSurface, _domain: &Extent2d, _dir: SurfParamType) -> Result<bool> {
-    // UNPORTED(surface.surface_p7): SmSurface::IsClosed
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsClosed",
-        unit: "surface.surface_p7",
-    })
+fn is_closed(srf: &BSplineSurface, domain: &Extent2d, dir: SurfParamType) -> Result<bool> {
+    Ok(crate::surface::surface::p7::base_is_closed(srf, domain, dir, None, false)?.0)
 }
 
 /// The curves dropped by `SmSurface::DropCurve` (with its two distance outputs, which

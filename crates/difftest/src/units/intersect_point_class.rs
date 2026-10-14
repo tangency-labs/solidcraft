@@ -17,7 +17,7 @@
 //! members: `IsConnectedTo`, `GetBrep`, `GetTolerance`, `GetPoint` / `SetPoint`,
 //! `MergeIntoObject` on a vertex), the surface and volume point solves of
 //! `ComputePointParameters` and `GetGap3d` (units `surface.surface_p4`,
-//! `surface.surface_p7`, `surface.volume_p2`), and stand-in regions and edgeuses whose
+//! `surface.volume_p2`), and stand-in regions and edgeuses whose
 //! tolerance upstream takes from the system (the port asks their topology units).
 //! Scripts never call a member of a stand-in object or of an `SmPoint3d` cast to
 //! `SmObject` (undefined behaviour upstream): both sides reject those ops, and the

@@ -83,10 +83,9 @@
 //!   `FindInteriorCurves`' reverse trace, `AddStartPoint`), except
 //!   [`SolidError::Unported`], which is always propagated. `GetSurfaceContinuity`
 //!   at most `SM_CT_C0` only signals upstream (`SE`), so the trace goes on.
-//! - **Unported callees.** `SmSurface::EvaluateNormal` for surfaces other than
-//!   planes (`surface.surface_p7`) and `SmSurface::DropCurve` for surfaces other
-//!   than planes (`intersect.surface_drop_lib_p3`) return
-//!   [`SolidError::Unported`] (see the `UNPORTED` markers).
+//! - **Unported callees.** `SmSurface::DropCurve` for surfaces other than planes
+//!   (`intersect.surface_drop_lib_p3`) returns [`SolidError::Unported`] (see the
+//!   `UNPORTED` markers).
 //! - **Undefined behaviour.** `ReverseCurveDirection` on an empty curve is
 //!   `SM_ERR_NULL_POINTER` (upstream `NER`); a `TraceCurve` that ends with an empty
 //!   curve and a `TestPoint` closure check on an empty curve (upstream dereferences
@@ -120,6 +119,7 @@ use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::SurfaceCache;
@@ -1437,19 +1437,9 @@ fn flush_crv(
     Ok(())
 }
 
-/// `SmSurface::EvaluateNormal(uv, FALSE, FALSE, ..)`: the plane override; other
-/// kinds run `SmSurface::EvaluateNormal`.
-fn evaluate_normal(surface: &Surface, _uv: Point2) -> Result<Vec3> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
-            // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-            Err(SolidError::unported(
-                "SmSurface::EvaluateNormal",
-                "surface.surface_p7",
-            ))
-        }
-    }
+/// `SmSurface::EvaluateNormal(uv, FALSE, FALSE, ..)` (virtual).
+fn evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(uv, Side::Right, Side::Right)
 }
 
 /// `SmSurfaceTracer::FlushCurve`: empties the curve points and appends the curve

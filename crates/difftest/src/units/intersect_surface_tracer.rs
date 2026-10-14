@@ -15,8 +15,7 @@
 //! `rec`.
 //!
 //! Deferred cases: `DoTrace` (the surface cache lookup `smsurf_GetSurfaceCache`,
-//! `surface.surface_p1`), and a `Flush` with a curve to follow on a B-spline surface whose
-//! span middles are off the curve (`SmSurface::EvaluateNormal`, `surface.surface_p7`).
+//! `surface.surface_p1`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

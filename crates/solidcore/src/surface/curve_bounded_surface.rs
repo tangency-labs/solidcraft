@@ -34,8 +34,7 @@
 //! - **Object model.** The surface is the [`SurfaceKind::CurveBounded`] kind of
 //!   [`Surface`]; the `SmSurface` virtuals it does not override run the base-class
 //!   defaults there. Its own overrides pass the call along to the basis surface.
-//! - **Unported callees.** The basis surface's `EvaluateNormal` (unit
-//!   `surface.surface_p7`), `EvaluateSimple`, `EvaluateSTEP`, `EvaluateSTEPPoint`
+//! - **Unported callees.** The basis surface's `EvaluateSimple`, `EvaluateSTEP`, `EvaluateSTEPPoint`
 //!   (`surface.surface_p1`), `EvaluateNormalAtSingularity` (`surface.surface_p5`),
 //!   `EvaluateGeometric` and `EvaluateNormalSection` (`surface.surface_p3`) are not in
 //!   the [`Surface`] dispatch yet, nor is `SmSurface::operator==`
@@ -256,14 +255,10 @@ impl CurveBoundedSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::EvaluateNormal` (`surface.surface_p7`).
-    pub fn evaluate_normal(&self, _uv: Point2, _u_side: Side, _v_side: Side) -> Result<Vec3> {
+    /// Those of the basis surface's [`Surface::evaluate_normal`].
+    pub fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         // pass the call along
-        // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-        Err(SolidError::unported(
-            "SmSurface::EvaluateNormal",
-            "surface.surface_p7",
-        ))
+        self.basis.evaluate_normal(uv, u_side, v_side)
     }
 
     /// The basis surface's point and partial derivatives at `uv` (`Evaluate`).
@@ -605,10 +600,12 @@ mod tests {
             surface_p2::base_degree()
         );
         assert!(s.copy().is_err());
-        assert!(c
-            .evaluate_normal(uv, Side::Left, Side::Left)
-            .unwrap_err()
-            .is_unported());
+        assert_eq!(
+            c.evaluate_normal(uv, Side::Left, Side::Left).unwrap(),
+            Surface::from(b.clone())
+                .evaluate_normal(uv, Side::Left, Side::Left)
+                .unwrap()
+        );
         assert!(c.evaluate_step_point(uv).unwrap_err().is_unported());
     }
 

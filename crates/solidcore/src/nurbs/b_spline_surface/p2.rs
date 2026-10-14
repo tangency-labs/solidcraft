@@ -62,10 +62,10 @@
 //!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
 //!   `CreateTrimmedPlaneFromRuled` (unless the ruled
-//!   surface is a rectangle) `SmSurface::Evaluate1stDerivatives`
-//!   (`surface.surface_p1`); `IsDegeneratePoint` over another domain
-//!   `SmSurface::IsDegeneratePoint` (`surface.surface_p1`); `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and
-//!   `IsClosed` (`surface.surface_p7`). Those calls return [`SolidError::Unported`].
+//!   surface is a rectangle) nothing unported (`SmSurface::Evaluate1stDerivatives`,
+//!   `IsPlanar` and `IsClosed` are those of `surface::surface::p7`); `IsDegeneratePoint`
+//!   over another domain `SmSurface::IsDegeneratePoint` (`surface.surface_p1`). Those
+//!   calls return [`SolidError::Unported`].
 
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
@@ -246,12 +246,13 @@ fn sweep_circle(c: &SmCurve) -> Result<(CurveCanonical, Extent1d)> {
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: point, `S_u`, `S_v`.
-fn evaluate_1st_derivatives(_srf: &BSplineSurface, _uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    // UNPORTED(surface.surface_p1): SmSurface::Evaluate1stDerivatives
-    Err(SolidError::Unported {
-        upstream: "SmSurface::Evaluate1stDerivatives",
-        unit: "surface.surface_p1",
-    })
+fn evaluate_1st_derivatives(srf: &BSplineSurface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
+    crate::surface::surface::p7::evaluate_1st_derivatives(
+        srf,
+        uv,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )
 }
 
 /// The parts of `SmPlane(point, x_dir, y_dir, (1, 1), domain)` that
@@ -307,25 +308,14 @@ fn surface_is_degenerate_point(
 }
 
 /// `SmSurface::IsPlanar()`.
-fn surface_is_planar(_srf: &BSplineSurface) -> Result<bool> {
-    // UNPORTED(surface.surface_p7): SmSurface::IsPlanar
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsPlanar",
-        unit: "surface.surface_p7",
-    })
+fn surface_is_planar(srf: &BSplineSurface) -> Result<bool> {
+    // upstream's default tolerance is SM_EFF_ZERO
+    Ok(crate::surface::surface::p7::b_spline_is_planar(srf, EFF_ZERO)?.is_planar)
 }
 
 /// `SmSurface::IsClosed(domain, dir)`.
-fn surface_is_closed(
-    _srf: &BSplineSurface,
-    _domain: &Extent2d,
-    _dir: SurfParamType,
-) -> Result<bool> {
-    // UNPORTED(surface.surface_p7): SmSurface::IsClosed
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsClosed",
-        unit: "surface.surface_p7",
-    })
+fn surface_is_closed(srf: &BSplineSurface, domain: &Extent2d, dir: SurfParamType) -> Result<bool> {
+    Ok(crate::surface::surface::p7::base_is_closed(srf, domain, dir, None, false)?.0)
 }
 
 /// Expands `ivl` relatively by 100 (degree 1), 1 (degree 2) or 0.5.

@@ -143,7 +143,8 @@
 //!   `mass.integrator`.
 //! - **Unported callees.** `SurfaceMaxDistanceBetween` (over any
 //!   [`crate::surface::surface::p2::SurfaceEvaluate`]) needs `SmSurface::DropPoint`
-//!   (`surface.surface_p5`) and `LocalCurveSolve` (`surface.surface_p7`), and
+//!   (`surface.surface_p5`) and `LocalCurveSolve`'s evaluator (`SmCSNormalizeENFO`,
+//!   `surface.surface_p1`), and
 //!   `ReadFromDB` of the analytic and generated curve types needs their units;
 //!   those calls return [`SolidError::Unported`].
 
@@ -2137,10 +2138,12 @@ fn surface_local_curve_solve<S>(
     _guess_uv: Point2,
     _guess_t: f64,
 ) -> Result<Option<(f64, Point2)>> {
-    // UNPORTED(surface.surface_p7): SmSurface::LocalCurveSolve
+    // SmSurface::LocalCurveSolve is surface::surface::p7::Surface::local_curve_solve; its
+    // evaluator is not ported yet.
+    // UNPORTED(surface.surface_p1): SmCSNormalizeENFO::SmCSNormalizeENFO (via SmSurface::LocalCurveSolve)
     Err(SolidError::Unported {
-        upstream: "SmSurface::LocalCurveSolve",
-        unit: "surface.surface_p7",
+        upstream: "SmCSNormalizeENFO::SmCSNormalizeENFO",
+        unit: "surface.surface_p1",
     })
 }
 

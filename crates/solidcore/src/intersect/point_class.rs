@@ -121,6 +121,7 @@ use crate::geom::tol::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE};
+use crate::nurbs::knots::Side;
 use crate::surface::surface::Surface;
 use crate::surface::volume::Volume;
 use crate::topology::BrepId;
@@ -310,9 +311,8 @@ impl<O: ClassObject> PointClassification<O> {
     /// tolerance).
     #[must_use]
     pub fn new(src_zone_tol_3d: f64) -> Self {
-        let tol = src_zone_tol_3d;
-        let mut pc = Self {
-            src_zone_tol_3d: tol,
+        Self {
+            src_zone_tol_3d,
             point_class: PointClassType::Unknown,
             object: None,
             face: None,
@@ -324,9 +324,7 @@ impl<O: ClassObject> PointClassification<O> {
             pre_snap_param: BIG_DOUBLE,
             sss_point_flag: false,
             sss_point: Point3::new(0.0, 0.0, 0.0),
-        };
-        pc.src_zone_tol_3d = tol;
-        pc
+        }
     }
 
     /// Resets every member to its initial value (`ReSet`); the source zone tolerance
@@ -536,8 +534,8 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for a surface: the surface point solve and normal
-    /// (units `surface.surface_p4`, `surface.surface_p7`), and topology objects.
+    /// [`SolidError::Unported`] for a surface: the surface point solve (unit
+    /// `surface.surface_p4`), and topology objects.
     pub fn gap_3d(
         &self,
         k: &Kernel,
@@ -1457,6 +1455,11 @@ fn merge_vertex_neighborhood(
     }
 }
 
+/// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)` (virtual).
+fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(uv, Side::Left, Side::Left)
+}
+
 // ---- callees in units not ported yet --------------------------------------------
 
 /// `SmSurface::GlobalPointSolve(domain, SM_SO_INTERSECT, point, tol, NULL,
@@ -1471,15 +1474,6 @@ fn surface_global_point_solve(
     Err(SolidError::unported(
         "SmSurface::GlobalPointSolve",
         "surface.surface_p4",
-    ))
-}
-
-/// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn surface_evaluate_normal(_surface: &Surface, _uv: Point2) -> Result<Vec3> {
-    // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-    Err(SolidError::unported(
-        "SmSurface::EvaluateNormal",
-        "surface.surface_p7",
     ))
 }
 

@@ -106,8 +106,8 @@
 //!   types to `SmSurface::IsKindOf` ([`crate::surface::surface::p2::is_kind_of`]);
 //!   a plain B-spline is never one of the analytic types `CalculateBoundingBox` and
 //!   `IsParallelToVector` test for first. `CalculateBoundingBox` also calls
-//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`) and `SmSurface::GetFace`
-//!   (`surface.surface_p1`); `CreateOffsetSurface` and `IsDegenerateCurve` pass the
+//!   `SmSurface::EvaluateNormal` (`surface::surface::p7`) and `SmSurface::GetFace`
+//!   (`surface.surface_p1`, unported); `CreateOffsetSurface` and `IsDegenerateCurve` pass the
 //!   call to `SmSurface` (`surface.surface_p1`); `STEPInversion` calls
 //!   `SmSurface::LocalPointSolve` / `GlobalPointSolve` (`surface.surface_p1`),
 //!   `IsSingularity` and `IsClosed` (`surface.surface_p5`). Those calls return
@@ -471,12 +471,13 @@ fn nl_dir(param: SurfParamType) -> Direction {
 // ---- unported SmSurface methods ------------------------------------------------------
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn evaluate_normal(_srf: &BSplineSurface, _uv: Point2) -> Result<Vec3> {
-    // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-    Err(SolidError::Unported {
-        upstream: "SmSurface::EvaluateNormal",
-        unit: "surface.surface_p7",
-    })
+fn evaluate_normal(srf: &BSplineSurface, uv: Point2) -> Result<Vec3> {
+    crate::surface::surface::p7::base_evaluate_normal(
+        srf,
+        uv,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )
 }
 
 /// The zone tolerance of the owning face or brep, `SM_ZONE_TOL_3D` without owner
@@ -555,13 +556,9 @@ fn is_singularity(_srf: &BSplineSurface, _uv: Point2) -> Result<bool> {
     })
 }
 
-/// `SmSurface::IsClosed(domain, dir)`.
-fn is_closed(_srf: &BSplineSurface, _domain: &Extent2d, _dir: SurfParamType) -> Result<bool> {
-    // UNPORTED(surface.surface_p5): SmSurface::IsClosed
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsClosed",
-        unit: "surface.surface_p5",
-    })
+/// `SmSurface::IsClosed(domain, dir)` (unit `surface.surface_p7`).
+fn is_closed(srf: &BSplineSurface, domain: &Extent2d, dir: SurfParamType) -> Result<bool> {
+    Ok(crate::surface::surface::p7::base_is_closed(srf, domain, dir, None, false)?.0)
 }
 
 impl BSplineSurface {
@@ -2193,15 +2190,14 @@ mod tests {
         assert!(s
             .calculate_bounding_box(&s.natural_uv_domain(), &req)
             .is_ok());
-        // the polar box needs SmSurface::EvaluateNormal (surface.surface_p7)
+        // the polar box uses SmSurface::EvaluateNormal (surface::surface::p7)
         let req = BoundingBoxRequest {
             polar: true,
             ..BoundingBoxRequest::default()
         };
-        assert!(matches!(
-            s.calculate_bounding_box(&s.natural_uv_domain(), &req),
-            Err(SolidError::Unported { .. })
-        ));
+        assert!(s
+            .calculate_bounding_box(&s.natural_uv_domain(), &req)
+            .is_ok());
         assert!(s.is_parallel_to_vector(Vec3::new(0.0, 0.0, 0.0)).unwrap());
     }
 
