@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**155 / 261 units ported** (89 green, 66 partial), **205,206 / 387,903 upstream lines (52.9%)**. 17 claimed, 0 blocked, 89 todo.
+**156 / 261 units ported** (91 green, 65 partial), **206,989 / 387,903 upstream lines (53.4%)**. 16 claimed, 0 blocked, 89 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -105,7 +105,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 ## In progress
 
-- [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #71 @0xlillith (draft)
 - [ ] 🔨 `surface.surface_p4` (2270 lines) — in progress: #49 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.surface_p5` (2321 lines) — in progress: #50 @froglemonade2 (ready for review)
@@ -208,7 +207,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `nurbs.b_spline_surface_n_lib_p2` (1932 lines) — partial, 654 cases
 - [ ] 🟡 `nurbs.b_spline_surface_p2` (1338 lines) — partial, 763 cases
 
-### curve (24/25)
+### curve (25/25)
 
 - [x] ✅ `curve.hermite_curve` (383 lines) — green, 2131 cases
 - [x] ✅ `curve.curve_p2` (2302 lines) — green, 3021 cases
@@ -234,7 +233,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [x] ✅ `curve.composite_curve_p1` (1700 lines) — green, 3093 cases
 - [x] ✅ `curve.composite_curve_p2` (1345 lines) — green, 661 cases
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
-- [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
+- [x] ✅ `curve.curve_p9` (1783 lines) — green, 3093 cases
 
 ### surface (27/40)
 
@@ -249,7 +248,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_p9` (1252 lines) — partial, 821 cases
 - [ ] 🟡 `surface.trim_srf_cache` (966 lines) — partial, 621 cases
 - [ ] 🟡 `surface.b_spline_volume_n_lib` (310 lines) — partial, 2420 cases
-- [ ] 🟡 `surface.bend_volume` (945 lines) — partial, 2347 cases
+- [x] ✅ `surface.bend_volume` (945 lines) — green, 2347 cases
 - [x] ✅ `surface.cone_p1` (1835 lines) — green, 20694 cases
 - [ ] 🟡 `surface.surf_of_extrusion_p1` (1865 lines) — partial, 2055 cases
 - [ ] 🟡 `surface.surf_of_revolution_p3` (1620 lines) — partial, 26705 cases
