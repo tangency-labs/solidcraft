@@ -404,6 +404,12 @@ impl Dump<'_> {
 
 /// Ok(dump items) or the Rust error (an `Unported` one defers the case).
 fn rust(i: &Inputs) -> Result<Result<Vec<Item>, SolidError>, HarnessError> {
+    enum Got {
+        Brep(BrepData),
+        Curve(Keyed<Curve>),
+        Surface(Keyed<Surface>),
+    }
+
     let k = Kernel::default();
     let mode = mode_of(i)?;
     let data = bytes_of(i)?;
@@ -464,11 +470,6 @@ fn rust(i: &Inputs) -> Result<Result<Vec<Item>, SolidError>, HarnessError> {
     db.open_for_read(data, file_type);
     db.set_version(i.version);
 
-    enum Got {
-        Brep(BrepData),
-        Curve(Keyed<Curve>),
-        Surface(Keyed<Surface>),
-    }
     let got = {
         let mut sink = AttributeSink::new(&mut store, &mut all, 1);
         match mode {
@@ -686,7 +687,7 @@ impl G<'_> {
 
     /// A double of varied scale (subnormals and non-finite values only in binary).
     fn value(&mut self) -> f64 {
-        let v = match self.below(16) {
+        match self.below(16) {
             0 => 0.0,
             1 => -0.0,
             2 => self.rng.uniform(-1.0, 1.0) * 1e300,
@@ -698,8 +699,7 @@ impl G<'_> {
             8 if self.w.binary => f64::NAN,
             9 if self.w.binary => f64::INFINITY,
             _ => self.rng.uniform(-10.0, 10.0),
-        };
-        v
+        }
     }
 
     fn double(&mut self) {
@@ -1055,7 +1055,7 @@ impl G<'_> {
         (a, b, c, d)
     }
 
-    /// An interval, sometimes inverted (SetMinMax then fails).
+    /// An interval, sometimes inverted (`SetMinMax` then fails).
     fn interval(&mut self) -> (f64, f64) {
         let a = self.value();
         let b = self.value();
@@ -1094,7 +1094,7 @@ impl G<'_> {
         // keep the domain [U[p], U[n+1]] non-degenerate
         let lo = k.get(p).copied().unwrap_or(0.0);
         let hi = k.get(n + 1).copied().unwrap_or(1.0);
-        if !(lo < hi) {
+        if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
             for (i, x) in k.iter_mut().enumerate() {
                 *x = i as f64;
             }
@@ -1197,7 +1197,11 @@ impl G<'_> {
                 self.w.ul(closed);
                 self.w.eol();
                 for _ in 0..segs {
-                    let sense = [0, 1, 5][self.below(3) as usize];
+                    let sense = match self.below(3) {
+                        0 => 0,
+                        1 => 1,
+                        _ => 5,
+                    };
                     self.w.ul(sense);
                     self.double();
                     self.double();

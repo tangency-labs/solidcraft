@@ -887,9 +887,10 @@ fn gen_add(rng: &mut Rng, surf: SurfIn) -> Inputs {
         .collect();
     let nq = rng.below(5) as usize;
     let queries = (0..nq)
-        .map(|_| {
-            let a = &adds[rng.below(adds.len() as u64) as usize];
-            QueryIn {
+        // `adds` is never empty (na >= 1), so `get` always hits.
+        .filter_map(|_| {
+            let a = adds.get(rng.below(adds.len() as u64) as usize)?;
+            Some(QueryIn {
                 ty: if rng.chance(0.9) {
                     a.ty
                 } else {
@@ -902,7 +903,7 @@ fn gen_add(rng: &mut Rng, surf: SurfIn) -> Inputs {
                 },
                 angle: a.angle,
                 key: perturb_key(rng, &a.key),
-            }
+            })
         })
         .collect();
     Inputs {
@@ -916,7 +917,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     Ok(match rng.below(20) {
         0..=2 => {
             let sd = surf_domain(&surf)?;
-            let idx = (0..1 + rng.below(6)).map(|_| rng.below(4) as u8).collect();
+            let idx = (0..=rng.below(6)).map(|_| rng.below(4) as u8).collect();
             Inputs {
                 op: OpIn::Nth {
                     dom: gen_sub_dom(rng, sd),

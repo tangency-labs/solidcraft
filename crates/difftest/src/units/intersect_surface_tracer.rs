@@ -403,11 +403,9 @@ impl<'s> SurfaceTrace<'s> for SectionTracer<'s> {
             t = t / len;
         }
         let t3 = su * t.x + sv * t.y;
-        let mut norm = su.cross(sv);
+        let norm = su.cross(sv);
         let nlen = norm.length();
-        if nlen > 0.0 {
-            norm = norm / nlen;
-        }
+        let norm = if nlen > 0.0 { norm / nlen } else { norm };
         pnt.curve_uv[0] = uv;
         pnt.curve_uv[1] = t;
         pnt.curve_3d[0] = p;
@@ -1141,7 +1139,7 @@ fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
         .map(|_| gen_phase1_op(rng, domain, scale))
         .collect();
     // phase 2: traces
-    for _ in 0..1 + rng.below(5) {
+    for _ in 0..=rng.below(5) {
         ops.push(OpIn::Trace {
             uv: uv_in(rng, domain),
         });

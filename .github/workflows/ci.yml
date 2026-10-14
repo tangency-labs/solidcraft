@@ -123,6 +123,13 @@ jobs:
           workspaces: ". -> bin"
           key: difftest
 
+      # The clippy job above cannot see code behind the cpp feature (ffi bindings and
+      # the difftest unit runners); lint it here, where the C++ headers exist.
+      # difftest/cpp enables solidcore-ffi/cpp and registers the runners.
+      - name: Clippy with the C++ feature
+        if: steps.green.outputs.any == 'true'
+        run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
+
       - name: Difftest green units
         if: steps.green.outputs.any == 'true'
         # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
