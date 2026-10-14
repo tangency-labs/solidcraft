@@ -16,8 +16,8 @@
 //! Deferred cases: ops that reach topology (`ComputePointParameters` on vertices, edges and
 //! faces, `sm_SetXSectEdgeThroughPoint`, `sm_GetCCIGeometry`, `sm_ComputeFacePointClass`),
 //! surface point solves (`ComputePointParameters` on surfaces, `sm_GetCCISurfaceGaps` with
-//! surfaces), `SmTol::MapTo2d` (`sm_GetXSectTol2dOr3d_ForClassifyPair` for a UV curve on a
-//! surface) and an `SmCrvOnSurf` over a plane. Generated scripts are filtered by the shim's
+//! surfaces), `SmTol::MapTo2d` for a curve of dimension other than 2 or 3 on a surface
+//! (`SmSurface::DropPoint`) and an `SmCrvOnSurf` over a plane. Generated scripts are filtered by the shim's
 //! run-time checks (scripts it rejects as undefined upstream are dropped).
 
 use serde::{Deserialize, Serialize};
@@ -1755,6 +1755,46 @@ fn gen_objects(rng: &mut Rng) -> Vec<ObjIn> {
     objs
 }
 
+/// A 2D B-spline (degree 1 or 2) roughly along a chord of the UV domain of `srf` (the
+/// unit square for anything but a B-spline surface), sometimes reaching past it.
+fn gen_uv_line(rng: &mut Rng, srf: Option<&ObjIn>) -> BSplineIn {
+    let (u0, u1, v0, v1) = match srf {
+        Some(ObjIn::Bsurf(sf)) => (
+            sf.u.first().copied().unwrap_or(0.0),
+            sf.u.last().copied().unwrap_or(1.0),
+            sf.v.first().copied().unwrap_or(0.0),
+            sf.v.last().copied().unwrap_or(1.0),
+        ),
+        _ => (0.0, 1.0, 0.0, 1.0),
+    };
+    let reach = if rng.chance(0.2) { 0.3 } else { 0.0 };
+    let corner = |rng: &mut Rng| {
+        [
+            rng.uniform(u0 - reach * (u1 - u0), u1 + reach * (u1 - u0)),
+            rng.uniform(v0 - reach * (v1 - v0), v1 + reach * (v1 - v0)),
+        ]
+    };
+    let pa = corner(rng);
+    let pb = corner(rng);
+    let deg = 1 + rng.below(2) as usize;
+    let cnt = deg + 1 + rng.below(2) as usize;
+    let cpts = (0..cnt)
+        .map(|i| {
+            let f = i as f64 / (cnt - 1) as f64;
+            [
+                pa[0] + f * (pb[0] - pa[0]) + rng.uniform(-0.05, 0.05) * (u1 - u0),
+                pa[1] + f * (pb[1] - pa[1]) + rng.uniform(-0.05, 0.05) * (v1 - v0),
+                NOZ,
+                NOW,
+            ]
+        })
+        .collect();
+    let mut u = vec![0.0; deg + 1];
+    u.extend((1..cnt - deg).map(|i| i as f64 / (cnt - deg) as f64));
+    u.extend(vec![1.0; deg + 1]);
+    BSplineIn { dim: 2, oob: false, cpts, p: deg, u }
+}
+
 fn gen_tol(rng: &mut Rng) -> f64 {
     match rng.below(8) {
         0 => USE_DEFAULT,
@@ -2075,15 +2115,27 @@ fn gen_script(rng: &mut Rng) -> Script {
                             dev: rng.uniform(0.0, 1e-3),
                         }
                     }
-                    2 => OpIn::TolPair {
-                        t,
-                        c: pick(rng, &curves),
-                        s: maybe(rng, &surfs, 0.6),
-                        p1: rng.uniform(-1.0, 6.0),
-                        tol1: gen_tol(rng),
-                        p2: rng.uniform(-1.0, 6.0),
-                        tol2: gen_tol(rng),
-                    },
+                    2 => {
+                        // half the pairs take a fresh UV curve on a surface, so the
+                        // MapTo2d case (2D curve with m_cpSurface1) is well covered
+                        let (c, s) = if rng.chance(0.5) {
+                            let s = pick(rng, &surfs);
+                            let uvc = gen_uv_line(rng, s.and_then(|i| objects.get(i)));
+                            objects.push(ObjIn::Curve(CurveIn::Bspline(uvc)));
+                            (Some(objects.len() - 1), s)
+                        } else {
+                            (pick(rng, &curves), maybe(rng, &surfs, 0.6))
+                        };
+                        OpIn::TolPair {
+                            t,
+                            c,
+                            s,
+                            p1: rng.uniform(-1.0, 6.0),
+                            tol1: gen_tol(rng),
+                            p2: rng.uniform(-1.0, 6.0),
+                            tol2: gen_tol(rng),
+                        }
+                    }
                     3 => {
                         let nt = 2 * rng.below(6) as usize;
                         let loops = of_kind(&objects, kind::LOOP);

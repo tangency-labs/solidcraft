@@ -3729,6 +3729,28 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   Hermite source curves, a container case past `MIN_ARRAY_SIZE`). At unit and huge scale
   the UV-curve cases defer on `SmSurface::LocalPointSolve` (`surface.surface_p5`, 20
   cases); only the tiny-scale ones are compared until that unit lands.
+- **SmTol::MapTo2d for a UV curve (second review).** `sm_GetXSectTol2dOr3d_ForClassifyPair`
+  case 1 (2D curve with `m_cpSurface1`) was stubbed `UNPORTED(surface.surface_p1)` after
+  that unit became partial. Its UV-curve branch is now ported as the public
+  `surface::surface::p1::map_to_2d_on_curve` (co-port of geom.tol's overload;
+  `SmCurve::Evaluate` then `map_to_2d_dir`,
+  through `SmTol2d` and `SmZoneTol3d` as upstream); only a curve of another dimension
+  still needs `SmSurface::DropPoint` (`surface.surface_p5`, unreachable from the classify
+  pair). Covered by `fixtures/intersect.curve_class_p1/review_tol_pair.json` (37 cases:
+  flat, curved, pole-degenerate, huge and tiny B-spline surfaces and a plane; zero-tangent,
+  collapsed-edge, out-of-bounds and Hermite UV curves; USE_DEFAULT, negative, 0 and 1e3
+  tolerances; in- and out-of-domain params), and half the generated TolPair ops now use a
+  fresh UV curve on a surface. All pass with max_rel_err 0.
+- **DISPATCH GAP: SmCrvOnSurf over a non-B-spline surface.** `cull_or_refine_cci_in_3d`
+  (`sm_CullOrRefineCCIIn3d`) builds an `SmCrvOnSurf` over the classification surface, but
+  `curve::crv_on_surf::CrvOnSurf` holds only a `BSplineSurface`, so a plane (or any other
+  surface) returns `Unported { unit: "curve.crv_on_surf" }` (24 deferred cases, all
+  Cull on planes). There is no `UNPORTED(..)` marker, as in `curve/crv_on_surf.rs`:
+  whoever generalises `CrvOnSurf` over `Surface` should grep `DISPATCH GAP` and wire this
+  site. It was tagged `surface.surface_p1` before, which is partial and not the gap.
+- **Not compared.** The shim never builds an `SmSurfOfRevolution` or `SmSurfOfExtrusion`,
+  so the `SurfOfRevolution` arm of `out_of_bounds()` (the base-flag-only
+  `SmTemporaryChangeValue`) is ported but not difftested; planes and B-spline surfaces are.
 
 ## intersect.surface_intersector_p4
 

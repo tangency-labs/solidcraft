@@ -119,11 +119,12 @@
 //!   `AssertValid` and `Draw` are not reachable from the in-scope entry points.
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]: every
 //!   topology member (`SmEdge`, `SmVertex`, `SmFace`, `SmEdgeuse`), the surface point
-//!   solves (`surface.surface_p4`, `surface.surface_p5`), `SmSurface::GetFace` and
-//!   `ApproximateSize` and the surface cache (`surface.surface_p1`), `SmTol::MapTo2d`
-//!   (its `Evaluate1stDerivatives`, `surface.surface_p1`), and an `SmCrvOnSurf` over a
-//!   surface that is not a B-spline (its `SmSurface` dispatch, `surface.surface_p1`, as
-//!   in `curve.crv_on_surf`).
+//!   solves (`surface.surface_p4`, `surface.surface_p5`), the 3D-curve
+//!   branch of `SmTol::MapTo2d(.., SmCurve, SmSurface)` (`SmSurface::DropPoint`,
+//!   `surface.surface_p5`; its UV-curve branch is co-ported as
+//!   [`map_to_2d_on_curve`]), and an `SmCrvOnSurf` over a
+//!   surface that is not a B-spline (a dispatch gap of `curve.crv_on_surf`, whose
+//!   `CrvOnSurf` holds only an `SmBSplineSurface`).
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -148,6 +149,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
+use crate::surface::surface::p1::map_to_2d_on_curve;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -156,7 +158,6 @@ const OP_TOUCH: &str = "intersect::curve_class::p1::get_winding_count";
 const OP_XSECT: &str = "intersect::curve_class::p1::set_xsect_curve_through_point";
 const OP_APPLY: &str = "intersect::curve_class::p1::apply_point_solution";
 const OP_GAPS: &str = "intersect::curve_class::p1::get_cci_surface_gaps";
-const OP_PAIR: &str = "intersect::curve_class::p1::xsect_tol_2d_or_3d_for_classify_pair";
 
 /// The most intervals [`CurveClassification::set_size`] stores (far above anything a
 /// classification reaches; upstream allocates whatever is asked for).
@@ -1759,8 +1760,8 @@ pub fn get_curve_curve_angle(
 /// # Errors
 ///
 /// Those of the 3D intersection and distance computations;
-/// [`SolidError::Unported`] for a surface that is not a B-spline surface (the
-/// `SmSurface` dispatch of `SmCrvOnSurf`, unit `surface.surface_p1`).
+/// [`SolidError::Unported`] for a surface that is not a B-spline surface (the ported
+/// `SmCrvOnSurf` holds only an `SmBSplineSurface`, unit `curve.crv_on_surf`).
 pub fn cull_or_refine_cci_in_3d<S: SolutionObject>(
     k: &Kernel,
     surface: &Surface,
@@ -1773,11 +1774,12 @@ pub fn cull_or_refine_cci_in_3d<S: SolutionObject>(
 ) -> Result<()> {
     // project UVCurve into 3d space
     let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for a non-B-spline surface
-        // (SmCrvOnSurf over it; curve.crv_on_surf holds only B-spline surfaces)
+        // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
+        // partial; no UNPORTED marker: the ported CrvOnSurf holds an SmBSplineSurface,
+        // not any Surface, as recorded in curve/crv_on_surf.rs and plan/findings.md)
         return Err(SolidError::unported(
             "SmSurface (non-B-spline) in SmCrvOnSurf",
-            "surface.surface_p1",
+            "curve.crv_on_surf",
         ));
     };
     let curve_1 = Curve::from(CrvOnSurf::new(k, uv_curve_1.clone(), bs.clone(), None, 0)?);
@@ -1890,8 +1892,9 @@ pub fn compute_face_point_class<O: ClassObject>(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] for a UV curve on a surface (`SmTol::MapTo2d` needs
-/// `SmSurface::Evaluate1stDerivatives`, unit `surface.surface_p1`).
+/// [`SolidError::Unported`] from the surface evaluation of `SmTol::MapTo2d`, and for
+/// a curve of dimension other than 2 or 3 on a surface (`SmSurface::DropPoint`, unit
+/// `surface.surface_p5`).
 pub fn xsect_tol_2d_or_3d_for_classify_pair(
     k: &Kernel,
     src_curve: &Curve,
@@ -1901,7 +1904,6 @@ pub fn xsect_tol_2d_or_3d_for_classify_pair(
     obj2_src_curve_param: f64,
     obj2_zone_tol_3d: f64,
 ) -> Result<f64> {
-    let _ = OP_PAIR;
     // tolerance cases:
     if src_curve.dim() == 3 {
         // Curve3d
@@ -1910,13 +1912,25 @@ pub fn xsect_tol_2d_or_3d_for_classify_pair(
             src_curve_or_obj1_zone_tol_3d,
             obj2_zone_tol_3d,
         ))
-    } else if surface_1.is_some() {
+    } else if let Some(surface_1) = surface_1 {
         // Curve2d with m_cpSurface1
-        let _ = (src_curve_or_obj1_param, obj2_src_curve_param);
-        // UNPORTED(surface.surface_p1): SmTol::MapTo2d (SmSurface::Evaluate1stDerivatives)
-        Err(SolidError::unported(
-            "SmSurface::Evaluate1stDerivatives",
-            "surface.surface_p1",
+        let obj2_zone_tol_2d = zone_tol3d(
+            k,
+            map_to_2d_on_curve(obj2_zone_tol_3d, obj2_src_curve_param, src_curve, surface_1)?,
+        );
+        let obj1_zone_tol_2d = zone_tol3d(
+            k,
+            map_to_2d_on_curve(
+                src_curve_or_obj1_zone_tol_3d,
+                src_curve_or_obj1_param,
+                src_curve,
+                surface_1,
+            )?,
+        );
+        Ok(xsect_tol_3d_from_zones(
+            k,
+            obj1_zone_tol_2d,
+            obj2_zone_tol_2d,
         ))
     } else {
         // Curve2d No m_cpSurface1

@@ -37,6 +37,7 @@
 //! | [`crossed_seam_or_pole`]                          | `sm_CrossedSeamOrPole` (static)                  |
 //! | [`surface_to_evaluate`], [`is_point_valid`], [`is_node_valid`] | `sm_GetSurfaceToEvaluate`, `sm_IsPointValid`, `sm_IsNodeValid` (static) |
 //! | [`zone_tol_3d`], [`map_to_2d_dir`], [`map_to_2d`], [`scaled_zero_of_surface`] | `SmTol::GetZoneTol3d(const SmObject*)` for surfaces, `SmTol::MapTo2d` (surface overloads), `SmTol::GetScaledZero(const SmSurface&)` (co-ports) |
+//! | [`map_to_2d_on_curve`]                            | `SmTol::MapTo2d(const SmTol3d&, double, const SmCurve&, const SmSurface&)` (co-port, first ported privately by `intersect.curve_class_p1`) |
 //! | [`SurfaceEval::fails_eval`], [`SurfaceEval::pos`], ... | `SmSurfaceEval::FailsEval`, `Pos`, `Su`, `Sv`, `Suu`, `Suv`, `Svv` |
 //! | [`DropCurveFail::copy_of`]                        | `SmDropCurveFail` copy constructor               |
 //! | [`IsoCurveLengthIntegrand::evaluate`], [`AreaIntegrand`] | `SmIsoCurveLengthIFEO::Evaluate`, `SmAreaIFEO::Evaluate` |
@@ -77,6 +78,10 @@
 //!   tolerance of a surface with a face needs `SmFace::GetTolerance`
 //!   (`topology.face_p2`): those calls return [`SolidError::Unported`]. Every tree build
 //!   needs `SmSurface::CalculateContinuities` (`surface.surface_p6`).
+//!   [`map_to_2d_on_curve`] ports only the UV-curve branch of `SmTol::MapTo2d(..,
+//!   SmCurve, SmSurface)`: the same-surface `SmCrvOnSurf` branch (`SmTol.cpp:1118-1123`)
+//!   is folded into the `UNPORTED(surface.surface_p5)` stub of the general 3D branch
+//!   (`SmSurface::DropPoint`).
 //! - **Solver and evaluator classes.** Their classes belong to the units of their
 //!   `Evaluate` / `LocalSolve` members; the structs and constructors live here. `m_pSurf`
 //!   (the owner object of a surface tree upstream) is passed in by the caller.
@@ -86,7 +91,7 @@
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::assert_array::labels::FACE_TYPE;
 use crate::geom::extent1d::Extent1d;
@@ -101,8 +106,8 @@ use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::tol::{
-    is_zero_to_tol, scaled_zero2, zone_tol_3d as kernel_zone_tol_3d, ScaledZero, SmallTopoType,
-    ANG_TOL_RAD,
+    is_zero_to_tol, scaled_zero2, tol3d, zone_tol_3d as kernel_zone_tol_3d, ScaledZero,
+    SmallTopoType, ANG_TOL_RAD,
 };
 use crate::geom::tree::{AuxDataType, NodeClass, NodeData, Tree, TreeNode, TreeOwner};
 use crate::geom::vector2d::{Point2, Vec2};
@@ -622,6 +627,50 @@ pub fn map_to_2d(tol_3d: f64, uv: Point2, surface: &Surface) -> Result<f64> {
 
     // pass the call along for Max 1st deriv (yields Min Tol2d value)
     map_to_2d_dir(tol_3d, uv, uv_dir, surface)
+}
+
+/// `SmTol::MapTo2d(rTol3d, dParam, rTrimCurve, rSurface)` (the result as an
+/// `SmTol2d`): for a UV curve, `tol_3d` mapped to the parameter space of `surface` at
+/// the curve point `trim_curve(param)` in the curve direction, by [`map_to_2d_dir`]
+/// (the curve evaluation's status is ignored, as upstream; a failed evaluation leaves
+/// undefined vectors).
+///
+/// Only the UV-curve branch (`GetDim() == 2`) is ported. The same-surface
+/// `SmCrvOnSurf` branch (`SmTol.cpp:1118-1123`, which evaluates the curve's UV curve)
+/// and the general 3D branch (`SmSurface::DropPoint`) both return
+/// [`SolidError::Unported`] for unit `surface.surface_p5`.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] for a curve that is not a UV curve, and from the
+/// evaluations.
+pub fn map_to_2d_on_curve(
+    tol_3d: f64,
+    param: f64,
+    trim_curve: &Curve,
+    surface: &Surface,
+) -> Result<f64> {
+    // evaluate SurfacePt = rSurface(rUVTrimCurve(dParam)) for UVTrimCurves (the
+    // same-surface SmCrvOnSurf branch is folded into the DropPoint stub below)
+    if trim_curve.dim() != 2 {
+        // UNPORTED(surface.surface_p5): SmSurface::DropPoint
+        return Err(SolidError::unported(
+            "SmSurface::DropPoint",
+            "surface.surface_p5",
+        ));
+    }
+    let mut pd = [Vec3::UNDEF; 2];
+    if let Some(d) = ignored(trim_curve.evaluate(param, 1, true, true))? {
+        for (slot, v) in pd.iter_mut().zip(d) {
+            *slot = v;
+        }
+    }
+    let [p0, p1] = pd;
+    let uv = Point2::new(p0.x, p0.y);
+    let uv_dir = Vec2::new(p1.x, p1.y);
+
+    // pass the call along
+    Ok(tol3d(map_to_2d_dir(tol_3d, uv, uv_dir, surface)?))
 }
 
 /// `Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` with its status ignored: zero
