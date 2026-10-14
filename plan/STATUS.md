@@ -868,3 +868,24 @@ The latest-main revolution surface also has 18 direct C++ comparisons (canonical
 cylinder, virtual iso curves), all bit-identical. The committed reports give the
 current deferral owners; earlier tables above
 are historical snapshots.
+
+## Topology traversal and public entrypoints (2026-10-14, PR #60)
+
+`intersect.topology_solver_p2` is partial: 2,429 cases, 2,384 bit-identical,
+zero failures and 45 explicit deferrals; no absolute floors. The shared part-1
+runner now compares 3,248/3,532 cases, clearing all 87 previous part-2 deferrals.
+`geom.tree` remains 611/618 with seven existing cache-data deferrals.
+
+Coverage combines traversal, CurveVertex, real C++ shell-vertex B-rep queries,
+empty shapes, face exclusion, operation rejection, all four result requests and
+zero/tiny tolerances, plus 1,080 scale/subdivision fixtures with up to 40/30
+vertices, coordinates scaled by 1e6 and tolerances 2/50. Forty face cases reach surface/query callees; the other
+five deferrals are topology tolerance/edge access. Nonempty Shape construction,
+full face solving and the native undefined EdgeVertex cast are not certified.
+See the committed reports and findings for the exact owners and scope.
+
+Final local gates pass with current official main's shared solver corrections: formatting, strict plain/C++ Clippy, workspace/native tests, wasm and
+license/source checks. Sensitivity detects 2,384/2,384 part-2 cases,
+3,248/3,248 part-1 cases 611/611 tree cases and 721/721 tools cases. Full differential validation:
+142 units, 89 green, 53 partial, zero failed. The four default reports match
+the full-validation reports byte for byte.

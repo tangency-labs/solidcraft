@@ -26,7 +26,8 @@
 //!   `Ok(None)`. Faces are returned as [`FaceId`]s.
 //! - **Unported callees.** Vertex and edge tolerances, edge geometry (curve,
 //!   interval, end vertices), curve evaluation, point drops, curve/curve distance,
-//!   `SmBrep::GetEdges`, `SmBrep::GetTolerance` and `SmTopologySolver::BrepPointSolve`
+//!   `SmBrep::GetEdges`, `SmBrep::GetTolerance` and the B-rep cache tree adapter
+//!   needed by the ported `SmTopologySolver::BrepPointSolve`
 //!   belong to units not ported yet; those calls return [`SolidError::Unported`]
 //!   (see the `UNPORTED` markers). The target curve of [`find_coincident_edge`] is
 //!   an opaque `C` until the curve units land (`curve.curve_p2`).
@@ -504,10 +505,11 @@ fn brep_tolerance(_brep: &Brep) -> Result<f64> {
 /// `SmTopologySolver::BrepPointSolve(brep, pt, SM_SO_MINIMIZE, SM_SR_ALL, tol,
 /// SM_BIG_DOUBLE, NULL, solutions)`: per solution, its first object if it is a face.
 fn brep_point_solve_faces(_brep: &Brep, _pt: Point3, _tol: f64) -> Result<Vec<Option<FaceId>>> {
-    // UNPORTED(intersect.topology_solver_p2): SmTopologySolver::BrepPointSolve
+    // UNPORTED(topology.brep_cache): SmBrepCache::GetVertexTree
+    // The point solver is ported; this Brep still lacks its TopologyObjects/cache adapter.
     Err(SolidError::Unported {
-        upstream: "SmTopologySolver::BrepPointSolve",
-        unit: "intersect.topology_solver_p2",
+        upstream: "SmBrepCache::GetVertexTree",
+        unit: "topology.brep_cache",
     })
 }
 

@@ -266,11 +266,11 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
     // Validate the Rust fixture independently against the native protocol guard.
     // Do not invoke C++ here: the two sides must construct their own objects.
     let i: StaticInputs = case.parse()?;
-    if input.len() > 60
+    if input.len() > 396
         || i.first.is_empty()
         || i.second.is_empty()
-        || i.first.len() > 8
-        || i.second.len() > 8
+        || i.first.len() > 64
+        || i.second.len() > 64
     {
         return Err(HarnessError::new("unbounded static fixture"));
     }
@@ -436,6 +436,11 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
                     flat.push(s.end.solution_value);
                     flat.extend(s.end.parameters.iter().take(s.num_variables).copied());
                 }
+                flat.extend(
+                    s.nodes
+                        .iter()
+                        .map(|node| f64::from(u8::from(node.is_some()))),
+                );
             }
         }
         Err(e) => {

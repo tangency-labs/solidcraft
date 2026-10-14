@@ -154,6 +154,12 @@ SC_EXPORT int32_t sc_intersect_topology_solver_p2_static(const double* in,
             values.push_back(solution.m_vEnd.m_dSolutionValue);
             for (int p=0;p<solution.m_lNumVariables;++p) values.push_back(solution.m_vEnd[p]);
         }
+        // Query/local trees can be temporary in the native static API. Compare
+        // presence without dereferencing or serializing any pointer addresses.
+        // SmSolution has five node slots, distinct from the global solver's
+        // maximum of three simultaneously traversed trees. Serialize all slots.
+        for (auto* node : solution.m_apNodes)
+            values.push_back(node?1.0:0.0);
     }
     if(!curve_consumed) delete curve;
     return sc_copy_out(values.data(),(int64_t)values.size(),out,cap,out_len);
@@ -171,5 +177,26 @@ SC_EXPORT int32_t sc_intersect_topology_solver_p2_edge_vertex_operand()
     if(brep.MakeShellVertex(NULL,SmPoint3d(0,0,0),shell,vertex)!=SM_SUCCESS || !vertex)
         return SC_ERR_ARG;
     return vertex->IsKindOf(SmCurve_TYPE)?1:0;
+    SC_CATCH
+}
+
+// Exercise native LocalSolve's ignored GetObjectList status in both orders.
+SC_EXPORT int32_t sc_intersect_topology_solver_p2_empty_lists(int64_t* results)
+{
+    SC_TRY
+    SmContext context;
+    SmTree empty(SmPoint3d(0,0,0),0.0);
+    SmObjectList item;
+    SmTree populated(SmPoint3d(0,0,0),0.0,NULL,&item);
+    for (int swap=0;swap<2;++swap) {
+        SmSolutionArray solutions;
+        SmTopologySolver solver(SM_SO_INTERSECT,SM_SR_ALL,1e-6,1e30,NULL,solutions);
+        SmTopoLocalSolver local(solver,FALSE,NULL);
+        SmStatus status = swap ? solver.SolveTrees(populated,empty,local)
+                              : solver.SolveTrees(empty,populated,local);
+        results[2*swap]=status==SM_SUCCESS ? 0 : (int64_t)status;
+        results[2*swap+1]=(int64_t)solutions.GetSize();
+    }
+    return 0;
     SC_CATCH
 }

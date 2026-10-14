@@ -7,6 +7,7 @@ use crate::{call_with_buffer, FfiError};
 
 mod sys {
     extern "C" {
+        pub fn sc_intersect_topology_solver_p2_empty_lists(results: *mut i64) -> i32;
         pub fn sc_intersect_topology_solver_p2_edge_vertex_operand() -> i32;
         pub fn sc_intersect_topology_solver_p2_static(
             input: *const f64,
@@ -68,6 +69,18 @@ pub fn point_storage_counts() -> Result<[i64; 2], FfiError> {
     Ok(counts)
 }
 
+/// Native solve status and solution count for each order of an empty-list tree.
+///
+/// # Errors
+/// C++ setup failures.
+pub fn empty_list_results() -> Result<[i64; 4], FfiError> {
+    let mut results = [0; 4];
+    // SAFETY: the shim writes exactly four i64 entries to the provided array.
+    let status = unsafe { sys::sc_intersect_topology_solver_p2_empty_lists(results.as_mut_ptr()) };
+    crate::check(status)?;
+    Ok(results)
+}
+
 /// Runs a validated local-solver fixture (including p2's `CurveVertex` class).
 ///
 /// # Errors
@@ -107,15 +120,15 @@ pub fn eval_static(input: &[f64]) -> Result<Vec<f64>, FfiError> {
         || operation.fract() != 0.0
         || !(0.0..=18.0).contains(&operation)
         || request.fract() != 0.0
-        || !(0.0..=1.0).contains(&request)
-        || !(1e-6..=1.0).contains(&tolerance)
+        || !(0.0..=3.0).contains(&request)
+        || !(0.0..=1e9).contains(&tolerance)
         || best.abs() > 1e30
         || [n1, n2]
             .iter()
-            .any(|n| n.fract() != 0.0 || !(1.0..=8.0).contains(n))
+            .any(|n| n.fract() != 0.0 || !(1.0..=64.0).contains(n))
         || input
             .get(7..)
-            .is_none_or(|v| v.iter().any(|x| x.abs() > 10.0))
+            .is_none_or(|v| v.iter().any(|x| x.abs() > 1e9))
     {
         return Err(invalid());
     }
@@ -174,7 +187,7 @@ mod tests {
         for (index, value) in [
             (0, 9.0),
             (1, 19.0),
-            (2, 2.0),
+            (2, 4.0),
             (5, 1e9),
             (5, 1.5),
             (6, -1.0),
@@ -227,6 +240,11 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn cpp_empty_object_lists_succeed_in_both_orders() {
+        assert_eq!(empty_list_results().unwrap(), [0, 0, 0, 0]);
+    }
+
     #[test]
     fn cpp_distinguishes_external_and_managed_point_nodes() {
         assert_eq!(point_storage_counts().unwrap(), [0, 1]);

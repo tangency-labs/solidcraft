@@ -1,15 +1,40 @@
-//! The topology solver's local traversal and remaining solver operations.
+//! Local topology traversal, face solves and static B-rep/shape queries.
 //!
 //! Upstream: `source/SMLib/src/SmTopologySolver.cpp`, `source/SMLib/inc/SmTopologySolver.h`.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
+//! | [`LocalSolver::new`] (shared in p1) | `SmTLSVertexEdge` / `SmTLSEdgeEdge` constructors |
 //! | [`TopologySolver::local_solve_branch`] | `SmTopologySolver::LocalSolve` |
 //! | `LocalSolver::solve_vertex_face` | `SmTLSVertexFace::SolveIt` |
 //! | `LocalSolver::solve_curve_vertex` | `SmTLSCurveVertex::SolveIt` |
+//! | `LocalSolver::solve_edge_vertex` | `SmTLSEdgeVertex::SolveIt` |
+//! | `LocalSolver::solve_curve_face` | `SmTLSCurveFace::SolveIt` |
+//! | `LocalSolver::solve_edge_face` | `SmTLSEdgeFace::SolveIt` |
+//! | `LocalSolver::solve_face_face` | `SmTLSFaceFace::SolveIt` |
+//! | [`TopologySolver::brep_point_solve`] | `SmTopologySolver::BrepPointSolve` |
+//! | [`TopologySolver::shape_point_solve`] | `SmTopologySolver::ShapePointSolve` |
+//! | [`TopologySolver::brep_curve_solve`] | `SmTopologySolver::BrepCurveSolve` |
+//! | [`TopologySolver::shape_curve_solve`] | `SmTopologySolver::ShapeCurveSolve` |
+//! | [`TopologySolver::solve_two_tree_sets`] | `sm_SolveTwoTrees` |
+//! | [`TopologySolver::brep_brep_solve`] | `SmTopologySolver::BrepBrepSolve` |
 //!
-//! Deviations: topology pointers are typed object handles; the local solver is
-//! temporarily taken from the parent and restored even when its solve fails.
+//! Deviations:
+//! - Topology pointers are adapter handles. [`TopologyTrees`] borrows cache trees;
+//!   the default B-rep cache lookup is explicitly unported. Shape topology keys
+//!   resolve to vertices, edge curves and face surfaces before tree traversal.
+//! - The local solver is taken from its parent and restored even on error.
+//!   The existing global solver and object-list walks supply traversal bounds;
+//!   this unit adds no input-driven recursion.
+//! - Static output arrays become returned [`SolutionArray`] values. On error the
+//!   caller receives the error, not the partial output C++ may have accumulated.
+//! - `SmTLSEdgeVertex::SolveIt` selects the vertex operand as a curve (upstream
+//!   line 1032). Its invalid cast is a controlled `InvalidInput` here; the operand
+//!   is not silently corrected. Native tests probe its class without that cast.
+//! - Range endpoint refinement needs `SmSurface::GlobalPointSolve` in part 4.
+//!   It must disable point testing on that SAME cache for BOTH endpoint solves.
+//! - Signed B-rep/curve and shape/curve queries test only the start parameter and
+//!   rewrite only start parameters, preserving upstream's `i < 1` behavior.
 
 use super::p1::TopologyObjects;
 use super::p1::{self, best_answer_so_far, CurveRef};
@@ -24,11 +49,11 @@ use crate::geom::object::{Shape, ShapeMember};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionType, SortKey};
 use crate::geom::tol::are_same;
-use crate::geom::tree::Tree;
+use crate::geom::tree::{AuxDataType, Tree};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec2};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
-use crate::surface::surface::{p2::surface_cache, Surface};
+use crate::surface::surface::Surface;
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
 
 const OP_LOCAL: &str = "intersect::topology_solver::p2::TopologySolver::local_solve_branch";
@@ -56,12 +81,22 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
             .copied()
             .flatten()
             .ok_or(SolidError::null_pointer(OP_LOCAL))?;
-        for list1 in tree1.node_object_list(id1)? {
+        let first_objects = if node1.aux_type == AuxDataType::ObjectList {
+            tree1.node_object_list(id1)?
+        } else {
+            Vec::new()
+        };
+        for list1 in first_objects {
             let object1 = tree1.list(list1)?;
             if !self.may_contain_answer(&object1.bbox, &node2.bbox)? {
                 continue;
             }
-            for list2 in tree2.node_object_list(id2)? {
+            let second_objects = if node2.aux_type == AuxDataType::ObjectList {
+                tree2.node_object_list(id2)?
+            } else {
+                Vec::new()
+            };
+            for list2 in second_objects {
                 let object2 = tree2.list(list2)?;
                 if !self.may_contain_answer(&object1.bbox, &object2.bbox)? {
                     continue;
@@ -179,6 +214,7 @@ fn classified_curve_intervals<O>(
 ) -> Result<Vec<(Extent1d, i32)>> {
     // The overload taking interval storage is owned by curve_class_p4, not the
     // other constructor currently being ported in curve_class_p1.
+    // UNPORTED(query.face_p2): SmFace::CurveOnClassify (after construction)
     // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
     Err(SolidError::unported(
         "SmCurveClassification::SmCurveClassification",
@@ -186,26 +222,21 @@ fn classified_curve_intervals<O>(
     ))
 }
 
-fn untrimmed_range_endpoints<O: Copy + PartialEq>(
-    kernel: &Kernel,
-    surface: &Surface,
-    surface_handle: O,
+fn untrimmed_range_endpoints<O>(
+    _kernel: &Kernel,
+    _surface: &Surface,
+    _surface_handle: O,
     _face_domain: &Extent2d,
     _start: Point3,
     _end: Point3,
     _tol: f64,
 ) -> Result<Option<(Vec2, Vec2)>> {
-    // The cache must be checked out and point_test_enabled temporarily disabled
-    // around BOTH GlobalPointSolve calls; restore it on success and error.
-    // get_surface_cache now constructs an owned cache. This operation needs the
-    // shared cache checkout consumed by BOTH point solves, so disabling a flag
-    // on that independent owned copy would not disable trimming in the solver.
-    // No endpoint is synthesized while that shared-cache bridge is unavailable.
-    let _cache = surface_cache(kernel, surface, Some(surface_handle))?;
-    // UNPORTED(surface.surface_p1): SmSurface::CacheMakeOrValidate (cache checkout bridge)
+    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
+    // Its eventual shared-cache adapter must suppress point testing on the SAME
+    // cache around BOTH endpoint solves. An independent cache copy is insufficient.
     Err(SolidError::unported(
-        "SmSurface::CacheMakeOrValidate",
-        "surface.surface_p1",
+        "SmSurface::GlobalPointSolve",
+        "surface.surface_p4",
     ))
 }
 
@@ -382,7 +413,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                         let end = curve.curve.evaluate_point(interval.max())?;
                         if let Some((uv_start, uv_end)) = untrimmed_range_endpoints(
                             ts.kernel,
-                            surface,
+                            ts.objects.surface(surface_handle)?,
                             surface_handle,
                             &domain,
                             start,
@@ -534,13 +565,13 @@ impl<O: SolutionObject> ShapeTreeViews<O> {
         Ok(Self {
             vertices: shape
                 .vertex_tree()
-                .map_objects(|key| objects.shape_member_object(ShapeMember::Vertex(key)))?,
+                .map_objects(|key| objects.shape_geometry_object(ShapeMember::Vertex(key)))?,
             curves: shape
                 .curve_tree()
-                .map_objects(|key| objects.shape_member_object(ShapeMember::Edge(key)))?,
+                .map_objects(|key| objects.shape_geometry_object(ShapeMember::Edge(key)))?,
             surfaces: shape
                 .surface_tree()
-                .map_objects(|key| objects.shape_member_object(ShapeMember::Face(key)))?,
+                .map_objects(|key| objects.shape_geometry_object(ShapeMember::Face(key)))?,
         })
     }
     fn views(&self) -> TopologyTrees<'_, O> {
@@ -927,5 +958,70 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
         let second = objects.brep_trees(second.ok_or(SolidError::null_pointer(OP))?)?;
         ts.solve_two_tree_sets(first, second)?;
         Ok(ts.base.solutions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::p1::tests::{scene, Obj};
+    use super::*;
+    use crate::math::BIG_DOUBLE;
+
+    #[test]
+    fn nodes_without_object_lists_solve_as_empty_in_both_orders() {
+        let kernel = Kernel::default();
+        let objects = scene();
+        let empty = Tree::<Obj>::from_point(Point3::ZERO, 0.0, false);
+        let mut populated = Tree::<Obj>::from_point(Point3::ZERO, 0.0, true);
+        let item = populated.object_list().unwrap()[0];
+        populated.list_mut(item).unwrap().object = Some(Obj::Vertex(0));
+        for swap in [false, true] {
+            let mut solver = TopologySolver::new(
+                &kernel,
+                &objects,
+                SolverOperation::Intersect,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &[],
+            );
+            let mut local = LocalSolver::new(LocalSolverKind::Base, false, None);
+            let (first, second) = if swap {
+                (&populated, &empty)
+            } else {
+                (&empty, &populated)
+            };
+            solver.solve_trees(first, second, &mut local).unwrap();
+            assert!(solver.base.solutions.is_empty());
+        }
+    }
+    #[test]
+    fn edge_vertex_rejects_the_upstream_wrong_class_operand() {
+        let kernel = Kernel::default();
+        let objects = scene();
+        for swap in [false, true] {
+            let mut solver = TopologySolver::new(
+                &kernel,
+                &objects,
+                SolverOperation::Intersect,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &[],
+            );
+            let mut local = LocalSolver::new(LocalSolverKind::EdgeVertex, swap, None);
+            let curve = Obj::Curve(0, Extent1d::from_min_max(0.0, 10.0));
+            let vertex = Obj::Vertex(0);
+            let (first, second) = if swap {
+                (vertex, curve)
+            } else {
+                (curve, vertex)
+            };
+            assert!(matches!(
+                local.solve_it(&mut solver, Some(first), Some(second)),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert!(solver.base.solutions.is_empty());
+        }
     }
 }

@@ -60,18 +60,12 @@
 //! - **`SolveTwoTrees`** solves each object of the first tree through a one-node
 //!   object tree local to the call; afterwards upstream's first tree pointer
 //!   dangles, here it is cleared.
-//! - **Unported callees.** `SmTopologySolver::LocalSolve` (unit
-//!   `intersect.topology_solver_p2`, the hook [`TopologySolver::solve_trees`]
-//!   reaches through `SolveBranch`), the local solvers of that unit
-//!   (`SmTLSVertexFace`, `SmTLSCurveVertex`, `SmTLSEdgeVertex`, `SmTLSCurveFace`,
-//!   `SmTLSEdgeFace`, `SmTLSFaceFace`), `SmCurve::GlobalCurveSolve`
-//!   (`curve.curve_p9`), `SmSurface::GlobalLineIntersect` (`surface.surface_p8`),
-//!   `SmSurface::GlobalPointSolve` (`surface.surface_p4`), the face point
-//!   classifications (`query.face_p1`, `query.face_p2`), the vertex zone tolerance
-//!   (`topology.brep_p1`) and the face trim behind the face silhouettes
-//!   (`SmFace::CreateCurvesByTrimming`, `topology.face_p2`; the surface cache build
-//!   before it needs `SmSurface::CalculateContinuities`, `surface.surface_p6`) return
-//!   [`SolidError::Unported`] (see the `UNPORTED` markers). The face-silhouette loop names its temporary curves by no handle.
+//! - **Unported callees.** Part 2 now supplies the local traversal and its six
+//!   local classes. Curve/curve solves, surface solves, topology tolerances and
+//!   face classification still propagate their owning units' unported errors.
+//!   Face silhouettes use the ported surface cache factory; building its tree
+//!   needs `surface.surface_p6`. The face-silhouette loop names temporary curves
+//!   by their face owner through the adapter.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
@@ -139,6 +133,24 @@ pub trait TopologyObjects<O> {
             "intersect::topology_solver::p2::TopologyObjects::shape_member_object",
             "adapter has no shape-member mapping",
         ))
+    }
+
+    /// The geometry stored in a shape tree: vertices themselves, edge curves,
+    /// and face surfaces. Shape trees use topology keys on the Rust side, whereas
+    /// the upstream object lists store the corresponding geometry pointers.
+    fn shape_geometry_object(&self, member: ShapeMember) -> Result<O> {
+        let object = self.shape_member_object(member)?;
+        match member {
+            ShapeMember::Vertex(_) => Ok(object),
+            ShapeMember::Edge(_) => self.edge_curve(object)?.ok_or(SolidError::null_pointer(
+                "intersect::topology_solver::p2::shape_geometry_object",
+            )),
+            ShapeMember::Face(_) => self.face_surface(object),
+            ShapeMember::Other => Err(SolidError::invalid_input(
+                "intersect::topology_solver::p2::shape_geometry_object",
+                "not a shape geometry member",
+            )),
+        }
     }
 
     /// The curve a curve handle refers to (the `SmCurve*` cast of a tree object).
@@ -624,8 +636,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
     /// # Errors
     ///
     /// Those of the traversal ([`GlobalSolve::solve_branch`]);
-    /// [`SolidError::Unported`] once a pair reaches the local solve
-    /// (`SmTopologySolver::LocalSolve`, unit `intersect.topology_solver_p2`).
+    /// Errors from local solves or their explicit unported callees.
     pub fn solve_trees(
         &mut self,
         tree1: &'t Tree<O>,
@@ -1884,18 +1895,20 @@ fn face_classifies_on_face<O>(_face: O, _point: Point3, _tol: f64) -> Result<boo
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::curve::line::{BoundedLineOptions, Line};
     use crate::geom::solution_array::ObjectKind;
 
     /// Free-standing test objects: vertices `(point, tolerance)` and curves.
     #[derive(Debug, Clone, Copy, PartialEq)]
-    enum Obj {
+    pub(crate) enum Obj {
         Vertex(usize),
         Curve(usize, Extent1d),
         Edge(usize),
         Analytic(usize),
+        Face(usize),
+        Surface(usize),
     }
 
     impl SolutionObject for Obj {
@@ -1904,6 +1917,8 @@ mod tests {
                 Obj::Vertex(_) => ObjectKind::Vertex,
                 Obj::Curve(..) | Obj::Analytic(_) => ObjectKind::Curve,
                 Obj::Edge(_) => ObjectKind::Edge,
+                Obj::Face(_) => ObjectKind::Face,
+                Obj::Surface(_) => ObjectKind::Surface,
             }
         }
 
@@ -1915,13 +1930,23 @@ mod tests {
         }
     }
 
-    struct Scene {
+    pub(crate) struct Scene {
         vertices: Vec<(Point3, f64)>,
         curves: Vec<Curve>,
         edges: Vec<(usize, Extent1d)>,
     }
 
     impl TopologyObjects<Obj> for Scene {
+        fn shape_member_object(&self, member: ShapeMember) -> Result<Obj> {
+            match member {
+                ShapeMember::Vertex((_, key)) => Ok(Obj::Vertex(key.index() as usize)),
+                ShapeMember::Edge((_, key)) => Ok(Obj::Edge(key.index() as usize)),
+                ShapeMember::Face((_, key)) => Ok(Obj::Face(key.index() as usize)),
+                ShapeMember::Other => {
+                    Err(SolidError::invalid_input("test mapping", "not a member"))
+                }
+            }
+        }
         fn curve(&self, object: Obj) -> Result<&Curve> {
             match object {
                 Obj::Curve(i, _) => self.curves.get(i).ok_or(SolidError::sm_err("curve")),
@@ -1970,8 +1995,11 @@ mod tests {
         fn surface_face(&self, _surface: Obj) -> Result<Option<Obj>> {
             Ok(None)
         }
-        fn face_surface(&self, _face: Obj) -> Result<Obj> {
-            Err(SolidError::sm_err("face"))
+        fn face_surface(&self, face: Obj) -> Result<Obj> {
+            match face {
+                Obj::Face(index) => Ok(Obj::Surface(index)),
+                _ => Err(SolidError::sm_err("face")),
+            }
         }
         fn surface(&self, _surface: Obj) -> Result<&Surface> {
             Err(SolidError::sm_err("surface"))
@@ -1990,7 +2018,7 @@ mod tests {
         }
     }
 
-    fn scene() -> Scene {
+    pub(crate) fn scene() -> Scene {
         let line = Line::bounded(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(1.0, 0.0, 0.0),
@@ -2005,6 +2033,29 @@ mod tests {
             curves: vec![Curve::from(line)],
             edges: vec![(0, Extent1d::from_min_max(2.0, 8.0))],
         }
+    }
+
+    #[test]
+    fn shape_topology_keys_resolve_to_the_stored_geometry() {
+        let objects = scene();
+        let brep = crate::topology::BrepId::from_index(0);
+        let edge = ShapeMember::Edge((brep, crate::topology::EdgeId::from_index(0)));
+        let face = ShapeMember::Face((brep, crate::topology::FaceId::from_index(0)));
+        let vertex = ShapeMember::Vertex((brep, crate::topology::VertexId::from_index(0)));
+        assert_eq!(objects.shape_member_object(edge).unwrap(), Obj::Edge(0));
+        assert_eq!(
+            objects.shape_geometry_object(edge).unwrap(),
+            Obj::Curve(0, Extent1d::from_min_max(0.0, 10.0))
+        );
+        assert_eq!(objects.shape_member_object(face).unwrap(), Obj::Face(0));
+        assert_eq!(
+            objects.shape_geometry_object(face).unwrap(),
+            Obj::Surface(0)
+        );
+        assert_eq!(
+            objects.shape_geometry_object(vertex).unwrap(),
+            Obj::Vertex(0)
+        );
     }
 
     #[test]
@@ -2118,36 +2169,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn edge_vertex_rejects_the_upstream_wrong_class_operand() {
-        let kernel = Kernel::default();
-        let objects = scene();
-        for swap in [false, true] {
-            let mut solver = TopologySolver::new(
-                &kernel,
-                &objects,
-                SolverOperation::Intersect,
-                SolutionRequested::All,
-                1e-6,
-                BIG_DOUBLE,
-                &[],
-            );
-            let mut local = LocalSolver::new(LocalSolverKind::EdgeVertex, swap, None);
-            let curve = Obj::Curve(0, Extent1d::from_min_max(0.0, 10.0));
-            let vertex = Obj::Vertex(0);
-            let (first, second) = if swap {
-                (vertex, curve)
-            } else {
-                (curve, vertex)
-            };
-            assert!(matches!(
-                local.solve_it(&mut solver, Some(first), Some(second)),
-                Err(SolidError::InvalidInput { .. })
-            ));
-            assert!(solver.base.solutions.is_empty());
-        }
     }
 
     #[test]
