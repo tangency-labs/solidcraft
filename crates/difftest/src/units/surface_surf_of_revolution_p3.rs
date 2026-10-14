@@ -581,7 +581,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generation -----------------------------------------------------------------------
 
 /// Scales every coordinate of the surface block by `f` (huge and tiny models).
-fn scale_surf(s: &mut SurfIn, f: f64) {
+pub(crate) fn scale_surf(s: &mut SurfIn, f: f64) {
     let sc = |p: &mut [f64; 3]| {
         for c in p.iter_mut() {
             *c *= f;
@@ -605,7 +605,7 @@ fn scale_surf(s: &mut SurfIn, f: f64) {
 }
 
 /// A sub-domain of `d` (fractions of each side), or `None` (the natural domain).
-fn sub_dom(rng: &mut Rng, d: &Extent2d) -> Option<[f64; 4]> {
+pub(crate) fn sub_dom(rng: &mut Rng, d: &Extent2d) -> Option<[f64; 4]> {
     if rng.chance(0.5) {
         return None;
     }
@@ -652,7 +652,7 @@ fn rand_frame(rng: &mut Rng) -> FrameIn {
 
 /// Another surface of revolution about the same axis as `s` (when `coaxial`), with a
 /// planar generator.
-fn other_surf(rng: &mut Rng, s: &SurfOfRevolution, coaxial: bool) -> SurfIn {
+pub(crate) fn other_surf(rng: &mut Rng, s: &SurfOfRevolution, coaxial: bool) -> SurfIn {
     let p = s.position();
     let (o, x, y, z) = (p.origin(), p.x_axis(), p.y_axis(), p.z_axis());
     let arr = |v: Vec3| [v.x, v.y, v.z];
@@ -706,7 +706,7 @@ fn other_surf(rng: &mut Rng, s: &SurfOfRevolution, coaxial: bool) -> SurfIn {
 
 /// A coaxial cylinder or cone sharing a radius with the generator of `s` at some
 /// height: a line generator at a radius the surface reaches (crossing intersections).
-fn crossing_surf(rng: &mut Rng, s: &SurfOfRevolution, k: &Kernel) -> Option<SurfIn> {
+pub(crate) fn crossing_surf(rng: &mut Rng, s: &SurfOfRevolution, k: &Kernel) -> Option<SurfIn> {
     let p = s.position();
     let (o, x, z) = (p.origin(), p.x_axis(), p.z_axis());
     let sd = s.step_uv_domain();

@@ -593,8 +593,16 @@ impl BSplineSurface {
         let z_axis = z_axis.unitize_or_z();
 
         // Make the Sphere as a SurfOfRevolution
-        let sphere =
-            Self::create_surf_of_revolution(gen_curve, origin, z_axis, angle_span, false, None)?;
+        // (no sweep circle is given, so the kernel is not used)
+        let sphere = Self::create_surf_of_revolution(
+            &Kernel::default(),
+            gen_curve,
+            origin,
+            z_axis,
+            angle_span,
+            false,
+            None,
+        )?;
         Ok(SphereFromArcs {
             ccw_arcs,
             orients,
@@ -615,6 +623,7 @@ impl BSplineSurface {
     /// every control point is on the axis or a circle or the surface cannot be built;
     /// `InvalidInput` for a sweep curve that is not a circle.
     pub fn create_surf_of_revolution(
+        k: &Kernel,
         gen_curve: &BSplineCurve,
         origin: Point3,
         axis_dir: Vec3,
@@ -623,6 +632,7 @@ impl BSplineSurface {
         opt_sweep_curve: Option<&SmCurve>,
     ) -> Result<Self> {
         Self::create_surf_of_revolution_with_line_vector(
+            k,
             gen_curve,
             None,
             origin,
@@ -645,6 +655,7 @@ impl BSplineSurface {
     /// Those of [`Self::create_surf_of_revolution`] and of the circle's arc length
     /// reparametrisation.
     pub fn create_surf_of_revolution_with_line_vector(
+        k: &Kernel,
         gen_curve: &BSplineCurve,
         gen_line_vector: Option<Vec3>,
         origin: Point3,
@@ -777,22 +788,54 @@ impl BSplineSurface {
                 continue;
             }
 
-            // generate a sweep circle from scratch (a given sweep circle returned
-            // Unported above)
-            x_vec /= radius; // Unitize.
-            let y_vec = axis_dir.cross(x_vec).unitize()?;
-            let ref_frame = Axis2Placement::new(center, x_vec, y_vec);
-            let cir = BSplineCurve::create_circle_segment(
-                3,
-                &ref_frame,
-                radius,
-                0.0,
-                angle_span_deg,
-                NurbCircleParam::Quadratic,
-            )?;
+            // build sweep circle for this control point and add its control points
+            // to newSurface ControlPoint array
+            let cir_ctrl_pts = if let Some(sweep) = opt_sweep_curve {
+                // copy, scale, and move sweep circle to desired location: this lets
+                // the sweep curve specify the sweep parameterization of the surface
+                let CurveKind::Ellipse(sweep_ellipse) = sweep.kind() else {
+                    return Err(SolidError::invalid_input(
+                        OP_REV,
+                        "the sweep curve is not an SmCircle",
+                    ));
+                };
+                let mut cir = sweep_ellipse.clone();
 
-            // Add sweep circle controlPoint to newSurface ControlPoint array
-            let cir_ctrl_pts = cir.polygon(&cir.natural_interval())?;
+                // set up transformation from GivenSweepCurve to needed SweepCurve
+                let sweep_radius = sweep_ellipse.radius();
+                let sweep_frame = sweep_ellipse.position();
+                let origin_of_sweep = sweep_frame.origin();
+                let mut scale = radius / sweep_radius;
+
+                // Check for inverted circle.  [B505] This creates a transform with a
+                // negative scale, which creates an SmCircle with a negative radius. That
+                // works though, and the circle is transient (only its control points
+                // are used).
+                if x_vec.dot(sweep_frame.x_axis()) < 0.0 {
+                    scale *= -1.0;
+                }
+
+                // = -dScale * rOrigin + sCenter (translate to the current origin)
+                let move_vec = (-scale) * origin_of_sweep + center;
+                let mut move_frame = Axis2Placement::IDENTITY;
+                move_frame.translate(move_vec);
+                cir.transform(k, &move_frame, Some(Vec3::new(scale, scale, scale)))?;
+                cir.base().polygon(&cir.base().natural_interval())?
+            } else {
+                // generate a sweep circle from scratch
+                x_vec /= radius; // Unitize.
+                let y_vec = axis_dir.cross(x_vec).unitize()?;
+                let ref_frame = Axis2Placement::new(center, x_vec, y_vec);
+                let cir = BSplineCurve::create_circle_segment(
+                    3,
+                    &ref_frame,
+                    radius,
+                    0.0,
+                    angle_span_deg,
+                    NurbCircleParam::Quadratic,
+                )?;
+                cir.polygon(&cir.natural_interval())?
+            };
             let take = cir_ctrl_pts.get(..num_cir_ctrl_pts).ok_or_else(|| {
                 SolidError::invalid_input(OP_REV, "sweep circle polygon too short")
             })?;
@@ -1571,6 +1614,7 @@ mod tests {
         )
         .expect("line");
         let s = BSplineSurface::create_surf_of_revolution(
+            &Kernel::default(),
             &line,
             Point3::ZERO,
             Vec3::new(0.0, 0.0, 3.0),
@@ -1586,6 +1630,7 @@ mod tests {
             BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(0.0, 0.0, 1.0))
                 .expect("axis line");
         assert!(BSplineSurface::create_surf_of_revolution(
+            &Kernel::default(),
             &on_axis,
             Point3::ZERO,
             Vec3::new(0.0, 0.0, 1.0),

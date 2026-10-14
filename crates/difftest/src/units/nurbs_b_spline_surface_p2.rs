@@ -955,6 +955,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         ) => {
             let c = bsc_of(curve)?;
             BSplineSurface::create_surf_of_revolution(
+                &Kernel::default(),
                 &c,
                 Point3::new(origin[0], origin[1], origin[2]),
                 Vec3::new(axis[0], axis[1], axis[2]),

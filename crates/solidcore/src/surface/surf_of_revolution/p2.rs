@@ -1,0 +1,732 @@
+//! `SmSurfOfRevolution`, part 2: the STEP domain adjustment and NURB trim, the STEP
+//! inversion, the offset surface, the dispatch of the surface/surface intersection
+//! and the recogniser that makes a surface of revolution of a B-spline surface.
+//!
+//! Upstream: `source/SMLib/src/SmSurfOfRevolution.cpp`,
+//! `source/SMLib/inc/SmSurfOfRevolution.h`.
+//!
+//! | Rust                                                        | Upstream                                  |
+//! |-------------------------------------------------------------|-------------------------------------------|
+//! | [`SurfOfRevolution::adjust_step_uv_domain`]                 | `AdjustSTEPUVDomain`                      |
+//! | [`SurfOfRevolution::step_inversion`]                        | `STEPInversion`                           |
+//! | [`SurfOfRevolution::create_canonical`]                      | `CreateCanonical` (co-ported in `p1`)     |
+//! | [`SurfOfRevolution::make_nurb`]                             | `MakeNurb` (co-ported in `p1`)            |
+//! | [`SurfOfRevolution::create_offset_surface`]                 | `CreateOffsetSurface`                     |
+//! | [`SurfOfRevolution::global_surface_intersect`]              | `GlobalSurfaceIntersect`                  |
+//! | [`SurfOfRevolution::is_nurb_surface_surf_of_revolution`]    | `IsNurbSurfaceSurfOfRevolution`           |
+//! | [`SurfOfRevolution::trim_with_domain`]                      | `TrimWithDomain`                          |
+//!
+//! Deviations:
+//! - **Arguments.** Out-params become return values; `SmContext` arguments, the
+//!   `Notify` calls and `TrimWithDomain`'s in/out domain (upstream never writes it) are
+//!   dropped. `STEPInversion` and `GlobalSurfaceIntersect` take the kernel for the
+//!   conversions and intersections they run.
+//! - **`STEPInversion`** returns the parameter and location only on success: upstream
+//!   writes them before returning `SM_ERR` for a point outside the sweep interval or
+//!   not on the generator, and the port returns that error alone.
+//! - **Generator.** As in `p1` the generator is a [`Curve`] derived from
+//!   `SmBSplineCurve`; `CreateOffsetSurface`'s composite-curve branch for any other
+//!   generator is unreachable. Upstream's `STEPInversion` switches the generator's
+//!   out-of-bounds flag on; the surface's flag always sets the generator's too
+//!   ([`SurfOfRevolution::set_out_of_bounds_enabled`]), so the generator is solved on a
+//!   copy with the flag on.
+//! - **`CreateOffsetSurface`** without a non-degenerate sweep circle (upstream asserts)
+//!   passes no sweep curve to `MakeNurbWithSweepParams`.
+//! - **`GlobalSurfaceIntersect`** reaches `SmSphere` and `SmCone` through
+//!   [`SurfOfRevolution::intersect_with_surf_of_revolution`] once those surface kinds
+//!   exist; until then a sphere or cone `other` cannot be given.
+//! - **Statuses.** Calls whose status upstream ignores keep upstream's values, except
+//!   that [`SolidError::Unported`] always propagates.
+
+use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::line::Line;
+use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::geom::extent2d::Extent2d;
+use crate::geom::geom_utility::p1::line_point_distance;
+use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::Point3;
+use crate::kernel::Kernel;
+use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::BoundingBoxRequest;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::p1::LocationType;
+use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
+use crate::surface::surface::p2::{
+    Surface, SurfaceIntersection, SurfaceKind, B_SPLINE_SURFACE_TYPE,
+};
+
+use super::p1::{
+    gen_adjust_step_interval, gen_base, gen_base_mut, gen_max_analytic_domain, gen_step_interval,
+    not_b_spline, SurfOfRevolution,
+};
+
+const OP_ADJUST: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::adjust_step_uv_domain";
+const OP_STEP_INV: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion";
+const OP_TRIM: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::trim_with_domain";
+
+/// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
+const ANALYTIC_TOL_SCALE: f64 = 100.0;
+
+/// `SM_ERR_OUTSIDE_OF_DOMAIN` (`SmMessages.h`).
+const SM_ERR_OUTSIDE_OF_DOMAIN: i32 = 1020;
+
+/// The solution object of solves whose solutions name no object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NoHandle;
+
+impl SolutionObject for NoHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+}
+
+impl SurfOfRevolution {
+    // ---- domain edits ---------------------------------------------------------------
+
+    /// Sets the STEP domain `new_step_uv_domain` (degrees by generator parameters),
+    /// adjusts the generator to its V interval and rebuilds the NURB and the polar
+    /// converter (`AdjustSTEPUVDomain`). Nothing happens when the domain is the
+    /// current one (within `SM_EFF_ZERO`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without generator; those of the generator's
+    /// `AdjustSTEPInterval` and of [`Self::make_nurb`].
+    pub fn adjust_step_uv_domain(
+        &mut self,
+        k: &Kernel,
+        new_step_uv_domain: &Extent2d,
+    ) -> Result<()> {
+        // no work - input domain = current domain
+        if new_step_uv_domain.is_contained_by(&self.anal_uv_domain, EFF_ZERO)
+            && self
+                .anal_uv_domain
+                .is_contained_by(new_step_uv_domain, EFF_ZERO)
+        {
+            return Ok(());
+        }
+
+        // set surface analytic domain
+        self.anal_uv_domain = *new_step_uv_domain;
+
+        // set GenCurve analytic domain from V part of new surface domain
+        let v_ivl = self.anal_uv_domain.v_interval();
+        let gen = self
+            .gen_curve
+            .as_mut()
+            .ok_or(SolidError::null_pointer(OP_ADJUST))?;
+        gen_adjust_step_interval(k, gen, &v_ivl)?;
+
+        // build Nurb domain from Analytic domain
+        let mut nurb_domain = *new_step_uv_domain;
+        if self.swap_uv {
+            nurb_domain.transpose();
+        }
+
+        // set Surface and GenCurve nurb domain (status ignored)
+        ignore_status(self.reparameterize(k, &nurb_domain))?;
+
+        // rebuild the associated m_pNurb and PolarConverter
+        self.make_nurb(k)?;
+        Ok(())
+    }
+
+    /// Trims to the NURB domain `new_nurb_uv_domain` (`TrimWithDomain`): the STEP
+    /// domain and the generator are updated to it, the NURB is rebuilt on the
+    /// trimmed STEP domain and then reparameterised onto the new NURB domain, and the
+    /// polar converter is rebuilt (statuses of the update, the reparameterisation and
+    /// the rebuild ignored). The surface geometry is preserved; the NURB
+    /// parameterisation between the domain corners may differ slightly.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_OUTSIDE_OF_DOMAIN` (1020) when the domain is not inside the current NURB
+    /// domain (within `SM_EFF_ZERO_PARAM`); those of [`Self::make_nurb`].
+    pub fn trim_with_domain(&mut self, k: &Kernel, new_nurb_uv_domain: &Extent2d) -> Result<()> {
+        // locals
+        let current = self.base.natural_uv_domain();
+
+        // check input - new trim UV domain must be inside current natural UV domain
+        if !new_nurb_uv_domain.is_contained_by(&current, EFF_ZERO_PARAM) {
+            return Err(SolidError::Upstream {
+                operation: OP_TRIM,
+                code: SM_ERR_OUTSIDE_OF_DOMAIN,
+                entity: None,
+            });
+        }
+
+        // no work - new and current domains are same size
+        if current.is_contained_by(new_nurb_uv_domain, EFF_ZERO_PARAM) {
+            return Ok(());
+        }
+
+        // Update just the analytic domain and the GenCurve (both analytic and NURB)
+        ignore_status(self.update_analytical_domain(k, new_nurb_uv_domain))?;
+
+        // rebuild Nurbs surface from updated analytic domain. (right shape - wrong
+        // UVDomain)
+        self.make_nurb(k)?;
+
+        // adjust Nurb Surface UVDomain
+        ignore_status(self.reparameterize(k, new_nurb_uv_domain))?;
+
+        // rebuild the sweep polar converter
+        ignore_status(self.rebuild_polar_converter(k))?;
+        Ok(())
+    }
+
+    // ---- inversion ------------------------------------------------------------------
+
+    /// The STEP parameters of `point_on_surf` (which must lie on the surface within
+    /// `tol_3d`) and its location (`STEPInversion`): degrees about the axis and the
+    /// generator's STEP parameter. A non-planar generator runs
+    /// [`BSplineSurface::step_inversion`] over the NURB image of `anal_domain`. A planar
+    /// generator is solved analytically: the point is swung onto the generator's plane,
+    /// the sweep angle (the larger of two on a seam when it is below the end of the
+    /// sweep) gives the U parameter, the point's distance from the axis a pole, and
+    /// the swung point is intersected with the generator for the V parameter. On a
+    /// seam, `uv_guess` picks the end nearer to it.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a point outside the sweep interval or not on the generator; those of
+    /// the conversions, the start-plane transform and the generator solve;
+    /// [`SolidError::Unported`] from [`BSplineSurface::step_inversion`] (non-planar
+    /// generator).
+    pub fn step_inversion(
+        &self,
+        k: &Kernel,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+    ) -> Result<(Point2, LocationType)> {
+        // pass call along for nonPlanar generator curves
+        if !self.planar_generator {
+            // Not planar, must use the general solver.
+
+            // Have to convert the analytical domain to a NURBS domain (the statuses are
+            // ignored: a failed conversion leaves the STEP point).
+            let mut nurbs_domain = Extent2d::new();
+            let step_min = anal_domain.min();
+            let nurbs_min =
+                ignored(self.convert_uv_from_step_to_nurbs(k, step_min))?.unwrap_or(step_min);
+            nurbs_domain.add_point(nurbs_min);
+            let step_max = anal_domain.max();
+            let nurbs_max =
+                ignored(self.convert_uv_from_step_to_nurbs(k, step_max))?.unwrap_or(step_max);
+            nurbs_domain.add_point(nurbs_max);
+
+            let (nurbs_parameter, location) =
+                self.base
+                    .step_inversion(&nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
+            let step = self.convert_uv_from_nurbs_to_step(k, nurbs_parameter)?;
+            return Ok((step, location));
+        }
+
+        // Generator curve is planar, so we can solve it analytically.
+
+        // Rotate Point to StartPlane
+        let sp = self.transform_point_to_start_plane(point_on_surf, tol_3d, false)?;
+        let num_angles = sp.angles_deg.len();
+        let angle0 = sp.angles_deg.first().copied().unwrap_or(0.0);
+        let angle1 = sp.angles_deg.get(1).copied().unwrap_or(0.0);
+
+        // set output U value (angle about rotation axis)
+        //  For points on seams and larger angle is less than 360
+        //  then the point is a little closer to the high side, else use low side value
+        let u_domain = self.anal_uv_domain.u_interval();
+        let mut u = if num_angles > 1 && angle1 < u_domain.max() - EFF_ZERO {
+            angle1
+        } else {
+            angle0
+        };
+
+        // get Point/RotationAxis distance
+        let (dist, _) = line_point_distance(
+            self.position.origin(),
+            self.position.z_axis(),
+            point_on_surf,
+        );
+
+        // set output point classification
+        let mut location = if dist < tol_3d {
+            LocationType::Pole
+        } else if num_angles == 2 {
+            LocationType::USeam
+        } else if sp.inside {
+            LocationType::Interior
+        } else {
+            LocationType::Exterior
+        };
+
+        // If a guess was given and we're on the seam, set u-parameter to what's closer
+        // to the guess.
+        if location == LocationType::USeam {
+            if let Some(guess) = uv_guess {
+                if guess.x > u_domain.mid() {
+                    u = u_domain.max();
+                }
+            }
+        }
+
+        // intersect rotated point with genCurve
+        let mut gen = self.gen()?.clone();
+        let mut ivl = gen_step_interval(&gen)?;
+        if self.is_out_of_bounds_enabled() {
+            ivl = gen_max_analytic_domain(&gen)?;
+            if let Some(b) = gen_base_mut(&mut gen) {
+                b.set_out_of_bounds_enabled(true);
+            }
+        }
+        let solutions = gen.global_point_solve_step::<NoHandle>(
+            k,
+            &ivl,
+            SolverOperation::Intersect,
+            sp.point,
+            tol_3d,
+            None,
+            None,
+            SolutionRequested::All,
+            None,
+            None,
+        )?;
+
+        // error - rotated point not on GenCurve
+        let Some(first) = solutions.first() else {
+            return Err(SolidError::sm_err(OP_STEP_INV));
+        };
+
+        // set output V coordinate
+        let mut v = first.start.param(0)?;
+
+        // for points on closed genCurve seams - update point classification
+        if solutions.len() > 1
+            && gen.is_closed(&ivl, tol_3d)?
+            && ivl.is_value_on_boundary(v, EFF_ZERO).0
+        {
+            location = match location {
+                LocationType::Interior => LocationType::VSeam,
+                LocationType::USeam => LocationType::UvSeam,
+                other => other,
+            };
+
+            // On the v-seam. If a guess was given, set v-parameter to what's closer to
+            // the guess.
+            if let Some(guess) = uv_guess {
+                let v_domain = self.anal_uv_domain.v_interval();
+                if guess.y > v_domain.mid() {
+                    v = v_domain.max();
+                }
+            }
+        }
+
+        // all done
+        if sp.inside {
+            Ok((Point2::new(u, v), location))
+        } else {
+            Err(SolidError::sm_err(OP_STEP_INV))
+        }
+    }
+
+    // ---- offsets --------------------------------------------------------------------
+
+    /// The offset surface at the signed distance `signed_offset_distance` (negative:
+    /// opposite the surface normal) approximated within `approx_tol_3d`
+    /// (`CreateOffsetSurface`): the generator is offset in its plane (lines and circles
+    /// stay lines and circles), simplified, cut at its crossing of the axis (the larger
+    /// part is kept) and swept by [`Self::make_nurb_with_sweep_params`] along the first
+    /// non-degenerate sweep circle of the surface. The offset surface has the STEP
+    /// domain of this one with the offset generator's STEP interval.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without generator; those of the directrices, the generator
+    /// offset, the knot removal, the axis segment and the sweep;
+    /// [`SolidError::Unported`] where the offset approximation is.
+    pub fn create_offset_surface(
+        &self,
+        k: &Kernel,
+        signed_offset_distance: f64,
+        approx_tol_3d: f64,
+    ) -> Result<Self> {
+        // locals
+        let input_nurb_domain = self.base.natural_uv_domain();
+        let gen_curve_nurb_ivl = if self.swap_uv {
+            input_nurb_domain.u_interval()
+        } else {
+            input_nurb_domain.v_interval()
+        };
+
+        // Get a nonDegenerate SweepCurve, to pass to MakeNurbWithSweepParams().
+        let mut sweep_curve: Option<Curve> = None;
+        let cnt: usize = 7;
+        for ii in 0..cnt {
+            let frac = if ii == 0 {
+                0.0
+            } else if ii == cnt - 1 {
+                1.0
+            } else {
+                ii as f64 / (cnt - 1) as f64
+            };
+            let param = gen_curve_nurb_ivl.evaluate(frac);
+            let dir = self.create_directrix_at_generator_param(k, param)?;
+            if dir.radius > EFF_ZERO_SQRT {
+                sweep_curve = Some(dir.directrix);
+                break;
+            }
+        }
+
+        // Offset the genCurve.
+
+        // Get the offset normal vector.
+        let offset_distance = signed_offset_distance.abs();
+        let sign = if (self.swap_uv || signed_offset_distance < 0.0)
+            && !(self.swap_uv && signed_offset_distance < 0.0)
+        {
+            -1.0
+        } else {
+            1.0
+        };
+
+        // Gen curve is in our (local) x-z plane, so the plane normal is our y axis.
+        let plane_norm = (-self.position.y_axis()) * sign;
+
+        // CreateSimpleOffset() preserves SmLines and SmCircles.
+        let gen = self.gen()?;
+        let tol = approx_tol_3d / 10.0;
+        let mut off_curve = match gen.kind() {
+            CurveKind::Line(l) => {
+                Curve::from(l.create_simple_offset(plane_norm, offset_distance)?.0)
+            }
+            CurveKind::Ellipse(e) => {
+                e.create_simple_offset(k, tol, plane_norm, offset_distance, false)?
+                    .0
+            }
+            CurveKind::BSpline(_) | CurveKind::Hyperbola(_) | CurveKind::Parabola(_) => {
+                Curve::from(
+                    gen_base(gen)?
+                        .create_simple_offset(k, tol, plane_norm, offset_distance, false)?
+                        .0,
+                )
+            }
+            _ => return Err(not_b_spline()),
+        };
+
+        // simplify the curve if possible
+        let base = gen_base_mut(&mut off_curve).ok_or_else(not_b_spline)?;
+        base.remove_extra_knots(approx_tol_3d / 10.0)?;
+
+        // Trim the offset curve with the axis of rev to avoid self intersecting results
+        let z_axis = self.position.z_axis();
+        let mut domain = off_curve.natural_interval();
+        let boxes = ignored(off_curve.calculate_bounding_box(
+            k,
+            &domain,
+            BoundingBoxRequest {
+                normal: true,
+                ..BoundingBoxRequest::default()
+            },
+            true,
+        ))?;
+        let height = boxes
+            .and_then(|b| b.normal)
+            .unwrap_or_default()
+            .max_dimension()
+            * 1.5; // multiply max dimension by some factor to be sure
+        let origin = self.position.origin();
+        let axis_line = Curve::from(Line::create_line_segment(
+            3,
+            origin,
+            origin + height * z_axis,
+            None,
+        )?);
+        let axis_ivl = axis_line.natural_interval();
+        let solutions = ignored(off_curve.global_curve_intersect::<NoHandle>(
+            k,
+            &domain,
+            &axis_line,
+            &axis_ivl,
+            approx_tol_3d,
+            &CurveIntersectOptions::default(),
+        ))?;
+        if let Some(sols) = solutions {
+            if sols.len() == 1 {
+                // if intersection is at endpoint, do not bother trimming
+                let param = sols
+                    .as_slice()
+                    .first()
+                    .map_or(Ok(0.0), |s| s.start.param(0))?;
+                if domain.min() != param || domain.max() != param {
+                    // Take the largest portion for now
+                    // Eventually use a better algorithm
+                    if param < domain.mid() {
+                        let _ = domain.set_min(param);
+                    } else {
+                        let _ = domain.set_max(param);
+                    }
+                    // may snap the interval by tol to existing knots (status ignored)
+                    ignore_status(off_curve.trim(k, &mut domain, TrimMode::Notify))?;
+                }
+            }
+        }
+
+        // The offset surface's V interval is the offset curve's STEP interval.
+        let mut offset_surf_domain = self.anal_uv_domain;
+        offset_surf_domain.set_v_interval(&gen_step_interval(&off_curve)?);
+
+        // create the new offset surface of revolution
+        let mut off_surf = Self::new(
+            k,
+            off_curve,
+            self.position.origin(),
+            self.position.x_axis(),
+            self.position.y_axis(),
+            offset_surf_domain,
+            self.swap_uv,
+        )?;
+
+        // rebuild the underlying Nurb Surface - with current parameterization
+        off_surf.make_nurb_with_sweep_params(k, sweep_curve.as_ref())?;
+        Ok(off_surf)
+    }
+
+    // ---- intersections --------------------------------------------------------------
+
+    /// The intersection curves of this surface over `uv_domain` with `other` over
+    /// `other_uv_domain` (`GlobalSurfaceIntersect`): the special cases of a plane or
+    /// another surface of revolution ([`Self::intersect_with_plane`],
+    /// [`Self::intersect_with_surf_of_revolution`]) and, where they need more, the
+    /// general surface intersection ([`Surface::global_surface_intersect_base`]) whose
+    /// curves follow the special cases' (upstream appends to the same arrays).
+    ///
+    /// # Errors
+    ///
+    /// Those of the special cases; [`SolidError::Unported`] from the general
+    /// intersection (`SmAdvSurfaceIntersector`).
+    pub fn global_surface_intersect(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        other: &Surface,
+        other_uv_domain: &Extent2d,
+        use_surface_edges: [bool; 2],
+        approx_tol_3d: Option<f64>,
+        ang_tol_rad: Option<f64>,
+    ) -> Result<SurfaceIntersection> {
+        let mut need_nurb_intersection = true;
+        let mut out = SurfaceIntersection::default();
+        match other.kind() {
+            SurfaceKind::Plane(p) => {
+                let (more, found) = self.intersect_with_plane(p, other_uv_domain, approx_tol_3d)?;
+                need_nurb_intersection = more;
+                out = found;
+            }
+            SurfaceKind::SurfOfRevolution(o) => {
+                let (more, found) = self.intersect_with_surf_of_revolution(
+                    k,
+                    uv_domain,
+                    o.as_ref(),
+                    other_uv_domain,
+                    approx_tol_3d,
+                )?;
+                need_nurb_intersection = more;
+                out = found;
+            }
+            // (IntersectWithSphere / IntersectWithCone once those kinds exist)
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {}
+        }
+
+        // If we're here, then analytic intersections were not found
+        if need_nurb_intersection {
+            let more = Surface::global_surface_intersect_base(
+                uv_domain,
+                other,
+                other_uv_domain,
+                use_surface_edges,
+                approx_tol_3d,
+                ang_tol_rad,
+            )?;
+            out.curves_3d.extend(more.curves_3d);
+            out.surface1_uv_curves.extend(more.surface1_uv_curves);
+            out.surface2_uv_curves.extend(more.surface2_uv_curves);
+            out.curve_types.extend(more.curve_types);
+            out.deviations.extend(more.deviations);
+        }
+        Ok(out)
+    }
+
+    // ---- recognition ----------------------------------------------------------------
+
+    /// The surface of revolution `test_surface` is, or the one a B-spline surface
+    /// makes (`IsNurbSurfaceSurfOfRevolution`): a surface of revolution is copied;
+    /// otherwise the B-spline surface must be rational and of degree 2 in at least one
+    /// direction whose iso curves in the other direction are coaxial circular arcs on
+    /// parallel planes starting and ending on common planes
+    /// ([`super::test_for_iso_circles`] at `tolerance_scale * ANALYTIC_TOL_SCALE *
+    /// SM_EFF_ZERO * (1 + |corner points|)`, constant-v circles first); the iso curve at
+    /// the start of the other direction becomes the generator, which must be planar,
+    /// non-degenerate and coplanar with the circles' axis. The new surface has the
+    /// NURB domain of `test_surface`. `None` when it is not a surface of revolution.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations, the iso-circle tests, the iso curve and the generator
+    /// queries.
+    pub fn is_nurb_surface_surf_of_revolution(
+        k: &Kernel,
+        test_surface: &Surface,
+        tolerance_scale: f64,
+    ) -> Result<Option<Self>> {
+        // low work - already a SmSurfOfRevolution
+        if let SurfaceKind::SurfOfRevolution(s) = test_surface.kind() {
+            return Ok(Some(s.copy()));
+        }
+
+        // no work - not a BSplineSurface
+        if !test_surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
+            return Ok(None);
+        }
+        let plane_base;
+        let tgt: &BSplineSurface = match test_surface.kind() {
+            SurfaceKind::BSpline(s) => s,
+            SurfaceKind::Plane(p) => {
+                plane_base = p.base_for_query();
+                &plane_base
+            }
+            SurfaceKind::SurfOfRevolution(_) | SurfaceKind::CurveBounded(_) => return Ok(None),
+        };
+        Self::is_nurb_surface_surf_of_revolution_base(k, tgt, tolerance_scale)
+    }
+
+    /// The recogniser of [`Self::is_nurb_surface_surf_of_revolution`] for the
+    /// B-spline surface `tgt`.
+    fn is_nurb_surface_surf_of_revolution_base(
+        k: &Kernel,
+        tgt: &BSplineSurface,
+        tolerance_scale: f64,
+    ) -> Result<Option<Self>> {
+        // no work - not a degree 2 rational surface in at least 1 direction
+        let deg_u = tgt.degree(SurfParamType::U);
+        let deg_v = tgt.degree(SurfParamType::V);
+        if !tgt.is_rational() || (deg_u != 2 && deg_v != 2) {
+            return Ok(None);
+        }
+
+        // evaluate min/max domain points (statuses ignored upstream; the points are read)
+        let uv_domain = tgt.natural_uv_domain();
+        let min_pnt = tgt.evaluate_point(uv_domain.min())?;
+        let max_pnt = tgt.evaluate_point(uv_domain.max())?;
+
+        // scaled zero value
+        let scaled_zero = tolerance_scale
+            * ANALYTIC_TOL_SCALE
+            * EFF_ZERO
+            * (1.0 + min_pnt.max_dimension() + max_pnt.max_dimension());
+
+        // made up AngTolRad value
+        let ang_tol_rad = EFF_ZERO_SQRT * tolerance_scale;
+
+        // test sequence of U direction (V Constant) isoCurves for circularity and
+        // parallelism
+        let mut circles_v = None;
+        let mut is_revolution_no_swap_uv = false;
+        if deg_u == 2 {
+            let c =
+                super::test_for_iso_circles(k, tgt, SurfParamType::V, scaled_zero, ang_tol_rad)?;
+            is_revolution_no_swap_uv =
+                c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve;
+            circles_v = Some(c);
+        }
+
+        // test sequence of V direction (U Constant) isoCurves
+        let mut circles_u = None;
+        let mut is_revolution_with_swap_uv = false;
+        if !is_revolution_no_swap_uv && deg_v == 2 {
+            let c =
+                super::test_for_iso_circles(k, tgt, SurfParamType::U, scaled_zero, ang_tol_rad)?;
+            is_revolution_with_swap_uv =
+                c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve;
+            circles_u = Some(c);
+        }
+
+        // no work - no sweep direction
+        if !is_revolution_with_swap_uv && !is_revolution_no_swap_uv {
+            return Ok(None);
+        }
+
+        // Now that the surface is a revolution of some generating curve
+        // Let GenCurve = iso-curve from the 'other' parameter
+        let (gen_dir, swap_uv, param, circles) = if is_revolution_no_swap_uv {
+            // constant V isoParamCurves are circles
+            (SurfParamType::U, false, uv_domain.min().x, circles_v)
+        } else {
+            // constant U isoParamCurves are circles
+            (SurfParamType::V, true, uv_domain.min().y, circles_u)
+        };
+        let Some(circles) = circles else {
+            return Ok(None);
+        };
+        let (Some(ref_frame), Some(angles)) = (circles.reference_frame, circles.angles) else {
+            return Ok(None);
+        };
+        let (min_ang_deg, max_ang_deg) = (angles.min(), angles.max());
+        let iso_crv = tgt
+            .create_iso_parametric_curve(k, gen_dir, param, IsoCurveOptions::default())?
+            .curve;
+
+        // no work - GenCurve is degenerate
+        if iso_crv.is_degenerate(scaled_zero, None)? {
+            return Ok(None);
+        }
+
+        // Verify GenCurve is planar and coplanar with refFrame ZAxis.
+        let iso_curve = Curve::from(iso_crv);
+        let linear_tol =
+            EFF_ZERO * (1.0 + crate::math::max2(min_pnt.max_dimension(), max_pnt.max_dimension()));
+        let planar = iso_curve.is_planar(k, scaled_zero)?;
+        let linear = iso_curve.is_linear(linear_tol, false)?;
+        let is_linear = linear.linear;
+
+        // verify that plane containing genCurve also contains refFrame Z axis
+        let origin_point_dist = (ref_frame.origin() - planar.point).dot(planar.normal).abs();
+        let frame_plane_ortho = planar.normal.dot(ref_frame.z_axis()).abs();
+        let frame_line_co_planar = if is_linear {
+            (ref_frame.origin() - planar.point)
+                .dot(ref_frame.z_axis().cross(linear.line_tangent))
+                .abs()
+        } else {
+            1.0
+        };
+        if !is_linear && origin_point_dist >= scaled_zero {
+            return Ok(None);
+        }
+        if (is_linear || frame_plane_ortho >= scaled_zero)
+            && (!is_linear || frame_line_co_planar >= scaled_zero)
+        {
+            return Ok(None);
+        }
+
+        // make SurfOfRevolution
+        let anal_ivl = gen_step_interval(&iso_curve)?;
+        let anal_uv_domain =
+            Extent2d::from_bounds(min_ang_deg, anal_ivl.min(), max_ang_deg, anal_ivl.max());
+        let mut surf = Self::new(
+            k,
+            iso_curve,
+            ref_frame.origin(),
+            ref_frame.x_axis(),
+            ref_frame.y_axis(),
+            anal_uv_domain,
+            swap_uv,
+        )?;
+
+        // reparameterize the NURB so that AnalyticSurface->NurbDomain ==
+        // InputSurface->NurbDomain (status ignored)
+        ignore_status(surf.reparameterize(k, &tgt.natural_uv_domain()))?;
+        Ok(Some(surf))
+    }
+}

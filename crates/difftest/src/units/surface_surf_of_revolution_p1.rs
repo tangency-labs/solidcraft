@@ -999,6 +999,7 @@ fn gen_iso_circles(rng: &mut Rng, k: &Kernel) -> Option<OpIn> {
         let (o, _, _, z) = f;
         let ang = if rng.chance(0.5) { 360.0 } else { rng.uniform(20.0, 359.0) };
         let s = BSplineSurface::create_surf_of_revolution(
+            k,
             &gen,
             v3(o),
             v3(z),

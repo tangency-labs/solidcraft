@@ -574,6 +574,7 @@ impl SurfOfRevolution {
             _ => None,
         };
         let tmp = BSplineSurface::create_surf_of_revolution_with_line_vector(
+            k,
             gen_base(&gen_curve)?,
             line_vector,
             self.position.origin(),

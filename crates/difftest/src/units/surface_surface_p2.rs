@@ -1276,7 +1276,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
         OpIn::Trim { dom } => {
             let mut d = dom_of(*dom);
             let r = match s.as_mut() {
-                Some(x) => x.trim_with_domain(&mut d),
+                Some(x) => x.trim_with_domain(&Kernel::default(), &mut d),
                 None => Err(base_err()),
             };
             match r {
@@ -1303,7 +1303,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
         }
         OpIn::StepInv { dom, p, tol, guess } => record(|o| {
             let (uv, loc) = match &s {
-                Some(x) => x.step_inversion(&dom_of(*dom), v3(*p), *tol, guess.map(p2))?,
+                Some(x) => x.step_inversion(&Kernel::default(), &dom_of(*dom), v3(*p), *tol, guess.map(p2))?,
                 None => sp2::base_step_inversion()?,
             };
             push2(o, uv);
@@ -1333,7 +1333,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
                 Ok(())
             })
         }
-        OpIn::AdjustStep { dom } => edit(&mut s, |x| x.adjust_step_uv_domain(&dom_of(*dom))),
+        OpIn::AdjustStep { dom } => edit(&mut s, |x| x.adjust_step_uv_domain(&Kernel::default(), &dom_of(*dom))),
         OpIn::MaxAnal => record(|o| {
             let d = match &s {
                 Some(x) => x.max_analytic_domain()?,

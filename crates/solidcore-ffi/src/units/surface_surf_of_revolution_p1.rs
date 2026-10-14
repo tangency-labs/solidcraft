@@ -374,7 +374,7 @@ fn check_bspline(c: &BSplineData) -> Result<(), FfiError> {
     check_knots(&c.knots, c.p, "curve")
 }
 
-fn check_surface(s: &SurfaceData) -> Result<(), FfiError> {
+pub(crate) fn check_surface(s: &SurfaceData) -> Result<(), FfiError> {
     let n = s
         .net
         .len()

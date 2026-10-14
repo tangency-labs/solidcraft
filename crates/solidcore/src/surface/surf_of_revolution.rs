@@ -8,6 +8,7 @@
 //! adds methods to [`SurfOfRevolution`] (or free functions).
 
 pub mod p1;
+pub mod p2;
 pub mod p3;
 
 pub use p1::{
