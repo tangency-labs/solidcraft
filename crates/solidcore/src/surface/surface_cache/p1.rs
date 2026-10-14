@@ -20,7 +20,7 @@
 //! | [`compute_bezier_approximation`]                  | `sm_ComputeBezierApproximation` (static)         |
 //! | [`cull_array`]                                    | `sm_CullArray` (static)                          |
 //! | [`BezierAux2d`], [`BezierAux2d::uv_domain`]       | `SmBezierAux2d`, `GetUVDomain`                   |
-//! | [`SurfaceCache::polar_box`]                       | `SmBezierAux2d::GetPolarBox`                     |
+//! | [`SurfaceCache::polar_box`], [`SurfaceCache::polar_box_unstored`] | `SmBezierAux2d::GetPolarBox`     |
 //! | [`SurfaceCache::build_polar_box`]                 | `SmBezierAux2d::BuildPolarBox`                   |
 //! | [`BezierPatch`], [`BezierPatch::pseudo_box`], [`BezierPatch::bezier`] | `SmBezierPatch`, `GetPseudoBox`, `GetBezierPtr` |
 //! | [`AltSrfCache`], [`AltSrfCacheType`], [`AltCacheKey`] | `SmAltSrfCache`, `SmAltSrfCacheType`, the user data arguments |
@@ -1907,6 +1907,74 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             last_polar = self.aux(n)?.polar_box;
         }
         Ok(())
+    }
+
+    /// The polar box [`Self::polar_box`] returns for `node`, for callers that only
+    /// borrow the cache: a missing box is built as [`Self::build_polar_box`] builds it
+    /// (from the nearest ancestor with a box, or the root, down to `node`, each with
+    /// its parent's box as guess) without storing the chain; the values are the
+    /// same.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a node without surface data; [`SolidError::Unported`] from
+    /// the build (its other failures leave the stored box, as [`Self::polar_box`]).
+    pub fn polar_box_unstored(&self, node: NodeId) -> Result<PolarBox> {
+        if self.aux(node)?.polar_box.state() == PolarBoxState::Uninitialized {
+            match self.build_polar_box_unstored(node) {
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => {}
+                Ok(b) => return Ok(b),
+            }
+        }
+        Ok(self.aux(node)?.polar_box)
+    }
+
+    /// The box [`Self::build_polar_box`] would store at `node`.
+    fn build_polar_box_unstored(&self, node: NodeId) -> Result<PolarBox> {
+        // collect chain of nodes up the tree, as build_polar_box
+        let mut chain = vec![node];
+        let mut found_polar = false;
+        let mut cur = node;
+        let limit = self.tree_ref(OP_POLAR)?.nodes().len();
+        loop {
+            if chain.len() > limit + 1 {
+                return Err(invalid(OP_POLAR, "tree node links are cyclic"));
+            }
+            let parent = self.tree_ref(OP_POLAR)?.node(cur)?.parent;
+            let Some(p) = parent else {
+                break; // found the root
+            };
+            chain.push(p);
+            if self.aux(p)?.polar_box.state() != PolarBoxState::Uninitialized {
+                found_polar = true;
+                break;
+            }
+            cur = p;
+        }
+
+        let last = chain
+            .pop()
+            .ok_or_else(|| invalid(OP_POLAR, "empty node chain"))?;
+        let mut last_polar = if found_polar {
+            self.aux(last)?.polar_box
+        } else {
+            // the root (can't have a box, else we would have stopped when we saw it)
+            match self.compute_polar_box(last, None)? {
+                Some(b) => b,
+                None => self.aux(last)?.polar_box,
+            }
+        };
+
+        // build boxes toward the start of the array (our starting node)
+        while let Some(n) = chain.pop() {
+            let guess = (last_polar.state() != PolarBoxState::Unbounded).then_some(last_polar);
+            last_polar = match self.compute_polar_box(n, guess.as_ref())? {
+                Some(b) => b,
+                None => self.aux(n)?.polar_box,
+            };
+        }
+        Ok(last_polar)
     }
 
     /// `mBA_pSurface->CalculateBoundingBox(m_sUVDomain, NULL, NULL, &m_sPolarBox,

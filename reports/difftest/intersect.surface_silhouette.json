@@ -1,0 +1,6368 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_axis_x",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#0 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_axis_x",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#1 (upstream review: adversarial)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_axis_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#2 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_axis_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#3 (upstream review: adversarial)",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateGeometric",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_near_x",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#4 (upstream review: adversarial)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateGeometric",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_near_x",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#5 (upstream review: adversarial)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_near_x2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#6 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_near_x2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#7 (upstream review: adversarial)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_diag",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#8 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_diag",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#9 (upstream review: adversarial)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_neg_x",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#10 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_neg_x",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#11 (upstream review: adversarial)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_tilt",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#12 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_prev_ang_tilt",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#13 (upstream review: adversarial)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_persp_in_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#14 (upstream review: adversarial)",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_persp_on_pt",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#15 (upstream review: adversarial)",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_persp_above",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#16 (upstream review: adversarial)",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_persp_in_plane_diag",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#17 (upstream review: adversarial)",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_persp_near",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#18 (upstream review: adversarial)",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_scale_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#19 (upstream review: adversarial)",
+      "values_compared": 81
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_scale_persp_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#20 (upstream review: adversarial)",
+      "values_compared": 86
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_scale_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#21 (upstream review: adversarial)",
+      "values_compared": 81
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_plane_scale_persp_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#22 (upstream review: adversarial)",
+      "values_compared": 86
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_pcyl_along_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#23 (upstream review: adversarial)",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_pcyl_along_y_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#24 (upstream review: adversarial)",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_pcyl_eye_far_y",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#25 (upstream review: adversarial)",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateGeometric",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "adv_pcyl_along_y_tilt",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#26 (upstream review: adversarial)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_saddle_chain_ang_None",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#27 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_saddle_chain_ang_0.001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#28 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_saddle_chain_ang_1.5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#29 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_saddle_chain_ang_0.0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#30 (upstream review: adversarial)",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "advx_plane_outside_par_in",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#31 (upstream review: adversarial (plane outside its extent))",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "advx_plane_outside_par_wider",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#32 (upstream review: adversarial (plane outside its extent))",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "advx_plane_outside_persp_in",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#33 (upstream review: adversarial (plane outside its extent))",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "advx_plane_outside_persp_wider",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#34 (upstream review: adversarial (plane outside its extent))",
+      "values_compared": 125
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "advx_plane_outside_persp_above_in",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#35 (upstream review: adversarial (plane outside its extent))",
+      "values_compared": 121
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "advx_plane_outside_persp_above_wider",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/adversarial_cases.json#36 (upstream review: adversarial (plane outside its extent))",
+      "values_compared": 121
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_cpv_along_u",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#0 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 309
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_cpv_along_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#1 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 377
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_cpv_diag_back",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#2 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 241
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_cpv_single",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#3 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_boundary_v0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_boundary_v1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#5 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_boundary_u0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#6 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_boundary_u1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#7 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_lps",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#8 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#9 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_branch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#10 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_z_branch_explicit_boxes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#11 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_cpv_along_u",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#12 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 309
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_cpv_along_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#13 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 377
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_cpv_diag_back",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#14 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 241
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_cpv_single",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#15 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_boundary_v0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#16 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_boundary_v1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#17 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_boundary_u0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#18 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_boundary_u1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#19 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_lps",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#20 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#21 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_branch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#22 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_x_branch_explicit_boxes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#23 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_cpv_along_u",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#24 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 309
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_cpv_along_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#25 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 377
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_cpv_diag_back",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#26 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 241
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_cpv_single",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#27 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_boundary_v0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#28 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_boundary_v1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#29 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_boundary_u0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#30 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_boundary_u1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#31 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_lps",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#32 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#33 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_branch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#34 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_view_skew_branch_explicit_boxes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#35 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_cpv_along_u",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#36 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 309
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_cpv_along_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#37 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 377
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_cpv_diag_back",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#38 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 241
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_cpv_single",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#39 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_boundary_v0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#40 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_boundary_v1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#41 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_boundary_u0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#42 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_boundary_u1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#43 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_lps",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#44 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#45 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_branch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#46 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_far_branch_explicit_boxes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#47 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_cpv_along_u",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#48 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 309
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_cpv_along_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#49 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 377
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_cpv_diag_back",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#50 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 241
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_cpv_single",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#51 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_boundary_v0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#52 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_boundary_v1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#53 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_boundary_u0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#54 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_boundary_u1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#55 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_lps",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#56 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#57 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_branch",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#58 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_test_eye_side_branch_explicit_boxes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#59 (upstream tests/prog_test/src/smSurfaceTest.cpp:3564)",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_edge_on_lps_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#60 (upstream edge case: SmPlane)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_edge_on_cpv",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#61 (upstream edge case: SmPlane)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_tilted_lps_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#62 (upstream edge case: SmPlane)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_tilted_cpv",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#63 (upstream edge case: SmPlane)",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_in_plane_dir_lps_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#64 (upstream edge case: SmPlane)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_in_plane_dir_cpv",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#65 (upstream edge case: SmPlane)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_zero_dir_lps_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#66 (upstream edge case: SmPlane)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_zero_dir_cpv",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#67 (upstream edge case: SmPlane)",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_eye_above_lps_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#68 (upstream edge case: SmPlane)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_eye_above_cpv",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#69 (upstream edge case: SmPlane)",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_eye_in_plane_lps_on_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#70 (upstream edge case: SmPlane)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "plane_eye_in_plane_cpv",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.surface_silhouette/upstream_cases.json#71 (upstream edge case: SmPlane)",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863910",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863911",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863912",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863913",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863914",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863915",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863916",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863917",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863918",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863919",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863920",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863921",
+      "values_compared": 43
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863922",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863923",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863924",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863925",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863926",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863927",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863928",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863929",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863930",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863931",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863932",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863933",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863934",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863935",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863936",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863937",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863938",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863939",
+      "values_compared": 66
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863940",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863941",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863942",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863943",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863944",
+      "values_compared": 7
+    },
+    {
+      "deferred": {
+        "symbol": "SmBSplineSurface::CalculateBoundingBox",
+        "unit": "surface.plane_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863945",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863946",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863947",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863948",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863949",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863950",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863951",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863952",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863953",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863954",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863955",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863956",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863957",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863958",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863959",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863960",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863961",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863962",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863963",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863964",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863965",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863966",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863967",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863968",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863969",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863970",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863971",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863972",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863973",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863974",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863975",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863976",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863977",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863978",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863979",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863980",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863981",
+      "values_compared": 210
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863982",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863983",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863984",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863985",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863986",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863987",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863988",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863989",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863990",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863991",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863992",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863993",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863994",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863995",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863996",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863997",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035863998",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035863999",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864000",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864001",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864002",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864003",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864004",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864005",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864006",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864007",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864008",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864009",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864010",
+      "values_compared": 79
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864011",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864012",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864013",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864014",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864015",
+      "values_compared": 26
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864016",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864017",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864018",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864019",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864020",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864021",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864022",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864023",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864024",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864025",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864026",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864027",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864028",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864029",
+      "values_compared": 144
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864030",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864031",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864032",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864033",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864034",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864035",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864036",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864037",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864038",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864039",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864040",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864041",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864042",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864043",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864044",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864045",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864046",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864047",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864048",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864049",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864050",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864051",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864052",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864053",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864054",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864055",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864056",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864057",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864058",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864059",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864060",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864061",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864062",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864063",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864064",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864065",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864066",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864067",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864068",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864069",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864070",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864071",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864072",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864073",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864074",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864075",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864076",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864077",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864078",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864079",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864080",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864081",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864082",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864083",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864084",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864085",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864086",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864087",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864088",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864089",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864090",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864091",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864092",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864093",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864094",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864095",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864096",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864097",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864098",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864099",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864100",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864101",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864102",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864103",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864104",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864105",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864106",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864107",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864108",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864109",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864110",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864111",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864112",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864113",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864114",
+      "values_compared": 176
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864115",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864116",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864117",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864118",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864119",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864120",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864121",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864122",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864123",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864124",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864125",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864126",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864127",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864128",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864129",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864130",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864131",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864132",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864133",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864134",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864135",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864136",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864137",
+      "values_compared": 74
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864138",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864139",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864140",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864141",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864142",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864143",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864144",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864145",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864146",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864147",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864148",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864149",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864150",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864151",
+      "values_compared": 66
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864152",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864153",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864154",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864155",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864156",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864157",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864158",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864159",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864160",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864161",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864162",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864163",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864164",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864165",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864166",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864167",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864168",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864169",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864170",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864171",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864172",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864173",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864174",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864175",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864176",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864177",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864178",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864179",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864180",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864181",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864182",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864183",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864184",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864185",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864186",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864187",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864188",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864189",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864190",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864191",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864192",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864193",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864194",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864195",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864196",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864197",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864198",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864199",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864200",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864201",
+      "values_compared": 39
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864202",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864203",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864204",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864205",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864206",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864207",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864208",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864209",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864210",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864211",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864212",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864213",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864214",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864215",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864216",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864217",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864218",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864219",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0310",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864220",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864221",
+      "values_compared": 142
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864222",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864223",
+      "values_compared": 76
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864224",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864225",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0316",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864226",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864227",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864228",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864229",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0320",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864230",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864231",
+      "values_compared": 71
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0322",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864232",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0323",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864233",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864234",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864235",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864236",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0327",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864237",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864238",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864239",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0330",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864240",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864241",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864242",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864243",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864244",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0335",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864245",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864246",
+      "values_compared": 11
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864247",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864248",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864249",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864250",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0341",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864251",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864252",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864253",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864254",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864255",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864256",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864257",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864258",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0349",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864259",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0350",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864260",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864261",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0352",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864262",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864263",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864264",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864265",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864266",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0357",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864267",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864268",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864269",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0360",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864270",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0361",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864271",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0362",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864272",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0363",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864273",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0364",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864274",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0365",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864275",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0366",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864276",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0367",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864277",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0368",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864278",
+      "values_compared": 15
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0369",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864279",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0370",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864280",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0371",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864281",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0372",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864282",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0373",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864283",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0374",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864284",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0375",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864285",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0376",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864286",
+      "values_compared": 210
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0377",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864287",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0378",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864288",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0379",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864289",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0380",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864290",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0381",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864291",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0382",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864292",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0383",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864293",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0384",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864294",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0385",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864295",
+      "values_compared": 36
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0386",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864296",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0387",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864297",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0388",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864298",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0389",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864299",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0390",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864300",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0391",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864301",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0392",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864302",
+      "values_compared": 13
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0393",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864303",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0394",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864304",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0395",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864305",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0396",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864306",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0397",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864307",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0398",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864308",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0399",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864309",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0400",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864310",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0401",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864311",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0402",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864312",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0403",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864313",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0404",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864314",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0405",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864315",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0406",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864316",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0407",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864317",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0408",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864318",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0409",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864319",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0410",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864320",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0411",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864321",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0412",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864322",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0413",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864323",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0414",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864324",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0415",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864325",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0416",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864326",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0417",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864327",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0418",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864328",
+      "values_compared": 11
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0419",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864329",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0420",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864330",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0421",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864331",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0422",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864332",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0423",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864333",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0424",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864334",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0425",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864335",
+      "values_compared": 173
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0426",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864336",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0427",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864337",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0428",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864338",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0429",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864339",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0430",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864340",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0431",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864341",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0432",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864342",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0433",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864343",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0434",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864344",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0435",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864345",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0436",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864346",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0437",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864347",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0438",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864348",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0439",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864349",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0440",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864350",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0441",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864351",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0442",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864352",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0443",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864353",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmBSplineSurface::CalculateBoundingBox",
+        "unit": "surface.plane_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0444",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864354",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0445",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864355",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0446",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864356",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0447",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864357",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0448",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864358",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0449",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864359",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0450",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864360",
+      "values_compared": 15
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0451",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864361",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0452",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864362",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0453",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864363",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0454",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864364",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0455",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864365",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0456",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864366",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0457",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864367",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0458",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864368",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0459",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864369",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0460",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864370",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0461",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864371",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0462",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864372",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0463",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864373",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0464",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864374",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0465",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864375",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0466",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864376",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0467",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864377",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0468",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864378",
+      "values_compared": 207
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0469",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864379",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0470",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864380",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0471",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864381",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmBSplineSurface::CalculateBoundingBox",
+        "unit": "surface.plane_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0472",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864382",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0473",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864383",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0474",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864384",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0475",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864385",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0476",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864386",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0477",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864387",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0478",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864388",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0479",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864389",
+      "values_compared": 9
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0480",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864390",
+      "values_compared": 14
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0481",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864391",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0482",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864392",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0483",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864393",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0484",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864394",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0485",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864395",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0486",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864396",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0487",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864397",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0488",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864398",
+      "values_compared": 56
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0489",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864399",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0490",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864400",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0491",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864401",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0492",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864402",
+      "values_compared": 10
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0493",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864403",
+      "values_compared": 10
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0494",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864404",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0495",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864405",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0496",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864406",
+      "values_compared": 7
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0497",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864407",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0498",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864408",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0499",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864409",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0500",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864410",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0501",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864411",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0502",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864412",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0503",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864413",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0504",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864414",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0505",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864415",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0506",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864416",
+      "values_compared": 46
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0507",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864417",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0508",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864418",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0509",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864419",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0510",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864420",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0511",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864421",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0512",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864422",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0513",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864423",
+      "values_compared": 12
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0514",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864424",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0515",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864425",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0516",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864426",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0517",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864427",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0518",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864428",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0519",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864429",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0520",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864430",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0521",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864431",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0522",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864432",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0523",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864433",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0524",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864434",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0525",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864435",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0526",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864436",
+      "values_compared": 7
+    },
+    {
+      "deferred": {
+        "symbol": "SmBSplineSurface::CalculateBoundingBox",
+        "unit": "surface.plane_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0527",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864437",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0528",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864438",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0529",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864439",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0530",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864440",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0531",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864441",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0532",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864442",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0533",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864443",
+      "values_compared": 105
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0534",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864444",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0535",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864445",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0536",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864446",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0537",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864447",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0538",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864448",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0539",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864449",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0540",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864450",
+      "values_compared": 16
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0541",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864451",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmBSplineSurface::CalculateBoundingBox",
+        "unit": "surface.plane_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0542",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864452",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0543",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864453",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0544",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864454",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0545",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864455",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmBSplineSurface::CalculateBoundingBox",
+        "unit": "surface.plane_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0546",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864456",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0547",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864457",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0548",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864458",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0549",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864459",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0550",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864460",
+      "values_compared": 109
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0551",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864461",
+      "values_compared": 207
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0552",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864462",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0553",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864463",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0554",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864464",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0555",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864465",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0556",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864466",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0557",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864467",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0558",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864468",
+      "values_compared": 36
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0559",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864469",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0560",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864470",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0561",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864471",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0562",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864472",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0563",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864473",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0564",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864474",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0565",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864475",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0566",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864476",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0567",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864477",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0568",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864478",
+      "values_compared": 8
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0569",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864479",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0570",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864480",
+      "values_compared": 105
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0571",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864481",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0572",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864482",
+      "values_compared": 13
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0573",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864483",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0574",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864484",
+      "values_compared": 16
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0575",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864485",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0576",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864486",
+      "values_compared": 139
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0577",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864487",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0578",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864488",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0579",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864489",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0580",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864490",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0581",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864491",
+      "values_compared": 7
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0582",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864492",
+      "values_compared": 71
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0583",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864493",
+      "values_compared": 9
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0584",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864494",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0585",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864495",
+      "values_compared": 6
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0586",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864496",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0587",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864497",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0588",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864498",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0589",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864499",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0590",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864500",
+      "values_compared": 173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0591",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864501",
+      "values_compared": 139
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0592",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864502",
+      "values_compared": 18
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0593",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864503",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0594",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864504",
+      "values_compared": 18
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0595",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864505",
+      "values_compared": 7
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0596",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864506",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0597",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=7001637241035864507",
+      "values_compared": 7
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0598",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864508",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::EvaluateNormalSection",
+        "unit": "surface.surface_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0599",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=7001637241035864509",
+      "values_compared": 0
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 169,
+  "cases_failed": 0,
+  "cases_passed": 540,
+  "cases_total": 709,
+  "deferred_by_unit": {
+    "surface.plane_p1": 6,
+    "surface.surface_p3": 163
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "intersect.surface_silhouette"
+}

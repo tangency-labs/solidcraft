@@ -273,12 +273,19 @@ impl TracePoint {
 
 /// The object of the boundary solutions of
 /// [`SurfaceTrace::find_solutions_on_boundary_curve`]: the boundary iso curve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct BoundaryCurve;
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BoundaryCurve {
+    /// The curve's natural interval (`SmCurve::GetNaturalInterval`), when known.
+    pub natural_interval: Option<Extent1d>,
+}
 
 impl SolutionObject for BoundaryCurve {
     fn kind(&self) -> ObjectKind {
         ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        self.natural_interval
     }
 }
 
@@ -769,7 +776,8 @@ pub trait SurfaceTrace<'s> {
     }
 
     /// `BranchMayContainAnswers` of the tracer's global solve (the base:
-    /// `SmGlobalSolver::BranchMayContainAnswers`).
+    /// `SmGlobalSolver::BranchMayContainAnswers`); `cache` owns the solved tree and
+    /// the node data its nodes point at.
     ///
     /// # Errors
     ///
@@ -777,8 +785,10 @@ pub trait SurfaceTrace<'s> {
     fn branch_may_contain_answers<O: SolutionObject>(
         &mut self,
         solver: &GlobalSolver<'_, O>,
+        cache: &SurfaceCache<O>,
         branch: &Branch,
     ) -> Result<bool> {
+        let _ = cache;
         solver.branch_may_contain_answers(branch)
     }
 
@@ -1838,6 +1848,7 @@ pub fn test_iso_curve_base<'s, T: SurfaceTrace<'s> + ?Sized>(
 /// state plus the tracer's hooks.
 struct InteriorSolver<'a, 't, T: ?Sized, O> {
     solver: GlobalSolver<'t, O>,
+    cache: &'t SurfaceCache<O>,
     tracer: &'a mut T,
 }
 
@@ -1855,7 +1866,8 @@ where
     }
 
     fn branch_may_contain_answers(&mut self, branch: &Branch) -> Result<bool> {
-        self.tracer.branch_may_contain_answers(&self.solver, branch)
+        self.tracer
+            .branch_may_contain_answers(&self.solver, self.cache, branch)
     }
 
     fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
@@ -1901,7 +1913,11 @@ where
         solver.set_best_answer_so_far_sq(0.0);
         solver.set_at_distance(0.0);
         solver.set_3d_tolerance(0.0);
-        let mut gs = InteriorSolver { solver, tracer: t };
+        let mut gs = InteriorSolver {
+            solver,
+            cache,
+            tracer: t,
+        };
         gs.solve_it(
             &SolveRequest {
                 operation: SolverOperation::Find,
