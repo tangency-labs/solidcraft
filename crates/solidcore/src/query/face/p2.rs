@@ -57,10 +57,10 @@
 //! - **`SmProtoVertex`** keeps no pointer to its manager; the manager is passed.
 //! - **`CurveOnClassify`** stores handles of the caller's choosing in the curve
 //!   classification; [`CurveOnClassifyObjects`] makes the face and surface handles and
-//!   resolves curve and loop handles. Its callees `SmCurveClassification::ReSet`
+//!   resolves curve and loop handles, and the caller's [`ClassGeometry`] resolves them
+//!   for `ClassifyFaceInterval` (`lFaceIndx` left at its default). Its callees `SmCurveClassification::ReSet`
 //!   (`intersect.curve_class_p2`), `IntersectTSBound` / `IntersectEdges`
-//!   (`intersect.curve_class_p9`), `ClassifyFaceInterval`
-//!   (`intersect.curve_class_p7`) and `SmFace::GetEdges`
+//!   (`intersect.curve_class_p9`) and `SmFace::GetEdges`
 //!   (`topology.face_p4`) return [`SolidError::Unported`]. `pbOptModifiedCurve` is the
 //!   result. `IntersectVertices` calls the part-5 implementation through the caller's
 //!   vertex handles and [`ClassGeometry`] callbacks.
@@ -786,7 +786,16 @@ pub fn curve_on_classify<O: ClassObject>(
 
         // classify the interval - avoiding point classification if possible
         if ivl.mid.point_class() == PointClassType::Unknown {
-            classify_face_interval(cc, ii, do_point_classify, f, uv_space_okay)?;
+            cc.classify_face_interval(
+                k,
+                objects,
+                ii,
+                do_point_classify,
+                face_handle,
+                None,
+                uv_space_okay,
+                None,
+            )?;
         }
     }
     Ok(modified)
@@ -846,22 +855,6 @@ fn intersect_edges<O>(
     Err(SolidError::unported(
         "SmCurveClassification::IntersectEdges",
         "intersect.curve_class_p9",
-    ))
-}
-
-/// `SmCurveClassification::ClassifyFaceInterval(ii, bDoPointClassify, this, NULL,
-/// bUVSpaceOkay)`.
-fn classify_face_interval<O>(
-    _cc: &mut CurveClassification<O>,
-    _index: usize,
-    _do_point_classify: bool,
-    _face: FaceId,
-    _uv_space_okay: bool,
-) -> Result<()> {
-    // UNPORTED(intersect.curve_class_p7): SmCurveClassification::ClassifyFaceInterval
-    Err(SolidError::unported(
-        "SmCurveClassification::ClassifyFaceInterval",
-        "intersect.curve_class_p7",
     ))
 }
 

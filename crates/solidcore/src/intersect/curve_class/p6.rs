@@ -16,7 +16,7 @@
 //! diagnostics are omitted. Insertion restarts after a squeeze in a loop, in upstream
 //! order, bounded by the initial interval count plus one (every restart removes one).
 //! Homogenization's final squeezes must reduce the count. Nonempty boundary lookups
-//! and coincident-maybe handling await p7; interval splicing/squeezing awaits p2.
+//! await p2, as does interval splicing/squeezing.
 //! `MergeInterval` ports its early exits and defers at `GetPointObjZoneTol3d` (p2):
 //! the subsequent topology mutation is not implemented or certified here.
 
@@ -146,7 +146,7 @@ impl<O: ClassObject> CurveClassification<O> {
         }
         if i != j {
             for index in [i, j] {
-                let (coin, end) = are_coincident_maybe(self, self, index)?;
+                let (coin, end) = are_coincident_maybe(k, geometry, self, self, index)?;
                 match coin {
                     Coincident::Unsure => return Err(SolidError::sm_err(OP)),
                     Coincident::Yes => {

@@ -131,6 +131,10 @@ use crate::surface::volume::Volume;
 // CO-PORTED in intersect.curve_class_p1: SmTol::MapTo2d(const SmTol3d&, double, const
 // SmCurve&, const SmSurface&) is surface::surface::p1::map_to_2d_on_curve (its UV-curve
 // and 3D branches; the SmCrvOnSurf branch is Unported there).
+// CO-PORTED in intersect.curve_class_p3 / _p7: SmTol::IsDegenerate(const SmCurve*,
+// SmExtent1d, SmXSectTol3d*) and SmTol::IsClosed(const SmObject*, SmXSectTol3d*) for a
+// curve, with the tolerance given, are intersect::curve_class::p3::curve_is_degenerate and
+// intersect::curve_class::p7's tol_is_closed_curve (private).
 // CO-PORTED in surface.surface_p1: SmTol::MapTo2d(const SmTol3d&, const SmVector2d&,
 // [const SmVector2d&,] const SmSurface&), SmTol::GetScaledZero(const SmSurface&) and
 // the SmSurface branch of SmTol::GetZoneTol3d(const SmObject*) are

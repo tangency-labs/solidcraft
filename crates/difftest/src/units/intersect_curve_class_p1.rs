@@ -65,45 +65,45 @@ fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
-const NOZ: f64 = f64::MAX;
-const NOW: f64 = -f64::MAX;
+pub(crate) const NOZ: f64 = f64::MAX;
+pub(crate) const NOW: f64 = -f64::MAX;
 /// `SM_USE_DEFAULT`.
-const USE_DEFAULT: f64 = 9876543.21;
+pub(crate) const USE_DEFAULT: f64 = 9876543.21;
 /// `SM_BIG_DOUBLE`.
-const BIG: f64 = 1.0e20;
+pub(crate) const BIG: f64 = 1.0e20;
 /// `SC_ERR_ARG`.
-const SC_ERR_ARG: i32 = -1002;
+pub(crate) const SC_ERR_ARG: i32 = -1002;
 
 // ---- inputs -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct BSplineIn {
-    dim: u64,
+pub(crate) struct BSplineIn {
+    pub(crate) dim: u64,
     #[serde(default)]
-    oob: bool,
-    cpts: Vec<[f64; 4]>,
-    p: usize,
-    u: Vec<f64>,
+    pub(crate) oob: bool,
+    pub(crate) cpts: Vec<[f64; 4]>,
+    pub(crate) p: usize,
+    pub(crate) u: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HermiteIn {
-    dim: u64,
-    p1: [f64; 3],
-    d1: [f64; 3],
-    p2: [f64; 3],
-    d2: [f64; 3],
+pub(crate) struct HermiteIn {
+    pub(crate) dim: u64,
+    pub(crate) p1: [f64; 3],
+    pub(crate) d1: [f64; 3],
+    pub(crate) p2: [f64; 3],
+    pub(crate) d2: [f64; 3],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct LineIn {
-    p: [f64; 3],
-    v: [f64; 3],
-    domain: [f64; 2],
+pub(crate) struct LineIn {
+    pub(crate) p: [f64; 3],
+    pub(crate) v: [f64; 3],
+    pub(crate) domain: [f64; 2],
     #[serde(default = "one")]
-    scale: f64,
+    pub(crate) scale: f64,
     #[serde(default)]
-    inside_out: bool,
+    pub(crate) inside_out: bool,
 }
 
 fn one() -> f64 {
@@ -113,20 +113,20 @@ fn one() -> f64 {
 /// An `SmEllipse(C, X, Y, [d0, d1], rx, ry, dim, ctx, NULL, io)` or, without `ry`, an
 /// `SmCircle(C, X, Y, [d0, d1], rx, dim, ctx, NULL, io)`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ConicIn {
-    center: [f64; 3],
-    x: [f64; 3],
-    y: [f64; 3],
-    domain: [f64; 2],
-    rx: f64,
-    ry: Option<f64>,
+pub(crate) struct ConicIn {
+    pub(crate) center: [f64; 3],
+    pub(crate) x: [f64; 3],
+    pub(crate) y: [f64; 3],
+    pub(crate) domain: [f64; 2],
+    pub(crate) rx: f64,
+    pub(crate) ry: Option<f64>,
     #[serde(default)]
-    inside_out: bool,
+    pub(crate) inside_out: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum CurveIn {
+pub(crate) enum CurveIn {
     Bspline(BSplineIn),
     Hermite(HermiteIn),
     Line(LineIn),
@@ -135,19 +135,19 @@ enum CurveIn {
 
 /// A B-spline surface: control net `net[i][j]` (`x y z w`, `w = NOW` non-rational).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SurfIn {
+pub(crate) struct SurfIn {
     #[serde(default)]
-    oob: bool,
-    net: Vec<Vec<[f64; 4]>>,
-    p: usize,
-    q: usize,
-    u: Vec<f64>,
-    v: Vec<f64>,
+    pub(crate) oob: bool,
+    pub(crate) net: Vec<Vec<[f64; 4]>>,
+    pub(crate) p: usize,
+    pub(crate) q: usize,
+    pub(crate) u: Vec<f64>,
+    pub(crate) v: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum ObjIn {
+pub(crate) enum ObjIn {
     Curve(CurveIn),
     Plane { o: [f64; 3], n: [f64; 3] },
     Bsurf(SurfIn),
@@ -285,19 +285,19 @@ struct Script {
 
 // ---- objects ----------------------------------------------------------------------------
 
-fn v3(p: [f64; 3]) -> Vec3 {
+pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::from_array(p)
 }
 
-fn b(x: bool) -> f64 {
+pub(crate) fn b(x: bool) -> f64 {
     f64::from(u8::from(x))
 }
 
-fn opt_id(o: Option<usize>) -> f64 {
+pub(crate) fn opt_id(o: Option<usize>) -> f64 {
     o.map_or(-1.0, |i| i as f64)
 }
 
-fn curve_block(v: &mut Vec<f64>, c: &CurveIn) {
+pub(crate) fn curve_block(v: &mut Vec<f64>, c: &CurveIn) {
     match c {
         CurveIn::Bspline(bs) => {
             let n = bs.cpts.len().saturating_sub(1);
@@ -336,7 +336,7 @@ fn curve_block(v: &mut Vec<f64>, c: &CurveIn) {
     }
 }
 
-fn surface_block(v: &mut Vec<f64>, s: &SurfIn) {
+pub(crate) fn surface_block(v: &mut Vec<f64>, s: &SurfIn) {
     let n = s.net.len().saturating_sub(1);
     let m = s.net.first().map_or(0, Vec::len).saturating_sub(1);
     v.push(b(s.oob));
@@ -357,7 +357,7 @@ fn surface_block(v: &mut Vec<f64>, s: &SurfIn) {
     v.extend_from_slice(&s.v);
 }
 
-fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
+pub(crate) fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
     match c {
         CurveIn::Bspline(bs) => {
             let n = bs
@@ -417,7 +417,7 @@ fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
     }
 }
 
-fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
+pub(crate) fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
@@ -680,7 +680,7 @@ fn cpp(s: &Script) -> Result<Output, HarnessError> {
 
 /// A pool handle: index and kind.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct H(usize, ClassObjectKind);
+pub(crate) struct H(pub(crate) usize, pub(crate) ClassObjectKind);
 
 impl ClassObject for H {
     fn class_kind(&self) -> ClassObjectKind {
@@ -698,17 +698,17 @@ impl SolutionObject for NoObj {
     }
 }
 
-enum PoolObj {
+pub(crate) enum PoolObj {
     Curve(Curve),
     Surface(Surface),
     Point(Vec3),
     Bare,
 }
 
-struct Pool {
-    objs: Vec<PoolObj>,
-    handles: Vec<H>,
-    kinds: Vec<usize>,
+pub(crate) struct Pool {
+    pub(crate) objs: Vec<PoolObj>,
+    pub(crate) handles: Vec<H>,
+    pub(crate) kinds: Vec<usize>,
 }
 
 impl ClassGeometry<H> for Pool {
@@ -736,7 +736,7 @@ impl ClassGeometry<H> for Pool {
 }
 
 impl Pool {
-    fn handle(&self, i: Option<usize>) -> Result<Option<H>, HarnessError> {
+    pub(crate) fn handle(&self, i: Option<usize>) -> Result<Option<H>, HarnessError> {
         i.map(|i| {
             self.handles
                 .get(i)
@@ -746,7 +746,7 @@ impl Pool {
         .transpose()
     }
 
-    fn curve_at(&self, i: Option<usize>) -> Result<Option<&Curve>, HarnessError> {
+    pub(crate) fn curve_at(&self, i: Option<usize>) -> Result<Option<&Curve>, HarnessError> {
         match i {
             None => Ok(None),
             Some(i) => match self.objs.get(i) {
@@ -756,7 +756,7 @@ impl Pool {
         }
     }
 
-    fn surface_at(&self, i: Option<usize>) -> Result<Option<&Surface>, HarnessError> {
+    pub(crate) fn surface_at(&self, i: Option<usize>) -> Result<Option<&Surface>, HarnessError> {
         match i {
             None => Ok(None),
             Some(i) => match self.objs.get(i) {
@@ -784,7 +784,7 @@ impl Pool {
     }
 }
 
-fn class_kind_of(k: usize) -> ClassObjectKind {
+pub(crate) fn class_kind_of(k: usize) -> ClassObjectKind {
     match k {
         kind::CURVE => ClassObjectKind::Curve,
         kind::PLANE | kind::BSURF => ClassObjectKind::Surface,
@@ -797,7 +797,7 @@ fn class_kind_of(k: usize) -> ClassObjectKind {
     }
 }
 
-fn obj_kind(o: &ObjIn) -> usize {
+pub(crate) fn obj_kind(o: &ObjIn) -> usize {
     match o {
         ObjIn::Curve(_) => kind::CURVE,
         ObjIn::Plane { .. } => kind::PLANE,
@@ -811,7 +811,7 @@ fn obj_kind(o: &ObjIn) -> usize {
     }
 }
 
-fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
+pub(crate) fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
     let mut pool = Pool {
         objs: Vec::new(),
         handles: Vec::new(),
@@ -836,7 +836,7 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 }
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
         SolidError::InvalidInput { .. } => 1007.0,
@@ -845,7 +845,7 @@ fn status(e: &SolidError) -> f64 {
 }
 
 /// A Rust failure: deferred for `Unported`, a harness error otherwise.
-enum Fail {
+pub(crate) enum Fail {
     Deferred(Box<Output>),
     Harness(HarnessError),
 }
@@ -857,7 +857,7 @@ impl From<HarnessError> for Fail {
 }
 
 /// `Ok(v)` or the status; `Unported` defers the case.
-fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
+pub(crate) fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
     match r {
         Ok(v) => Ok(Ok(v)),
         Err(e) => match Output::unported(&e) {
@@ -868,15 +868,15 @@ fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
 }
 
 /// The value, or a harness error for a status (an operation upstream cannot fail).
-fn must<T>(r: solidcore::Result<T>) -> Result<T, Fail> {
+pub(crate) fn must<T>(r: solidcore::Result<T>) -> Result<T, Fail> {
     st(r)?.map_err(|s| Fail::Harness(harness(format!("unexpected status {s}"))))
 }
 
-fn id(h: Option<H>) -> f64 {
+pub(crate) fn id(h: Option<H>) -> f64 {
     h.map_or(-1.0, |h| h.0 as f64)
 }
 
-fn put_pc(o: &mut Vec<f64>, pc: &PointClassification<H>) {
+pub(crate) fn put_pc(o: &mut Vec<f64>, pc: &PointClassification<H>) {
     o.push(f64::from(pc.point_class().code()));
     o.push(id(pc.object()));
     o.push(id(pc.face()));
@@ -931,7 +931,7 @@ fn put_cc(o: &mut Vec<f64>, k: &Kernel, cc: &CurveClassification<H>) {
 }
 
 /// The curve record (see the ffi module).
-fn put_curve(o: &mut Vec<f64>, c: &Curve) {
+pub(crate) fn put_curve(o: &mut Vec<f64>, c: &Curve) {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     let base = match c.kind() {
@@ -1518,12 +1518,12 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
 
 // ---- generation -------------------------------------------------------------------------
 
-fn rp(rng: &mut Rng, s: f64) -> [f64; 3] {
+pub(crate) fn rp(rng: &mut Rng, s: f64) -> [f64; 3] {
     rng.point3(-s, s)
 }
 
 /// A random clamped B-spline (sometimes rational or 2D).
-fn gen_bspline(rng: &mut Rng) -> BSplineIn {
+pub(crate) fn gen_bspline(rng: &mut Rng) -> BSplineIn {
     let p = 1 + rng.below(4) as usize;
     let n = p + rng.below(6) as usize;
     let rational = rng.chance(0.25);
@@ -1587,7 +1587,7 @@ fn gen_xsect_cubic(rng: &mut Rng, o: [f64; 3], d: [f64; 3], len: f64, off: f64) 
     }
 }
 
-fn gen_curve(rng: &mut Rng) -> CurveIn {
+pub(crate) fn gen_curve(rng: &mut Rng) -> CurveIn {
     match rng.below(10) {
         0..=1 => {
             let d0 = rng.uniform(-5.0, 5.0);
@@ -1628,7 +1628,7 @@ fn gen_curve(rng: &mut Rng) -> CurveIn {
 
 /// A B-spline surface patch over `[u0, u0 + ul] x [v0, v0 + vl]` of degrees up to 3,
 /// near the plane through `o` spanned by `x`, `y` (size `sz`), bumped by up to `bump`.
-fn gen_surface(rng: &mut Rng, o: [f64; 3], x: [f64; 3], y: [f64; 3], sz: f64, bump: f64) -> SurfIn {
+pub(crate) fn gen_surface(rng: &mut Rng, o: [f64; 3], x: [f64; 3], y: [f64; 3], sz: f64, bump: f64) -> SurfIn {
     let p = 1 + rng.below(3) as usize;
     let q = 1 + rng.below(3) as usize;
     let n = p + rng.below(2) as usize;
@@ -1679,7 +1679,7 @@ fn gen_surface(rng: &mut Rng, o: [f64; 3], x: [f64; 3], y: [f64; 3], sz: f64, bu
 }
 
 /// Pool indices of objects of kind `k`.
-fn of_kind(objs: &[ObjIn], k: usize) -> Vec<usize> {
+pub(crate) fn of_kind(objs: &[ObjIn], k: usize) -> Vec<usize> {
     objs.iter()
         .enumerate()
         .filter(|(_, o)| obj_kind(o) == k)
@@ -1687,11 +1687,11 @@ fn of_kind(objs: &[ObjIn], k: usize) -> Vec<usize> {
         .collect()
 }
 
-fn pick(rng: &mut Rng, v: &[usize]) -> Option<usize> {
+pub(crate) fn pick(rng: &mut Rng, v: &[usize]) -> Option<usize> {
     rng.choose(v).copied()
 }
 
-fn maybe(rng: &mut Rng, v: &[usize], p_none: f64) -> Option<usize> {
+pub(crate) fn maybe(rng: &mut Rng, v: &[usize], p_none: f64) -> Option<usize> {
     if rng.chance(p_none) {
         None
     } else {
@@ -1700,7 +1700,7 @@ fn maybe(rng: &mut Rng, v: &[usize], p_none: f64) -> Option<usize> {
 }
 
 /// A unit-ish random direction.
-fn dir(rng: &mut Rng) -> [f64; 3] {
+pub(crate) fn dir(rng: &mut Rng) -> [f64; 3] {
     let mut d = rp(rng, 1.0);
     let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
     if l < 0.1 {
@@ -1711,7 +1711,7 @@ fn dir(rng: &mut Rng) -> [f64; 3] {
     d
 }
 
-fn cross(a: [f64; 3], c: [f64; 3]) -> [f64; 3] {
+pub(crate) fn cross(a: [f64; 3], c: [f64; 3]) -> [f64; 3] {
     [
         a[1] * c[2] - a[2] * c[1],
         a[2] * c[0] - a[0] * c[2],
@@ -1719,7 +1719,7 @@ fn cross(a: [f64; 3], c: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-fn norm(a: [f64; 3]) -> [f64; 3] {
+pub(crate) fn norm(a: [f64; 3]) -> [f64; 3] {
     let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
     if l < 1e-9 {
         [0.0, 0.0, 1.0]
@@ -1729,7 +1729,7 @@ fn norm(a: [f64; 3]) -> [f64; 3] {
 }
 
 /// The base pool: curves, planes and B-spline surfaces, points, topology and stand-ins.
-fn gen_objects(rng: &mut Rng) -> Vec<ObjIn> {
+pub(crate) fn gen_objects(rng: &mut Rng) -> Vec<ObjIn> {
     let mut objs = Vec::new();
     for _ in 0..=rng.below(3) {
         objs.push(ObjIn::Curve(gen_curve(rng)));
@@ -1795,7 +1795,7 @@ fn gen_uv_line(rng: &mut Rng, srf: Option<&ObjIn>) -> BSplineIn {
     BSplineIn { dim: 2, oob: false, cpts, p: deg, u }
 }
 
-fn gen_tol(rng: &mut Rng) -> f64 {
+pub(crate) fn gen_tol(rng: &mut Rng) -> f64 {
     match rng.below(8) {
         0 => USE_DEFAULT,
         2 => 1e-3,

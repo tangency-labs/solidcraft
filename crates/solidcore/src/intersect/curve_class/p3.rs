@@ -37,7 +37,7 @@
 //!   restarts are bounded by the interval count plus one (each squeeze removes an
 //!   interval); past it `SM_ERR` is returned where upstream would recurse without end.
 //! - **Pointers into the interval array.** `GetPointClassByIndex` /
-//!   `GetPointClassMateByIndex` return pointers; the unported stubs below return a
+//!   `GetPointClassMateByIndex` return pointers; the helpers below return a
 //!   [`PointClassLoc`] (interval, end) that [`CurveClassification::pc_at`] /
 //!   [`CurveClassification::pc_at_mut`] resolve.
 //! - **Undefined behaviour upstream** is an error here: a `FindInterval` / `IsCoincident` /
@@ -51,8 +51,7 @@
 //!   closed-curve trial code and `sm_ChangeEdgePointClassToNearVertex`'s unused locals.
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]:
 //!   `intersect.curve_class_p2` (`InsertAt`, `EditIntervalMin`, `EditIntervalMax`,
-//!   `ConnectIntervals`, `GetClassifyCrvLoc(ULONG)`) and `intersect.curve_class_p7`
-//!   (`GetPointClassByIndex`, `GetPointClassMateByIndex`, `AreCoincidentMaybe`). The two
+//!   `ConnectIntervals`, `GetClassifyCrvLoc(ULONG)`). The two
 //!   uses of `GetClassifyCrvLoc(ULONG)` in `FindInterval` (the first and the last
 //!   boundary) are expanded inline through [`CurveClassification::classify_crv_loc`].
 //!   `SmTol::IsDegenerate(const SmCurve*, SmExtent1d, SmXSectTol3d*)` (unit `geom.tol`,
@@ -72,6 +71,7 @@ use crate::intersect::curve_class::p1::{
     object_dimension, xsect_tol_2d_or_3d_for_classify_pair, CurveClassification, CurveInterval,
     IntervalPosition,
 };
+use crate::intersect::curve_class::p7::CoincidentMaybe;
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
     PointClassification, Precedence,
@@ -172,26 +172,31 @@ pub(super) fn point_class_loc_by_index<O: ClassObject>(
     cc: &CurveClassification<O>,
     index: usize,
 ) -> Result<PointClassLoc> {
-    let _ = (cc, index);
-    // UNPORTED(intersect.curve_class_p7): SmCurveClassification::GetPointClassByIndex
-    Err(SolidError::unported(
-        "SmCurveClassification::GetPointClassByIndex",
-        "intersect.curve_class_p7",
-    ))
+    let (interval, is_end) = cc.point_class_by_index_interval(index)?;
+    Ok(PointClassLoc {
+        interval,
+        end: if is_end {
+            IntervalPosition::End
+        } else {
+            IntervalPosition::Start
+        },
+    })
 }
 
 /// `SmCurveClassification::GetPointClassMateByIndex(index)`: the location of the
 /// neighbouring interval's classification of the same boundary, if any.
 fn point_class_mate_loc_by_index<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
     cc: &CurveClassification<O>,
     index: usize,
 ) -> Result<Option<PointClassLoc>> {
-    let _ = (cc, index);
-    // UNPORTED(intersect.curve_class_p7): SmCurveClassification::GetPointClassMateByIndex
-    Err(SolidError::unported(
-        "SmCurveClassification::GetPointClassMateByIndex",
-        "intersect.curve_class_p7",
-    ))
+    Ok(cc
+        .point_class_mate_interval(k, geometry, index)?
+        .map(|interval| PointClassLoc {
+            interval,
+            end: IntervalPosition::End,
+        }))
 }
 
 /// `SmCurveClassification::GetClassifyCrvLoc(ULONG)`: the location of boundary `index`.
@@ -207,18 +212,22 @@ pub(super) fn classify_crv_loc_by_index<O: ClassObject>(
     ))
 }
 
-/// `SmCurveClassification::AreCoincidentMaybe(other, index, endOfCoincidentMaybe)`.
+/// `SmCurveClassification::AreCoincidentMaybe(other, index, endOfCoincidentMaybe)`
+/// (`bReportProb` at its default `TRUE`).
 pub(super) fn are_coincident_maybe<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
     cc: &CurveClassification<O>,
     other: &CurveClassification<O>,
     index: usize,
 ) -> Result<(Coincident, IntervalPosition)> {
-    let _ = (cc, other, index);
-    // UNPORTED(intersect.curve_class_p7): SmCurveClassification::AreCoincidentMaybe
-    Err(SolidError::unported(
-        "SmCurveClassification::AreCoincidentMaybe",
-        "intersect.curve_class_p7",
-    ))
+    let (coin, position) = cc.are_coincident_maybe(k, geometry, other, index, true)?;
+    let coin = match coin {
+        CoincidentMaybe::No => Coincident::No,
+        CoincidentMaybe::Fixable => Coincident::Yes,
+        CoincidentMaybe::Unsure => Coincident::Unsure,
+    };
+    Ok((coin, position))
 }
 
 /// `SmCurveClassification::InsertAt(index, interval)`.
@@ -1264,8 +1273,9 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// The errors of [`PointClassification::merge_into_object`]; `SM_ERR` when an old
     /// edge's classification parameter lies in neither new edge; the curve evaluation and
-    /// drop-point errors; [`SolidError::Unported`] for `GetPointClassByIndex`,
-    /// `GetPointClassMateByIndex` (unit `intersect.curve_class_p7`),
+    /// drop-point errors; those of `GetPointClassByIndex` / `GetPointClassMateByIndex`
+    /// ([`CurveClassification::point_class_by_index`],
+    /// [`CurveClassification::point_class_mate_by_index`]); [`SolidError::Unported`] for
     /// `GetClassifyCrvLoc` (unit `intersect.curve_class_p2`) and the topology members.
     pub fn merge_point_class(
         &mut self,
@@ -1280,7 +1290,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // Get the PointClass from the adjacent interval that corresponds to the same
         // location as this one (the first and last have a mate only for closed curves).
-        let adjacent = point_class_mate_loc_by_index(self, index)?;
+        let adjacent = point_class_mate_loc_by_index(k, geometry, self, index)?;
 
         // evaluate the interval's min-point's position in 3 space using the curve
         // definition (gets SSSPoint when available else the curve point)
@@ -1452,8 +1462,9 @@ impl<O: ClassObject> CurveClassification<O> {
     /// # Errors
     ///
     /// `SM_ERR` when `AreCoincidentMaybe` is unsure; [`SolidError::InvalidInput`] when
-    /// `other` has fewer intervals; [`SolidError::Unported`] for `AreCoincidentMaybe`
-    /// (unit `intersect.curve_class_p7`) and `ConnectIntervals` (unit
+    /// `other` has fewer intervals; those of
+    /// [`CurveClassification::are_coincident_maybe`]; [`SolidError::Unported`] for
+    /// `ConnectIntervals` (unit
     /// `intersect.curve_class_p2`).
     pub fn cleanup_and_validate(
         &mut self,
@@ -1472,7 +1483,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // for every interval
             for ii in 0..self.size() {
                 // if interval passes AreCoincidentMaybe() test
-                let (mut coin, mut end_of_cm) = are_coincident_maybe(self, other, ii)?;
+                let (mut coin, mut end_of_cm) = are_coincident_maybe(k, geometry, self, other, ii)?;
                 if coin == Coincident::Unsure {
                     // This signals an unrecoverable error.
                     return Err(SolidError::sm_err(OP_CLEANUP));
@@ -1541,9 +1552,8 @@ impl<O: ClassObject> CurveClassification<O> {
 ///
 /// # Errors
 ///
-/// The errors of `RemovePointClass`; [`SolidError::Unported`] for
-/// `GetPointClassByIndex` / `GetPointClassMateByIndex` (unit `intersect.curve_class_p7`)
-/// and the topology members.
+/// The errors of `RemovePointClass`, `GetPointClassByIndex` and
+/// `GetPointClassMateByIndex`; [`SolidError::Unported`] for the topology members.
 pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
@@ -1597,7 +1607,7 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         pc_mut.set_gap_3d(dist1);
         let moved = *pc_mut;
 
-        if let Some(mate) = point_class_mate_loc_by_index(cc, index)? {
+        if let Some(mate) = point_class_mate_loc_by_index(k, geometry, cc, index)? {
             *cc.pc_at_mut(mate)? = moved;
         }
     }
@@ -1612,7 +1622,7 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         pc_mut.set_gap_3d(dist2);
         let moved = *pc_mut;
 
-        if let Some(mate) = point_class_mate_loc_by_index(cc, index)? {
+        if let Some(mate) = point_class_mate_loc_by_index(k, geometry, cc, index)? {
             *cc.pc_at_mut(mate)? = moved;
         }
     }

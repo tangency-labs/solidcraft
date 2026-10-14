@@ -190,14 +190,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
     // Remaining dependency boundaries belong to the independent p2/p7 ports.
     fn p5_point_class_by_index(
-        _classification: &Self,
-        _index: usize,
+        classification: &Self,
+        index: usize,
     ) -> Result<(&PointClassification<O>, f64)> {
-        // UNPORTED(intersect.curve_class_p7): SmCurveClassification::GetPointClassByIndex
-        Err(SolidError::unported(
-            "SmCurveClassification::GetPointClassByIndex",
-            "intersect.curve_class_p7",
-        ))
+        classification.point_class_by_index(index)
     }
 
     fn p5_classify_crv_loc_by_index(

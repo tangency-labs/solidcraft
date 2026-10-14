@@ -1,0 +1,1904 @@
+//! Curve classification, part 7: queries over the interval end classifications (point
+//! classifications by boundary index and their mates, touches, vertices and edges met,
+//! edge crossings, face crossings, near misses), interval collapse, the
+//! coincident-maybe and partial-coincidence heuristics, face classification of an
+//! interval and the fillet geometry hand-over.
+//!
+//! Upstream: `source/SMLib/src/SmCurveClass.cpp`, `source/SMLib/inc/SmCurveClass.h`.
+//!
+//! | Rust                                                        | Upstream                                              |
+//! |-------------------------------------------------------------|-------------------------------------------------------|
+//! | [`CurveClassification::point_class_by_index`], [`CurveClassification::point_class_by_index_mut`] | `GetPointClassByIndex` |
+//! | [`CurveClassification::point_class_mate_by_index`]          | `GetPointClassMateByIndex`                            |
+//! | [`CurveClassification::collapse_interval`]                  | `CollapseInterval`                                    |
+//! | [`CurveClassification::point_classifies_connected_to`]      | `GetPointClassifiesConnectedTo`                       |
+//! | [`CurveClassification::find_vertex_objects`], [`VertexObjects`] | `FindVertexObjects`                               |
+//! | [`CurveClassification::find_edge_objects`]                  | `FindEdgeObjects`                                     |
+//! | [`CurveClassification::is_crossed_by_edge`]                 | `IsCrossedByEdge`                                     |
+//! | [`CurveClassification::is_crossing_face`]                   | `IsCrossingFace`                                      |
+//! | [`CurveClassification::has_near_misses`]                    | `HasNearMisses`                                       |
+//! | [`CurveClassification::are_coincident_maybe`], [`CoincidentMaybe`] | `AreCoincidentMaybe`                          |
+//! | [`CurveClassification::classify_face_interval`]             | `ClassifyFaceInterval`                                |
+//! | [`CurveClassification::test_for_partial_coincident_edges`], [`PartialCoincidence`] | `TestForPartialCoincidentEdges` |
+//! | [`set_do_filleting_geometry`]                               | `sm_SetDoFilletingGeometry`                           |
+//! | [`CurveClassification::curve`] of the owner                 | `SmCurveInterval::GetCurve`                           |
+//! | [`curve_is_degenerate`] (`intersect.curve_class_p3`)        | `SmTol::IsDegenerate(const SmCurve*, SmExtent1d, SmXSectTol3d*)` (CO-PORTED from `geom.tol`, with the tolerance given) |
+//! | `tol_is_closed_curve` (private)                             | `SmTol::IsClosed(const SmObject*, SmXSectTol3d*)` for a curve (CO-PORTED from `geom.tol`, with the tolerance given) |
+//!
+//! Deviations:
+//! - **Handles.** As in part 1, every object is a caller handle `O` resolved through a
+//!   [`ClassGeometry`]. `SmCurveInterval::GetCurve` reads the owner's curve through its
+//!   back pointer, which is not ported: use [`CurveClassification::curve`] of the
+//!   classification holding the interval.
+//! - **Out-params** become return values: [`VertexObjects`], [`PartialCoincidence`],
+//!   `(CoincidentMaybe, IntervalPosition)`, `(point classification, parameter)`. The
+//!   touches of [`CurveClassification::point_classifies_connected_to`] carry
+//!   `pt_classify = None` (a point classification inside a classification has no
+//!   handle): `pt_classify_index` 0 is the first interval's start, `i > 0` the end of
+//!   interval `i - 1`.
+//! - **The other classification** of `sm_SetDoFilletingGeometry` is reached through
+//!   `GetOtherClassification` upstream; here the caller passes the classification the
+//!   handle names. `sm_SetDoFilletingGeometry` reads the target classification only
+//!   (upstream edits the topology it classifies to).
+//! - **`SmCrvOnSurf` in `AreCoincidentMaybe`** is built only where it is evaluated (the
+//!   edge-coincidence branch), not at the top of each pass; it has no other effect.
+//! - **`ClassifyFaceInterval`**: the `SmClassifyProblem` causes are not returned by the
+//!   face queries (only the commented-out step 3 read them); `lFaceIndx` is passed on
+//!   as upstream (debugging only).
+//! - **`TestForPartialCoincidentEdges`** re-runs the coincidence check into the array
+//!   it is iterating, and keeps reading its solution reference `rSol`: here `rSol` is
+//!   the re-run's solution at the same index, or the old one when the re-run found
+//!   fewer (upstream's fixed 16-entry buffer keeps the old entry).
+//! - **Undefined behaviour upstream** is an error here (`InvalidInput`): interval or
+//!   boundary indices past the intervals, the first interval of an empty
+//!   classification, a missing curve where it is dereferenced, and a coincident edge
+//!   whose curve is not a B-spline (`SM_CAST_PTR` gives `NULL`).
+//! - **Debug-only work** (`SM_DEBUG_CODE`, `SM_DBG_WARN`, `bReportProb` messages, the
+//!   unused `AreCoincidentMaybe` angle check) is dropped; the angle is still computed.
+//! - **Callees in units not ported yet** return [`SolidError::Unported`]: the topology
+//!   members (`SmEdge`, `SmVertex`: `GetCurve`, `GetInterval`, `IsConnectedTo`,
+//!   `GetPoint`, `SetPoint`, `SetCurve`, `GetTolerance` through `SmTol`), the face
+//!   classifiers `SmFace::FindVertexSector` (`topology.face_p4`),
+//!   `EdgeCurveOnClassify` / `Point3DClassify` (`query.face_p1`) and `PointClassify`
+//!   (`query.face_p2`), and the topology zone tolerances of point classifications
+//!   (through `intersect.point_class`).
+//! - **Recursion.** None.
+
+use std::borrow::Cow;
+
+use crate::curve::crv_on_surf::CrvOnSurf;
+use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::{ignored, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
+use crate::geom::global_solver::SolverOperation;
+use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
+use crate::geom::tol::{eff_zero_ang_rad, scaled_zero, xsect_tol_3d_from_zones, ScaledZero};
+use crate::intersect::curve_class::p3::curve_is_degenerate;
+use crate::intersect::point_class::{
+    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification, Precedence,
+};
+use crate::kernel::Kernel;
+use crate::math::{max2, min2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::{Surface, SurfaceKind};
+
+use super::p1::{
+    get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
+    CurveClassification, CurveInterval, IntervalPosition, TouchData,
+};
+
+const OP_INDEX: &str = "intersect::curve_class::p7::point_class_by_index";
+const OP_COLLAPSE: &str = "intersect::curve_class::p7::collapse_interval";
+const OP_COIN: &str = "intersect::curve_class::p7::are_coincident_maybe";
+const OP_FACE: &str = "intersect::curve_class::p7::classify_face_interval";
+const OP_PARTIAL: &str = "intersect::curve_class::p7::test_for_partial_coincident_edges";
+const OP_FILLET: &str = "intersect::curve_class::p7::set_do_filleting_geometry";
+const OP_GEOM: &str = "intersect::curve_class::p7";
+
+/// `SM_UNDEF_ULONG`: the loop index of a touch found without a target list.
+pub const UNDEF_LOOP_INDEX: u64 = 123_456_789;
+
+/// The verdict of [`CurveClassification::are_coincident_maybe`] (upstream `SmBoolean`
+/// `FALSE`, `TRUE`, `UNSURE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CoincidentMaybe {
+    /// `FALSE`: not a coincident-maybe case, or not a fixable one.
+    No,
+    /// `TRUE`: a fixable coincident-maybe case (remove the reported interval end).
+    Fixable,
+    /// `UNSURE`: an edge classification whose object is not an edge.
+    Unsure,
+}
+
+impl CoincidentMaybe {
+    /// The upstream value (`FALSE` 0, `TRUE` 1, `UNSURE` 2).
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        match self {
+            Self::No => 0,
+            Self::Fixable => 1,
+            Self::Unsure => 2,
+        }
+    }
+}
+
+/// The vertices met by the classification curve and their curve parameters
+/// (`FindVertexObjects`' `rVertices`, `pOptClassifyParams`; the count is
+/// `vertices.len()`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VertexObjects<O> {
+    /// The vertices, without repeats.
+    pub vertices: Vec<O>,
+    /// The curve parameter of every vertex end met (one per end, so repeats of a vertex
+    /// add parameters).
+    pub params: Vec<f64>,
+}
+
+/// The result of [`CurveClassification::test_for_partial_coincident_edges`]
+/// (`rdMaxPartialCoinGap`, `rpNewCurveToTest`).
+#[derive(Debug, Clone, Default)]
+pub struct PartialCoincidence {
+    /// The largest gap at the ends of the coincident range; `0.0` for none.
+    pub max_partial_coin_gap: f64,
+    /// A copy of the edge curve trimmed to the coincident range, when the curve is
+    /// partially coincident to an edge.
+    pub new_curve_to_test: Option<BSplineCurve>,
+}
+
+/// A solution object naming nothing (the coincidence checks here pass no objects).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NoObject;
+
+impl SolutionObject for NoObject {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+}
+
+impl<O: ClassObject> CurveClassification<O> {
+    /// The point classification at interval boundary `index` (`0 ..= size()`) and its
+    /// curve parameter (`GetPointClassByIndex`): the start of interval `index`, or the
+    /// end of the last interval for `index == size()`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for `index > size()` or an empty classification
+    /// (upstream reads outside the intervals).
+    pub fn point_class_by_index(&self, index: usize) -> Result<(&PointClassification<O>, f64)> {
+        let size = self.size();
+        if size == 0 || index > size {
+            return Err(bad_boundary());
+        }
+        if index == size {
+            let ivl = self.at(index - 1)?;
+            return Ok((&ivl.end, ivl.interval.max()));
+        }
+        let ivl = self.at(index)?;
+        Ok((&ivl.start, ivl.interval.min()))
+    }
+
+    /// Where [`CurveClassification::point_class_by_index`]'s pointer points: the
+    /// interval, and whether it is that interval's end (else its start).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurveClassification::point_class_by_index`].
+    pub(crate) fn point_class_by_index_interval(&self, index: usize) -> Result<(usize, bool)> {
+        let size = self.size();
+        if size == 0 || index > size {
+            return Err(bad_boundary());
+        }
+        if index == size {
+            return Ok((index - 1, true));
+        }
+        Ok((index, false))
+    }
+
+    /// [`CurveClassification::point_class_by_index`], mutable.
+    ///
+    /// # Errors
+    ///
+    /// As [`CurveClassification::point_class_by_index`].
+    pub fn point_class_by_index_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<(&mut PointClassification<O>, f64)> {
+        let size = self.size();
+        if size == 0 || index > size {
+            return Err(bad_boundary());
+        }
+        if index == size {
+            let ivl = self.at_mut(index - 1)?;
+            let param = ivl.interval.max();
+            return Ok((&mut ivl.end, param));
+        }
+        let ivl = self.at_mut(index)?;
+        let param = ivl.interval.min();
+        Ok((&mut ivl.start, param))
+    }
+
+    /// The point classification sharing boundary `index` with the one
+    /// [`CurveClassification::point_class_by_index`] returns
+    /// (`GetPointClassMateByIndex`): the end of interval `index - 1`. The first and
+    /// last boundaries have no mate, except that boundary 0 of a curve closed over the
+    /// classified interval mates the end of the last interval.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for `index > size()`, a missing curve at the first
+    /// or last boundary (upstream dereferences it), and an empty classification whose
+    /// curve is closed; those of [`Curve::is_closed`].
+    pub fn point_class_mate_by_index(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        index: usize,
+    ) -> Result<Option<&PointClassification<O>>> {
+        match self.point_class_mate_interval(k, geometry, index)? {
+            Some(i) => Ok(Some(&self.at(i)?.end)),
+            None => Ok(None),
+        }
+    }
+
+    /// The interval whose end [`CurveClassification::point_class_mate_by_index`]
+    /// returns (where its pointer points), `None` for no mate.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CurveClassification::point_class_mate_by_index`].
+    pub(crate) fn point_class_mate_interval(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        index: usize,
+    ) -> Result<Option<usize>> {
+        let size = self.size();
+        if index > size {
+            return Err(bad_boundary());
+        }
+
+        // No mate for first and last one unless interval is closed
+        if index == size || index == 0 {
+            let zone_tol_3d = src_zone_tol_3d_of(k, Some(self));
+            let xsect_tol_3d = xsect_tol_3d_from_zones(k, zone_tol_3d, zone_tol_3d);
+
+            let curve = self.curve_geometry(geometry)?;
+            if curve.is_closed(&self.interval(), xsect_tol_3d)? && index == 0 {
+                if size == 0 {
+                    return Err(bad_boundary());
+                }
+                return Ok(Some(size - 1));
+            }
+            return Ok(None);
+        }
+
+        Ok(Some(index - 1))
+    }
+
+    /// Removes interval `index` whose length is degenerate (`CollapseInterval`): the
+    /// combined end classification (see [`PointClassification::combine`]) becomes both
+    /// ends and the neighbours' shared ends; interval parameters are not changed.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for `index >= size()`, fewer than two intervals, or an interval that is
+    /// not degenerate within the pair tolerance of its ends
+    /// ([`xsect_tol_2d_or_3d_for_classify_pair`]); [`SolidError::InvalidInput`] for a
+    /// missing curve; those of the tolerance and degeneracy computations and of
+    /// [`PointClassification::combine`].
+    pub fn collapse_interval(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        index: usize,
+    ) -> Result<()> {
+        // check input - lInterval index is valid
+        if index >= self.size() {
+            return Err(SolidError::sm_err(OP_COLLAPSE));
+        }
+
+        // Do not squeeze out the only interval.  [B232]
+        if self.size() < 2 {
+            return Err(SolidError::sm_err(OP_COLLAPSE));
+        }
+
+        // locals
+        let ivl = *self.at(index)?;
+
+        let start_tol = ivl.start.obj_zone_tol_3d(k, geometry)?;
+        let end_tol = ivl.end.obj_zone_tol_3d(k, geometry)?;
+        let curve = self.curve_geometry(geometry)?;
+        let surface1 = self.surface1_geometry(geometry)?;
+        let xsect_tol_2d_or_3d = xsect_tol_2d_or_3d_for_classify_pair(
+            k,
+            curve,
+            surface1,
+            ivl.min(),
+            start_tol,
+            ivl.max(),
+            end_tol,
+        )?;
+
+        // no work and an error - CurveClassification interval is not degenerate
+        if !curve_is_degenerate(Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
+            return Err(SolidError::sm_err(OP_COLLAPSE));
+        }
+
+        // pick the PtClassification data to persist
+        let mut start = ivl.start;
+        let kept = match start.combine(&ivl.end)? {
+            Precedence::This => start,
+            Precedence::Other => ivl.end,
+        };
+        {
+            let target = self.at_mut(index)?;
+            target.start = kept;
+            target.end = kept;
+        }
+
+        // propagate the persistent PtClassification data to the neighbour boundaries
+        if index >= 1 {
+            self.at_mut(index - 1)?.end = kept;
+        }
+        if index + 2 <= self.size() {
+            self.at_mut(index + 1)?.start = kept;
+        }
+
+        // compress the m_vData array
+        self.remove_at(index)
+    }
+
+    /// The interval end classifications to vertices and edges, each boundary once, in
+    /// curve order (`GetPointClassifiesConnectedTo`): all of them for an empty
+    /// `targets`, else those whose object is connected to one of `targets` (the touch
+    /// then records which). Touches carry `loop_dir` [`CrvDirOnFaceType::Uninit`]
+    /// and, without targets, `loop_index` [`UNDEF_LOOP_INDEX`].
+    ///
+    /// [`CrvDirOnFaceType::Uninit`]: super::p1::CrvDirOnFaceType::Uninit
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an empty classification (upstream reads its
+    /// missing first interval); those of [`PointClassification::is_connected_to_any`].
+    pub fn point_classifies_connected_to(&self, targets: &[O]) -> Result<Vec<TouchData<O>>> {
+        // locals
+        let mut touches = Vec::new();
+        let mut found_index = UNDEF_LOOP_INDEX;
+        let first = self.at(0).map_err(|_| empty_classification(OP_GEOM))?;
+
+        let push = |touches: &mut Vec<TouchData<O>>, param: f64, index: usize, found_index: u64| {
+            touches.push(TouchData {
+                connected_to: if targets.is_empty() {
+                    None
+                } else {
+                    usize::try_from(found_index)
+                        .ok()
+                        .and_then(|i| targets.get(i).copied())
+                },
+                loop_dir: super::p1::CrvDirOnFaceType::Uninit,
+                loop_index: found_index,
+                param,
+                pt_classify_index: index as u64,
+                pt_classify: None,
+            });
+        };
+
+        // When First Interval Start Edge/Vertex Object is connected to a target
+        if is_vertex_or_edge(&first.start)
+            && (targets.is_empty() || connected_any(&first.start, targets, &mut found_index)?)
+        {
+            push(&mut touches, first.interval.min(), 0, found_index);
+        }
+
+        // for every Interval End
+        for (ii, ivl) in self.intervals().iter().enumerate() {
+            if is_vertex_or_edge(&ivl.end)
+                && (targets.is_empty() || connected_any(&ivl.end, targets, &mut found_index)?)
+            {
+                push(&mut touches, ivl.interval.max(), ii + 1, found_index);
+            }
+        }
+
+        Ok(touches)
+    }
+
+    /// The vertices the classification curve meets (`FindVertexObjects`; upstream
+    /// default `pOptConnectedTarget = NULL`): the first start and every interval end
+    /// classified to a vertex connected to `connected_target` (any, for `None`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an empty classification;
+    /// [`SolidError::Unported`] for a vertex (`SmVertex::IsConnectedTo`, unit
+    /// `topology.vertex`).
+    pub fn find_vertex_objects(&self, connected_target: Option<O>) -> Result<VertexObjects<O>> {
+        // init output
+        let mut out = VertexObjects {
+            vertices: Vec::new(),
+            params: Vec::new(),
+        };
+
+        // locals
+        let first = self.at(0).map_err(|_| empty_classification(OP_GEOM))?;
+
+        // for the first CurveInterval Start - add any VertexObject
+        if let Some(v) = first.start.vertex_object() {
+            if vertex_is_connected_to(v, connected_target)? {
+                out.vertices.push(v);
+                out.params.push(first.interval.min());
+            }
+        }
+
+        // for every interval
+        for ivl in self.intervals() {
+            if let Some(v) = ivl.end.vertex_object() {
+                if vertex_is_connected_to(v, connected_target)? {
+                    if !out.vertices.contains(&v) {
+                        out.vertices.push(v);
+                    }
+                    out.params.push(ivl.interval.max());
+                }
+            }
+        }
+
+        Ok(out)
+    }
+
+    /// The edges the classification curve meets (`FindEdgeObjects`; upstream defaults
+    /// `pOptConnectedTarget = NULL`, `lWorkFlag = 3`): with bit 1 of `work_flag` the
+    /// edges an interval is coincident with, with bit 2 the edges crossed at an
+    /// interval end not next to a coincident interval; only edges connected to
+    /// `connected_target` (any, for `None`), each once.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an empty classification;
+    /// [`SolidError::Unported`] for an edge tested for connection
+    /// (`SmEdge::IsConnectedTo`, unit `topology.edge`).
+    pub fn find_edge_objects(&self, connected_target: Option<O>, work_flag: u64) -> Result<Vec<O>> {
+        // init output
+        let mut edges: Vec<O> = Vec::new();
+
+        // locals
+        let get_coins = work_flag & 1 != 0;
+        let get_xsects = work_flag & 2 != 0;
+        let first = self.at(0).map_err(|_| empty_classification(OP_GEOM))?;
+        let start_edge = first.start.edge_object();
+        let mut mid_edge = first.mid.edge_object();
+        let mut mid_edge_next = mid_edge;
+
+        // for the first CurveInterval Start - add any XSecting EdgeObject
+        if get_xsects {
+            if let Some(e) = start_edge {
+                if edge_is_connected_to(e, connected_target)? && mid_edge.is_none() {
+                    edges.push(e);
+                }
+            }
+        }
+
+        // for every interval - add Mid and End Edges as appropriate
+        let size = self.size();
+        for ii in 0..size {
+            mid_edge = mid_edge_next;
+            let end_edge = self.at(ii)?.end.edge_object();
+            mid_edge_next = if ii < size - 1 {
+                self.at(ii + 1)?.mid.edge_object()
+            } else {
+                None
+            };
+
+            // when asked and appropriate - add Coincident mid edges
+            if get_coins {
+                if let Some(e) = mid_edge {
+                    if edge_is_connected_to(e, connected_target)? && !edges.contains(&e) {
+                        edges.push(e);
+                    }
+                }
+            }
+
+            // when asked and appropriate - add XSecting end edges
+            if get_xsects {
+                if let Some(e) = end_edge {
+                    if edge_is_connected_to(e, connected_target)?
+                        && mid_edge.is_none()
+                        && mid_edge_next.is_none()
+                        && !edges.contains(&e)
+                    {
+                        edges.push(e);
+                    }
+                }
+            }
+        }
+
+        Ok(edges)
+    }
+
+    /// Whether an edge crosses the classification curve (`IsCrossedByEdge`): an
+    /// interval end on an edge, away from the edge's ends, where neither the interval
+    /// nor its neighbour on that side is coincident with the edge.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] for an interval end on an edge (`SmEdge::GetInterval`,
+    /// unit `topology.edge`).
+    pub fn is_crossed_by_edge(&self) -> Result<bool> {
+        let size = self.size();
+
+        // for every classification interval
+        for ii in 0..size {
+            let ivl = self.at(ii)?;
+
+            // When interval starts on an EDGE
+            if ivl.start.point_class() == PointClassType::Edge {
+                let t = ivl.start.t_param();
+                let edge = ivl.start.edge_object();
+                let edge_ivl = edge_interval(edge)?;
+                let sz = t.scaled_zero();
+
+                // not crossing when XSection happens at bndry of pEdge Interval
+                if edge_ivl.is_value_on_boundary(t, sz).0 {
+                    continue;
+                }
+
+                // not crossing if pEdge is coincident with Classification Curve
+                if ivl.mid.point_class() == PointClassType::Edge && edge == ivl.mid.edge_object() {
+                    continue;
+                }
+
+                // not crossing if previous CrvIvl is coincident with this Edge
+                if ii > 0 {
+                    let prev = self.at(ii - 1)?;
+                    if prev.end.point_class() == PointClassType::Edge
+                        && prev.end.edge_object() == edge
+                        && prev.mid.point_class() == PointClassType::Edge
+                        && prev.mid.edge_object() == edge
+                    {
+                        continue;
+                    }
+                }
+
+                // an Edge was found crossing the Classification Curve
+                return Ok(true);
+            }
+
+            // When Interval ends on an Edge
+            if ivl.end.point_class() == PointClassType::Edge {
+                let t = ivl.end.t_param();
+                let edge = ivl.end.edge_object();
+                let edge_ivl = edge_interval(edge)?;
+                let sz = t.scaled_zero();
+
+                // not crossing if the intersection happens at boundary of the pEdge Interval
+                if edge_ivl.is_value_on_boundary(t, sz).0 {
+                    continue;
+                }
+
+                // not crossing if pEdge is coincident with Classification Curve
+                if ivl.mid.point_class() == PointClassType::Edge && edge == ivl.mid.edge_object() {
+                    continue;
+                }
+
+                // not crossing if next CrvIvl is coincident with this Edge
+                if ii < size - 1 {
+                    let next = self.at(ii + 1)?;
+                    if next.start.point_class() == PointClassType::Edge
+                        && next.start.edge_object() == edge
+                        && next.mid.point_class() == PointClassType::Edge
+                        && next.mid.edge_object() == edge
+                    {
+                        continue;
+                    }
+                }
+
+                // an Edge was found crossing the Classification Curve
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Whether an interval interior is classified to a face (`IsCrossingFace`; upstream
+    /// default `pOptTgtFace = NULL`): to `target_face`, or to any face for `None`.
+    #[must_use]
+    pub fn is_crossing_face(&self, target_face: Option<O>) -> bool {
+        self.intervals().iter().any(|ivl| {
+            ivl.mid.point_class() == PointClassType::Face
+                && (target_face.is_none() || ivl.mid.object() == target_face)
+        })
+    }
+
+    /// Whether a vertex end or a coincident edge is only a near miss of the curve
+    /// (`HasNearMisses`; upstream default `bInSurfaceGaps = FALSE`): its gap is at
+    /// least `1000 * SM_EFF_ZERO`, measured within the surface-1 tangent plane with
+    /// `in_surface_gaps` and a surface 1 (see [`PointClassification::gap_3d`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PointClassification::gap_3d`] with a surface;
+    /// [`SolidError::InvalidInput`] for an unresolved surface handle.
+    pub fn has_near_misses(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        in_surface_gaps: bool,
+    ) -> Result<bool> {
+        // locals
+        let surface = if in_surface_gaps {
+            self.surface1_geometry(geometry)?
+        } else {
+            None
+        };
+        let near_miss_dist_3d = EFF_ZERO * 1000.0;
+
+        for ivl in self.intervals() {
+            let beg = &ivl.start;
+            let mid = &ivl.mid;
+            let end = &ivl.end;
+
+            if (beg.point_class() == PointClassType::Vertex
+                && beg.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+                || (mid.point_class() == PointClassType::Edge
+                    && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+                || (end.point_class() == PointClassType::Vertex
+                    && end.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Whether interval `index` of `self` or of its partner `other` (`self` again to
+    /// check one classification) only looks coincident with an edge and can be fixed by
+    /// removing the interval (`AreCoincidentMaybe`; upstream default
+    /// `bReportProb = FALSE`, whose messages are not reproduced). Returns the verdict
+    /// and the interval end to remove ([`IntervalPosition::Inside`] when none was
+    /// picked; a picked end stays reported when the case turns out not fixable, as
+    /// upstream).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for `index` past either classification or a missing
+    /// curve; [`SolidError::Unported`] in the edge-coincidence branch (edge tolerances
+    /// and curves, the topology units).
+    pub fn are_coincident_maybe(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        other: &Self,
+        index: usize,
+        report_prob: bool,
+    ) -> Result<(CoincidentMaybe, IntervalPosition)> {
+        let _ = report_prob;
+
+        // init output
+        let mut position = IntervalPosition::Inside;
+        let mut rtn = false;
+
+        let this_ivl = self.at(index)?;
+        let other_ivl = other.at(index)?;
+
+        // no work - neither interval coincident (maybe) with an edge
+        let edge = PointClassType::Edge;
+        if (this_ivl.mid.point_class() != edge
+            || (this_ivl.end.point_class() != edge && this_ivl.start.point_class() != edge))
+            && (other_ivl.mid.point_class() != edge
+                || (other_ivl.end.point_class() != edge && other_ivl.start.point_class() != edge))
+        {
+            return Ok((CoincidentMaybe::No, position));
+        }
+
+        // check four times: this(Start, Mid), other(Start, Mid), this(End, Mid),
+        // other(End, Mid)
+        for ii in 0..4 {
+            // select tgt classification and interval
+            let (tgt_class, tgt_ivl, mate_ivl, mate_owner) = if ii == 0 || ii == 2 {
+                (self, this_ivl, other_ivl, other)
+            } else {
+                (other, other_ivl, this_ivl, self)
+            };
+            let tgt_curve_3d = tgt_class.curve_geometry(geometry)?;
+            let on_surface = tgt_curve_3d.dim() == 2 && tgt_class.surface1().is_some();
+
+            // select target end of the tgt interval
+            let (tgt_beg, tgt_end, mate_beg, end_beg, end_end, tgt_param) = if ii < 2 {
+                (
+                    &tgt_ivl.start,
+                    &tgt_ivl.end,
+                    &mate_ivl.start,
+                    IntervalPosition::Start,
+                    IntervalPosition::End,
+                    tgt_ivl.interval.min(),
+                )
+            } else {
+                (
+                    &tgt_ivl.end,
+                    &tgt_ivl.start,
+                    &mate_ivl.end,
+                    IntervalPosition::End,
+                    IntervalPosition::Start,
+                    tgt_ivl.interval.max(),
+                )
+            };
+            let tgt_mid = &tgt_ivl.mid;
+            let mate_mid = &mate_ivl.mid;
+
+            // when this interval mid and beg point look coincident with an edge
+            if tgt_beg.point_class() == edge
+                && tgt_mid.point_class() == edge
+                && tgt_mid.object() == tgt_beg.object()
+            {
+                let xsect_tol_3d = xsect_tol_3d_from_zones(
+                    k,
+                    src_zone_tol_3d_of(k, Some(mate_owner)),
+                    tgt_mid.obj_zone_tol_3d(k, geometry)?,
+                );
+
+                // get Edge, Interval, and Curve lengths
+                let Some(edge_obj) = tgt_beg
+                    .object()
+                    .filter(|o| o.class_kind() == ClassObjectKind::Edge)
+                else {
+                    // probable bug - PointClassify classifies to SmEdge but its object
+                    // is not an SmEdge
+                    return Ok((CoincidentMaybe::Unsure, position));
+                };
+                let edge_param = tgt_beg.t_param();
+
+                let edge_curve = edge_curve(geometry, edge_obj)?;
+                let edge_ivl = edge_interval(Some(edge_obj))?;
+                let tgt_curve: Cow<'_, Curve> = if on_surface {
+                    Cow::Owned(crv_on_surf(
+                        k,
+                        tgt_curve_3d,
+                        tgt_class.surface1_geometry(geometry)?,
+                    )?)
+                } else {
+                    Cow::Borrowed(tgt_curve_3d)
+                };
+                let edge_len = edge_curve.approximate_length(&edge_ivl, 4, false)?.0;
+                let cm_len = tgt_curve.approximate_length(&tgt_ivl.interval, 4, false)?.0;
+                let total_cc_len = tgt_curve.approximate_length(&self.interval(), 4, false)?.0;
+
+                // curve/edge angle at curve/edge intersection
+                let angle_rad = get_curve_curve_angle(
+                    Some(edge_curve),
+                    edge_param,
+                    Some(&tgt_curve),
+                    tgt_param,
+                    xsect_tol_3d,
+                )?;
+
+                // case 1: original heuristic - left in to preserve current behavior
+                let this_zone_tol_3d = src_zone_tol_3d_of(k, Some(self)) / 1000.0;
+                let tgt_beg_gap_3d = tgt_beg.gap_3d(k, geometry, None)?;
+
+                if (tgt_class.ignore_tangency() || tgt_beg_gap_3d > this_zone_tol_3d)
+                    && (cm_len < edge_len / 10.0
+                        || (self.ignore_tangency() && cm_len < total_cc_len / 2.0))
+                {
+                    // conclude this target interval is mislabeled as coincident
+                    position = end_beg;
+                    rtn = true;
+                }
+
+                // case 2: Curve runs close to vertex and intersects an existing edge
+                // attached to the vertex
+                let near_vertex = tgt_end.gap_3d(k, geometry, None)? > scaled_zero() * 100.0;
+                let tight_crv_xsect = tgt_beg.gap_3d(k, geometry, None)? < scaled_zero() * 100.0;
+
+                if !rtn
+                    && tgt_end.point_class() == PointClassType::Vertex
+                    && near_vertex
+                    && tight_crv_xsect
+                    && (cm_len < edge_len / 10.0
+                        || cm_len < total_cc_len / 10.0
+                        || cm_len < EFF_ZERO_SQRT)
+                {
+                    // remove the non-vertex end of the interval
+                    position = end_end;
+                    rtn = true;
+                }
+
+                // case 3: not yet an action (a place for a break upstream)
+                let _ = !rtn && angle_rad > eff_zero_ang_rad() * 10.0;
+
+                // when a coincident segment was identified
+                if rtn {
+                    let mb = mate_beg.point_class();
+                    let mm = mate_mid.point_class();
+                    let mate_mergeable = (mb == mm
+                        && (mb == PointClassType::Edge
+                            || mb == PointClassType::Face
+                            || mb == PointClassType::Region))
+                        || (mm == PointClassType::Face && mb == PointClassType::Unknown);
+
+                    if mate_mergeable {
+                        return Ok((CoincidentMaybe::Fixable, position));
+                    }
+                    // look for other fixable cases of coincident-maybe
+                    rtn = false;
+                }
+            }
+        }
+
+        // arrive here when no removable coincident-maybe segments were found
+        Ok((CoincidentMaybe::No, position))
+    }
+
+    /// Classifies interval `index`, known to lie on `face`, against it
+    /// (`ClassifyFaceInterval`; upstream defaults `bUVSpaceOkay = TRUE`,
+    /// `lFaceIndx = SM_UNDEF_ULONG`): through the vertex sector or edge side at its
+    /// classified ends, else (with `do_point_classify`) by classifying a point near its
+    /// middle (in UV space through the surface-1 UV curve when there is one and
+    /// `uv_space_okay`). An interval found inside the face gets its interior, and any
+    /// unknown or face end, classified to it. Only intervals whose interior is unknown,
+    /// or classified to `old_face` (when given), are considered.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for `index >= size()` or a missing curve where it is
+    /// used; `SM_ERR_NULL_POINTER` for a vertex or edge end without its object; those
+    /// of the curve evaluations; [`SolidError::Unported`] for the face queries (units
+    /// `topology.face_p4`, `query.face_p1`, `query.face_p2`).
+    pub fn classify_face_interval(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        index: usize,
+        do_point_classify: bool,
+        face: O,
+        old_face: Option<O>,
+        uv_space_okay: bool,
+        face_index: Option<u64>,
+    ) -> Result<()> {
+        // locals
+        let mut ivl = *self.at(index)?;
+        let src_zone_tol_3d = src_zone_tol_3d_of(k, Some(&*self));
+        let ctx = FaceIntervalContext {
+            curve: self.curve(),
+            uv_curve1: self.uv_curve1(),
+            src_zone_tol_3d,
+            face,
+            old_face,
+            do_point_classify,
+            uv_space_okay,
+            face_index,
+        };
+        let r = classify_face_interval_on(geometry, &ctx, &mut ivl);
+        *self.at_mut(index)? = ivl;
+        r
+    }
+
+    /// Whether the classification and its partner `other` (`self` again to check one)
+    /// are only partially coincident with an edge (`TestForPartialCoincidentEdges`):
+    /// their first (or last) intervals lie on edges without starting (ending) on a
+    /// vertex, or the single interval runs between vertices at one end pair only, and
+    /// the two edges have a coincident range. The result then holds the largest gap at
+    /// the range ends and a copy of the edge curve trimmed to the range; otherwise
+    /// (empty classifications, a closed curve, complete coincidence) gap `0` and no
+    /// curve.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an unresolved curve handle or a coincident
+    /// edge curve that is not a B-spline; those of [`Curve::is_closed`] and the
+    /// coincidence checks; [`SolidError::Unported`] where edges are examined (unit
+    /// `topology.edge`).
+    pub fn test_for_partial_coincident_edges(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        other: &Self,
+    ) -> Result<PartialCoincidence> {
+        // init output
+        let none = PartialCoincidence::default();
+        let src_zone_tol_3d = src_zone_tol_3d_of(k, Some(self));
+        let xsect_tol_3d = xsect_tol_3d_from_zones(k, src_zone_tol_3d, src_zone_tol_3d);
+
+        // no work - one of the classifications has no segments
+        if self.size() == 0 || other.size() == 0 {
+            return Ok(none);
+        }
+
+        // no work - closed curve
+        let curve = match self.curve() {
+            Some(c) => Some(geometry.curve(c).ok_or(SolidError::invalid_input(
+                OP_PARTIAL,
+                "unresolved curve handle",
+            ))?),
+            None => None,
+        };
+        if tol_is_closed_curve(curve, xsect_tol_3d)? {
+            return Ok(none);
+        }
+
+        // First check initial interval for edge coincidence that does not start on a
+        // vertex.
+        {
+            let ivl = self.at(0)?;
+            let o_ivl = other.at(0)?;
+            if ivl.mid.point_class() == PointClassType::Edge
+                && o_ivl.mid.point_class() == PointClassType::Edge
+            {
+                let vert_on_start = ivl.start.point_class() == PointClassType::Vertex
+                    || o_ivl.start.point_class() == PointClassType::Vertex;
+                if !vert_on_start {
+                    if let Some(found) =
+                        partial_coincidence(k, geometry, &ivl.mid, &o_ivl.mid, CoinCheck::Range)?
+                    {
+                        return Ok(found);
+                    }
+                }
+            }
+        }
+
+        // Second, check last interval for edge coincidence that does not end on a
+        // vertex.
+        {
+            let ivl = self.at(self.size() - 1)?;
+            let o_ivl = other.at(other.size() - 1)?;
+            if ivl.mid.point_class() == PointClassType::Edge
+                && o_ivl.mid.point_class() == PointClassType::Edge
+            {
+                let vert_on_end = ivl.end.point_class() == PointClassType::Vertex
+                    || o_ivl.end.point_class() == PointClassType::Vertex;
+                if !vert_on_end {
+                    if let Some(found) =
+                        partial_coincidence(k, geometry, &ivl.mid, &o_ivl.mid, CoinCheck::Range)?
+                    {
+                        return Ok(found);
+                    }
+                }
+            }
+        }
+
+        // when classification has just 1 segment
+        if self.size() == 1 {
+            let ivl = self.at(0)?;
+            let o_ivl = other.at(0)?;
+
+            if ivl.mid.point_class() == PointClassType::Edge
+                && o_ivl.mid.point_class() == PointClassType::Edge
+            {
+                // remember if both segments start on a vertex (upstream tests this
+                // interval's ends, then the other's)
+                let coin1 = ivl.end.point_class() == PointClassType::Vertex
+                    && ivl.start.point_class() == PointClassType::Vertex;
+                let coin2 = o_ivl.start.point_class() == PointClassType::Vertex
+                    && o_ivl.end.point_class() == PointClassType::Vertex;
+
+                // both segments align to vertices - return no edge to check
+                if coin1 && coin2 {
+                    return Ok(none);
+                }
+
+                if coin1 {
+                    if let Some(found) =
+                        partial_coincidence(k, geometry, &ivl.mid, &o_ivl.mid, CoinCheck::Vertices)?
+                    {
+                        return Ok(found);
+                    }
+                }
+
+                if coin2 {
+                    if let Some(found) =
+                        partial_coincidence(k, geometry, &ivl.mid, &o_ivl.mid, CoinCheck::Vertices)?
+                    {
+                        return Ok(found);
+                    }
+                }
+            }
+        }
+
+        // all done
+        Ok(none)
+    }
+
+    /// The resolved surface 1, if any.
+    fn surface1_geometry<'g>(
+        &self,
+        geometry: &'g impl ClassGeometry<O>,
+    ) -> Result<Option<&'g Surface>> {
+        match self.surface1() {
+            Some(s) => geometry
+                .surface(s)
+                .map(Some)
+                .ok_or(SolidError::invalid_input(
+                    OP_GEOM,
+                    "unresolved surface handle",
+                )),
+            None => Ok(None),
+        }
+    }
+}
+
+/// Copies fillet geometry from the other classification's topology onto the topology
+/// interval `index` of `this` was merged into (`sm_SetDoFilletingGeometry`): with bit
+/// 1 of `todo` the start vertex position, bit 2 the end vertex position, bit 4 the
+/// interior edge curve (the other edge's curve trimmed to the matching range,
+/// reparametrised to this edge's interval and reversed when it runs the other way).
+/// Nothing is done unless `this` is doing fillets with an other classification;
+/// `other` is the classification that handle names. Processing stops at the first
+/// requested item whose ends are not both classified to vertices (edges).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `index` past either classification or a missing
+/// `other` when `this` names one; `SM_ERR_NULL_POINTER` for a missing vertex or edge
+/// object; [`SolidError::Unported`] for the topology edits (units `topology.vertex`,
+/// `topology.edge`).
+pub fn set_do_filleting_geometry<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    index: usize,
+    this: &CurveClassification<O>,
+    other: Option<&CurveClassification<O>>,
+    todo: u64,
+) -> Result<()> {
+    // no work - don't have DoingFillet Data
+    if !this.doing_fillets() || this.other_classification().is_none() {
+        return Ok(());
+    }
+
+    // locals
+    let other = other.ok_or(SolidError::invalid_input(
+        OP_FILLET,
+        "no other classification",
+    ))?;
+    let this_ivl = this.at(index)?;
+    let other_ivl = other.at(index)?;
+
+    // when asked - set StartVertex Geometry
+    if todo & 1 != 0 {
+        if this_ivl.start.point_class() != PointClassType::Vertex
+            || other_ivl.start.point_class() != PointClassType::Vertex
+        {
+            return Ok(());
+        }
+        let this_v = this_ivl
+            .start
+            .vertex_object()
+            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let other_v = other_ivl
+            .start
+            .vertex_object()
+            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        vertex_set_point(this_v, vertex_point(other_v)?)?;
+    }
+
+    // when asked - set EndVertex Geometry
+    if todo & 2 != 0 {
+        if this_ivl.end.point_class() != PointClassType::Vertex
+            || other_ivl.end.point_class() != PointClassType::Vertex
+        {
+            return Ok(());
+        }
+        let this_v = this_ivl
+            .end
+            .vertex_object()
+            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let other_v = other_ivl
+            .end
+            .vertex_object()
+            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        vertex_set_point(this_v, vertex_point(other_v)?)?;
+    }
+
+    // when asked - set MidEdge Geometry
+    if todo & 4 != 0 {
+        if this_ivl.mid.point_class() != PointClassType::Edge
+            || other_ivl.mid.point_class() != PointClassType::Edge
+        {
+            return Ok(());
+        }
+
+        // this mid edge
+        let this_edge = this_ivl
+            .mid
+            .edge_object()
+            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_edge_curve = edge_curve(geometry, this_edge)?;
+        let this_edge_ivl = edge_interval(Some(this_edge))?;
+
+        // other mid edge
+        let other_edge = other_ivl
+            .mid
+            .edge_object()
+            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let other_edge_curve = edge_curve(geometry, other_edge)?;
+        let other_edge_ivl = edge_interval(Some(other_edge))?;
+
+        // DropPoint locals
+        let other_start_guess = other_edge_ivl.min();
+        let other_end_guess = other_edge_ivl.max();
+        let xsect_tol_3d = edge_pair_xsect_tol_3d(k, this_edge, other_edge)?;
+
+        // this and other edge end point samples (statuses ignored)
+        let sample = |c: &Curve, t: f64| -> Result<[Vec3; 2]> {
+            Ok(match ignored(c.evaluate(t, 1, true, true))? {
+                Some(v) => [
+                    v.first().copied().unwrap_or(Vec3::UNDEF),
+                    v.get(1).copied().unwrap_or(Vec3::UNDEF),
+                ],
+                None => [Vec3::UNDEF; 2],
+            })
+        };
+        let this_start = sample(this_edge_curve, this_edge_ivl.min())?;
+        let this_end = sample(this_edge_curve, this_edge_ivl.max())?;
+        let other_start = sample(other_edge_curve, other_edge_ivl.min())?;
+        let other_end = sample(other_edge_curve, other_edge_ivl.max())?;
+
+        let start_start_close = this_start[0].closer_than(xsect_tol_3d, other_start[0]);
+        let start_end_close = this_start[0].closer_than(xsect_tol_3d, other_end[0]);
+        let end_start_close = this_end[0].closer_than(xsect_tol_3d, other_start[0]);
+        let end_end_close = this_end[0].closer_than(xsect_tol_3d, other_end[0]);
+
+        // ThisStartPoint drop to OtherEdge->Curve
+        let start_guess = if start_start_close {
+            Some(other_start_guess)
+        } else if start_end_close {
+            Some(other_end_guess)
+        } else {
+            None
+        };
+        let start_drop = other_edge_curve.drop_point(
+            k,
+            &other_edge_ivl,
+            this_start[0],
+            None,
+            xsect_tol_3d,
+            start_guess,
+            SolverOperation::Minimize,
+        );
+
+        // ThisEndPoint drop to OtherEdge->Curve
+        let end_guess = if end_end_close {
+            Some(other_end_guess)
+        } else if end_start_close {
+            Some(other_start_guess)
+        } else {
+            None
+        };
+        let end_drop = other_edge_curve.drop_point(
+            k,
+            &other_edge_ivl,
+            this_end[0],
+            None,
+            xsect_tol_3d,
+            end_guess,
+            SolverOperation::Minimize,
+        );
+
+        // check both drops worked - do no harm
+        let (Some(start_drop), Some(end_drop)) = (ignored(start_drop)?, ignored(end_drop)?) else {
+            return Ok(());
+        };
+        if !start_drop.success || !end_drop.success {
+            return Ok(());
+        }
+        let other_start_param = start_drop.parameter;
+        let other_end_param = end_drop.parameter;
+
+        // copy pOtherEdgeCurve
+        let mut copy = other_edge_curve.copy(k)?;
+
+        // Trim interval bounded by DropPoint Params (may snap to existing knots)
+        let mut final_ivl = Extent1d::new();
+        ignored(final_ivl.set_min_max(
+            min2(other_start_param, other_end_param),
+            max2(other_start_param, other_end_param),
+        ))?;
+        ignored(copy.trim(k, &mut final_ivl, TrimMode::Notify))?;
+
+        // reparameterize the OtherCurveCopy to the ThisEdge Interval
+        ignored(copy.edit_parameterization(k, &this_edge_ivl))?;
+
+        // when needed reverse parameterization
+        if (((start_start_close && start_end_close) || (end_start_close && end_end_close))
+            && this_start[1].dot(other_start[1]) <= 0.0)
+            || (((!start_start_close || !start_end_close) && (!end_start_close || !end_end_close))
+                && other_start_param > other_end_param)
+        {
+            ignored(copy.reverse_parameterization(k, &this_edge_ivl))?;
+        }
+
+        // Set ThisEdge->Curve from OtherEdge->Curve Copy
+        edge_set_curve(this_edge, copy)?;
+    }
+
+    Ok(())
+}
+
+// ---- classify face interval ------------------------------------------------------------
+
+/// The classification data `ClassifyFaceInterval` reads besides the interval.
+struct FaceIntervalContext<O> {
+    curve: Option<O>,
+    uv_curve1: Option<O>,
+    src_zone_tol_3d: f64,
+    face: O,
+    old_face: Option<O>,
+    do_point_classify: bool,
+    uv_space_okay: bool,
+    face_index: Option<u64>,
+}
+
+/// The answer of a face query on an interval end: inside the face, and whether the
+/// answer is to be doubted (`bPossibleProblem`).
+#[derive(Debug, Clone, Copy, Default)]
+struct EndInside {
+    inside: bool,
+    possible_problem: bool,
+}
+
+/// The body of [`CurveClassification::classify_face_interval`] on a copy of the
+/// interval.
+fn classify_face_interval_on<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    ctx: &FaceIntervalContext<O>,
+    ivl: &mut CurveInterval<O>,
+) -> Result<()> {
+    // no work - ClassifMid not classified to UNKNOWN or FACE when given pOldFace
+    let mid_class = ivl.mid.point_class();
+    if !(mid_class == PointClassType::Unknown
+        || (ctx.old_face.is_some() && mid_class == PointClassType::Face))
+    {
+        return Ok(());
+    }
+
+    // no work - OldFace not ivl's classifObj
+    if ctx.old_face.is_some()
+        && ivl.mid.face_object().is_some()
+        && ctx.old_face != ivl.mid.face_object()
+    {
+        return Ok(());
+    }
+
+    let curve = || -> Result<&Curve> {
+        let c = ctx.curve.ok_or(SolidError::invalid_input(
+            OP_FACE,
+            "no classification curve",
+        ))?;
+        geometry.curve(c).ok_or(SolidError::invalid_input(
+            OP_FACE,
+            "unresolved curve handle",
+        ))
+    };
+    let uv_curve1 = || -> Result<Option<&Curve>> {
+        match ctx.uv_curve1 {
+            Some(c) => geometry.curve(c).map(Some).ok_or(SolidError::invalid_input(
+                OP_FACE,
+                "unresolved UV curve handle",
+            )),
+            None => Ok(None),
+        }
+    };
+
+    let face = ctx.face;
+    let mut did_min = false;
+    let mut did_mid = false;
+    let mut did_max = false;
+    let mut min = EndInside::default();
+    let mut max = EndInside::default();
+
+    // 1. When StartPoint is classified to a vertex or edge (looking forwards)
+    match ivl.start.point_class() {
+        PointClassType::Vertex => {
+            did_min = true;
+            let v = ivl
+                .start
+                .object()
+                .ok_or(SolidError::null_pointer(OP_FACE))?;
+            min = face_find_vertex_sector(
+                face,
+                v,
+                curve()?,
+                uv_curve1()?,
+                ivl.interval.min(),
+                ivl.interval.max(),
+                OrientType::Same,
+                ctx.src_zone_tol_3d,
+                ctx.uv_space_okay,
+            )?;
+        }
+        PointClassType::Edge => {
+            did_min = true;
+            let e = ivl
+                .start
+                .object()
+                .ok_or(SolidError::null_pointer(OP_FACE))?;
+            min = face_edge_curve_on_classify(
+                face,
+                e,
+                ivl.start.t_param(),
+                curve()?,
+                &ivl.interval,
+                OrientType::Same,
+                ctx.src_zone_tol_3d,
+                ctx.uv_space_okay,
+                None,
+            )?;
+        }
+        _ => {}
+    }
+
+    // 2. when EndPoint is classified to a vertex or edge (looking backwards)
+    match ivl.end.point_class() {
+        PointClassType::Vertex => {
+            did_max = true;
+            let v = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
+            max = face_find_vertex_sector(
+                face,
+                v,
+                curve()?,
+                uv_curve1()?,
+                ivl.interval.max(),
+                ivl.interval.min(),
+                OrientType::Opposite,
+                ctx.src_zone_tol_3d,
+                ctx.uv_space_okay,
+            )?;
+        }
+        PointClassType::Edge => {
+            did_max = true;
+            let e = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
+            max = face_edge_curve_on_classify(
+                face,
+                e,
+                ivl.end.t_param(),
+                curve()?,
+                &ivl.interval,
+                OrientType::Opposite,
+                ctx.src_zone_tol_3d,
+                ctx.uv_space_okay,
+                ctx.face_index,
+            )?;
+        }
+        _ => {}
+    }
+
+    // 4. Do a PointClassification when interval couldn't be classified through
+    // endPoint classifications
+    if ctx.do_point_classify && !did_min && !did_max {
+        did_mid = true;
+
+        // pick a near interval mid-point curve parameter
+        let param = ivl.interval.evaluate(0.4567);
+
+        let uv1 = uv_curve1()?;
+        match uv1 {
+            Some(uv_curve) if ctx.uv_space_okay => {
+                let pnt = uv_curve.evaluate_point(param)?;
+                let uv = Point2::new(pnt.x, pnt.y);
+
+                // Don't put this face's classification directly into m_vMid [B97]
+                let mut temp = PointClassification::new(ctx.src_zone_tol_3d);
+                face_point_classify(face, uv, ctx.src_zone_tol_3d, false, true, &mut temp)?;
+                if temp.point_class() != PointClassType::Unknown {
+                    ivl.mid = temp;
+                }
+            }
+            _ => {
+                let pnt = curve()?.evaluate_point(param)?;
+
+                // Don't put this face's classification directly into m_vMid [B97]
+                let mut temp = PointClassification::new(ctx.src_zone_tol_3d);
+                // status ignored (assume the point was not on the surface)
+                ignored(face_point_3d_classify(
+                    face,
+                    pnt,
+                    ctx.src_zone_tol_3d,
+                    false,
+                    &mut temp,
+                ))?;
+                if temp.point_class() != PointClassType::Unknown {
+                    ivl.mid = temp;
+                }
+            }
+        }
+    }
+
+    // 5. check for endPoint-based classification conflicts
+    if did_min && did_max && min.inside != max.inside {
+        // Fix 1: use lone classification not marked as problematic
+        if min.possible_problem && !max.possible_problem {
+            min.inside = max.inside;
+        } else if !min.possible_problem && max.possible_problem {
+            max.inside = min.inside;
+        } else {
+            // Fix 2: use classification from endPoint with smallest deviation
+            let start_dev = ivl.start.deviation();
+            let end_dev = ivl.end.deviation();
+            if start_dev > end_dev + 1.0E-10 {
+                min.inside = max.inside;
+            } else if start_dev < end_dev - 1.0E-10 {
+                max.inside = min.inside;
+            } else {
+                return Ok(());
+            }
+        }
+    }
+
+    // 6. check for successful inside classification of interval to the face
+    if (did_min && min.inside)
+        || (did_max && max.inside)
+        || (did_mid
+            && ivl.mid.point_class() == PointClassType::Face
+            && ivl.mid.object() == Some(face))
+    {
+        // when the classification was done through the endPoints
+        if !did_mid {
+            ivl.mid.set_class_object(PointClassType::Face, Some(face));
+        }
+
+        // set any StartPoint or EndPoint with face (or no) classifications to the
+        // MidPoint's face
+        let mid_obj = ivl.mid.object();
+        if matches!(
+            ivl.start.point_class(),
+            PointClassType::Face | PointClassType::Unknown
+        ) {
+            ivl.start.set_class_object(PointClassType::Face, mid_obj);
+        }
+        if matches!(
+            ivl.end.point_class(),
+            PointClassType::Face | PointClassType::Unknown
+        ) {
+            ivl.end.set_class_object(PointClassType::Face, mid_obj);
+        }
+    }
+
+    Ok(())
+}
+
+// ---- partial coincidence ---------------------------------------------------------------
+
+/// Which return rule a coincidence block of `TestForPartialCoincidentEdges` follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CoinCheck {
+    /// First / last interval: return the first coincident range.
+    Range,
+    /// Single interval between vertices at one end pair: stop at the first coincident
+    /// range, reporting it only when its gap exceeds a third of the tolerance.
+    Vertices,
+}
+
+/// One coincidence block of `TestForPartialCoincidentEdges` over the edges of two
+/// interval interiors: `Some` to return (with or without a curve), `None` to go on.
+fn partial_coincidence<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    mid: &PointClassification<O>,
+    o_mid: &PointClassification<O>,
+    check: CoinCheck,
+) -> Result<Option<PartialCoincidence>> {
+    let edge = mid.object().ok_or(SolidError::null_pointer(OP_PARTIAL))?;
+    let o_edge = o_mid.object().ok_or(SolidError::null_pointer(OP_PARTIAL))?;
+    let curve = edge_curve(geometry, edge)?;
+    let o_curve = edge_curve(geometry, o_edge)?;
+    let edge_ivl = edge_interval(Some(edge))?;
+    let o_edge_ivl = edge_interval(Some(o_edge))?;
+    let xsect_tol_3d = edge_pair_xsect_tol_3d(k, edge, o_edge)?;
+
+    let coincide = |tol: f64| -> Result<Vec<Solution<NoObject>>> {
+        Ok(curve
+            .global_coincidence_checker(k, &edge_ivl, o_curve, &o_edge_ivl, tol, true, [None; 2])?
+            .solutions)
+    };
+
+    // find coincident points and spans between the two segments with larger tol
+    let mut solutions = coincide(3.0 * xsect_tol_3d)?;
+
+    let mut i = 0;
+    while i < solutions.len() {
+        let Some(mut sol) = solutions.get(i).copied() else {
+            break;
+        };
+
+        // skip points of coincidence
+        if sol.solution_type != SolutionType::RangeOfValues {
+            i += 1;
+            continue;
+        }
+
+        // set maxTol to max deviation at coincident range end points
+        let mut max_gap = max2(sol.start.solution_value, sol.end.solution_value);
+
+        // when MaxGap is larger tol
+        if max_gap > xsect_tol_3d {
+            // check for coincidence with normal tolerance (into the same array:
+            // rSol now reads the re-run's entry i, or keeps the old one)
+            solutions = coincide(xsect_tol_3d)?;
+            if let Some(s) = solutions.get(i) {
+                sol = *s;
+            }
+
+            // when segments still have coincident regions
+            if let Some(sol2) = solutions.first() {
+                if sol2.solution_type == SolutionType::RangeOfValues {
+                    max_gap = max2(sol.start.solution_value, sol.end.solution_value);
+                }
+            }
+        }
+
+        if check == CoinCheck::Vertices && max_gap <= xsect_tol_3d / 3.0 {
+            return Ok(Some(PartialCoincidence::default()));
+        }
+
+        // return a copy of the edge curve trimmed to the coincident range
+        let CurveKind::BSpline(bsc) = curve.kind() else {
+            return Err(SolidError::invalid_input(
+                OP_PARTIAL,
+                "coincident edge curve is not a B-spline",
+            ));
+        };
+        let mut copy = bsc.clone();
+        let mut coin_domain = Extent1d::from_min_max(
+            sol.start.parameters.first().copied().unwrap_or(0.0),
+            sol.end.parameters.first().copied().unwrap_or(0.0),
+        );
+        ignored(copy.trim(k, &mut coin_domain, TrimMode::Notify))?;
+
+        return Ok(Some(PartialCoincidence {
+            max_partial_coin_gap: max_gap,
+            new_curve_to_test: Some(copy),
+        }));
+    }
+
+    Ok(None)
+}
+
+// ---- helpers -----------------------------------------------------------------------------
+
+fn bad_boundary() -> SolidError {
+    SolidError::invalid_input(OP_INDEX, "boundary index out of range")
+}
+
+fn empty_classification(op: &'static str) -> SolidError {
+    SolidError::invalid_input(op, "empty classification")
+}
+
+fn is_vertex_or_edge<O: ClassObject>(pc: &PointClassification<O>) -> bool {
+    matches!(
+        pc.point_class(),
+        PointClassType::Vertex | PointClassType::Edge
+    )
+}
+
+/// `IsConnectedTo(crTgtOwners, lFoundIndx)`: on a match the found index is updated.
+fn connected_any<O: ClassObject>(
+    pc: &PointClassification<O>,
+    targets: &[O],
+    found_index: &mut u64,
+) -> Result<bool> {
+    match pc.is_connected_to_any(targets)? {
+        Some(i) => {
+            *found_index = i as u64;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// `SmTol::IsClosed(const SmObject*, SmXSectTol3d*)` for a curve with the tolerance
+/// given: closed over its natural interval; false for no curve.
+fn tol_is_closed_curve(curve: Option<&Curve>, xsect_tol_3d: f64) -> Result<bool> {
+    match curve {
+        None => Ok(false),
+        Some(c) => c.is_closed(&c.natural_interval(), xsect_tol_3d),
+    }
+}
+
+/// `SmCrvOnSurf(uv_curve, surface)` as a curve.
+fn crv_on_surf(k: &Kernel, uv_curve: &Curve, surface: Option<&Surface>) -> Result<Curve> {
+    let Some(surface) = surface else {
+        return Err(SolidError::invalid_input(OP_COIN, "no surface 1"));
+    };
+    let SurfaceKind::BSpline(bs) = surface.kind() else {
+        // UNPORTED(curve.crv_on_surf): SmCrvOnSurf over a non-B-spline surface (the
+        // Rust CrvOnSurf holds only B-spline surfaces)
+        return Err(SolidError::unported(
+            "SmCrvOnSurf (non-B-spline surface)",
+            "curve.crv_on_surf",
+        ));
+    };
+    Ok(Curve::from(CrvOnSurf::new(
+        k,
+        uv_curve.clone(),
+        bs.clone(),
+        None,
+        0,
+    )?))
+}
+
+// ---- callees in units not ported yet ---------------------------------------------------
+
+/// `SmEdge::GetCurve`.
+fn edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<&Curve> {
+    let _ = (geometry, edge);
+    // UNPORTED(topology.edge): SmEdge::GetCurve
+    Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
+}
+
+/// `SmEdge::GetInterval` (of the edge object of a classification).
+fn edge_interval<O: ClassObject>(edge: Option<O>) -> Result<Extent1d> {
+    let _ = edge;
+    // UNPORTED(topology.edge): SmEdge::GetInterval
+    Err(SolidError::unported("SmEdge::GetInterval", "topology.edge"))
+}
+
+/// `SmEdge::IsConnectedTo`.
+fn edge_is_connected_to<O: ClassObject>(edge: O, target: Option<O>) -> Result<bool> {
+    let _ = (edge, target);
+    // UNPORTED(topology.edge): SmEdge::IsConnectedTo
+    Err(SolidError::unported(
+        "SmEdge::IsConnectedTo",
+        "topology.edge",
+    ))
+}
+
+/// `SmVertex::IsConnectedTo`.
+fn vertex_is_connected_to<O: ClassObject>(vertex: O, target: Option<O>) -> Result<bool> {
+    let _ = (vertex, target);
+    // UNPORTED(topology.vertex): SmVertex::IsConnectedTo
+    Err(SolidError::unported(
+        "SmVertex::IsConnectedTo",
+        "topology.vertex",
+    ))
+}
+
+/// `SmVertex::GetPoint`.
+fn vertex_point<O: ClassObject>(vertex: O) -> Result<Point3> {
+    let _ = vertex;
+    // UNPORTED(topology.vertex): SmVertex::GetPoint
+    Err(SolidError::unported(
+        "SmVertex::GetPoint",
+        "topology.vertex",
+    ))
+}
+
+/// `SmVertex::SetPoint`.
+fn vertex_set_point<O: ClassObject>(vertex: O, point: Point3) -> Result<()> {
+    let _ = (vertex, point);
+    // UNPORTED(topology.vertex): SmVertex::SetPoint
+    Err(SolidError::unported(
+        "SmVertex::SetPoint",
+        "topology.vertex",
+    ))
+}
+
+/// `SmEdge::SetCurve(curve, TRUE, TRUE, TRUE)` and `SmCurve::SetOwner(edge)`.
+fn edge_set_curve<O: ClassObject>(edge: O, curve: Curve) -> Result<()> {
+    let _ = (edge, curve);
+    // UNPORTED(topology.edge): SmEdge::SetCurve
+    Err(SolidError::unported("SmEdge::SetCurve", "topology.edge"))
+}
+
+/// `SmTol::GetXSectTol3d(const SmObject*, const SmObject*)` of two edges (their
+/// `GetTolerance`).
+fn edge_pair_xsect_tol_3d<O: ClassObject>(k: &Kernel, edge: O, other: O) -> Result<f64> {
+    let _ = (k, edge, other);
+    // UNPORTED(topology.edge): SmEdge::GetTolerance (SmTol::GetXSectTol3d of two edges)
+    Err(SolidError::unported(
+        "SmEdge::GetTolerance",
+        "topology.edge",
+    ))
+}
+
+/// `SmFace::FindVertexSector`: inside when a vertexuse sector of `face` at `vertex`
+/// contains the curve leaving `from` towards `to`.
+fn face_find_vertex_sector<O: ClassObject>(
+    face: O,
+    vertex: O,
+    curve: &Curve,
+    uv_curve: Option<&Curve>,
+    from: f64,
+    to: f64,
+    direction: OrientType,
+    src_zone_tol_3d: f64,
+    uv_space_okay: bool,
+) -> Result<EndInside> {
+    let _ = (
+        face,
+        vertex,
+        curve,
+        uv_curve,
+        from,
+        to,
+        direction,
+        src_zone_tol_3d,
+        uv_space_okay,
+    );
+    // UNPORTED(topology.face_p4): SmFace::FindVertexSector
+    Err(SolidError::unported(
+        "SmFace::FindVertexSector",
+        "topology.face_p4",
+    ))
+}
+
+/// `SmFace::EdgeCurveOnClassify`.
+fn face_edge_curve_on_classify<O: ClassObject>(
+    face: O,
+    edge: O,
+    edge_param: f64,
+    curve: &Curve,
+    interval: &Extent1d,
+    direction: OrientType,
+    src_zone_tol_3d: f64,
+    uv_space_okay: bool,
+    face_index: Option<u64>,
+) -> Result<EndInside> {
+    let _ = (
+        face,
+        edge,
+        edge_param,
+        curve,
+        interval,
+        direction,
+        src_zone_tol_3d,
+        uv_space_okay,
+        face_index,
+    );
+    // UNPORTED(query.face_p1): SmFace::EdgeCurveOnClassify
+    Err(SolidError::unported(
+        "SmFace::EdgeCurveOnClassify",
+        "query.face_p1",
+    ))
+}
+
+/// `SmFace::PointClassify(uv, tol, bDoXSects, bUseUV, pc)`.
+fn face_point_classify<O: ClassObject>(
+    face: O,
+    uv: Point2,
+    src_zone_tol_3d: f64,
+    do_xsects: bool,
+    use_uv: bool,
+    point_class: &mut PointClassification<O>,
+) -> Result<()> {
+    let _ = (face, uv, src_zone_tol_3d, do_xsects, use_uv, point_class);
+    // UNPORTED(query.face_p2): SmFace::PointClassify
+    Err(SolidError::unported(
+        "SmFace::PointClassify",
+        "query.face_p2",
+    ))
+}
+
+/// `SmFace::Point3DClassify(point, tol, bDoXSects, pc)`.
+fn face_point_3d_classify<O: ClassObject>(
+    face: O,
+    point: Point3,
+    src_zone_tol_3d: f64,
+    do_xsects: bool,
+    point_class: &mut PointClassification<O>,
+) -> Result<()> {
+    let _ = (face, point, src_zone_tol_3d, do_xsects, point_class);
+    // UNPORTED(query.face_p1): SmFace::Point3DClassify
+    Err(SolidError::unported(
+        "SmFace::Point3DClassify",
+        "query.face_p1",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::line::{BoundedLineOptions, Line};
+    use crate::intersect::point_class::ClassObjectKind as K;
+    use crate::surface::volume::Volume;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct H(usize, K);
+
+    impl ClassObject for H {
+        fn class_kind(&self) -> K {
+            self.1
+        }
+    }
+
+    struct Geo {
+        curves: Vec<Curve>,
+    }
+
+    impl ClassGeometry<H> for Geo {
+        fn curve(&self, o: H) -> Option<&Curve> {
+            self.curves.get(o.0)
+        }
+        fn surface(&self, _o: H) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _o: H) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _o: H) -> Option<Point3> {
+            None
+        }
+    }
+
+    fn line(a: [f64; 3], b: [f64; 3]) -> Curve {
+        Curve::from(Line::bounded(
+            Vec3::from_array(a),
+            Vec3::from_array([b[0] - a[0], b[1] - a[1], b[2] - a[2]]),
+            &Extent1d::from_min_max(0.0, 1.0),
+            &BoundedLineOptions::default(),
+        ))
+    }
+
+    fn classification(k: &Kernel, params: &[f64]) -> CurveClassification<H> {
+        let mut cc = CurveClassification::new(k);
+        cc.set_size(k, params.len() - 1).unwrap();
+        for (i, w) in params.windows(2).enumerate() {
+            cc.at_mut(i)
+                .unwrap()
+                .set_interval(&Extent1d::from_min_max(w[0], w[1]));
+        }
+        cc.set_curve(Some(H(0, K::Curve)), false);
+        cc
+    }
+
+    #[test]
+    fn boundary_indices_and_mates() {
+        let k = Kernel::default();
+        let geo = Geo {
+            curves: vec![line([0.0; 3], [1.0, 0.0, 0.0])],
+        };
+        let cc = classification(&k, &[0.0, 0.25, 1.0]);
+        assert_eq!(cc.point_class_by_index(0).unwrap().1, 0.0);
+        assert_eq!(cc.point_class_by_index(1).unwrap().1, 0.25);
+        assert_eq!(cc.point_class_by_index(2).unwrap().1, 1.0);
+        assert!(cc.point_class_by_index(3).is_err());
+        assert!(cc.point_class_mate_by_index(&k, &geo, 0).unwrap().is_none());
+        assert!(cc.point_class_mate_by_index(&k, &geo, 2).unwrap().is_none());
+        assert!(cc.point_class_mate_by_index(&k, &geo, 1).unwrap().is_some());
+        assert!(CurveClassification::<H>::new(&k)
+            .point_class_by_index(0)
+            .is_err());
+    }
+
+    #[test]
+    fn crossing_face_and_touches() {
+        let k = Kernel::default();
+        let mut cc = classification(&k, &[0.0, 0.5, 1.0]);
+        let face = H(7, K::Face);
+        cc.at_mut(1)
+            .unwrap()
+            .mid
+            .set_class_object(PointClassType::Face, Some(face));
+        assert!(cc.is_crossing_face(None));
+        assert!(cc.is_crossing_face(Some(face)));
+        assert!(!cc.is_crossing_face(Some(H(8, K::Face))));
+        assert!(cc.point_classifies_connected_to(&[]).unwrap().is_empty());
+        assert!(!cc.is_crossed_by_edge().unwrap());
+        assert!(cc.find_vertex_objects(None).unwrap().vertices.is_empty());
+        assert!(cc.find_edge_objects(None, 3).unwrap().is_empty());
+    }
+
+    #[test]
+    fn collapse_degenerate_interval() {
+        let k = Kernel::default();
+        let geo = Geo {
+            curves: vec![line([0.0; 3], [1.0, 0.0, 0.0])],
+        };
+        let mut cc = classification(&k, &[0.0, 0.5, 0.5, 1.0]);
+        assert!(cc.collapse_interval(&k, &geo, 0).is_err());
+        cc.collapse_interval(&k, &geo, 1).unwrap();
+        assert_eq!(cc.size(), 2);
+        assert!(cc.collapse_interval(&k, &geo, 5).is_err());
+    }
+
+    #[test]
+    fn partial_coincidence_needs_intervals() {
+        let k = Kernel::default();
+        let geo = Geo {
+            curves: vec![line([0.0; 3], [1.0, 0.0, 0.0])],
+        };
+        let cc = classification(&k, &[0.0, 1.0]);
+        let r = cc.test_for_partial_coincident_edges(&k, &geo, &cc).unwrap();
+        assert_eq!(r.max_partial_coin_gap, 0.0);
+        assert!(r.new_curve_to_test.is_none());
+    }
+}

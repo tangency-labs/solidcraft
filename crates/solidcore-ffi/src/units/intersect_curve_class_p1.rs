@@ -190,14 +190,14 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
+/// Sequential reader over the input (also used by unit `intersect.curve_class_p7`).
+pub(crate) struct Reader<'a> {
+    pub(crate) input: &'a [f64],
+    pub(crate) at: usize,
 }
 
 impl<'a> Reader<'a> {
-    fn num(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
             .get(self.at)
@@ -208,7 +208,7 @@ impl<'a> Reader<'a> {
     }
 
     /// A finite value of magnitude at most `max`.
-    fn bounded(&mut self, max: f64) -> Result<f64, FfiError> {
+    pub(crate) fn bounded(&mut self, max: f64) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > max {
             return Err(bad(format!("value {v} not finite or too large")));
@@ -216,19 +216,19 @@ impl<'a> Reader<'a> {
         Ok(v)
     }
 
-    fn finite(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn finite(&mut self) -> Result<f64, FfiError> {
         self.bounded(MAX_COORD)
     }
 
-    fn value(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn value(&mut self) -> Result<f64, FfiError> {
         self.bounded(MAX_VALUE)
     }
 
-    fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
+    pub(crate) fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
         Ok([self.finite()?, self.finite()?, self.finite()?])
     }
 
-    fn nonzero3(&mut self) -> Result<[f64; 3], FfiError> {
+    pub(crate) fn nonzero3(&mut self) -> Result<[f64; 3], FfiError> {
         let v = self.vec3()?;
         if v.iter().map(|c| c * c).sum::<f64>() < 1e-12 {
             return Err(bad("zero vector"));
@@ -237,7 +237,7 @@ impl<'a> Reader<'a> {
     }
 
     /// An integer in `0..=max`.
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
+    pub(crate) fn index(&mut self, max: usize) -> Result<usize, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
             return Err(bad(format!("bad index/count {v}")));
@@ -246,7 +246,7 @@ impl<'a> Reader<'a> {
     }
 
     /// `-1` (`None`) or an object index below `len`.
-    fn object(&mut self, len: usize) -> Result<Option<usize>, FfiError> {
+    pub(crate) fn object(&mut self, len: usize) -> Result<Option<usize>, FfiError> {
         let v = self.num()?;
         if v == -1.0 {
             return Ok(None);
@@ -257,11 +257,11 @@ impl<'a> Reader<'a> {
         Ok(Some(v as usize))
     }
 
-    fn flag(&mut self) -> Result<bool, FfiError> {
+    pub(crate) fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
     }
 
-    fn take(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
+    pub(crate) fn take(&mut self, k: usize) -> Result<&'a [f64], FfiError> {
         let end = self.at.checked_add(k).ok_or_else(|| bad("overflow"))?;
         let s = self
             .input
@@ -461,23 +461,19 @@ fn touches(rd: &mut Reader<'_>, n_obj: usize) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// Checks the static shape of a script (what [`run`] checks before calling the shim).
-///
-/// # Errors
-///
-/// [`FfiError::InvalidArgument`] for a malformed script.
-pub fn validate(input: &[f64]) -> Result<(), FfiError> {
-    let mut rd = Reader { input, at: 0 };
+/// Checks the object pool block `n_obj obj*n_obj` (also used by unit
+/// `intersect.curve_class_p7`) and returns the object count.
+pub(crate) fn validate_objects(rd: &mut Reader<'_>) -> Result<usize, FfiError> {
     let n_obj = rd.index(MAX_OBJECTS)?;
     for i in 0..n_obj {
         let k = rd.index(kind::OTHER)?;
         match k {
-            kind::CURVE => curve_block(&mut rd)?,
+            kind::CURVE => curve_block(rd)?,
             kind::PLANE => {
                 rd.vec3()?;
                 rd.nonzero3()?;
             }
-            kind::BSURF => surface_block(&mut rd)?,
+            kind::BSURF => surface_block(rd)?,
             kind::POINT => {
                 rd.vec3()?;
             }
@@ -487,6 +483,17 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
             _ => {}
         }
     }
+    Ok(n_obj)
+}
+
+/// Checks the static shape of a script (what [`run`] checks before calling the shim).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed script.
+pub fn validate(input: &[f64]) -> Result<(), FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    let n_obj = validate_objects(&mut rd)?;
     let n_ops = rd.index(MAX_OPS)?;
     for _ in 0..n_ops {
         let code = rd.index(op::LAST)?;
