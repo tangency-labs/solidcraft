@@ -3497,10 +3497,10 @@ soft_depends_on = ["curve.curve_p2", "geom.context", "geom.object", "nurbs.b_spl
 est_lines = 381
 layer = 59
 tests = ["SM_API_test:TestSmCreateRuledSurface", "SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "SM_API_test:TestSmCreateSurfaceRevolution"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "9 fns; largest: SmApiCreateSkinPrimitive, SmApiCreateSurfaceRevolution, SmApiCreateSkin, SmApiCreateSkinFromFaces; entry points: SmApiCreateExtrude, SmApiCreateRuledSurface, SmApiCreateSkin, SmApiCreateSkinFromFaces, SmApiCreateSkinPrimitive, SmApiCreateSurfaceRevolution, SmApiCreateSweep; 15 upstream test entry points reach this unit"
+notes = "partial (PR #37): difftest cases=882 passed=831 deferred=51 (blocked_by primitive.primitive_creation_p2(11), primitive.primitive_creation_p3(40): SmApiCreateSkinPrimitive / SmApiCreateSkinFromFaces / SmApiCreateSurfaceRevolution validate and copy inputs, then stub SmPrimitiveCreation::CreateSkinPrimitive / CreateSkinFromFaces / CreateRotationalSweep); extrude, sweep, ruled and skin bit-identical; 9 fns; largest: SmApiCreateSkinPrimitive, SmApiCreateSurfaceRevolution, SmApiCreateSkin, SmApiCreateSkinFromFaces; entry points: SmApiCreateExtrude, SmApiCreateRuledSurface, SmApiCreateSkin, SmApiCreateSkinFromFaces, SmApiCreateSkinPrimitive, SmApiCreateSurfaceRevolution, SmApiCreateSweep; 15 upstream test entry points reach this unit"
 
 [[unit]]
 id = "blend.fillet_geom_p3"
