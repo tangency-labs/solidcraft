@@ -1077,7 +1077,8 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
     match s.map(Surface::kind) {
         Some(sp2::SurfaceKind::BSpline(b)) => dump_bss(o, b),
         // `put_state` of a surface that is not a B-spline
-        Some(sp2::SurfaceKind::CurveBounded(_) | sp2::SurfaceKind::Plane(_)) | None => o.push(0.0),
+        Some(sp2::SurfaceKind::CurveBounded(_) | sp2::SurfaceKind::Plane(_) | sp2::SurfaceKind::Step(_))
+        | None => o.push(0.0),
     }
 }
 
@@ -2060,7 +2061,7 @@ fn gen_bss(rng: &mut Rng) -> BssIn {
     }
 }
 
-pub(crate) fn gen_curve(rng: &mut Rng, dim: u64) -> CrvIn {
+fn gen_curve(rng: &mut Rng, dim: u64) -> CrvIn {
     let p = 1 + rng.below(3) as usize;
     let n = p + rng.below(4) as usize;
     let rational = rng.chance(0.15);

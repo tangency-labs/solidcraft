@@ -467,8 +467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "trimmed_plane_trapezoid",
@@ -775,8 +775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -966,16 +966,12 @@
       "values_compared": 251
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsDegeneratePoint",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0055",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781705",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1099,8 +1095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0071",
@@ -1286,16 +1282,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsDegeneratePoint",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0094",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781744",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1643,8 +1635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0138",
@@ -1914,16 +1906,12 @@
       "values_compared": 109
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsDegeneratePoint",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0170",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781820",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2850,16 +2838,12 @@
       "values_compared": 227
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0286",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781936",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -3154,16 +3138,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0323",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781973",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -3303,8 +3283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0341",
@@ -3678,16 +3658,12 @@
       "values_compared": 150
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782037",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -3882,16 +3858,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0412",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782062",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -4347,8 +4319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0469",
@@ -4438,16 +4410,12 @@
       "values_compared": 142
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0480",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782130",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -4966,16 +4934,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0545",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782195",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -5734,16 +5698,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsDegeneratePoint",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782290",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5887,8 +5847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0658",
@@ -5978,16 +5938,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0669",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782319",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6163,8 +6119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0691",
@@ -6207,8 +6163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0696",
@@ -6243,13 +6199,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 34,
+  "cases_deferred": 23,
   "cases_failed": 0,
-  "cases_passed": 729,
+  "cases_passed": 740,
   "cases_total": 763,
   "deferred_by_unit": {
     "surface.plane_p2": 5,
-    "surface.surface_p1": 29
+    "surface.surface_p6": 9,
+    "surface.surface_p7": 9
   },
   "max_rel_err": 0.0,
   "pass": true,

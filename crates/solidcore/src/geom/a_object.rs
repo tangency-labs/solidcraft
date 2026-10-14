@@ -991,7 +991,8 @@ pub fn get_or_create_object_cache(
         CacheMaker::Surface => {
             // (the face state of an old trimmed cache lives with the cache; an old
             // cache is reused)
-            match crate::surface::surface::p1::validate_surface_cache(cache_type, old, false, false) {
+            match crate::surface::surface::p1::validate_surface_cache(cache_type, old, false, false)
+            {
                 Ok(Some(old)) => Ok(Some(old)),
                 // a new surface cache needs the surface: built with make_trim_srf_cache /
                 // make_surface_cache

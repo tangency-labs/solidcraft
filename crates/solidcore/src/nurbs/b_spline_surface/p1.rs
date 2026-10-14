@@ -106,12 +106,16 @@
 //!   types to `SmSurface::IsKindOf` ([`crate::surface::surface::p2::is_kind_of`]);
 //!   a plain B-spline is never one of the analytic types `CalculateBoundingBox` and
 //!   `IsParallelToVector` test for first. `CalculateBoundingBox` also calls
-//!   `SmSurface::EvaluateNormal` (`surface::surface::p7`) and `SmSurface::GetFace`
-//!   (`surface.surface_p1`, unported); `CreateOffsetSurface` and `IsDegenerateCurve` pass the
-//!   call to `SmSurface` (`surface.surface_p1`); `STEPInversion` calls
-//!   `SmSurface::LocalPointSolve` / `GlobalPointSolve` (`surface.surface_p1`),
-//!   `IsSingularity` and `IsClosed` (`surface.surface_p5`). Those calls return
-//!   [`SolidError::Unported`] until the units are ported.
+//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`); its zone tolerance expansion
+//!   reads `GetFace()`, and a bare B-spline has no owner (the owner is held by the
+//!   [`Surface`](crate::surface::surface::Surface) wrapper), so it uses
+//!   `SM_ZONE_TOL_3D`; `CreateOffsetSurface` passes the call to `SmSurface`, which needs
+//!   `SmOffsetSurface` (`surface.offset_surface`); `STEPInversion` calls
+//!   `SmSurface::LocalPointSolve` (`surface.surface_p5`) / `GlobalPointSolve`
+//!   (`surface.surface_p4`), `IsSingularity` and `IsClosed` (`surface.surface_p5`).
+//!   Those calls return [`SolidError::Unported`] until the units are ported.
+//!   `IsDegenerateCurve` runs the `SmSurface` base body on a copy of the B-spline
+//!   wrapped as a `Surface` (without owner).
 
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -481,40 +485,38 @@ fn evaluate_normal(srf: &BSplineSurface, uv: Point2) -> Result<Vec3> {
 }
 
 /// The zone tolerance of the owning face or brep, `SM_ZONE_TOL_3D` without owner
-/// (`GetFace() ? GetFace()->GetTolerance() : GetBrep() ? ... : SM_ZONE_TOL_3D`).
-fn owner_zone_tolerance(_srf: &BSplineSurface) -> Result<f64> {
-    // UNPORTED(surface.surface_p1): SmSurface::GetFace
-    Err(SolidError::Unported {
-        upstream: "SmSurface::GetFace",
-        unit: "surface.surface_p1",
-    })
+/// (`GetFace() ? GetFace()->GetTolerance() : GetBrep() ? ... : SM_ZONE_TOL_3D`). A
+/// bare B-spline has no owner (the owner is held by the
+/// [`Surface`](crate::surface::surface::Surface) wrapper, whose
+/// [`calculate_bounding_box`](crate::surface::surface::Surface::calculate_bounding_box)
+/// handles a face owner before calling here): `SM_ZONE_TOL_3D`.
+const fn owner_zone_tolerance(_srf: &BSplineSurface) -> f64 {
+    crate::geom::tol::ZONE_TOL_3D
 }
 
-/// `SmSurface::CreateOffsetSurface`.
+/// `SmSurface::CreateOffsetSurface`: its body constructs an `SmOffsetSurface`.
 fn surface_create_offset_surface(
     _srf: &BSplineSurface,
     _signed_offset_distance: f64,
     _approx_tol_3d: f64,
 ) -> Result<BSplineSurface> {
-    // UNPORTED(surface.surface_p1): SmSurface::CreateOffsetSurface
+    // UNPORTED(surface.offset_surface): SmOffsetSurface (from SmSurface::CreateOffsetSurface)
     Err(SolidError::Unported {
-        upstream: "SmSurface::CreateOffsetSurface",
-        unit: "surface.surface_p1",
+        upstream: "SmOffsetSurface",
+        unit: "surface.offset_surface",
     })
 }
 
-/// `SmSurface::IsDegenerateCurve`.
+/// `SmSurface::IsDegenerateCurve` (the base body, on a copy of the B-spline as an
+/// [`SmSurface`](crate::surface::surface::Surface)).
 fn surface_is_degenerate_curve(
-    _srf: &BSplineSurface,
-    _angle_tol_deg: f64,
-    _uv_domain: Option<&Extent2d>,
-    _tol_3d: f64,
+    srf: &BSplineSurface,
+    angle_tol_deg: f64,
+    uv_domain: Option<&Extent2d>,
+    tol_3d: f64,
 ) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): SmSurface::IsDegenerateCurve
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsDegenerateCurve",
-        unit: "surface.surface_p1",
-    })
+    let s = crate::surface::surface::Surface::from(srf.clone());
+    crate::surface::surface::p1::base_is_degenerate_curve(&s, angle_tol_deg, uv_domain, tol_3d)
 }
 
 /// `SmSurface::LocalPointSolve(domain, SM_SO_INTERSECT, point, guess, ..)`: whether it
@@ -525,10 +527,10 @@ fn local_point_solve(
     _point: Point3,
     _guess: Point2,
 ) -> Result<(bool, Point2)> {
-    // UNPORTED(surface.surface_p1): SmSurface::LocalPointSolve
+    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
     Err(SolidError::Unported {
         upstream: "SmSurface::LocalPointSolve",
-        unit: "surface.surface_p1",
+        unit: "surface.surface_p5",
     })
 }
 
@@ -540,10 +542,10 @@ fn global_point_solve(
     _point: Point3,
     _tol_3d: f64,
 ) -> Result<Vec<Point2>> {
-    // UNPORTED(surface.surface_p1): SmSurface::GlobalPointSolve
+    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
     Err(SolidError::Unported {
         upstream: "SmSurface::GlobalPointSolve",
-        unit: "surface.surface_p1",
+        unit: "surface.surface_p4",
     })
 }
 
@@ -1016,7 +1018,7 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::IsDegenerateCurve` is not ported yet.
+    /// Those of `SmSurface::IsDegenerateCurve`.
     pub fn is_degenerate_curve(
         &self,
         angle_tol_deg: f64,
@@ -1362,11 +1364,11 @@ impl BSplineSurface {
         // When asked, expand the normal box by the zone tolerance
         if req.expand_by_zone_tol {
             if let Some(nb) = normal_box.as_mut() {
-                nb.expand_absolute(owner_zone_tolerance(self)?);
+                nb.expand_absolute(owner_zone_tolerance(self));
             }
             // When asked, expand the pPseudoBox box by the zone tolerance
             if let Some(pb) = pseudo_box.as_mut() {
-                pb.expand_absolute(owner_zone_tolerance(self)?);
+                pb.expand_absolute(owner_zone_tolerance(self));
             }
         }
 

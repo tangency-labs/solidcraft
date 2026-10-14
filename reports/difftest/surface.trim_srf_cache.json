@@ -43,8 +43,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "Surface_sms_classify",
@@ -55,8 +55,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "Surface_sms_build",
@@ -67,8 +67,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sms_classify",
@@ -79,8 +79,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sms_build",
@@ -323,8 +323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -371,8 +371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0021",
@@ -539,8 +539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0040",
@@ -683,8 +683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0057",
@@ -879,8 +879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0080",
@@ -891,8 +891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0081",
@@ -911,8 +911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0083",
@@ -987,8 +987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0092",
@@ -1007,8 +1007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0094",
@@ -1019,8 +1019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0095",
@@ -1067,8 +1067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -1079,8 +1079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -1167,8 +1167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0111",
@@ -1227,8 +1227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0118",
@@ -1335,8 +1335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0131",
@@ -1411,8 +1411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0140",
@@ -1431,8 +1431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0142",
@@ -1579,8 +1579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0160",
@@ -1591,8 +1591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0161",
@@ -1775,8 +1775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0182",
@@ -1971,8 +1971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0206",
@@ -2063,8 +2063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0217",
@@ -2111,8 +2111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0222",
@@ -2255,8 +2255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -2275,8 +2275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0241",
@@ -2335,8 +2335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0248",
@@ -2419,8 +2419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0258",
@@ -2603,8 +2603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0279",
@@ -2623,8 +2623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0281",
@@ -2659,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0285",
@@ -2711,8 +2711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0291",
@@ -2967,8 +2967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0322",
@@ -2979,8 +2979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0323",
@@ -3263,8 +3263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0356",
@@ -3315,8 +3315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0362",
@@ -3431,8 +3431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0376",
@@ -3595,8 +3595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0396",
@@ -3647,8 +3647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0402",
@@ -3667,8 +3667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0404",
@@ -3807,8 +3807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0421",
@@ -3875,8 +3875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0428",
@@ -4071,8 +4071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0451",
@@ -4115,8 +4115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0456",
@@ -4127,8 +4127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0457",
@@ -4171,8 +4171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0462",
@@ -4183,8 +4183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0463",
@@ -4243,8 +4243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0470",
@@ -4291,8 +4291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0475",
@@ -4311,8 +4311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0477",
@@ -4355,8 +4355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0482",
@@ -4699,8 +4699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0524",
@@ -4835,8 +4835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0540",
@@ -4863,8 +4863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0543",
@@ -4947,8 +4947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0553",
@@ -4983,8 +4983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0557",
@@ -5075,8 +5075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0568",
@@ -5103,8 +5103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0571",
@@ -5115,8 +5115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0572",
@@ -5287,8 +5287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0593",
@@ -5315,8 +5315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmBrep::CreateFaceFromSurface",
+        "unit": "topology.brep_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0596",
@@ -5356,10 +5356,9 @@
   "cases_passed": 526,
   "cases_total": 621,
   "deferred_by_unit": {
-    "surface.surface_p1": 36,
+    "query.tess": 4,
     "surface.surface_p3": 29,
-    "surface.surface_p6": 28,
-    "topology.edgeuse_p1": 2
+    "topology.brep_p8": 60
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -761,7 +761,7 @@ void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
         if (want_p)
         {
             for (int i = 0; i < 3; i++)
-                put_vec(o, pb.GetBasisVector(i));
+                put_vec(o, pb.GetBasis((ULONG)i));
             for (int i = 0; i < 3; i++)
             {
                 o.push_back(pb.GetInterval(i).GetMin());
@@ -772,13 +772,22 @@ void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     delete s;
 }
 
-// `W S cont uv vec`: GetDomainWithContinuity (virtual).
+// `W S cont uv vec`: GetDomainWithContinuity (virtual): `status [D]` (`SM_ERR` without a surface
+// cache, where upstream would crash).
 void op_dom_cont(Rd& rd, const SmContext& ctx, std::vector<double>& o)
 {
     SmSurface* s = read_wrapped(rd, ctx);
     SmContinuityType c = (SmContinuityType)rd.idx();
     SmPoint2d uv = rd.uv();
     SmVector2d v = rd.uv();
+    // the base body reads the surface cache through a NULL pointer when none can be made
+    // (after SE(SM_ERR)): report SM_ERR instead (the built cache is reused by the call)
+    if (s->GetType() != SmSTEPSurface_TYPE && smsurf_GetSurfaceCache(s) == NULL)
+    {
+        o.push_back(st(SM_ERR));
+        delete s;
+        return;
+    }
     o.push_back(0.0);
     put_dom(o, s->GetDomainWithContinuity(c, uv, v));
     delete s;

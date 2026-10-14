@@ -466,16 +466,12 @@
       "values_compared": 627
     },
     {
-      "deferred": {
-        "symbol": "smsurf_EvaluateNormalSection",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0057",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023565789891795091",
-      "values_compared": 0
+      "values_compared": 2331
     },
     {
       "deferred": {
@@ -4530,16 +4526,12 @@
       "values_compared": 719
     },
     {
-      "deferred": {
-        "symbol": "smsurf_EvaluateNormalSection",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0553",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023565789891795587",
-      "values_compared": 0
+      "values_compared": 617
     },
     {
       "max_rel_err": 0.0,
@@ -6694,16 +6686,12 @@
       "values_compared": 463
     },
     {
-      "deferred": {
-        "symbol": "smsurf_EvaluateNormalSection",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0816",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023565789891795850",
-      "values_compared": 0
+      "values_compared": 610
     },
     {
       "max_rel_err": 0.0,
@@ -11438,16 +11426,12 @@
       "values_compared": 1151
     },
     {
-      "deferred": {
-        "symbol": "smsurf_EvaluateNormalSection",
-        "unit": "surface.surface_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen1390",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023565789891796424",
-      "values_compared": 0
+      "values_compared": 557
     },
     {
       "max_rel_err": 0.0,
@@ -12459,12 +12443,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 94,
+  "cases_deferred": 100,
   "cases_failed": 0,
-  "cases_passed": 1416,
+  "cases_passed": 1410,
   "cases_total": 1510,
   "deferred_by_unit": {
-    "surface.surface_p1": 4,
     "surface.surface_p11": 36,
     "surface.surface_p3": 48,
     "surface.surface_p5": 6

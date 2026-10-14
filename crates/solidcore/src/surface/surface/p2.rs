@@ -557,7 +557,9 @@ impl Surface {
     pub fn step_uv_domain(&self) -> Extent2d {
         match &self.kind {
             SurfaceKind::Plane(s) => s.step_uv_domain(),
-            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_step_uv_domain(self),
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+                base_step_uv_domain(self)
+            }
         }
     }
 
@@ -706,7 +708,9 @@ impl Surface {
                 target_distance,
                 None,
             ),
-            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_drop_point_fast(),
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+                base_drop_point_fast()
+            }
         }
     }
 

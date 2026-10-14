@@ -227,8 +227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "surfaces_line_plane_normal",
@@ -375,8 +375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "edge_partial_plane_axis",
@@ -443,8 +443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "edge_circle_gen_plane_normal",
@@ -2135,8 +2135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0058",
@@ -2275,8 +2275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0075",
@@ -2455,8 +2455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0097",
@@ -2499,8 +2499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0102",
@@ -2551,8 +2551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0108",
@@ -2659,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0121",
@@ -2671,8 +2671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0122",
@@ -2939,8 +2939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0155",
@@ -2975,8 +2975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0159",
@@ -3027,8 +3027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0165",
@@ -3367,8 +3367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0207",
@@ -3427,8 +3427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0214",
@@ -3479,8 +3479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0220",
@@ -3699,8 +3699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0247",
@@ -3711,8 +3711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0248",
@@ -3731,8 +3731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0250",
@@ -3895,8 +3895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0270",
@@ -3955,8 +3955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0277",
@@ -3967,8 +3967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0278",
@@ -4347,8 +4347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0325",
@@ -4671,8 +4671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0365",
@@ -4859,8 +4859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0388",
@@ -5663,8 +5663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0488",
@@ -6027,8 +6027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0533",
@@ -6079,8 +6079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0539",
@@ -6107,8 +6107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0542",
@@ -6151,8 +6151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0547",
@@ -6235,8 +6235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetFace",
-        "unit": "surface.surface_p1"
+        "symbol": "SmPlane::TrimCurveToPlaneDomain",
+        "unit": "surface.plane_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0557",
@@ -6588,7 +6588,7 @@
   "cases_passed": 776,
   "cases_total": 807,
   "deferred_by_unit": {
-    "surface.surface_p1": 31
+    "surface.plane_p2": 31
   },
   "max_rel_err": 0.0,
   "pass": true,

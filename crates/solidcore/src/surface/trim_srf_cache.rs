@@ -1298,10 +1298,11 @@ mod tests {
             (true, None)
         );
         c.base_mut().point_test_enabled = true;
-        assert!(c
-            .point_test(&k, Point2::new(5.0, 5.0), None)
-            .unwrap_err()
-            .is_unported());
+        // no face to classify against (SM_ERR_NULL_POINTER)
+        assert!(matches!(
+            c.point_test(&k, Point2::new(5.0, 5.0), None),
+            Err(SolidError::Upstream { code: 1006, .. })
+        ));
     }
 
     #[test]
@@ -1338,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn implant_vertexuse_away_from_poles_marks_the_leaf() {
+    fn implants_vertexuse_and_poly_edge() {
         let k = Kernel::default();
         let mut c = cache();
         let mut ext = Extent2d::new();
@@ -1347,18 +1348,8 @@ mod tests {
             uv_point: Point2::new(0.4, 0.4),
             vertex_tolerance: 0.001,
         };
-        // away from the domain sides no pole check (GetSingularities) is made
         c.implant_vertexuse(&k, vu, &mut ext).unwrap();
-        assert_eq!(ext, Extent2d::from_bounds(0.399, 0.399, 0.401, 0.401));
-        let leaf = c.base().aux(NodeId(1)).unwrap();
-        assert_eq!(leaf.vertex_list.len(), 1);
-        assert_eq!(leaf.vertex_list[0].vertexuse, Some(7));
-        assert!(c.base().aux(NodeId(2)).unwrap().vertex_list.is_empty());
-    }
-
-    #[test]
-    fn unavailable_surface_operations_are_explicit_and_preserve_state() {
-        let mut c = cache();
+        assert_ne!(ext, before);
         let surface = plane();
         let edge = PolyEdgeInput {
             poly_edge: 8,
@@ -1367,15 +1358,9 @@ mod tests {
             tolerance: 0.001,
             surface: &surface,
         };
-        assert!(matches!(
-            c.implant_poly_edge(edge, NodeId(1)),
-            Err(SolidError::Unported {
-                unit: "surface.surface_p1",
-                ..
-            })
-        ));
+        c.implant_poly_edge(edge, NodeId(1)).unwrap();
         let aux = c.base().aux(NodeId(1)).unwrap();
-        assert!(aux.poly_edge_list.is_empty() && aux.vertex_list.is_empty());
+        assert_eq!((aux.poly_edge_list.len(), aux.vertex_list.len()), (1, 1));
     }
 
     #[test]

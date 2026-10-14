@@ -2844,7 +2844,7 @@ mod tests {
         c.point_test_enabled = true;
         assert!(!c.point_test(Point2::new(5.0, 5.0)));
         assert!(c.point_classify(Point2::new(0.5, 0.5), 0.0).is_err());
-        assert!(c.face().unwrap_err().is_unported());
+        assert_eq!(c.face().unwrap(), None);
         assert!(c.is_kind_of(TYPE) && c.is_kind_of(object::OBJECT_TYPE) && !c.is_kind_of(15001));
         let k = Kernel::default();
         let d = c.uv_domain();

@@ -61,11 +61,10 @@
 //! - **Back-edges.** `CopyAndAddAnalytics` needs `SmPlane::IsNurbSurfacePlane`
 //!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
-//!   `CreateTrimmedPlaneFromRuled` (unless the ruled
-//!   surface is a rectangle) nothing unported (`SmSurface::Evaluate1stDerivatives`,
-//!   `IsPlanar` and `IsClosed` are those of `surface::surface::p7`); `IsDegeneratePoint`
-//!   over another domain `SmSurface::IsDegeneratePoint` (`surface.surface_p1`). Those
-//!   calls return [`SolidError::Unported`].
+//!   `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and `IsClosed` (`surface.surface_p7`).
+//!   Those calls return [`SolidError::Unported`]. `IsDegeneratePoint` over another
+//!   domain runs the `SmSurface` base body on a copy of the B-spline wrapped as a
+//!   `Surface` (without owner).
 
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
@@ -307,17 +306,15 @@ fn create_natural_uv_trim_curves(
     })
 }
 
-/// `SmSurface::IsDegeneratePoint(d3DTol, pUVDomain)`.
+/// `SmSurface::IsDegeneratePoint(d3DTol, pUVDomain)` (the base body, on a copy of the
+/// B-spline as an [`SmSurface`](crate::surface::surface::Surface)).
 fn surface_is_degenerate_point(
-    _srf: &BSplineSurface,
-    _tol_3d: f64,
-    _uv_domain: Option<&Extent2d>,
+    srf: &BSplineSurface,
+    tol_3d: f64,
+    uv_domain: Option<&Extent2d>,
 ) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): SmSurface::IsDegeneratePoint
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsDegeneratePoint",
-        unit: "surface.surface_p1",
-    })
+    let s = crate::surface::surface::Surface::from(srf.clone());
+    crate::surface::surface::p1::base_is_degenerate_point(&s, tol_3d, uv_domain)
 }
 
 /// `SmSurface::IsPlanar()`.
@@ -949,8 +946,8 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for a domain other than the natural one
-    /// (`SmSurface::IsDegeneratePoint`); `SM_ERR` without NURB.
+    /// Those of `SmSurface::IsDegeneratePoint` for a domain other than the natural
+    /// one; `SM_ERR` without NURB.
     pub fn is_degenerate_point(&self, tol_3d: f64, uv_domain: Option<&Extent2d>) -> Result<bool> {
         // low work - for nonNaturalUVInterval intervals pass the call
         //  along to the general SmSurface::IsDegenerate
@@ -1613,9 +1610,7 @@ mod tests {
         assert!(unported(s.max_analytic_domain().map(|_| ())));
         assert!(s.is_degenerate_point(1e-6, None).is_ok());
         let sub = Extent2d::from_bounds(0.0, 0.0, 0.5, 0.5);
-        assert!(unported(
-            s.is_degenerate_point(1e-6, Some(&sub)).map(|_| ())
-        ));
+        assert!(!s.is_degenerate_point(1e-6, Some(&sub)).unwrap());
         assert!(matches!(
             BSplineSurface::create_sphere_from_arcs(&[], 1e-6),
             Err(SolidError::Upstream { code: 1001, .. })

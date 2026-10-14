@@ -13,8 +13,8 @@
 //! reports its first entry as the `status` (`0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for
 //! a Rust `InvalidInput`, `-1` for a Rust error upstream cannot produce) and the rest as `out`.
 //!
-//! Deferred cases: every face case (`SmSurface::GetFace` and the face classification, or the
-//! base tree construction `SmSurfaceCache::BuildTree`), and edge use implants that reach
+//! Deferred cases: every face case (the Rust side cannot put the surface on a face:
+//! `SmBrep::CreateFaceFromSurface`, `topology.brep_p8`), and edge use implants that reach
 //! `SmSurface::GetSingularities` (cache domain at a natural boundary), `FindUVNodes` (no node
 //! given) or `SubdivideNode` (large nodes with subdivision on). Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are redrawn.
@@ -642,23 +642,14 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Ok(o)
             }
         }
-        OpIn::Face { build, points } => {
-            // the Rust side has no face: every path reaches GetFace (or the base tree
-            // construction first), so only the deferral is produced; the generator always
-            // builds or tests at least one point.
-            let mut c = cache_of(&bss, DEFAULT_OPTS);
-            let mut body = || -> Result<(), SolidError> {
-                if *build {
-                    c.build_tree(&k)?;
-                }
-                for p in points {
-                    let uv = Point2::new(p.uv[0], p.uv[1]);
-                    c.point_test(&k, uv, p.test_tol.then_some(p.tol))?;
-                    c.point_classify(&k, uv, p.tol)?;
-                }
-                Ok(())
-            };
-            body().map(|()| o)
+        OpIn::Face { .. } => {
+            // the C++ side puts the surface on a face of a new brep: the Rust side has no
+            // face to give the cache, so the case defers on that construction
+            // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
+            Err(SolidError::unported(
+                "SmBrep::CreateFaceFromSurface",
+                "topology.brep_p8",
+            ))
         }
     };
     Ok(run)
@@ -1102,8 +1093,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// The generators reach every op with successful outcomes on the Rust side (the
-    /// face cases are always deferred until `SmSurface::GetFace` and the tree
-    /// construction are ported).
+    /// face cases are always deferred until `SmBrep::CreateFaceFromSurface` is
+    /// ported).
     #[test]
     fn generated_cases_cover_ops() {
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();

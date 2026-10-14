@@ -753,7 +753,7 @@ fn run_op(
         }
         OpIn::DoTrace => {
             // smsurf_GetSurfaceCache: the cache the trace runs on
-            st(tracer_surface_cache(&t.base))?
+            st(tracer_surface_cache::<()>(k, &t.base))?
                 .map_err(|_| Fail::Harness(harness("surface cache lookup failed")))?;
             return Err(Fail::Harness(harness(
                 "the surface cache store cannot hand out caches yet",

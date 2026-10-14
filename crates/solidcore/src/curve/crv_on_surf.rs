@@ -160,11 +160,7 @@ fn surface_evaluate_2nd_derivatives(
     from_left: bool,
 ) -> Result<[Vec3; 6]> {
     // (the virtual Evaluate of the B-spline, non-zero tangents)
-    let side = if from_left {
-        Side::Left
-    } else {
-        Side::Right
-    };
+    let side = if from_left { Side::Left } else { Side::Right };
     let m = srf.evaluate(
         uv,
         2,

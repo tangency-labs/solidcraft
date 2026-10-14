@@ -118,9 +118,9 @@ use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 use super::p2::{
-    cs_are_perpen_disjoint, evaluate_geometric, intersect_curve_and_split,
-    original_surface, DropCurveFail, IsoCurveLengthIntegrand, LsiGlobalSolver, SurfaceEval,
-    STEP_SURFACE_TYPE, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE,
+    cs_are_perpen_disjoint, evaluate_geometric, intersect_curve_and_split, original_surface,
+    DropCurveFail, IsoCurveLengthIntegrand, LsiGlobalSolver, SurfaceEval, STEP_SURFACE_TYPE,
+    SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE,
 };
 use super::{Surface, SurfaceKind};
 
@@ -160,6 +160,14 @@ const fn upper_flags(non_zero_tangents: bool) -> EvaluateFlags {
 /// `D[i][j]` of an evaluation matrix (zero when the evaluation did not fill it).
 fn at(m: &[Vec<Vec3>], i: usize, j: usize) -> Vec3 {
     m.get(i)
+        .and_then(|r| r.get(j))
+        .copied()
+        .unwrap_or(Vec3::ZERO)
+}
+
+/// `B[i][j]` of a first-derivative block (zero outside it).
+fn block_at(b: &[[Vec3; 2]; 2], i: usize, j: usize) -> Vec3 {
+    b.get(i)
         .and_then(|r| r.get(j))
         .copied()
         .unwrap_or(Vec3::ZERO)
@@ -223,9 +231,10 @@ impl StepSurface {
     /// The base surface, or `InvalidInput` where upstream dereferences a null
     /// `m_pSurface`.
     fn base(&self) -> Result<&Surface> {
-        self.surface
-            .as_deref()
-            .ok_or(SolidError::invalid_input(OP_STEP, "STEP surface without base surface"))
+        self.surface.as_deref().ok_or(SolidError::invalid_input(
+            OP_STEP,
+            "STEP surface without base surface",
+        ))
     }
 
     /// `GetType()`.
@@ -542,9 +551,9 @@ pub fn cache_tolerances(surface: &Surface) -> Result<CacheTolerances> {
     let p2 = surface.evaluate_point(uv_domain.max())?;
 
     // get an Idea of surface's size.
-    let size = (p_mid.distance(p1) + p_mid.distance(p2) + p_mid.distance(p_mid2)
-        + p_mid.distance(p_mid3))
-        / 2.0;
+    let size =
+        (p_mid.distance(p1) + p_mid.distance(p2) + p_mid.distance(p_mid2) + p_mid.distance(p_mid3))
+            / 2.0;
 
     // use surface size estimate to set chordHeight tolerance
     let mut chord_height_tol = size / 40.0; // Tessellation CH is 1/40th of estimated surface size
@@ -832,12 +841,10 @@ impl Surface {
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
         match self.kind() {
-            SurfaceKind::CurveBounded(s) => s.basis().evaluate_step(
-                uv,
-                highest_u_deriv,
-                highest_v_deriv,
-                flags,
-            ),
+            SurfaceKind::CurveBounded(s) => {
+                s.basis()
+                    .evaluate_step(uv, highest_u_deriv, highest_v_deriv, flags)
+            }
             SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::Step(_) => {
                 // pass the call along
                 self.evaluate(
@@ -894,12 +901,10 @@ impl Surface {
             SurfaceKind::Plane(s) => {
                 s.evaluate_simple(uv, highest_u_deriv, highest_v_deriv, flags.only_upper_half)
             }
-            SurfaceKind::CurveBounded(s) => s.basis().evaluate_simple(
-                uv,
-                highest_u_deriv,
-                highest_v_deriv,
-                flags,
-            ),
+            SurfaceKind::CurveBounded(s) => {
+                s.basis()
+                    .evaluate_simple(uv, highest_u_deriv, highest_v_deriv, flags)
+            }
             SurfaceKind::Step(_) => {
                 // pass the call along
                 self.evaluate(
@@ -1023,7 +1028,9 @@ impl Surface {
 
         // For each dimension
         {
-            let knots = self.knots(SurfParamType::U, None).map_or_else(|_| Vec::new(), |k| k.0);
+            let knots = self
+                .knots(SurfParamType::U, None)
+                .map_or_else(|_| Vec::new(), |k| k.0);
             let u_conts = cache.u_continuities();
             let n = u_conts.len();
             for (i, &cont) in u_conts.iter().enumerate() {
@@ -1058,7 +1065,9 @@ impl Surface {
         }
 
         {
-            let knots = self.knots(SurfParamType::V, None).map_or_else(|_| Vec::new(), |k| k.0);
+            let knots = self
+                .knots(SurfParamType::V, None)
+                .map_or_else(|_| Vec::new(), |k| k.0);
             let v_conts = cache.v_continuities();
             let n = v_conts.len();
             for (j, &cont) in v_conts.iter().enumerate() {
@@ -1153,7 +1162,9 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the surface cache and of the polar box.
+    /// Those of the surface cache and of the polar box; [`SolidError::Unported`]:
+    /// `SmFace::GetTolerance` (`topology.face_p2`) when a B-spline or plane with a
+    /// face expands its boxes.
     pub fn calculate_bounding_box(
         &self,
         k: &Kernel,
@@ -1163,6 +1174,16 @@ impl Surface {
     ) -> Result<SurfaceBoxes> {
         match self.kind() {
             SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) => {
+                // the B-spline override expands by its face's tolerance (GetFace()):
+                // the owner is held here, not by the B-spline
+                if expand_pos_boxes_by_zone_tol_3d && (want[0] || want[1]) && self.face()?.is_some()
+                {
+                    // UNPORTED(topology.face_p2): SmFace::GetTolerance
+                    return Err(SolidError::unported(
+                        "SmFace::GetTolerance",
+                        "topology.face_p2",
+                    ));
+                }
                 let plane_base;
                 let bs = match self.kind() {
                     SurfaceKind::BSpline(s) => s,
@@ -1212,7 +1233,10 @@ impl Surface {
         let top = cache
             .get_tree(k)?
             .top_node()
-            .ok_or(SolidError::invalid_input(OP_BOX, "surface tree without top node"))?;
+            .ok_or(SolidError::invalid_input(
+                OP_BOX,
+                "surface tree without top node",
+            ))?;
         let (bbox, aux_type) = {
             let tree = cache.get_tree(k)?;
             let node = tree.node(top)?;
@@ -1234,7 +1258,7 @@ impl Surface {
         // set the psuedo box = cached pseudo box increased by a small amount
         if want[1] {
             if aux_type == AuxDataType::BezierSurface {
-                let mut pseudo = cache.patch(top)?.pseudo_box().clone();
+                let mut pseudo = *cache.patch(top)?.pseudo_box();
                 if expand_pos_boxes_by_zone_tol_3d {
                     let radius = bbox.sphere_bound().radius;
                     pseudo.expand_absolute(radius / 20.0);
@@ -1287,11 +1311,27 @@ impl Surface {
             ));
         };
 
-        let iso1 = Curve::from(IsoCurve::new(bs.clone(), SurfParamType::U, uv_mid.x, true, true));
-        let size_v = iso1.approximate_length(&iso1.natural_interval(), 5, false)?.0;
+        let iso1 = Curve::from(IsoCurve::new(
+            bs.clone(),
+            SurfParamType::U,
+            uv_mid.x,
+            true,
+            true,
+        ));
+        let size_v = iso1
+            .approximate_length(&iso1.natural_interval(), 5, false)?
+            .0;
 
-        let iso2 = Curve::from(IsoCurve::new(bs.clone(), SurfParamType::V, uv_mid.y, true, true));
-        let size_u = iso2.approximate_length(&iso2.natural_interval(), 5, false)?.0;
+        let iso2 = Curve::from(IsoCurve::new(
+            bs.clone(),
+            SurfParamType::V,
+            uv_mid.y,
+            true,
+            true,
+        ));
+        let size_u = iso2
+            .approximate_length(&iso2.natural_interval(), 5, false)?
+            .0;
 
         Ok(Vec2::new(size_u, size_v))
     }
@@ -1390,9 +1430,10 @@ impl Surface {
 
             // Check tangent-vector directions, in V, then in U.
             for (i, j) in [(0, 1), (1, 0)] {
-                if (p_min[i][j] - p_max[i][j]).length_squared() > ang_tol_rad_sq {
+                let (d_min, d_max) = (block_at(&p_min, i, j), block_at(&p_max, i, j));
+                if (d_min - d_max).length_squared() > ang_tol_rad_sq {
                     // Do G1 test
-                    let (Ok(a), Ok(b)) = (p_min[i][j].unitize(), p_max[i][j].unitize()) else {
+                    let (Ok(a), Ok(b)) = (d_min.unitize(), d_max.unitize()) else {
                         return Ok(true);
                     };
                     if (a - b).length_squared() > ang_tol_rad_sq {
@@ -1499,8 +1540,12 @@ impl Surface {
         let tol_2d_v = map_to_2d_dir(tol_3d, uv_point, Vec2::new(0.0, 1.0), self)?;
 
         // test point against boundaries
-        let (b_u, o_u) = uv_domain.u_interval().is_value_on_boundary(uv_point.x, tol_2d_u);
-        let (b_v, o_v) = uv_domain.v_interval().is_value_on_boundary(uv_point.y, tol_2d_v);
+        let (b_u, o_u) = uv_domain
+            .u_interval()
+            .is_value_on_boundary(uv_point.x, tol_2d_u);
+        let (b_v, o_v) = uv_domain
+            .v_interval()
+            .is_value_on_boundary(uv_point.y, tol_2d_v);
 
         let param_side = match (b_u, b_v) {
             (true, true) => SurfParamType::Both,
@@ -1626,7 +1671,9 @@ pub fn base_is_degenerate_point(
     uv_domain: Option<&Extent2d>,
 ) -> Result<bool> {
     // get target UVDomain
-    let uv_domain = uv_domain.copied().unwrap_or_else(|| surface.natural_uv_domain());
+    let uv_domain = uv_domain
+        .copied()
+        .unwrap_or_else(|| surface.natural_uv_domain());
 
     // degenerate when sUVDomain is a point
     let mut uv0 = uv_domain.min();
@@ -1641,7 +1688,12 @@ pub fn base_is_degenerate_point(
     let uv_size2 = uv_domain.max_dimension() * uv_domain.max_dimension();
 
     let eval = |uv: Point2| -> Result<[[Vec3; 2]; 2]> {
-        Ok(first_block(&surface.evaluate(uv, 1, 1, upper_flags(false))?))
+        Ok(first_block(&surface.evaluate(
+            uv,
+            1,
+            1,
+            upper_flags(false),
+        )?))
     };
     let pv0 = eval(uv0)?;
     let pv1 = eval(uv1)?;
@@ -1717,7 +1769,9 @@ pub fn base_is_degenerate_curve(
     opt_3d_tol: f64,
 ) -> Result<bool> {
     // get target UVDomain
-    let uv_domain = uv_domain.copied().unwrap_or_else(|| surface.natural_uv_domain());
+    let uv_domain = uv_domain
+        .copied()
+        .unwrap_or_else(|| surface.natural_uv_domain());
 
     // max and min domain corner points
     let uv00 = uv_domain.min();
@@ -1738,7 +1792,12 @@ pub fn base_is_degenerate_curve(
     }
 
     // remaining domain corner points
-    let corners = [uv00, uv01, Point2::new(uv00.x, uv01.y), Point2::new(uv01.x, uv00.y)];
+    let corners = [
+        uv00,
+        uv01,
+        Point2::new(uv00.x, uv01.y),
+        Point2::new(uv01.x, uv00.y),
+    ];
     // some sample points
     let samples = [
         uv_domain.evaluate(0.5, 0.333),
@@ -1757,7 +1816,12 @@ pub fn base_is_degenerate_curve(
     let center = uv_domain.evaluate(0.5, 0.5);
 
     let eval = |uv: Point2| -> Result<[[Vec3; 2]; 2]> {
-        Ok(first_block(&surface.evaluate(uv, 1, 1, upper_flags(false))?))
+        Ok(first_block(&surface.evaluate(
+            uv,
+            1,
+            1,
+            upper_flags(false),
+        )?))
     };
     let eval4 = |uvs: &[Point2; 4]| -> Result<[[[Vec3; 2]; 2]; 4]> {
         Ok([eval(uvs[0])?, eval(uvs[1])?, eval(uvs[2])?, eval(uvs[3])?])
@@ -1800,37 +1864,26 @@ pub fn base_is_degenerate_curve(
 
     // Surface degenerates to Curve when all Su (then all Sv) values are zero
     for (i, j) in [(1, 0), (0, 1)] {
-        let zero = |d: &[[Vec3; 2]; 2]| is_zero_to_tol(d[i][j].length_squared(), tol_square);
+        let zero =
+            |d: &[[Vec3; 2]; 2]| is_zero_to_tol(block_at(d, i, j).length_squared(), tol_square);
         if d0.iter().all(zero) {
             // check sample points
-            let s = match d1 {
-                Some(s) => s,
-                None => {
-                    let s = eval4(&samples)?;
-                    d1 = Some(s);
-                    s
-                }
-            };
+            if d1.is_none() {
+                d1 = Some(eval4(&samples)?);
+            }
+            let s = d1.unwrap_or_default();
             if s.iter().all(zero) {
                 // check diagonal points
-                let g = match d2 {
-                    Some(g) => g,
-                    None => {
-                        let g = eval4(&diagonals)?;
-                        d2 = Some(g);
-                        g
-                    }
-                };
+                if d2.is_none() {
+                    d2 = Some(eval4(&diagonals)?);
+                }
+                let g = d2.unwrap_or_default();
                 if g.iter().all(zero) {
                     // check center point
-                    let c = match d3 {
-                        Some(c) => c,
-                        None => {
-                            let c = eval(center)?;
-                            d3 = Some(c);
-                            c
-                        }
-                    };
+                    if d3.is_none() {
+                        d3 = Some(eval(center)?);
+                    }
+                    let c = d3.unwrap_or_default();
                     if zero(&c) {
                         return Ok(true);
                     }
@@ -1894,9 +1947,10 @@ pub fn find_uv_curve_ivl_in_domain<O: SolutionObject>(
     // For every TgtCurve Segment Bndry
     for w in segments.windows(2) {
         // If segment contains input dParamInside value
-        if w[0] <= param_inside && param_inside < w[1] {
+        let &[lo, hi] = w else { continue };
+        if lo <= param_inside && param_inside < hi {
             let mut ivl = Extent1d::new();
-            ivl.set_min_max(w[0], w[1])?;
+            ivl.set_min_max(lo, hi)?;
             return Ok(ivl);
         }
     }
@@ -1961,6 +2015,8 @@ pub fn crossed_seam_or_pole(
     curr_uv: Point2,
     domain: &Extent2d,
 ) -> bool {
+    const MAX_STEP_RATIO: f64 = 0.4;
+
     // First special cases: SmPlane or bilinear.
     match surface.kind() {
         SurfaceKind::Plane(_) => return false,
@@ -1974,7 +2030,6 @@ pub fn crossed_seam_or_pole(
 
     // Just look for a big jump.
     let step = curr_uv - prev_uv;
-    const MAX_STEP_RATIO: f64 = 0.4;
 
     // Check u and v separately.
     let dom_size_u = domain.u_interval().length();
@@ -2066,7 +2121,12 @@ impl SurfaceEval<'_> {
     /// `values()[i][j]` after evaluating.
     fn value(&mut self, i: usize, j: usize) -> Result<Vec3> {
         self.eval()?;
-        Ok(self.values()[i][j])
+        Ok(self
+            .values()
+            .get(i)
+            .and_then(|r| r.get(j))
+            .copied()
+            .unwrap_or(Vec3::ZERO))
     }
 
     /// The position (`Pos`).
@@ -2736,7 +2796,10 @@ mod tests {
         assert_eq!(st.type_code(), STEP_SURFACE_TYPE);
         assert!(st.is_kind_of(STEP_SURFACE_TYPE).unwrap());
         let uv = Point2::new(0.5, 0.5);
-        assert_eq!(st.evaluate_point(uv).unwrap(), base.evaluate_point(uv).unwrap());
+        assert_eq!(
+            st.evaluate_point(uv).unwrap(),
+            base.evaluate_point(uv).unwrap()
+        );
         let (knots, mults) = st.knots(SurfParamType::U, None).unwrap();
         assert_eq!(knots, vec![0.0, 1.0]);
         assert_eq!(mults, vec![2, 2]);
@@ -2752,7 +2815,9 @@ mod tests {
         assert!(!base_is_degenerate_point(&s, DEGENERATE_TOL_3D, None).unwrap());
         assert!(!base_is_degenerate_curve(&s, EFF_ZERO_DEG, None, DEGENERATE_TOL_3D).unwrap());
         let line = Extent2d::from_bounds(0.5, 0.0, 0.5, 1.0);
-        assert!(base_is_degenerate_curve(&s, EFF_ZERO_DEG, Some(&line), DEGENERATE_TOL_3D).unwrap());
+        assert!(
+            base_is_degenerate_curve(&s, EFF_ZERO_DEG, Some(&line), DEGENERATE_TOL_3D).unwrap()
+        );
         let d = s.natural_uv_domain();
         assert!(!s.is_periodic(&d, SurfParamType::U).unwrap());
         assert!(!s.is_analytic().unwrap());
@@ -2765,7 +2830,12 @@ mod tests {
         assert_eq!(p, Point2::new(1.0, 0.4));
         let d = s.natural_uv_domain();
         // bilinear: never a seam
-        assert!(!crossed_seam_or_pole(&s, Point2::new(0.0, 0.0), Point2::new(1.0, 1.0), &d));
+        assert!(!crossed_seam_or_pole(
+            &s,
+            Point2::new(0.0, 0.0),
+            Point2::new(1.0, 1.0),
+            &d
+        ));
     }
 
     #[test]

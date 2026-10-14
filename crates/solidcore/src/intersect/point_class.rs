@@ -94,7 +94,7 @@
 //!   surface the tolerance of its edge or face (`GetEdge` / `GetFace`), and every other
 //!   non-topology object the system zone tolerance. A curve's edge is found with
 //!   [`Curve::edge`] (intermediate owners through [`ClassGeometry::owner_of`]); a
-//!   surface with no owner has no face (`GetFace` itself is unit `surface.surface_p1`);
+//!   surface's face is [`Surface::face`](crate::surface::surface::Surface::face);
 //!   an edge's or face's tolerance needs the topology units (`UNPORTED`). Topology
 //!   kinds without a `GetTolerance` override (region, faceuse, loop, loopuse,
 //!   vertexuse) get `SmTopology::GetTolerance`, `SM_ZONE_TOL_3D`, and a faceuse
@@ -416,12 +416,9 @@ impl<O: ClassObject> PointClassification<O> {
                 None
             }
             PointClassType::Surface => {
-                if self.surface_of(geometry, OP_GEOMETRY)?.owner().is_some() {
-                    // UNPORTED(surface.surface_p1): SmSurface::GetFace
-                    return Err(SolidError::unported(
-                        "SmSurface::GetFace",
-                        "surface.surface_p1",
-                    ));
+                if self.surface_of(geometry, OP_GEOMETRY)?.face()?.is_some() {
+                    // UNPORTED(topology.face_p4): SmFace::GetBrep (of SmSurface::GetFace)
+                    return Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"));
                 }
                 None
             }
@@ -1379,12 +1376,11 @@ fn object_zone_tol_3d<O: ClassObject>(
         | ClassObjectKind::Region => Ok(ZONE_TOL_3D),
         ClassObjectKind::Surface => {
             let surface = geometry.surface(o).ok_or_else(|| unresolved(OP_GEOMETRY))?;
-            if surface.owner().is_some() {
-                // UNPORTED(surface.surface_p1): SmSurface::GetFace
+            if surface.face()?.is_some() {
                 // UNPORTED(topology.face_p2): SmFace::GetTolerance
                 return Err(SolidError::unported(
-                    "SmSurface::GetFace",
-                    "surface.surface_p1",
+                    "SmFace::GetTolerance",
+                    "topology.face_p2",
                 ));
             }
             Ok(system)

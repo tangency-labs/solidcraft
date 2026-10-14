@@ -611,7 +611,8 @@ mod tests {
             Some(domain()),
         )
         .unwrap();
-        assert!(a.approx_eq(&c).is_err());
+        // equal surfaces through SmSurface::operator==
+        assert!(a.approx_eq(&c).unwrap());
     }
 
     #[test]
