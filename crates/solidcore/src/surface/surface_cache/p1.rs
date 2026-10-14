@@ -74,8 +74,7 @@
 //!   only initialises fields; [`SurfaceCache::new`] does the same so the cache can
 //!   exist before its tree is built ([`crate::surface::surface_cache::p3`] builds it). The byte-size bookkeeping (`m_lBezierSize`,
 //!   `m_lTotalBezSize`, `sm_ComputeNurbSurfaceSize`) has no counterpart.
-//!   `SmSurfaceCache::GetTree` (same unit) is only reproduced as far as returning an
-//!   existing tree: when it would build one, [`SolidError::Unported`] is returned.
+//!   `SmSurfaceCache::GetTree` is [`SurfaceCache::get_tree`] (same unit).
 //! - **Virtual dispatch.** The surface calls go through the surface kind: the
 //!   [`BSplineSurface`] overrides (`CreateIsoParametricCurve`, `CalculateBoundingBox`)
 //!   are used; the curve-bounded surface runs the base class bodies
@@ -2139,7 +2138,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// `SM_ERR` from the base class `PointClassify` (a region without classified
     /// neighbour); `InvalidInput` for malformed trees; [`SolidError::Unported`] from
-    /// `GetTree` (building a tree) and `SmTol::GetZoneTol3d` of a face.
+    /// `GetTree` (a tree build needs `SmSurface::CalculateContinuities`) and
+    /// `SmTol::GetZoneTol3d` of a face.
     pub fn mark_face_containment(&mut self, k: &Kernel) -> Result<()> {
         self.get_tree(k)?;
         let top = self

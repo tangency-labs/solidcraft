@@ -19,8 +19,9 @@
 //! Outputs (first entry the status `0` / `SmStatus`):
 //! `New`: `type kinds.. modified boundary point_test have_t containment D factor ch ang ar max min
 //! ratio no_tree`. `PointTest`: `ok object_type` (`-1` = none). `ImplantEu`: one status per call
-//! up to the first failing one, the face extent `D`, then per node `marked class k eu..` (edge use
-//! indices = call indices). `Face`: (with `build`) `build_status boundary point_test have_t
+//! up to the first failing one, the face extent `D`, the node count, then for every node of the
+//! tree (the input nodes, then the children subdivisions made, in allocation order) `marked
+//! class k eu..` (edge use indices = call indices). `Face`: (with `build`) `build_status boundary point_test have_t
 //! containment D node_count`, then per point `test_status ok object_type classify_status class
 //! object_type`.
 //!

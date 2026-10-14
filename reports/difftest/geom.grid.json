@@ -40,7 +40,7 @@
     {
       "deferred": {
         "symbol": "SmBezierPatch::GetPseudoBox",
-        "unit": "surface.surface_cache_p3"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "surface_leaf_element",
@@ -4936,7 +4936,7 @@
   "cases_passed": 613,
   "cases_total": 615,
   "deferred_by_unit": {
-    "surface.surface_cache_p3": 1,
+    "surface.surface_cache_p1": 1,
     "surface.surface_p1": 1
   },
   "max_rel_err": 0.0,

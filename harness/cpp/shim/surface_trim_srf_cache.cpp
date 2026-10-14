@@ -291,8 +291,13 @@ void op_implant_eu(Rd& rd, SmBSplineSurface* s, const SmContext& ctx, std::vecto
             failed = true;
     }
     put_dom(o, fe);
-    for (SmTreeNode* nd : nodes)
+    // every node of the tree (the input nodes, then the children subdivisions made)
+    SmTArray<void*> act;
+    ((TreePeek*)c->tree())->node_mgr().GetActiveElements(act);
+    o.push_back((double)act.GetSize());
+    for (ULONG ni = 0; ni < act.GetSize(); ni++)
     {
+        const SmTreeNode* nd = (const SmTreeNode*)act[ni];
         const SmBezierAux2d* a = (const SmBezierAux2d*)nd->m_pData;
         o.push_back(flg(a->m_bIsMarked == TRUE));
         o.push_back((double)a->m_eNodeClass);

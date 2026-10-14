@@ -654,10 +654,11 @@ impl<O: Copy> Grid<O> {
                 // cache, which a tree node reaches once the tree construction hands it
                 // over (SmSurfaceGridElement::Init also needs SmPseudoBox/SmPolarBox
                 // copies, SmSurface::Evaluate and SmSurface::EvaluateNormal)
-                // UNPORTED(surface.surface_cache_p3): SmBezierPatch::GetPseudoBox
+                // DISPATCH GAP: SmBezierPatch::GetPseudoBox (surface.surface_cache_p1,
+                // ported; no UNPORTED marker: the callee is ported, the tree cannot reach the cache's data yet)
                 return Err(SolidError::Unported {
                     upstream: "SmBezierPatch::GetPseudoBox",
-                    unit: "surface.surface_cache_p3",
+                    unit: "surface.surface_cache_p1",
                 });
             }
             ElementSource::PolyBrep(node) => GridElement::polygon(node),

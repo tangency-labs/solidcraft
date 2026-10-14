@@ -140,7 +140,7 @@
     {
       "deferred": {
         "symbol": "SmBezierPatch::GetBezierPtr",
-        "unit": "surface.surface_cache_p3"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "first_patch_bezier_surface",
@@ -496,7 +496,7 @@
     {
       "deferred": {
         "symbol": "SmBSplineSurface::GetGwNurbPointer",
-        "unit": "surface.surface_cache_p3"
+        "unit": "nurbs.b_spline_surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -692,7 +692,7 @@
     {
       "deferred": {
         "symbol": "SmBSplineSurface::GetGwNurbPointer",
-        "unit": "surface.surface_cache_p3"
+        "unit": "nurbs.b_spline_surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0067",
@@ -1600,7 +1600,7 @@
     {
       "deferred": {
         "symbol": "SmBSplineSurface::GetGwNurbPointer",
-        "unit": "surface.surface_cache_p3"
+        "unit": "nurbs.b_spline_surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0180",
@@ -2484,7 +2484,7 @@
     {
       "deferred": {
         "symbol": "SmBSplineSurface::GetGwNurbPointer",
-        "unit": "surface.surface_cache_p3"
+        "unit": "nurbs.b_spline_surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0290",
@@ -3288,7 +3288,7 @@
     {
       "deferred": {
         "symbol": "SmBSplineSurface::GetGwNurbPointer",
-        "unit": "surface.surface_cache_p3"
+        "unit": "nurbs.b_spline_surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0390",
@@ -3300,7 +3300,7 @@
     {
       "deferred": {
         "symbol": "SmBSplineSurface::GetGwNurbPointer",
-        "unit": "surface.surface_cache_p3"
+        "unit": "nurbs.b_spline_surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0391",
@@ -4980,7 +4980,8 @@
   "cases_passed": 611,
   "cases_total": 618,
   "deferred_by_unit": {
-    "surface.surface_cache_p3": 7
+    "nurbs.b_spline_surface_p1": 6,
+    "surface.surface_cache_p1": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

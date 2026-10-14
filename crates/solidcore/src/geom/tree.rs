@@ -1150,10 +1150,11 @@ impl<O: Copy + PartialEq> Tree<O> {
                 // (crate::surface::surface_cache::p1::SurfaceCache::first_bezier_patch
                 // answers from there); the tree reaches it once the tree construction
                 // hands it over, as the curve cache does with set_curve_data.
-                // UNPORTED(surface.surface_cache_p3): SmBezierPatch::GetBezierPtr
+                // DISPATCH GAP: SmBezierPatch::GetBezierPtr (surface.surface_cache_p1,
+                // ported; no UNPORTED marker: the callee is ported, the tree cannot reach the cache's data yet)
                 return Err(SolidError::Unported {
                     upstream: "SmBezierPatch::GetBezierPtr",
-                    unit: "surface.surface_cache_p3",
+                    unit: "surface.surface_cache_p1",
                 });
             }
             if !n.aux_type.is_surface_subdivision() {
@@ -1167,10 +1168,11 @@ impl<O: Copy + PartialEq> Tree<O> {
                 // but the surface behind the opaque handle `O` is held by the surface
                 // cache (SurfaceCache::first_bezier_patch resolves it there); the tree
                 // reaches it once the tree construction hands it over.
-                // UNPORTED(surface.surface_cache_p3): SmBSplineSurface::GetGwNurbPointer
+                // DISPATCH GAP: SmBSplineSurface::GetGwNurbPointer
+                // (nurbs.b_spline_surface_p1, ported; no UNPORTED marker: the callee is ported, the tree cannot reach the cache's data yet)
                 return Err(SolidError::Unported {
                     upstream: "SmBSplineSurface::GetGwNurbPointer",
-                    unit: "surface.surface_cache_p3",
+                    unit: "nurbs.b_spline_surface_p1",
                 });
             }
             match n.parent {

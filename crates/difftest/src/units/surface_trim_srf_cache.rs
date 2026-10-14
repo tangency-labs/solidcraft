@@ -622,8 +622,10 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Err(e)
             } else {
                 push_dom(&mut o, &ext);
+                // every node of the tree (the input nodes, then the subdivisions made)
                 let t = c.base().tree().ok_or_else(|| harness("no tree"))?;
-                for id in 0..tree.len() {
+                o.push(t.nodes().len() as f64);
+                for id in 0..t.nodes().len() {
                     let n = t.node(NodeId(id)).map_err(|e| harness(e.to_string()))?;
                     let NodeData::Surface(a) = n.data else {
                         return Err(harness("node lost its surface data"));
@@ -1121,11 +1123,13 @@ mod tests {
                 let st = out.values.get("status").and_then(|v| v.first()).copied();
                 format!("status:{}", st.unwrap_or(f64::NAN))
             };
-            if let (OpIn::ImplantEu { calls, tree, .. }, None) = (&i.op, &out.deferred) {
+            if let (OpIn::ImplantEu { calls, .. }, None) = (&i.op, &out.deferred) {
                 // count the implanted edge uses per curve kind (line / curved)
                 let o = out.values.get("out").cloned().unwrap_or_default();
                 let mut at = calls.len() + 4;
-                for _ in 0..tree.len() {
+                let count = o.get(at).copied().unwrap_or(0.0) as usize;
+                at += 1;
+                for _ in 0..count {
                     let k = o.get(at + 2).copied().unwrap_or(0.0) as usize;
                     for j in 0..k {
                         let id = o.get(at + 3 + j).copied().unwrap_or(-1.0) as usize;

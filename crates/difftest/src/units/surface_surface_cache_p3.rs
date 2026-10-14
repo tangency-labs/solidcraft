@@ -805,7 +805,8 @@ fn gen_basis(rng: &mut Rng) -> [[f64; 3]; 3] {
 fn gen_start(rng: &mut Rng, surf: &SurfIn, aux6: bool) -> Result<StartIn, HarnessError> {
     let sd = surf_domain(surf)?;
     let size = surf_size(surf)?;
-    let bspline = matches!(surf, SurfIn::Bspline(_));
+    // a B-spline cache (an SmPlane is an SmBSplineSurface)
+    let bspline = matches!(surf, SurfIn::Bspline(_) | SurfIn::Plane(_));
     let dom = if rng.chance(0.3) { sd } else { gen_sub_dom(rng, sd) };
     let (p, q) = if bspline {
         (1 + rng.below(3) as usize, 1 + rng.below(3) as usize)
@@ -881,7 +882,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             }
         }
         8..=12 => {
-            let aux6 = matches!(surf, SurfIn::Bspline(_)) && rng.chance(0.1);
+            let aux6 = matches!(surf, SurfIn::Bspline(_) | SurfIn::Plane(_)) && rng.chance(0.1);
             let mut start = gen_start(rng, &surf, aux6)?;
             if aux6 {
                 start.surf = true;

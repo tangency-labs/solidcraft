@@ -58,6 +58,16 @@
 //!   tree build), `SmSurface::SnapToKnots` (`surface.surface_p1`, splitting a node with
 //!   a subdivision surface) and `SmSurface::GetSingularities` (`surface.surface_p3`,
 //!   pole search) return [`SolidError::Unported`].
+//! - **Virtual calls.** `SubdivideNode` moves a boundary parent's edge uses and poly edges
+//!   into the children through the virtual `ImplantEdgeuse` / `ImplantPolyEdge`:
+//!   [`SurfaceCache::subdivide_node`] runs the base class's (which fail: the edge uses are
+//!   dropped), and the trimmed surface cache splits through
+//!   [`SurfaceCache::subdivide_node_split`] and its own implants. DISPATCH GAP: `GetTree`
+//!   (also called at the start of `SubdivideNode`, where it may build or rebuild the tree)
+//!   dispatches `BuildTree()` virtually, to `SmTrimSrfCache::BuildTree` on a trimmed
+//!   surface cache; [`SurfaceCache::get_tree`] builds the base class tree, and
+//!   [`SurfaceCache::subdivide_node`] does not call `GetTree` (it needs a built tree and
+//!   fails without one).
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -301,7 +311,32 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         direction: SurfParamType,
         only_aux_data: bool,
     ) -> Result<()> {
+        if let Some((node1, node2)) = self.subdivide_node_split(node, direction, only_aux_data)? {
+            self.move_boundary_uses_base(node, node1, node2)?;
+        }
+        Ok(())
+    }
+
+    /// [`SurfaceCache::subdivide_node`] up to the edge uses and poly edges of a parent on
+    /// the boundary: splits `node` and, when it is on the boundary, sets its children's
+    /// class to unknown and returns them; the caller then moves the parent's edge uses
+    /// and poly edges into them through its `ImplantEdgeuse` / `ImplantPolyEdge`
+    /// (virtual upstream: the base class's in [`SurfaceCache::subdivide_node`], the
+    /// trimmed surface cache's in
+    /// [`TrimSrfCache`](crate::surface::trim_srf_cache::TrimSrfCache)).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfaceCache::subdivide_node`] but the implants.
+    pub fn subdivide_node_split(
+        &mut self,
+        node: NodeId,
+        direction: SurfParamType,
+        only_aux_data: bool,
+    ) -> Result<Option<(NodeId, NodeId)>> {
         let mut only_aux_data = only_aux_data;
+        // DISPATCH GAP: upstream starts with GetTree(), which may build or rebuild the tree
+        // (through the virtual BuildTree()); the port needs a built tree
         let (aux_type, parent_bbox, has_children, is_top) = {
             let tree = self.tree_or(OP_NODE)?;
             let n = tree.node(node)?;
@@ -507,30 +542,42 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             }
         }
 
-        // when the parent is on the boundary, move its edge uses (or poly edges) into
+        // when the parent is on the boundary, its edge uses (or poly edges) move into
         // the children
         if node_class == NodeClass::OnBoundary {
             // init the node classification
             self.surface_aux_mut(node1, OP_NODE)?.node_class = NodeClass::Unknown;
             self.surface_aux_mut(node2, OP_NODE)?.node_class = NodeClass::Unknown;
-
-            let poly_edges = self.aux(node)?.poly_edge_list.clone();
-            if poly_edges.is_empty() {
-                // for every edge use in the parent node, last first
-                while let Some(eu) = self.aux_mut(node)?.edgeuse_list.last().copied() {
-                    // implant the edge use in both children without subsequent subdivision
-                    ignore(self.implant_edgeuse_in(eu, node1))?;
-                    ignore(self.implant_edgeuse_in(eu, node2))?;
-                    self.aux_mut(node)?.edgeuse_list.pop();
-                }
-            } else {
-                for pe in poly_edges {
-                    ignore(self.implant_poly_edge(pe, node1))?;
-                    ignore(self.implant_poly_edge(pe, node2))?;
-                }
-            }
+            return Ok(Some((node1, node2)));
         }
 
+        Ok(None)
+    }
+
+    /// The end of `SubdivideNode` for a parent on the boundary, with the base class's
+    /// `ImplantEdgeuse` / `ImplantPolyEdge` (both fail, the status is ignored): the
+    /// parent's edge uses are dropped, last first.
+    fn move_boundary_uses_base(
+        &mut self,
+        node: NodeId,
+        node1: NodeId,
+        node2: NodeId,
+    ) -> Result<()> {
+        let poly_edges = self.aux(node)?.poly_edge_list.clone();
+        if poly_edges.is_empty() {
+            // for every edge use in the parent node, last first
+            while let Some(eu) = self.aux_mut(node)?.edgeuse_list.last().copied() {
+                // implant the edge use in both children without subsequent subdivision
+                ignore(self.implant_edgeuse_in(eu, node1))?;
+                ignore(self.implant_edgeuse_in(eu, node2))?;
+                self.aux_mut(node)?.edgeuse_list.pop();
+            }
+        } else {
+            for pe in poly_edges {
+                ignore(self.implant_poly_edge(pe, node1))?;
+                ignore(self.implant_poly_edge(pe, node2))?;
+            }
+        }
         Ok(())
     }
 
@@ -849,6 +896,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 && face_owned
                 && self.face_containment_done != FaceContainment::UnderConstruction)
         {
+            // DISPATCH GAP: the virtual BuildTree() (SmTrimSrfCache::BuildTree on a
+            // trimmed surface cache); this builds the base class tree
             self.build_tree(k, false)?;
         }
         self.tree_mut_or(OP_GET)

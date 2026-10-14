@@ -768,7 +768,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                     };
 
                     // promote leaf node into a parent->Child(1,2) triplet
-                    let (c1, c2) = subdivide_node(&mut self.base, node, dir)?;
+                    let (c1, c2) = self.subdivide_node(k, node, dir)?;
 
                     // put the children on the stack
                     stack.push(c1);
@@ -786,6 +786,74 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
         // all done
         Ok(())
+    }
+
+    /// `SmSurfaceCache::SubdivideNode(node, dir, TRUE, NULL)` on this cache: the two new
+    /// children. A parent on the boundary moves its edge uses into them through the
+    /// trimmed surface cache's `ImplantEdgeuse(pEU, FALSE, sTempExt, pNode)` (virtual
+    /// upstream), last first, and its poly edges through `ImplantPolyEdge`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfaceCache::subdivide_node_split`]; [`SolidError::Unported`]:
+    /// `SmEdgeuse::GetUVTrimCurve` (`topology.edgeuse_p1`) for an edge use to move,
+    /// the poly edge points (`query.poly`) for a poly edge to move.
+    fn subdivide_node(
+        &mut self,
+        k: &Kernel,
+        node: NodeId,
+        dir: SurfParamType,
+    ) -> Result<(NodeId, NodeId)> {
+        const OP: &str = "surface::trim_srf_cache::TrimSrfCache::subdivide_node";
+        if let Some((node1, node2)) = self.base.subdivide_node_split(node, dir, true)? {
+            if self.base.aux(node)?.poly_edge_list.is_empty() {
+                // for every edge use in the parent node, last first
+                while let Some(eu) = self.base.aux(node)?.edgeuse_list.last().copied() {
+                    // implant the edge use in both children without subsequent
+                    // subdivision (the status is ignored)
+                    let curve = edgeuse_uv_trim_curve(eu)?;
+                    for child in [node1, node2] {
+                        let mut temp_ext = Extent2d::new();
+                        let r = self.implant_edgeuse(
+                            k,
+                            eu,
+                            curve.as_ref(),
+                            false,
+                            &mut temp_ext,
+                            Some(child),
+                        );
+                        if let Err(e) = r {
+                            if e.is_unported() {
+                                return Err(e);
+                            }
+                        }
+                    }
+                    self.base.aux_mut(node)?.edgeuse_list.pop();
+                }
+            } else {
+                // UNPORTED(query.poly): SmPolyEdge::GetStartPoint / GetEndPoint /
+                // GetTolerance (the PolyEdgeInput of ImplantPolyEdge)
+                return Err(SolidError::unported(
+                    "SmPolyEdge::GetStartPoint",
+                    "query.poly",
+                ));
+            }
+        }
+        let n = self
+            .base
+            .tree()
+            .ok_or(SolidError::InvalidInput {
+                operation: OP,
+                reason: "cache has no tree",
+            })?
+            .node(node)?;
+        match (n.child1, n.child2) {
+            (Some(c1), Some(c2)) => Ok((c1, c2)),
+            _ => Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "split node has no children",
+            }),
+        }
     }
 
     /// Embeds a poly edge segment into `node` (`ImplantPolyEdge`): when the node's
@@ -988,30 +1056,6 @@ fn find_uv_nodes<O: Copy + PartialEq>(
     near_poles: bool,
 ) -> Result<Vec<NodeId>> {
     cache.find_uv_nodes(k, uv_box, near_poles)
-}
-
-/// `SmSurfaceCache::SubdivideNode(node, dir, TRUE, NULL)`: the two new children.
-fn subdivide_node<O: Copy + PartialEq>(
-    cache: &mut SurfaceCache<O>,
-    node: NodeId,
-    dir: SurfParamType,
-) -> Result<(NodeId, NodeId)> {
-    const OP: &str = "surface::trim_srf_cache::subdivide_node";
-    cache.subdivide_node(node, dir, true)?;
-    let n = cache
-        .tree()
-        .ok_or(SolidError::InvalidInput {
-            operation: OP,
-            reason: "cache has no tree",
-        })?
-        .node(node)?;
-    match (n.child1, n.child2) {
-        (Some(c1), Some(c2)) => Ok((c1, c2)),
-        _ => Err(SolidError::InvalidInput {
-            operation: OP,
-            reason: "split node has no children",
-        }),
-    }
 }
 
 /// `SmSurface::GetSingularities`: the `SM_SS_*` sides that are poles.

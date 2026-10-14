@@ -30,6 +30,7 @@
 //! it); a pseudo box basis of independent unit vectors with ordered intervals; valid
 //! enumerators; splits of existing leaves only (upstream asserts). `SubdivTol` starts from an
 //! `SM_AD_AUX_DATA` node only when it holds the B-spline surface (the tolerance test reads it).
+//! A plane counts as a B-spline here (an `SmPlane` is an `SmBSplineSurface`).
 
 use super::surface_surface_cache_p1::{bad, bspline_block, surface, Reader, Srf};
 use crate::{call_with_buffer, FfiError};
@@ -233,8 +234,9 @@ fn start_node(rd: &mut Reader<'_>, kind: Kind, srf: &Srf) -> Result<(usize, f64)
     rd.flag()?;
     rd.flag()?;
     let surf = rd.flag()?;
-    if aux == AUX_DATA && surf && kind != Kind::BSpline {
-        return Err(bad("start node: an aux node with the surface needs a B-spline"));
+    // (upstream casts the node's surface to an SmBSplineSurface: an SmPlane is one)
+    if aux == AUX_DATA && surf && kind == Kind::CurveBounded {
+        return Err(bad("start node: an aux node with the surface needs a B-spline or plane"));
     }
     let mut patch_size = 0.0;
     if aux == AUX_BEZIER {
@@ -249,7 +251,7 @@ fn start_node(rd: &mut Reader<'_>, kind: Kind, srf: &Srf) -> Result<(usize, f64)
         if n != p || m != q {
             return Err(bad("start node: the patch must be a single span"));
         }
-        if kind != Kind::BSpline && (p != 3 || q != 3) {
+        if kind == Kind::CurveBounded && (p != 3 || q != 3) {
             return Err(bad("start node: patches of non B-spline caches are bicubic"));
         }
         if bez.dom != d {
@@ -298,8 +300,10 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             // the tolerance test reads an SM_AD_AUX_DATA node's surface as a B-spline NURB
             let aux = rd.input.get(start_at).copied().unwrap_or(0.0);
             let surf = rd.input.get(start_at + 14).copied().unwrap_or(0.0);
-            if aux == AUX_DATA as f64 && (surf == 0.0 || kind != Kind::BSpline) {
-                return Err(bad("subdivide to tolerances: an aux start node needs the B-spline surface"));
+            if aux == AUX_DATA as f64 && (surf == 0.0 || kind == Kind::CurveBounded) {
+                return Err(bad(
+                    "subdivide to tolerances: an aux start node needs the B-spline or plane surface",
+                ));
             }
             // the tolerances bound the subdivision of the start node's patch too
             let end = rd.at;
