@@ -64,7 +64,7 @@ pub const MIN_GENERATED: usize = 3000;
 /// `surface.surface_p7` runner.
 pub struct Runner;
 
-fn harness(msg: impl Into<String>) -> HarnessError {
+pub(crate) fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
@@ -74,25 +74,25 @@ const SM_ERR: f64 = 1001.0;
 // ---- inputs -----------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct BssIn {
+pub(crate) struct BssIn {
     #[serde(default)]
-    oob: bool,
+    pub(crate) oob: bool,
     #[serde(default = "default_form")]
-    form: u8,
-    net: Vec<Vec<[f64; 4]>>,
-    p: usize,
-    q: usize,
-    u: Vec<f64>,
-    v: Vec<f64>,
+    pub(crate) form: u8,
+    pub(crate) net: Vec<Vec<[f64; 4]>>,
+    pub(crate) p: usize,
+    pub(crate) q: usize,
+    pub(crate) u: Vec<f64>,
+    pub(crate) v: Vec<f64>,
 }
 
-fn default_form() -> u8 {
+pub(crate) fn default_form() -> u8 {
     BSplineSurfaceForm::Unspecified as u8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum SrfIn {
+pub(crate) enum SrfIn {
     Bspline(BssIn),
     Plane { o: [f64; 3], n: [f64; 3] },
     /// An upstream `.sms` file (absolute path after fixture expansion), as a B-spline
@@ -152,7 +152,7 @@ fn read_sms(path: &str) -> Result<BssIn, HarnessError> {
 }
 
 /// `s` with a file replaced by its inline B-spline.
-fn resolve(s: &SrfIn) -> Result<SrfIn, HarnessError> {
+pub(crate) fn resolve(s: &SrfIn) -> Result<SrfIn, HarnessError> {
     match s {
         SrfIn::Sms(path) => Ok(SrfIn::Bspline(read_sms(path)?)),
         _ => Ok(s.clone()),
@@ -160,11 +160,11 @@ fn resolve(s: &SrfIn) -> Result<SrfIn, HarnessError> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CrvIn {
-    dim: u64,
-    cpts: Vec<[f64; 4]>,
-    p: usize,
-    u: Vec<f64>,
+pub(crate) struct CrvIn {
+    pub(crate) dim: u64,
+    pub(crate) cpts: Vec<[f64; 4]>,
+    pub(crate) p: usize,
+    pub(crate) u: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,11 +270,11 @@ mod non_finite3 {
 
 // ---- C++ side -----------------------------------------------------------------------
 
-fn b(x: bool) -> f64 {
+pub(crate) fn b(x: bool) -> f64 {
     f64::from(u8::from(x))
 }
 
-fn shape(s: &BssIn) -> Result<(usize, usize), HarnessError> {
+pub(crate) fn shape(s: &BssIn) -> Result<(usize, usize), HarnessError> {
     let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
     let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
@@ -284,7 +284,7 @@ fn shape(s: &BssIn) -> Result<(usize, usize), HarnessError> {
     Ok((n, m))
 }
 
-fn push_srf(o: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
+pub(crate) fn push_srf(o: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
     match &resolve(s)? {
         SrfIn::Sms(_) => return Err(harness("unresolved surface file")),
         SrfIn::Bounded { basis, implicit } => {
@@ -316,7 +316,7 @@ fn push_srf(o: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
     Ok(())
 }
 
-fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
+pub(crate) fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
     let n = c.cpts.len().saturating_sub(1);
     let m = c.u.len().saturating_sub(1);
     o.extend([c.dim as f64, n as f64, c.p as f64, m as f64]);
@@ -326,14 +326,14 @@ fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
     o.extend_from_slice(&c.u);
 }
 
-fn push_vecs(o: &mut Vec<f64>, v: &[[f64; 3]]) {
+pub(crate) fn push_vecs(o: &mut Vec<f64>, v: &[[f64; 3]]) {
     o.push(v.len() as f64);
     for x in v {
         o.extend_from_slice(x);
     }
 }
 
-fn push_opt(o: &mut Vec<f64>, x: Option<f64>) {
+pub(crate) fn push_opt(o: &mut Vec<f64>, x: Option<f64>) {
     o.extend([b(x.is_some()), x.unwrap_or(0.0)]);
 }
 
@@ -570,19 +570,19 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side ----------------------------------------------------------------------
 
-fn v3(p: [f64; 3]) -> Vec3 {
+pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::from_array(p)
 }
 
-fn p2(p: [f64; 2]) -> Point2 {
+pub(crate) fn p2(p: [f64; 2]) -> Point2 {
     Point2::new(p[0], p[1])
 }
 
-fn dom_of(d: [f64; 4]) -> Extent2d {
+pub(crate) fn dom_of(d: [f64; 4]) -> Extent2d {
     Extent2d::from_points(Point2::new(d[0], d[1]), Point2::new(d[2], d[3]))
 }
 
-fn side(left: bool) -> Side {
+pub(crate) fn side(left: bool) -> Side {
     if left {
         Side::Left
     } else {
@@ -590,7 +590,7 @@ fn side(left: bool) -> Side {
     }
 }
 
-fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
+pub(crate) fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
     match &resolve(s)? {
         SrfIn::Sms(_) => Err(harness("unresolved surface file")),
         SrfIn::Bounded { basis, implicit } => Ok(Surface::from(CurveBoundedSurface::new(
@@ -618,7 +618,7 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
     }
 }
 
-fn curve_of(c: &CrvIn) -> Result<SmCurve, HarnessError> {
+pub(crate) fn curve_of(c: &CrvIn) -> Result<SmCurve, HarnessError> {
     let pw = c
         .cpts
         .iter()
@@ -628,11 +628,11 @@ fn curve_of(c: &CrvIn) -> Result<SmCurve, HarnessError> {
     Ok(SmCurve::from(BSplineCurve::from_nurb(cur, c.dim, false)))
 }
 
-fn sop_of(v: u8) -> Result<SolverOperation, HarnessError> {
+pub(crate) fn sop_of(v: u8) -> Result<SolverOperation, HarnessError> {
     SolverOperation::from_code(i32::from(v)).ok_or_else(|| harness(format!("bad solver op {v}")))
 }
 
-fn param_of(v: u8) -> Result<SurfParamType, HarnessError> {
+pub(crate) fn param_of(v: u8) -> Result<SurfParamType, HarnessError> {
     SurfParamType::from_code(u64::from(v)).ok_or_else(|| harness(format!("bad param {v}")))
 }
 
@@ -649,7 +649,7 @@ fn loc_of(v: u8) -> Result<LocationType, HarnessError> {
     })
 }
 
-fn req_of(v: u8) -> Result<SolutionRequested, HarnessError> {
+pub(crate) fn req_of(v: u8) -> Result<SolutionRequested, HarnessError> {
     SolutionRequested::ALL
         .get(usize::from(v))
         .copied()
@@ -658,7 +658,7 @@ fn req_of(v: u8) -> Result<SolutionRequested, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
@@ -667,7 +667,7 @@ fn status(e: &SolidError) -> f64 {
 }
 
 /// A Rust failure: deferred for `Unported`, else a harness error.
-enum Fail {
+pub(crate) enum Fail {
     Deferred(Box<Output>),
     Harness(HarnessError),
 }
@@ -679,7 +679,7 @@ impl From<HarnessError> for Fail {
 }
 
 /// `Ok(v)` or the status; `Unported` defers the case.
-fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
+pub(crate) fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
     match r {
         Ok(v) => Ok(Ok(v)),
         Err(e) => match Output::unported(&e) {
@@ -689,11 +689,11 @@ fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
     }
 }
 
-fn pv(o: &mut Vec<f64>, v: Vec3) {
+pub(crate) fn pv(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
-fn puv(o: &mut Vec<f64>, v: Vec2) {
+pub(crate) fn puv(o: &mut Vec<f64>, v: Vec2) {
     o.extend([v.x, v.y]);
 }
 
@@ -1088,7 +1088,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- generator --------------------------------------------------------------------
 
-fn gen_knots(rng: &mut Rng, p: usize, n: usize) -> Vec<f64> {
+pub(crate) fn gen_knots(rng: &mut Rng, p: usize, n: usize) -> Vec<f64> {
     let interior = n - p;
     let mut inner: Vec<f64> = (0..interior).map(|_| rng.uniform(0.05, 0.95)).collect();
     if rng.chance(0.2) && interior >= 2 && p >= 2 {
@@ -1113,7 +1113,7 @@ fn gen_knots(rng: &mut Rng, p: usize, n: usize) -> Vec<f64> {
 
 /// The surface shapes the generator makes.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Shape {
+pub(crate) enum Shape {
     /// A random bumpy net.
     Bumpy,
     /// A flat net (planar within noise or exactly).
@@ -1129,7 +1129,7 @@ enum Shape {
     Pinched,
 }
 
-fn gen_bss(rng: &mut Rng, shape: Shape) -> BssIn {
+pub(crate) fn gen_bss(rng: &mut Rng, shape: Shape) -> BssIn {
     let p = 1 + rng.below(3) as usize;
     let q = 1 + rng.below(3) as usize;
     let n = p + rng.below(3) as usize;
@@ -1225,7 +1225,7 @@ fn gen_bss(rng: &mut Rng, shape: Shape) -> BssIn {
     }
 }
 
-fn gen_plane(rng: &mut Rng) -> SrfIn {
+pub(crate) fn gen_plane(rng: &mut Rng) -> SrfIn {
     let mut n = rng.point3(-1.0, 1.0);
     if n.iter().map(|c| c * c).sum::<f64>() < 1e-2 {
         n = [0.0, 0.0, 1.0];
@@ -1236,7 +1236,7 @@ fn gen_plane(rng: &mut Rng) -> SrfIn {
     }
 }
 
-fn gen_surface(rng: &mut Rng) -> SrfIn {
+pub(crate) fn gen_surface(rng: &mut Rng) -> SrfIn {
     if rng.chance(0.08) {
         let basis = match rng.below(4) {
             0 => gen_plane(rng),
@@ -1260,7 +1260,7 @@ fn gen_surface(rng: &mut Rng) -> SrfIn {
 }
 
 /// The natural domain `[u0, v0, u1, v1]` of a surface input.
-fn natural(s: &SrfIn) -> [f64; 4] {
+pub(crate) fn natural(s: &SrfIn) -> [f64; 4] {
     match s {
         SrfIn::Sms(_) => [0.0, 0.0, 1.0, 1.0],
         SrfIn::Bounded { basis, .. } => natural(basis),
@@ -1281,7 +1281,7 @@ fn natural(s: &SrfIn) -> [f64; 4] {
 }
 
 /// A parameter in `[a, b]`: interior, at an end, at a knot.
-fn gen_param(rng: &mut Rng, a: f64, b: f64, knots: Option<&[f64]>) -> f64 {
+pub(crate) fn gen_param(rng: &mut Rng, a: f64, b: f64, knots: Option<&[f64]>) -> f64 {
     match rng.below(10) {
         0 => a,
         1 => b,
@@ -1291,7 +1291,7 @@ fn gen_param(rng: &mut Rng, a: f64, b: f64, knots: Option<&[f64]>) -> f64 {
     }
 }
 
-fn gen_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
+pub(crate) fn gen_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
     let [u0, v0, u1, v1] = natural(s);
     let base = match s {
         SrfIn::Bounded { basis, .. } => basis.as_ref(),
@@ -1305,7 +1305,7 @@ fn gen_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
 }
 
 /// A `uv` point on a domain boundary or corner half the time.
-fn gen_boundary_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
+pub(crate) fn gen_boundary_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
     let [u0, v0, u1, v1] = natural(s);
     let mut uv = gen_uv(rng, s);
     if rng.chance(0.5) {
@@ -1318,7 +1318,7 @@ fn gen_boundary_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
     uv
 }
 
-fn gen_dom(rng: &mut Rng, s: &SrfIn) -> [f64; 4] {
+pub(crate) fn gen_dom(rng: &mut Rng, s: &SrfIn) -> [f64; 4] {
     let [u0, v0, u1, v1] = natural(s);
     if rng.chance(0.6) {
         return [u0, v0, u1, v1];
@@ -1331,7 +1331,7 @@ fn gen_dom(rng: &mut Rng, s: &SrfIn) -> [f64; 4] {
     [a, b, c, e]
 }
 
-fn gen_curve(rng: &mut Rng) -> CrvIn {
+pub(crate) fn gen_curve(rng: &mut Rng) -> CrvIn {
     let p = 1 + rng.below(3) as usize;
     let n = p + rng.below(4) as usize;
     let cpts = (0..=n)
@@ -1352,7 +1352,7 @@ fn gen_curve(rng: &mut Rng) -> CrvIn {
     }
 }
 
-fn gen_point_near(rng: &mut Rng, s: &SrfIn) -> [f64; 3] {
+pub(crate) fn gen_point_near(rng: &mut Rng, s: &SrfIn) -> [f64; 3] {
     if let Ok(srf) = surface_of(s) {
         let uv = gen_uv(rng, s);
         if let Ok(p) = srf.evaluate_point(p2(uv)) {
@@ -1364,7 +1364,7 @@ fn gen_point_near(rng: &mut Rng, s: &SrfIn) -> [f64; 3] {
     rng.point3(-5.0, 5.0)
 }
 
-fn gen_vecs(rng: &mut Rng, n: usize) -> Vec<[f64; 3]> {
+pub(crate) fn gen_vecs(rng: &mut Rng, n: usize) -> Vec<[f64; 3]> {
     (0..n)
         .map(|_| {
             if rng.chance(0.1) {
@@ -1579,7 +1579,7 @@ fn is_solve(op: &OpIn) -> bool {
 }
 
 /// Whether a surface's control points span roughly unit size (`0.5..=100`).
-fn unit_scale(s: &SrfIn) -> bool {
+pub(crate) fn unit_scale(s: &SrfIn) -> bool {
     match s {
         SrfIn::Bspline(bs) => {
             let max = bs

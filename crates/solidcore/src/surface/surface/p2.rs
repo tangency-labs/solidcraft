@@ -1745,6 +1745,20 @@ pub struct SurfaceEval<'s> {
     fails_eval: bool,
 }
 
+/// The members of a [`SurfaceEval`] its lazy normal evaluations write.
+pub(super) struct EvalStateMut<'a> {
+    /// `m_sPVV`.
+    pub(super) pvv: &'a mut [[Vec3; 3]; 3],
+    /// `m_sSectTangent`.
+    pub(super) sect_tangent: &'a mut Vec3,
+    /// `m_dSectCurvature`.
+    pub(super) sect_curvature: &'a mut f64,
+    /// `m_bNormalSet`.
+    pub(super) normal_set: &'a mut bool,
+    /// `m_bSectDirSet`.
+    pub(super) sect_dir_set: &'a mut bool,
+}
+
 impl<'s> SurfaceEval<'s> {
     /// An evaluator of `surface` with nothing set (`SmSurfaceEval(pSurf)`).
     #[must_use]
@@ -1834,6 +1848,24 @@ impl<'s> SurfaceEval<'s> {
     #[must_use]
     pub const fn sect_dir(&self) -> Vec3 {
         self.sect_dir
+    }
+
+    /// The side flags `(m_bUFromLeft, m_bVFromLeft)`.
+    #[must_use]
+    pub(super) const fn sides(&self) -> (bool, bool) {
+        (self.u_from_left, self.v_from_left)
+    }
+
+    /// Mutable access to the members the lazy evaluations of unit
+    /// `surface.surface_p4` (`EvalNormal`, `EvalNormalSection`) write.
+    pub(super) const fn state_mut(&mut self) -> EvalStateMut<'_> {
+        EvalStateMut {
+            pvv: &mut self.pvv,
+            sect_tangent: &mut self.sect_tangent,
+            sect_curvature: &mut self.sect_curvature,
+            normal_set: &mut self.normal_set,
+            sect_dir_set: &mut self.sect_dir_set,
+        }
     }
 
     /// The evaluation matrix as stored (`m_sPVV`; entries not evaluated yet keep
