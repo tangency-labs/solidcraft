@@ -7,5 +7,6 @@
 //! submodule and adds methods to [`SurfaceIntersector`] (or free functions).
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{IntersectionPointType, SrfIndex, SurfaceIntersector, TsectId, TsectPnt};

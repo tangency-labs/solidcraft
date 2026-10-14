@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**124 / 261 units ported** (83 green, 41 partial), **159,084 / 387,903 upstream lines (41.0%)**. 20 claimed, 0 blocked, 117 todo.
+**125 / 261 units ported** (83 green, 42 partial), **160,063 / 387,903 upstream lines (41.3%)**. 19 claimed, 0 blocked, 117 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -130,7 +130,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `blend.fillet_geom_p2` (2077 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p6`, `blend.fillet_solver_p1` +5 more
 - [ ] `blend.fillet_geom_p5` (1952 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_geom_p4` +6 more
 - [ ] `blend.fillet_corner_p2` (1892 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_solver_p1` +3 more
-- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `boolean.api_brep` +15 more
+- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `boolean.api_brep` +14 more
 
 ## In progress
 
@@ -149,7 +149,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.srf_in_volume` (779 lines) — in progress: #53 @froglemonade2 (draft)
 - [ ] 🔨 `surface.surface_p3` (1794 lines) — in progress: #52 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p1` (2087 lines) — in progress: #47 @bherbruck (draft)
-- [ ] 🔨 `intersect.surface_silhouette` (979 lines) — in progress: #45 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.ray_tracer` (1246 lines) — in progress: #48 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.topology_solver_p1` (1838 lines) — in progress: #30 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.adv_surface_intersector` (1646 lines) — in progress: #41 @bherbruck (ready for review)
@@ -345,13 +344,13 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `topology.proto_topology_p2` (2091 lines) — waiting
 - [ ] ⏳ `topology.proto_topology_p3` (1577 lines) — waiting
 
-### intersect (3/25)
+### intersect (4/25)
 
 - [ ] 🟡 `intersect.surface_tracer` (1900 lines) — partial, 427 cases
 - [ ] 🟡 `intersect.point_class` (909 lines) — partial, 2511 cases
 - [ ] 🔨 `intersect.curve_class_p1` (2087 lines) — in progress: #47 @bherbruck (draft)
 - [ ] ⏳ `intersect.surface_drop_lib_p1` (1478 lines) — waiting
-- [ ] 🔨 `intersect.surface_silhouette` (979 lines) — in progress: #45 @bherbruck (ready for review)
+- [ ] 🟡 `intersect.surface_silhouette` (979 lines) — partial, 709 cases
 - [ ] ⏳ `intersect.curve_class_p7` (2248 lines) — waiting
 - [ ] 🔨 `intersect.ray_tracer` (1246 lines) — in progress: #48 @froglemonade2 (ready for review)
 - [ ] ⏳ `intersect.surface_drop_curve` (2014 lines) — waiting
