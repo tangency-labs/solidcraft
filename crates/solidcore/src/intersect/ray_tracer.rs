@@ -1,0 +1,1570 @@
+//! The ray tracer: a voxel grid of surface subdivision leaves that rays are fired
+//! into, and the local Newton solver that intersects a ray with one leaf.
+//!
+//! Upstream: `source/SMLib/src/SmRayTracer.cpp`, `source/SMLib/inc/SmRayTracer.h`.
+//!
+//! | Rust                                              | Upstream                                  |
+//! |---------------------------------------------------|-------------------------------------------|
+//! | [`LightSource`], [`LightSource::new`]             | `SmLightSource`, its constructor          |
+//! | `Drop` (implicit)                                 | `~SmLightSource`                          |
+//! | [`Lsi3LocalSolver`], [`Lsi3LocalSolver::new`]     | `SmLSI3LocalSolver`, its constructors     |
+//! | [`Lsi3LocalSolver::local_solve`], [`LocalSolveResult`] | `SmLSI3LocalSolver::LocalSolve`      |
+//! | [`RayTracer`], [`RayTracer::new`]                 | `SmRayTracer`, `SmRayTracer::SmRayTracer` |
+//! | `Drop` (implicit)                                 | `~SmRayTracer`                            |
+//! | [`RayTracer::set_solver_tolerance`]               | `SmRayTracer::SetSolverTolerance`         |
+//! | [`RayTracer::fire_ray`], [`RayHit`]               | `SmRayTracer::FireRay`                    |
+//! | [`RayTracer::add_surface_to_grid`], [`RayTracer::add_surface_with_bbox`] | `SmRayTracer::AddSurfaceToGrid` |
+//! | [`RayTracer::add_poly_brep_to_grid`]              | `SmRayTracer::AddPolyBrepToGrid`          |
+//! | [`RayRenderer`], [`RayRenderer::new`]               | `SmRayRenderer`, `SmRayRenderer::SmRayRenderer` |
+//! | `Drop` (implicit)                                 | `~SmRayRenderer`                          |
+//! | [`RayRenderer::do_render`], [`RayRenderer::render_pixel`], [`RayRenderer::render_ray`] | `SmRayRenderer::DoRender`, `RenderPixel`, `RenderRay` |
+//! | [`RayRenderer::set_sample_rate`], [`RayRenderer::add_light_source`], [`RayRenderer::pixels_shaded`] | `SetSampleRate`, `AddLightSource`, `GetPixelsShaded` |
+//! | [`RayObject`]                                   | the `SmObject*` of `SmSolution::m_apObjects` |
+//! | [`surface_leaf`]                                  | `SmSurfaceGridElement::Init` (the part after the Bezier patch data) |
+//! | `line_plane_intersect` (private)                  | `sm_LinePlaneIntersect`                   |
+//! | `is_point_valid` (private)                        | `sm_IsPointValid`                         |
+//! | `convert_to_parameter_delta` (private)            | `sm_ConvertToParameterDelta`              |
+//! | `find_additional_tangent_guess` (private)         | `sm_FindAdditionalTangentGuess`           |
+//! | `find_poly_hit` (private)                         | `sm_FindPolyHit`                          |
+//!
+//! Deviations:
+//! - **Pointers.** The tracer owns its grid by value (`~SmRayTracer` deletes it);
+//!   surfaces are borrowed and addressed by index into the tracer's surface list
+//!   (`m_sSurfaces`, [`RayTracer::register_surface`]), which is what a surface grid
+//!   element and a [`RayObject::Surface`] hold. The context reference
+//!   (`m_crContext`) has no counterpart: it is only read by `GetMemoryUsed` and
+//!   `Dump`.
+//! - **Out-params** become return values: [`RayHit`] for `FireRay` (the solution
+//!   starts as a default-constructed `SmSolution`, as every caller passes one;
+//!   `rGridElements`/`rMinDistances`/`rMaxDistances` hold the last 3DDDA step's
+//!   lists) and [`LocalSolveResult`] for `LocalSolve`. `LocalSolve`'s status is
+//!   ignored by `FireRay`, but its outputs are used, so the status travels in
+//!   [`LocalSolveResult::status`]; [`SolidError::Unported`] is always propagated.
+//! - **Solution nodes.** `LocalSolve` stores the grid element pointer in
+//!   `m_apNodes[0]` through an illegal cast that only `SmRayRenderer::RenderRay`
+//!   reads; `FireRay` clears it. The Rust solution leaves `nodes` empty.
+//! - **Grid elements of other types.** `FireRay` asserts (debug builds only) that a
+//!   non-polygon element is a surface element and casts it regardless; an element
+//!   of another type (user data, hierarchy) is [`SolidError::InvalidInput`] here.
+//! - **Surface leaf data.** `SmSurfaceGridElement::Init` is unported
+//!   (`geom::grid`), so surface leaves enter the grid through
+//!   [`Grid::add_surface_element`] with their data filled in
+//!   ([`SurfaceGridElement`] is co-ported by this unit).
+//! - **Polygon elements.** `sm_FindPolyHit` walks the `SmBrepCache` tree of a
+//!   polygon grid element and tests `SmPolyFace`s: neither exists yet, so a polygon
+//!   element in the ray's path is [`SolidError::Unported`], as is
+//!   [`RayTracer::add_poly_brep_to_grid`], so the `SmPolyBrep` list and the
+//!   per-context mark locks of `FireRay` (nothing can put a poly B-rep in the list)
+//!   are not ported; `GetMemoryUsed`, `Dump` and the drawing blocks are not reached
+//!   by the upstream tests and not ported either.
+//! - **Renderer.** [`RayRenderer`] owns its tracer and light sources by value.
+//!   `DoRender` returns the pixel colours (upstream keeps one row in a local and prints
+//!   a progress line per row with `smos_WriteBuffer`, which is dropped); the colours
+//!   upstream leaves unset before `DoRender` are black; the hit node `RenderRay`
+//!   passes as the skip element is `m_apNodes[0]`, which `FireRay` always clears, so
+//!   no element is skipped; unsigned products wrap as upstream's `ULONG`.
+//! - **Unported callees.** `SmSurface::LocalLineIntersect` (`surface.surface_p8`),
+//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`), `SmSurface::GetFace`
+//!   (`surface.surface_p1`), `SmFace::PointClassify` (`query.face_p2`), the surface
+//!   cache of `smsurf_GetSurfaceCache` (`surface.surface_p1`,
+//!   `surface.surface_cache_p3`) and the poly types return
+//!   [`SolidError::Unported`] (see the `UNPORTED` markers).
+//! - `SM_ERR` results the upstream ignores or `SER`s keep their behaviour; the
+//!   `SM_DEBUG_CODE` blocks are not ported. No recursion depends on input here
+//!   (`sm_FindPolyHit`, which recurses up a tree, is unported).
+
+use crate::curve::curve::p2::evaluate_geometric;
+use crate::curve::curve::Curve;
+use crate::curve::line::Line;
+use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::{
+    circle_coplanar_circle_intersect, line_closest_point, line_coplanar_circle_intersect,
+    line_plane_intersect_uv, CircleCircle,
+};
+use crate::geom::grid::{ElementId, Grid, GridItem, HierarchyElement, SurfaceGridElement};
+use crate::geom::polar_box::PolarBox;
+use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
+use crate::geom::tree::NodeId;
+use crate::geom::vector2d::{Point2, Vec2};
+use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
+use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::knots::Side;
+use crate::surface::surface::p2::surface_cache;
+use crate::surface::surface::p7::evaluate_1st_derivatives;
+use crate::surface::surface::Surface;
+use crate::topology::{EdgeId, FaceId, VertexId};
+
+/// A light source (`SmLightSource`): white light from a point or in a direction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LightSource {
+    /// `m_vLightDirectionOrOrigin`: light position or direction.
+    pub direction_or_origin: Vec3,
+    /// `m_bIsPointLightSource`: true for a point source, false for diffuse light.
+    pub is_point_light_source: bool,
+}
+
+impl LightSource {
+    /// `SmLightSource(crLightDirOrOrigin, bIsPointLight)`.
+    #[must_use]
+    pub const fn new(direction_or_origin: Vec3, is_point_light_source: bool) -> Self {
+        Self {
+            direction_or_origin,
+            is_point_light_source,
+        }
+    }
+}
+
+/// An object a ray solution refers to (`SmObject*` of `SmSolution::m_apObjects`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RayObject {
+    /// A surface: its index in the tracer's surface list.
+    Surface(usize),
+    /// The face of the hit point (`SmFace`).
+    Face(FaceId),
+    /// The edge of the hit point (`SmEdge`).
+    Edge(EdgeId),
+    /// The vertex of the hit point (`SmVertex`).
+    Vertex(VertexId),
+}
+
+impl SolutionObject for RayObject {
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Surface(_) => ObjectKind::Surface,
+            Self::Face(_) => ObjectKind::Face,
+            Self::Edge(_) => ObjectKind::Edge,
+            Self::Vertex(_) => ObjectKind::Vertex,
+        }
+    }
+}
+
+/// The outputs of `SmSurface::LocalLineIntersect`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LineIntersection {
+    /// `rbFoundIntersection`.
+    pub found: bool,
+    /// `rUVFound`: the surface parameters of the intersection.
+    pub uv: Point2,
+    /// `rdTFound`: the line parameter.
+    pub t: f64,
+    /// `rdDeviation`: the distance between the final line and surface points.
+    pub deviation: f64,
+    /// `rPoint`: the intersection point.
+    pub point: Point3,
+    /// `rNormal`: the surface normal there (not unitized).
+    pub normal: Vec3,
+}
+
+/// The outputs of `SmSurface::EvaluateNormalSection`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NormalSection {
+    /// `rTangentPlaneDirection`: the unit direction projected into the tangent plane.
+    pub tangent_plane_direction: Vec3,
+    /// `rdCurvatureValue`: the curvature of the surface curve in that direction.
+    pub curvature: f64,
+    /// `rSurfaceNormalVector`: the unit surface normal.
+    pub normal: Vec3,
+}
+
+/// `SmSurface::LocalLineIntersect`: the line `point + t * vector` against the surface
+/// from the guess `uv_guess`.
+fn surface_local_line_intersect(
+    _surface: &Surface,
+    _uv_domain: &Extent2d,
+    _line_point: Point3,
+    _line_vector: Vec3,
+    _interval: &Extent1d,
+    _distance_tolerance: f64,
+    _accuracy_tolerance: f64,
+    _uv_guess: Point2,
+) -> Result<LineIntersection> {
+    // UNPORTED(surface.surface_p8): SmSurface::LocalLineIntersect
+    Err(SolidError::unported(
+        "SmSurface::LocalLineIntersect",
+        "surface.surface_p8",
+    ))
+}
+
+/// `SmSurface::EvaluateNormalSection` (`bUFromLeft`, `bVFromLeft` both true).
+fn surface_evaluate_normal_section(
+    _surface: &Surface,
+    _uv: Point2,
+    _direction: Vec3,
+) -> Result<NormalSection> {
+    // UNPORTED(surface.surface_p3): SmSurface::EvaluateNormalSection
+    Err(SolidError::unported(
+        "SmSurface::EvaluateNormalSection",
+        "surface.surface_p3",
+    ))
+}
+
+/// `SmSurface::GetFace`: the face owning the surface, if any.
+fn surface_face(_surface: &Surface) -> Result<Option<FaceId>> {
+    // UNPORTED(surface.surface_p1): SmSurface::GetFace
+    Err(SolidError::unported(
+        "SmSurface::GetFace",
+        "surface.surface_p1",
+    ))
+}
+
+/// The leaf data `SmSurfaceGridElement::Init` derives from the surface once it has the
+/// Bezier patch data (domain, box, pseudo box and polar box): the surface point,
+/// derivatives and unit normal at the middle of the domain. `surface_index` is the
+/// surface's index in the tracer's surface list.
+///
+/// # Errors
+///
+/// Those of the surface's `Evaluate` and `EvaluateNormal` (upstream signals them with
+/// `SE` and carries on with unset values).
+pub fn surface_leaf(
+    surface_index: usize,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    bbox: &Extent3d,
+    pseudo_box: &PseudoBox,
+    polar_box: &PolarBox,
+) -> Result<SurfaceGridElement<usize>> {
+    // Precomputation of derivative information for this little patch
+    let uv_mid = uv_domain.evaluate(0.5, 0.5);
+    let eval = surface.evaluate(
+        uv_mid,
+        1,
+        1,
+        EvaluateFlags {
+            u_side: Side::Left,
+            v_side: Side::Left,
+            only_upper_half: true,
+            non_zero_tangents: true,
+        },
+    )?;
+    let at = |i: usize, j: usize| -> Result<Vec3> {
+        eval.get(i)
+            .and_then(|r| r.get(j))
+            .copied()
+            .ok_or_else(|| SolidError::sm_err("intersect::ray_tracer::surface_leaf"))
+    };
+    let mid_point = at(0, 0)?;
+    let mid_du = at(1, 0)?;
+    let mid_dv = at(0, 1)?;
+    let mut mid_normal = mid_du.cross(mid_dv);
+    if mid_normal.length_squared() > EFF_ZERO {
+        mid_normal = mid_normal.unitize()?;
+    } else {
+        mid_normal = surface.evaluate_normal(uv_mid, Side::Left, Side::Left)?;
+    }
+    Ok(SurfaceGridElement {
+        surface: surface_index,
+        uv_domain: *uv_domain,
+        bbox: *bbox,
+        pseudo_box: *pseudo_box,
+        polar_box: *polar_box,
+        mid_point,
+        mid_du,
+        mid_dv,
+        mid_normal,
+    })
+}
+
+/// `sm_LinePlaneIntersect`: the line against the plane `plane_point + u * plane_u +
+/// v * plane_v`; `Some((point, uv, line parameter))`, or `None` when the line is
+/// parallel to the plane (upstream `SM_ERR`).
+fn line_plane_intersect(
+    line_point: Point3,
+    line_vector: Vec3,
+    plane_point: Point3,
+    plane_u: Vec3,
+    plane_v: Vec3,
+) -> Option<(Point3, Point2, f64)> {
+    let (t, u, v) =
+        line_plane_intersect_uv(line_point, line_vector, plane_point, plane_u, plane_v).ok()?;
+    Some((line_point + t * line_vector, Vec2::new(u, v), t))
+}
+
+/// `sm_IsPointValid`: whether `uv` is a valid point of the surface (inside its face,
+/// or its natural domain when it has no face), and the topology object coincident
+/// with the point.
+fn is_point_valid(
+    surface: &Surface,
+    uv: Point2,
+    _src_zone_tol: f64,
+) -> Result<(bool, Option<RayObject>)> {
+    match surface_face(surface)? {
+        // no face - check uv against the natural domain
+        None => Ok((surface.natural_uv_domain().contains_point(uv, 0.0), None)),
+        Some(_face) => {
+            // UNPORTED(query.face_p2): SmFace::PointClassify
+            Err(SolidError::unported(
+                "SmFace::PointClassify",
+                "query.face_p2",
+            ))
+        }
+    }
+}
+
+/// `sm_ConvertToParameterDelta`: the parameter step that moves along `tangent` so
+/// that the projection of `delta` falls on the new point.
+fn convert_to_parameter_delta(tangent: Vec3, delta: Vec3) -> f64 {
+    let tan_len = tangent.length();
+    if tan_len < EFF_ZERO {
+        return 0.0;
+    }
+    let unit_tan = tangent / tan_len;
+    let dot = unit_tan.dot(delta);
+    dot / tan_len
+}
+
+/// The outputs of `sm_FindAdditionalTangentGuess`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TangentGuess {
+    /// `rbFoundGuess`.
+    found: bool,
+    /// `rNewUVGuess`.
+    uv: Point2,
+    /// `rdNewTGuess`.
+    t: f64,
+}
+
+/// `sm_FindAdditionalTangentGuess`: near a tangential ray/surface contact, a second
+/// intersection guess from the circles of the surface normal section and the curve.
+fn find_additional_tangent_guess(
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    current_uv: Point2,
+    current_t: f64,
+) -> Result<TangentGuess> {
+    let mut guess = TangentGuess {
+        found: false,
+        uv: Vec2::new(0.0, 0.0),
+        t: 0.0,
+    };
+    let no_guess = guess;
+
+    let mut normal = surface.evaluate_normal(current_uv, Side::Left, Side::Left)?;
+    let pv = curve.evaluate(current_t, 1, true, true)?;
+    let (pv0, pv1) = match pv.as_slice() {
+        [a, b, ..] => (*a, *b),
+        _ => return Err(SolidError::sm_err("intersect::ray_tracer")),
+    };
+    // First do a quick test to determin the angle of intersection between the
+    // tangent plane of the surface ane the tangent of the curve.  If not within 20
+    // degrees assume that we don't have a tangency touching situation.
+    if !normal.is_perpendicular_to(pv1, 20.0) {
+        return Ok(no_guess);
+    }
+    // Lets take a normal section on the surface along the direction of the tangent
+    // of the curve.  This should give us two circles or a line and a circle to
+    // intersect.
+    let section = surface_evaluate_normal_section(surface, current_uv, pv1)?;
+    let tan_plane_proj = section.tangent_plane_direction;
+    let normal_curvature = section.curvature;
+    normal = section.normal;
+
+    // First compute the projected tangent vector.
+    let surf_point = surface.evaluate_point(current_uv)?;
+
+    // Get the geometric properties of the curve at the intersection
+    let geom_vec = evaluate_geometric(curve, current_t, 2, true)?;
+    let mut curvature_vector = *geom_vec
+        .get(2)
+        .ok_or_else(|| SolidError::sm_err("intersect::ray_tracer"))?;
+    let curve_curvature = curvature_vector.length();
+    if curve_curvature > EFF_ZERO {
+        curvature_vector = curvature_vector.unitize()?;
+    }
+
+    // Compute the normal to the plane which is defined by the surface normal and
+    // the projected vector.
+    let projection_plane_normal = tan_plane_proj.cross(normal).unitize()?;
+
+    // If the normal curvature is zero then use a line instead of a circle for the
+    // surface. Also if the radius of one circle is greater then twice the other use
+    // a line for the one with the larger radius.
+    let line_circle_intersection;
+    let mut circle1_radius;
+    let mut circle2_radius = 0.0;
+    let line_point;
+    let mut circle1_center;
+    let mut circle2_center = Vec3::new(0.0, 0.0, 0.0);
+    let line_vec;
+    let mut circle1_normal;
+    let mut circle2_normal = Vec3::new(0.0, 0.0, 0.0);
+    if normal_curvature.abs() < EFF_ZERO {
+        // If the curve also has zero curvature then we are done
+        if curve_curvature.abs() < EFF_ZERO {
+            return Ok(no_guess); // Done with no new guesses needed
+        }
+        circle1_radius = (1.0 / curve_curvature).abs();
+        circle1_center = pv0 + curvature_vector * circle1_radius;
+        circle1_normal = pv1.cross(curvature_vector);
+        if circle1_normal.length_squared() < EFF_ZERO_SQ {
+            return Ok(no_guess);
+        }
+        circle1_normal = circle1_normal.unitize()?;
+        line_point = surf_point;
+        line_vec = tan_plane_proj.unitize()?;
+        line_circle_intersection = true;
+    } else {
+        // have surface with curvature
+        circle1_radius = (1.0 / normal_curvature).abs();
+        normal = normal.unitize()?;
+        circle1_center = surf_point + normal * (1.0 / normal_curvature);
+        circle1_normal = projection_plane_normal;
+        if curve_curvature.abs() < EFF_ZERO || (1.0 / curve_curvature).abs() > 2.0 * circle1_radius
+        {
+            line_point = pv0;
+            line_vec = pv1.unitize()?;
+            line_circle_intersection = true;
+        } else {
+            circle2_radius = (1.0 / curve_curvature).abs();
+            if circle1_radius > 2.0 * circle2_radius {
+                circle1_radius = circle2_radius;
+                circle1_center = pv0 + curvature_vector * circle2_radius;
+                circle2_normal = pv1.cross(curvature_vector);
+                if circle2_normal.length_squared() < EFF_ZERO_SQ {
+                    return Ok(no_guess);
+                }
+                line_point = surf_point;
+                line_vec = tan_plane_proj.unitize()?;
+                line_circle_intersection = true;
+            } else {
+                // nearly equal radii
+                curvature_vector = curvature_vector.unitize()?;
+                circle2_center = pv0 + curvature_vector * circle2_radius;
+                circle2_normal = pv1.cross(curvature_vector);
+                if circle2_normal.length_squared() < EFF_ZERO_SQ {
+                    return Ok(no_guess);
+                }
+                line_point = Vec3::new(0.0, 0.0, 0.0);
+                line_vec = Vec3::new(0.0, 0.0, 0.0);
+                line_circle_intersection = false;
+            }
+        }
+    }
+
+    let found_vector = if line_circle_intersection {
+        let params = line_coplanar_circle_intersect(
+            line_point,
+            line_vec,
+            circle1_center,
+            circle1_normal,
+            circle1_radius,
+            EFF_ZERO,
+        )?;
+        // If only have one or zero intersections we are done without picking up
+        // extra guess
+        let [p0, p1] = params.as_slice() else {
+            return Ok(no_guess);
+        };
+        // Find the other intersection -- i.e. the one we don't have
+        let mut line_t = *p0;
+        if p1.abs() > p0.abs() {
+            line_t = *p1;
+        }
+        line_t * line_vec
+    } else {
+        // Do circle circle intersection
+        let hits = if circle1_radius > circle2_radius {
+            circle_coplanar_circle_intersect(
+                circle1_normal,
+                circle1_center,
+                circle1_radius,
+                circle2_center,
+                circle2_radius,
+                EFF_ZERO,
+            )?
+        } else {
+            circle_coplanar_circle_intersect(
+                circle2_normal,
+                circle2_center,
+                circle2_radius,
+                circle1_center,
+                circle1_radius,
+                EFF_ZERO,
+            )?
+        };
+        // If only have one or zero intersections we are done without picking up
+        // extra guess
+        let CircleCircle::Crossing(t0, t1) = hits else {
+            return Ok(no_guess);
+        };
+        let mut fv = t0 - surf_point;
+        if fv.length() < t1.distance(surf_point) {
+            fv = t1 - surf_point;
+        }
+        fv
+    };
+
+    // Use the found vector to compute an approximate step in the curve and surface
+    // parameters.
+    let (_point, du, dv) = evaluate_1st_derivatives(surface, current_uv, Side::Left, Side::Left)?;
+
+    guess.found = true;
+    guess.t = current_t + convert_to_parameter_delta(pv1, found_vector);
+    guess.uv = Vec2::new(
+        current_uv.x + convert_to_parameter_delta(du, found_vector),
+        current_uv.y + convert_to_parameter_delta(dv, found_vector),
+    );
+
+    if !interval.contains_value(guess.t, 0.0) && !uv_domain.contains_point(guess.uv, 0.0) {
+        // If the guess is outside of the domain we'll be able to pick it up using
+        // another method.
+        return Ok(no_guess);
+    }
+    guess.t = interval.clamp_value(guess.t);
+    guess.uv = uv_domain.clamp_point(guess.uv);
+
+    Ok(guess) // Found a guess - loaded it now we are done
+}
+
+/// The ray solver for one surface subdivision leaf (`SmLSI3LocalSolver`): a Newton
+/// iteration from guesses taken off the leaf's mid-point tangent plane or corners.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean members
+pub struct Lsi3LocalSolver {
+    /// `m_d3dTolerance`: near-miss tolerance, used for line intersections.
+    pub d3d_tolerance: f64,
+    /// `m_sUVDomain`.
+    pub uv_domain: Extent2d,
+    /// `m_vLinePoint`.
+    pub line_point: Point3,
+    /// `m_vLineVector`.
+    pub line_vector: Vec3,
+    /// `m_sLineInterval`.
+    pub line_interval: Extent1d,
+    /// `m_bRayFire`.
+    pub ray_fire: bool,
+    /// `m_dDistanceTolerance`: used for line intersections (and as a step-off distance
+    /// by callers).
+    pub distance_tolerance: f64,
+    /// `m_dRayAccuracy`: convergence tolerance for line-surface intersections.
+    pub ray_accuracy: f64,
+    /// `m_bHaveTMinTMax`.
+    pub have_t_min_t_max: bool,
+    /// `m_dTMinOfBBox`.
+    pub t_min_of_bbox: f64,
+    /// `m_dTMaxOfBBox`.
+    pub t_max_of_bbox: f64,
+}
+
+impl Default for Lsi3LocalSolver {
+    /// `SmLSI3LocalSolver()`: tolerance 0 and the line interval `[0, 1e10]`; the
+    /// members upstream leaves uninitialised are zero.
+    fn default() -> Self {
+        Self {
+            d3d_tolerance: 0.0,
+            uv_domain: Extent2d::new(),
+            line_point: Vec3::new(0.0, 0.0, 0.0),
+            line_vector: Vec3::new(0.0, 0.0, 0.0),
+            line_interval: Extent1d::from_raw(0.0, 1.0e10),
+            ray_fire: false,
+            distance_tolerance: 0.0,
+            ray_accuracy: 0.0,
+            have_t_min_t_max: false,
+            t_min_of_bbox: 0.0,
+            t_max_of_bbox: 0.0,
+        }
+    }
+}
+
+/// What [`Lsi3LocalSolver::local_solve`] returns.
+#[derive(Debug, Clone)]
+pub struct LocalSolveResult {
+    /// The returned status: `Ok` for `SM_SUCCESS`. The outputs below are valid
+    /// whatever it is (`FireRay` ignores the status but reads them).
+    pub status: Result<()>,
+    /// `rbNeedsMoreSubdivision`: always false.
+    pub needs_more_subdivision: bool,
+    /// `rbFoundIntersection`: a valid point was found.
+    pub found_intersection: bool,
+    /// `rSolution`: when `found_intersection`, `start` holds the ray parameter, the
+    /// surface `uv`, the 3D point and the normal; `objects` the surface and the
+    /// coincident topology object.
+    pub solution: Solution<RayObject>,
+}
+
+impl Lsi3LocalSolver {
+    /// `SmLSI3LocalSolver(pSurfaceTree, crUVDomain, crLinePoint, crLineVector,
+    /// cpLineInterval, bRayFire, dDistanceTolerance, dRayAccuracy)` (the unused
+    /// tree argument is dropped).
+    #[must_use]
+    pub fn new(
+        uv_domain: &Extent2d,
+        line_point: Point3,
+        line_vector: Vec3,
+        line_interval: Option<&Extent1d>,
+        ray_fire: bool,
+        distance_tolerance: f64,
+        ray_accuracy: f64,
+    ) -> Self {
+        Self {
+            d3d_tolerance: 0.0,
+            uv_domain: *uv_domain,
+            line_point,
+            line_vector,
+            line_interval: line_interval.map_or(Extent1d::from_raw(0.0, 1.0e10), |i| *i),
+            ray_fire,
+            distance_tolerance,
+            ray_accuracy,
+            have_t_min_t_max: false,
+            t_min_of_bbox: 0.0,
+            t_max_of_bbox: 0.0,
+        }
+    }
+
+    /// A ray/leaf intersection by Newton-Raphson (`LocalSolve`): the intersection of
+    /// the line with `surface` over the leaf `element` with the smallest line
+    /// parameter that lies in the line interval and is a valid surface point.
+    #[must_use]
+    pub fn local_solve(
+        &self,
+        surface: &Surface,
+        element: &SurfaceGridElement<usize>,
+    ) -> LocalSolveResult {
+        let mut out = LocalSolveResult {
+            status: Ok(()),
+            needs_more_subdivision: false,
+            found_intersection: false,
+            solution: Solution::new(),
+        };
+        out.status = self.local_solve_into(surface, element, &mut out);
+        out
+    }
+
+    fn local_solve_into(
+        &self,
+        surface: &Surface,
+        element: &SurfaceGridElement<usize>,
+        out: &mut LocalSolveResult,
+    ) -> Result<()> {
+        // locals
+        let mid_point = element.mid_point;
+        let mid_du = element.mid_du;
+        let mid_dv = element.mid_dv;
+        let mid_normal = element.mid_normal;
+
+        // get patch UVDomain, regular BBox, PolarBox and PseudoBox
+        let uv_domain = &element.uv_domain;
+        let polar_box = &element.polar_box;
+        let mut pseudo_box = element.pseudo_box;
+        pseudo_box.expand_absolute(self.distance_tolerance);
+
+        let mut uv_point_delta = Vec2::new(0.0, 0.0);
+        let mut point_3d = Vec3::new(0.0, 0.0, 0.0);
+
+        // Get PatchMidNormal/LineVector dot product - to measure angle
+        let dot_norm = self.line_vector.dot(mid_normal);
+
+        // when PatchMidPoint/LineVector is large( more than 60) - use Corner Guess Points
+        let mut use_corners = dot_norm.abs() < 0.4;
+        // get ray/MidTangentPlane intersection
+        match line_plane_intersect(self.line_point, self.line_vector, mid_point, mid_du, mid_dv) {
+            Some((p, uv_delta, _t)) => {
+                point_3d = p;
+                uv_point_delta = uv_delta;
+            }
+            None => use_corners = true,
+        }
+
+        // when using corners - let 3DGuessPoint = Closest LinePoint to patchMidPoint
+        if use_corners {
+            let line_param = line_closest_point(self.line_point, self.line_vector, mid_point);
+            point_3d = self.line_point + line_param * self.line_vector;
+        }
+
+        // when the 3DGuessPoint is not in the pseudoBox try to eliminate intersection
+        // possibility by looking at the psuedoBoxPlane/Line intersections and quitting
+        // when no intersection can be found inside both the bounding and pseudo box
+        // of the node.
+        if !pseudo_box.contains_point(point_3d, 0.0) {
+            // If the point is not in the pseudo box, check whether the ray intersects
+            // it anywhere (the status is ignored: no intersections).
+            let num_ints = pseudo_box
+                .intersect_line(self.line_point, self.line_vector)
+                .map_or(0, |hit| hit.count());
+
+            // If no intersection found just return here
+            if num_ints == 0 {
+                return Ok(());
+            }
+        }
+
+        // Arrive here when we need to look for a line/patch intersection using
+        // numerical methods.
+        let d3d_accuracy = if self.ray_accuracy <= EFF_ZERO / 10.0 {
+            EFF_ZERO * 100.0 * (1.0 + point_3d.max_dimension())
+        } else {
+            self.ray_accuracy
+        };
+
+        // Get Line/PatchMidPoint intersection UVPoint in patch coordinates
+        let mut uv_point = uv_domain.evaluate(0.5, 0.5) + uv_point_delta;
+
+        // set ray interval
+        let mut tmp_ivl = Extent1d::from_raw(-1.0e10, 1.0e10);
+        if !self.line_interval.is_init() {
+            tmp_ivl = self.line_interval;
+        }
+
+        // NR Solver locals
+        let mut min_t_found = BIG_DOUBLE;
+
+        // Add the first GuessPoint to the guess Point array
+        let mut uv_points: Vec<f64> = vec![uv_point.x, uv_point.y];
+        let mut total_points = 1_usize;
+
+        // when needed - add in the corner points to the guess point array
+        if use_corners {
+            for (nx, ny) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                uv_point = uv_domain.evaluate(nx, ny);
+                uv_points.push(uv_point.x);
+                uv_points.push(uv_point.y);
+            }
+            total_points = 5;
+        }
+
+        let orig_points = total_points;
+
+        // For every guess point - call the intersector to seek a solution.
+        let mut ii = 0_usize;
+        while ii < total_points {
+            let (Some(&gu), Some(&gv)) = (uv_points.get(ii * 2), uv_points.get(ii * 2 + 1)) else {
+                return Err(SolidError::sm_err("intersect::ray_tracer::local_solve"));
+            };
+            uv_point = Vec2::new(gu, gv);
+
+            let hit = surface_local_line_intersect(
+                surface,
+                uv_domain,
+                self.line_point,
+                self.line_vector,
+                &tmp_ivl,
+                self.d3d_tolerance,
+                d3d_accuracy,
+                uv_point,
+            )?;
+
+            // skip to next guess when no intersection was found
+            if !hit.found {
+                ii += 1;
+                continue;
+            }
+
+            // save solution with lowest in-range ray parameter value
+            if hit.t < min_t_found && self.line_interval.contains_value(hit.t, 0.0) {
+                // see if point is valid (within surface trim boundaries)
+                let (valid, object) = is_point_valid(surface, hit.uv, self.d3d_tolerance)?;
+                if valid {
+                    // save the solution
+                    out.found_intersection = true;
+                    min_t_found = hit.t;
+                    let sol = &mut out.solution;
+                    sol.num_objects = 1;
+                    for (slot, o) in sol
+                        .objects
+                        .iter_mut()
+                        .zip([Some(RayObject::Surface(element.surface)), object])
+                    {
+                        *slot = o;
+                    }
+                    sol.num_variables = 9;
+                    let values = [
+                        hit.t,
+                        hit.uv.x,
+                        hit.uv.y,
+                        hit.point.x,
+                        hit.point.y,
+                        hit.point.z,
+                        hit.normal.x,
+                        hit.normal.y,
+                        hit.normal.z,
+                    ];
+                    for (slot, v) in sol.start.parameters.iter_mut().zip(values) {
+                        *slot = v;
+                    }
+                    sol.start.solution_value = hit.deviation;
+                    sol.solution_type = SolutionType::SingleValue;
+                }
+            }
+
+            // Try to get done right here.  If we have an intersection then we can
+            // look at the vector map of the surface and try to eliminate the
+            // possibility of additional intersections.
+            let line_vec = self.line_vector;
+
+            // If the angle is less than 45 degrees than we can quit here with out
+            // additional work to test for more tangent guesses.
+            let mut angle = line_vec.angle_between(hit.normal)?;
+            if angle > PI / 2.0 {
+                angle = PI - angle;
+            }
+            if angle < 60.0 * PI / 180.0 {
+                return Ok(());
+            }
+
+            let line_vec = line_vec.unitize()?;
+            if !polar_box.has_perpendicular_to_vector(line_vec) {
+                return Ok(());
+            }
+
+            // If we have found an intersection look closely at it and see if there
+            // might be another intersection very close to it.  If there is compute a
+            // guess point for that other intersection and add it to the list of
+            // guesses. This should pick up any near tangent cases - like ray firing
+            // just inside of a silhouette.
+            if ii < orig_points {
+                let tmp_line =
+                    Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false));
+                let guess = find_additional_tangent_guess(
+                    surface, uv_domain, &tmp_line, &tmp_ivl, hit.uv, hit.t,
+                )?;
+                if guess.found {
+                    total_points += 1;
+                    uv_points.push(guess.uv.x);
+                    uv_points.push(guess.uv.y);
+                }
+            }
+            ii += 1;
+        }
+        Ok(())
+    }
+}
+
+/// What [`RayTracer::fire_ray`] returns.
+#[derive(Debug, Clone)]
+pub struct RayHit {
+    /// `rbRayHitsSomething`.
+    pub hits_something: bool,
+    /// `rSolution`: `start[0]` is the ray parameter, `start[1..3]` the surface `uv`
+    /// (`BIG_DOUBLE` for poly faces), `start[3..6]` the 3D point, `start[6..9]` the
+    /// normal; `objects[0]` the surface and `objects[1]` the associated topology
+    /// object (a face, edge or vertex, or none).
+    pub solution: Solution<RayObject>,
+    /// `rGridElements`: the elements whose boxes the ray crosses in the last voxel
+    /// walked, ordered by ray parameter.
+    pub grid_elements: Vec<ElementId>,
+    /// `rMinDistances`: the entry parameter of each of those boxes.
+    pub min_distances: Vec<f64>,
+    /// `rMaxDistances`: the exit parameter of each of those boxes.
+    pub max_distances: Vec<f64>,
+}
+
+/// The ray tracer (`SmRayTracer`): a grid of surface subdivision leaves and the
+/// solver that intersects rays with them.
+#[derive(Debug)]
+pub struct RayTracer<'s> {
+    /// `m_dRayTolerance`.
+    ray_tolerance: f64,
+    /// `m_dRayAccuracy`.
+    ray_accuracy: f64,
+    /// `m_pGrid`: the voxel model.
+    grid: Grid<usize>,
+    /// `m_sLSISolver`: the ray/leaf solver.
+    solver: Lsi3LocalSolver,
+    /// `m_sSurfaces`: the surfaces added to the grid.
+    surfaces: Vec<&'s Surface>,
+    /// `m_pSkipElement`: an element `FireRay` does not test.
+    pub skip_element: Option<ElementId>,
+    /// `m_bHitAnyThing`: stop at the first hit instead of finding the closest.
+    pub hit_any_thing: bool,
+}
+
+impl<'s> RayTracer<'s> {
+    /// `SmRayTracer(crContext, pGrid, dRayTolerance, dRayAccuracy)`: takes ownership
+    /// of `grid`.
+    #[must_use]
+    pub fn new(grid: Grid<usize>, ray_tolerance: f64, ray_accuracy: f64) -> Self {
+        let solver = Lsi3LocalSolver {
+            uv_domain: Extent2d::from_points(
+                Vec2::new(-BIG_DOUBLE, -BIG_DOUBLE),
+                Vec2::new(BIG_DOUBLE, BIG_DOUBLE),
+            ),
+            have_t_min_t_max: true,
+            ray_fire: true,
+            distance_tolerance: ray_tolerance,
+            ray_accuracy,
+            // SetMinMax(0.0, 1.0E10) cannot fail
+            line_interval: Extent1d::from_raw(0.0, 1.0e10),
+            ..Lsi3LocalSolver::default()
+        };
+        Self {
+            ray_tolerance,
+            ray_accuracy,
+            grid,
+            solver,
+            surfaces: Vec::new(),
+            skip_element: None,
+            hit_any_thing: false,
+        }
+    }
+
+    /// The grid (`GetGrid`).
+    #[must_use]
+    pub const fn grid(&self) -> &Grid<usize> {
+        &self.grid
+    }
+
+    /// The grid, mutably (`GetGrid`).
+    pub fn grid_mut(&mut self) -> &mut Grid<usize> {
+        &mut self.grid
+    }
+
+    /// The ray solver (`m_sLSISolver`).
+    #[must_use]
+    pub const fn solver(&self) -> &Lsi3LocalSolver {
+        &self.solver
+    }
+
+    /// `m_dRayTolerance`.
+    #[must_use]
+    pub const fn ray_tolerance(&self) -> f64 {
+        self.ray_tolerance
+    }
+
+    /// `m_dRayAccuracy`.
+    #[must_use]
+    pub const fn ray_accuracy(&self) -> f64 {
+        self.ray_accuracy
+    }
+
+    /// `SetSolverTolerance`: the solver's near-miss tolerance.
+    pub fn set_solver_tolerance(&mut self, tol: f64) {
+        self.solver.d3d_tolerance = tol;
+    }
+
+    /// `m_sSurfaces.Add(pSurface)`: records `surface` and returns its index, the
+    /// handle surface grid elements and solution objects use.
+    pub fn register_surface(&mut self, surface: &'s Surface) -> usize {
+        self.surfaces.push(surface);
+        self.surfaces.len() - 1
+    }
+
+    /// The surfaces added so far (`m_sSurfaces`).
+    #[must_use]
+    pub fn surfaces(&self) -> &[&'s Surface] {
+        &self.surfaces
+    }
+
+    /// Intersects a ray with the geometry in the grid (`FireRay`): the nearest hit
+    /// (any hit when [`RayTracer::hit_any_thing`]) with ray parameter in
+    /// `[-EFF_ZERO, dMaxRayParameter)`; use `BIG_DOUBLE` for an infinite ray.
+    ///
+    /// # Errors
+    ///
+    /// Those of the grid walk; [`SolidError::Unported`] from the solver or a polygon
+    /// element; [`SolidError::InvalidInput`] for a grid element that is neither a
+    /// surface nor a polygon element or whose surface is not registered.
+    pub fn fire_ray(
+        &mut self,
+        ray_point: Point3,
+        ray_vector: Vec3,
+        max_ray_parameter: f64,
+    ) -> Result<RayHit> {
+        const OP: &str = "intersect::ray_tracer::RayTracer::fire_ray";
+        // init output
+        let mut result = RayHit {
+            hits_something: false,
+            solution: Solution::new(),
+            grid_elements: Vec::new(),
+            min_distances: Vec::new(),
+            max_distances: Vec::new(),
+        };
+
+        // (The per-context mark locks of the poly B-reps: none can be added.)
+
+        // Init Grid scratch ray walking data with first Voxel/Ray intersection
+        let hits_nothing = self.grid.setup_3ddda(ray_point, ray_vector)?;
+
+        // Quit when ray hits no voxels
+        if hits_nothing {
+            return Ok(result);
+        }
+        let mut hit_t = max_ray_parameter;
+
+        // traverse ray from voxel to voxel looking for 1st GridElement Intersection.
+        // Stop when ray intersects an element or when ray exits grid.
+        loop {
+            // move to the next voxel that contains any not yet marked element whose
+            // box the ray crosses
+            let step = self.grid.step_3ddda(BIG_DOUBLE)?;
+            result.grid_elements = step.elements;
+            result.min_distances = step.min_distances;
+            result.max_distances = step.max_distances;
+            let exits_grid = step.exited_grid;
+
+            // For every GridElement found in the current Voxel
+            for (ii, &id) in result.grid_elements.iter().enumerate() {
+                let (Some(&min_d), Some(&max_d)) =
+                    (result.min_distances.get(ii), result.max_distances.get(ii))
+                else {
+                    return Err(SolidError::InvalidInput {
+                        operation: OP,
+                        reason: "grid step lists differ in length",
+                    });
+                };
+                // skip hits which come after current hit pramameter value
+                if min_d > hit_t {
+                    continue;
+                }
+
+                // skip hits on the current SkipNode
+                if self.skip_element == Some(id) {
+                    continue;
+                }
+
+                let item = self.grid.element(id)?.item();
+
+                // handle PolyBrep Faces
+                let leaf = match item {
+                    GridItem::Polygon(node) => {
+                        // Handle polygon ray firing
+                        let hit = find_poly_hit(node, ray_point, ray_vector, hit_t)?;
+                        if let Some(hit) = hit {
+                            hit_t = hit;
+                            result.hits_something = true;
+                            if self.hit_any_thing {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    GridItem::Surface(leaf) => leaf,
+                    GridItem::Hierarchy(_) | GridItem::User(_) => {
+                        return Err(SolidError::InvalidInput {
+                            operation: OP,
+                            reason: "grid element is neither a surface nor a polygon element",
+                        });
+                    }
+                };
+
+                // handle Brep Surfaces
+
+                // init solver parameters
+                self.solver.line_point = ray_point;
+                self.solver.line_vector = ray_vector;
+                self.solver.t_min_of_bbox = min_d;
+                self.solver.t_max_of_bbox = max_d;
+
+                // skip ElementBBox/Ray intersections that happen before the ray Start
+                // Point
+                if self.solver.t_max_of_bbox < -EFF_ZERO {
+                    continue;
+                }
+
+                // solve for a ray/GridElementGeometry intersection
+                let surface = *self
+                    .surfaces
+                    .get(leaf.surface)
+                    .ok_or(SolidError::InvalidInput {
+                        operation: OP,
+                        reason: "surface grid element refers to an unregistered surface",
+                    })?;
+                let solved = self.solver.local_solve(surface, &leaf);
+                // (the status is ignored; Unported always propagates)
+                if let Err(e) = &solved.status {
+                    if e.is_unported() {
+                        return Err(e.clone());
+                    }
+                }
+                let found = solved.found_intersection;
+                let sol = solved.solution;
+
+                // when an intersection was found that happens before any others and
+                // is in the positive part of the ray
+                let t = sol.start.parameters.first().copied().unwrap_or(0.0);
+                if found && t < hit_t && t > -EFF_ZERO {
+                    // put the solution in the output
+                    hit_t = t;
+                    let out = &mut result.solution;
+                    out.start.solution_value = sol.start.solution_value;
+                    out.solution_type = sol.solution_type;
+
+                    // Put T parameter of line in 0, UV Point in 1-2, 3D point in 3-5
+                    // and 3D Normal into 6-8
+                    for (slot, v) in out
+                        .start
+                        .parameters
+                        .iter_mut()
+                        .zip(sol.start.parameters.iter())
+                        .take(9)
+                    {
+                        *slot = *v;
+                    }
+
+                    out.nodes[0] = None; // GWC no longer set as output
+                    out.num_objects = 2;
+                    out.objects[0] = sol.objects[0]; // surface pointer
+                    out.objects[1] = sol.objects[1]; // face pointer or NULL
+
+                    result.hits_something = true;
+                    // If we are looking for any hit just stop here otherwise make
+                    // sure we get the closest hit.
+                    if self.hit_any_thing {
+                        break;
+                    }
+                } // end found a keeper intersection check
+            } // end iter every found Grid Element
+
+            // Stop when ray exits grid
+            if exits_grid {
+                break;
+            }
+
+            // Stop when ray hit an element
+            if hit_t < self.grid.dda().ray_t {
+                break;
+            }
+        } // end while(TRUE) stepping from voxel to voxel
+
+        Ok(result)
+    }
+
+    /// Adds a surface to the grid as a hierarchy element that expands into its
+    /// subdivision leaves (`AddSurfaceToGrid`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: the surface cache and its subdivision tree
+    /// (`smsurf_GetSurfaceCache`, `SmSurfaceCache::GetTree`) are not ported; see
+    /// [`RayTracer::add_surface_with_bbox`] for the rest of the function.
+    pub fn add_surface_to_grid(&mut self, surface: &'s Surface) -> Result<()> {
+        // build the surface spatial decomposition by building the surface cache
+        // (the cache's absence is `SM_ERR` upstream)
+        let _cache = surface_cache(surface)?;
+        // UNPORTED(surface.surface_cache_p3): SmSurfaceCache::GetTree
+        Err(SolidError::unported(
+            "SmSurfaceCache::GetTree",
+            "surface.surface_cache_p3",
+        ))
+    }
+
+    /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`]: `SmPolyBrep` and its `SmBrepCache` are not ported
+    /// (`query.poly`), so `P` stands for the poly B-rep type to come.
+    pub fn add_poly_brep_to_grid<P: ?Sized>(
+        &mut self,
+        _poly_brep: &P,
+        _expansion_tolerance: f64,
+    ) -> Result<()> {
+        // UNPORTED(query.poly): SmPolyBrep::Notify
+        Err(SolidError::unported("SmPolyBrep::Notify", "query.poly"))
+    }
+
+    /// `AddSurfaceToGrid` from the point where the top node of the surface cache's
+    /// tree is known: `top_node_bbox` is that node's box. Lists the surface, adds a
+    /// surface hierarchy element for it over the box grown by a twentieth of its
+    /// bounding sphere radius, and expands it.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Grid::add_hierarchy_element`] and [`Grid::expand_hierarchy`]
+    /// (the latter is [`SolidError::Unported`] today).
+    pub fn add_surface_with_bbox(
+        &mut self,
+        surface: &'s Surface,
+        top_node_bbox: &Extent3d,
+    ) -> Result<()> {
+        // set the bounding box = cached normal box increased by a small amount
+        let mut surf_bbox = *top_node_bbox;
+
+        // Expand it a little just to be safe
+        let radius = surf_bbox.sphere_bound().radius;
+        surf_bbox.expand_absolute(radius / 20.0);
+
+        // store the surface in the RayTracer lists
+        let index = self.register_surface(surface);
+
+        // add the surface to the grid's hierarchical element list
+        let hierarchy = HierarchyElement::new_surface(index, self.ray_tolerance);
+        let id = self.grid.add_hierarchy_element(hierarchy, &surf_bbox)?;
+
+        // Expand the hierarchy element to avoid recomputing the surface cache a 2nd
+        // time
+        self.grid.expand_hierarchy(id)
+    }
+}
+
+/// The image renderer (`SmRayRenderer`): fires one ray per pixel sample into a
+/// [`RayTracer`] and shades the hits from the light sources. The view looks along
+/// the z axis of the inverse geometry transform into the unit square of `view_volume`.
+#[derive(Debug)]
+pub struct RayRenderer<'s> {
+    /// `m_pRayTracer`: owned, as upstream.
+    ray_tracer: RayTracer<'s>,
+    /// `m_vInvTransform`: the inverse of the view transformation.
+    inv_transform: Axis2Placement,
+    /// `m_vViewVolume`.
+    view_volume: Extent3d,
+    /// `m_lNumXPixels`.
+    num_x_pixels: u64,
+    /// `m_lNumYPixels`.
+    num_y_pixels: u64,
+    /// `m_lSampleRate`: samples per pixel in one direction.
+    sample_rate: u64,
+    /// `m_vLightSources`.
+    light_sources: Vec<LightSource>,
+    /// `m_bDoShadows`.
+    do_shadows: bool,
+    /// `m_vBackgroundColor`.
+    background_color: Vec3,
+    /// `m_vDefaultObjectColor`.
+    default_object_color: Vec3,
+    /// `m_vDefaultAmbientColor`.
+    default_ambient_color: Vec3,
+    /// `m_lPixelsShaded`.
+    pixels_shaded: u64,
+}
+
+impl<'s> RayRenderer<'s> {
+    /// `SmRayRenderer(pRayTracer, crGeometryTransform, crViewVolume, lNumXPixels,
+    /// lNumYPixels)`: takes ownership of the tracer. The colours upstream leaves
+    /// unset until `DoRender` are black.
+    #[must_use]
+    pub fn new(
+        ray_tracer: RayTracer<'s>,
+        geometry_transform: &Axis2Placement,
+        view_volume: &Extent3d,
+        num_x_pixels: u64,
+        num_y_pixels: u64,
+    ) -> Self {
+        Self {
+            ray_tracer,
+            inv_transform: geometry_transform.invert(),
+            view_volume: *view_volume,
+            num_x_pixels,
+            num_y_pixels,
+            sample_rate: 1,
+            light_sources: Vec::new(),
+            do_shadows: false,
+            background_color: Vec3::new(0.0, 0.0, 0.0),
+            default_object_color: Vec3::new(0.0, 0.0, 0.0),
+            default_ambient_color: Vec3::new(0.0, 0.0, 0.0),
+            pixels_shaded: 0,
+        }
+    }
+
+    /// The ray tracer (`m_pRayTracer`).
+    #[must_use]
+    pub const fn ray_tracer(&self) -> &RayTracer<'s> {
+        &self.ray_tracer
+    }
+
+    /// The ray tracer, mutably.
+    pub fn ray_tracer_mut(&mut self) -> &mut RayTracer<'s> {
+        &mut self.ray_tracer
+    }
+
+    /// `GetPixelsShaded`.
+    #[must_use]
+    pub const fn pixels_shaded(&self) -> u64 {
+        self.pixels_shaded
+    }
+
+    /// `SetSampleRate`.
+    pub fn set_sample_rate(&mut self, sample_rate: u64) {
+        self.sample_rate = sample_rate;
+    }
+
+    /// `AddLightSource`.
+    pub fn add_light_source(&mut self, light: LightSource) {
+        self.light_sources.push(light);
+    }
+
+    /// Renders the whole image (`DoRender`): sets the colours and renders every
+    /// pixel row by row. Returns the pixel colours in row-major order (upstream
+    /// keeps one row in a local and prints a progress line per row).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`RayRenderer::render_pixel`].
+    pub fn do_render(
+        &mut self,
+        do_shadows: bool,
+        background_color: Vec3,
+        default_object_color: Vec3,
+    ) -> Result<Vec<Vec3>> {
+        self.do_shadows = do_shadows;
+        self.background_color = background_color;
+        self.default_object_color = default_object_color;
+        self.default_ambient_color = default_object_color / 10.0;
+
+        let mut image = Vec::new();
+        for iy in 0..self.num_y_pixels {
+            for ix in 0..self.num_x_pixels {
+                // Here we are working on pixel ix,iy as measured from the upper left
+                // hand corner.
+                image.push(self.render_pixel(ix, iy)?);
+            }
+        }
+        Ok(image)
+    }
+
+    /// The colour of one pixel (`RenderPixel`): the average colour of
+    /// `sample_rate`² rays from within the pixel.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`RayRenderer::render_ray`].
+    pub fn render_pixel(&mut self, pixel_x: u64, pixel_y: u64) -> Result<Vec3> {
+        // init output
+        let mut pixel_color = Vec3::new(0.0, 0.0, 0.0);
+
+        // Get Ray direction
+        let ray_vector = self.inv_transform.z_axis();
+
+        // get lower corner parameter value for this pixel
+        let x = (pixel_x as f64 * 1.0) / self.num_x_pixels as f64;
+        let y = (pixel_y as f64 * 1.0) / self.num_y_pixels as f64;
+
+        // figure the sample stepping size for one pixel assuming all pixels sit in a
+        // 1x1 unit square.
+        let size_x = 1.0 / self.num_x_pixels.wrapping_mul(self.sample_rate) as f64;
+        let size_y = 1.0 / self.num_y_pixels.wrapping_mul(self.sample_rate) as f64;
+
+        // for every sample point within the pixel
+        for ixs in 0..self.sample_rate {
+            for iys in 0..self.sample_rate {
+                // pick a pixel start point
+                let eval_x = x + ixs as f64 * size_x;
+                let eval_y = y + iys as f64 * size_y;
+                let ray_point = self.view_volume.evaluate(eval_x, eval_y, 1.0);
+
+                // fire ray into model and pick an associated color
+                let ray_color = self.render_ray(ray_point, ray_vector)?;
+
+                // accumulate sample point color values
+                pixel_color += ray_color;
+            }
+        }
+
+        // set output color = average of all sample point colors
+        Ok(pixel_color / self.sample_rate.wrapping_mul(self.sample_rate) as f64)
+    }
+
+    /// The colour of a ray (`RenderRay`): the background when it hits nothing, else
+    /// the ambient colour plus the object colour weighted by the cosine to every
+    /// light that is not shadowed, clamped to 1.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`RayTracer::fire_ray`].
+    pub fn render_ray(&mut self, ray_point: Point3, ray_vector: Vec3) -> Result<Vec3> {
+        // init state for upcoming Ray intersection
+        self.ray_tracer.hit_any_thing = false; // Only take closest hit
+        self.ray_tracer.skip_element = None;
+
+        // intersect ray with shapes stored within m_pRayTracer
+        let hit = self
+            .ray_tracer
+            .fire_ray(ray_point, ray_vector, BIG_DOUBLE)?;
+
+        // when nothing was hit - set output color to Background color
+        if !hit.hits_something {
+            return Ok(self.background_color);
+        }
+
+        // arrive here when input ray hits something
+
+        // get local hit data
+        self.pixels_shaded += 1;
+        let param = |i: usize| hit.solution.start.parameters.get(i).copied().unwrap_or(0.0);
+        let point = Vec3::new(param(3), param(4), param(5));
+        let normal = Vec3::new(param(6), param(7), param(8));
+
+        // init output color to Ambient
+        let mut ray_color = self.default_ambient_color;
+
+        // for every light source
+        for light in &self.light_sources {
+            // get angle between lightSource and hitNormal directions
+            let mut dot = light.direction_or_origin.dot(normal);
+
+            // when doing shadows - trace a ray towards the light. If it hits anything,
+            // this point is in shadow and won't get any of this light's color added to
+            // it.
+            if self.do_shadows {
+                let shadow_vec = light.direction_or_origin;
+
+                // (the hit node, which upstream would skip when the shadow vector is not
+                // near 90 degrees to the normal, is the null `m_apNodes[0]`: no skip)
+                self.ray_tracer.skip_element = None;
+
+                // start the ray just beyond the current hit point
+                let shadow_point = point + 0.0001 * shadow_vec;
+
+                // save a little time - look for any hit not just the closest hit
+                self.ray_tracer.hit_any_thing = true;
+
+                // shoot the ray to the light - see if anything else is hit
+                let shadow = self
+                    .ray_tracer
+                    .fire_ray(shadow_point, shadow_vec, BIG_DOUBLE)?;
+
+                // something was hit - set dDot to zero to remember this point is in
+                // shadow
+                if shadow.hits_something {
+                    dot = 0.0;
+                }
+            }
+
+            // add Default Object Color to current ambient light
+            if dot > 0.0 {
+                ray_color += dot * self.default_object_color;
+            }
+        }
+
+        // Clamp colors to 1.0
+        if ray_color.x > 1.0 {
+            ray_color.x = 1.0;
+        }
+        if ray_color.y > 1.0 {
+            ray_color.y = 1.0;
+        }
+        if ray_color.z > 1.0 {
+            ray_color.z = 1.0;
+        }
+
+        Ok(ray_color)
+    }
+}
+
+/// `sm_FindPolyHit`: the nearest hit of the ray on the poly faces of a polygon element's
+/// tree node and its parents, with parameter below `hit_t`: its parameter.
+fn find_poly_hit(
+    _node: NodeId,
+    _ray_point: Point3,
+    _ray_vector: Vec3,
+    _hit_t: f64,
+) -> Result<Option<f64>> {
+    // The node's tree is the SmBrepCache surface tree of a poly B-rep and its objects
+    // are SmPolyFaces (SmPolyFace::ComputeSphereBound, GetNormal, PointInPolygon).
+    // UNPORTED(query.poly): SmPolyFace::ComputeSphereBound
+    Err(SolidError::unported(
+        "SmPolyFace::ComputeSphereBound",
+        "query.poly",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::extent3d::Extent3d;
+    use crate::geom::polar_box::PolarBox;
+    use crate::geom::pseudo_box::PseudoBox;
+
+    fn grid() -> Grid<usize> {
+        let bbox = Extent3d::from_bounds(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        Grid::new(&bbox, [2, 2, 2]).unwrap()
+    }
+
+    #[test]
+    fn convert_to_parameter_delta_projects_on_the_tangent() {
+        let d = convert_to_parameter_delta(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 4.0, 0.0));
+        assert!((d - 1.5).abs() < 1e-15);
+        assert_eq!(
+            convert_to_parameter_delta(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn constructor_sets_the_solver_like_upstream() {
+        let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
+        let s = t.solver();
+        assert!(s.ray_fire && s.have_t_min_t_max);
+        assert_eq!(s.distance_tolerance, 1e-4);
+        assert_eq!(s.ray_accuracy, 1e-8);
+        assert_eq!(s.line_interval, Extent1d::from_raw(0.0, 1.0e10));
+        assert_eq!(s.d3d_tolerance, 0.0);
+        t.set_solver_tolerance(0.5);
+        assert_eq!(t.solver().d3d_tolerance, 0.5);
+    }
+
+    #[test]
+    fn a_ray_that_misses_the_grid_hits_nothing() {
+        let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
+        let r = t
+            .fire_ray(
+                Vec3::new(-5.0, 20.0, 5.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(!r.hits_something);
+        assert!(r.grid_elements.is_empty());
+    }
+
+    #[test]
+    fn a_ray_through_an_empty_grid_walks_out() {
+        let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
+        let r = t
+            .fire_ray(
+                Vec3::new(-5.0, 5.0, 5.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(!r.hits_something);
+    }
+
+    #[test]
+    fn a_leaf_the_ray_cannot_reach_is_rejected_before_the_solver() {
+        let plane = Surface::from(crate::surface::plane::Plane::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0),
+        ));
+        let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
+        let s = t.register_surface(&plane);
+        // a pseudo box far from the ray: the solver returns before LocalLineIntersect
+        let far = Extent3d::from_bounds(0.0, 0.0, 8.0, 10.0, 10.0, 9.0);
+        let leaf = SurfaceGridElement {
+            surface: s,
+            uv_domain: Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0),
+            bbox: far,
+            pseudo_box: PseudoBox::from_extent3d(&far),
+            polar_box: PolarBox::from_vector(Vec3::new(0.0, 0.0, 1.0)),
+            mid_point: Vec3::new(5.0, 5.0, 8.5),
+            mid_du: Vec3::new(1.0, 0.0, 0.0),
+            mid_dv: Vec3::new(0.0, 1.0, 0.0),
+            mid_normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        t.grid_mut().add_surface_element(leaf, &far).unwrap();
+        let r = t
+            .fire_ray(
+                Vec3::new(-5.0, 5.0, 1.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(!r.hits_something);
+    }
+
+    #[test]
+    fn adding_a_surface_needs_the_surface_cache() {
+        let plane = Surface::from(crate::surface::plane::Plane::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
+        assert!(matches!(
+            t.add_surface_to_grid(&plane),
+            Err(SolidError::Unported { .. })
+        ));
+    }
+}

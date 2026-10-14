@@ -47,7 +47,9 @@
 //!   boxes of units not ported yet: `SmSurfaceGridElement::Init` (reached through
 //!   [`Grid::add_element`] with [`ElementSource::Surface`]) and
 //!   `SmSurfaceHierarchyElement::ExpandHierarchy` return [`SolidError::Unported`]
-//!   (see the `UNPORTED` markers); [`SurfaceGridElement`] has no values yet.
+//!   (see the `UNPORTED` markers). [`SurfaceGridElement`] (co-ported by
+//!   `intersect.ray_tracer`) holds only the data members; [`Grid::add_surface_element`]
+//!   adds a leaf whose data the caller filled in.
 //!   `ExpandHierarchy` on a plain [`HierarchyElement::new`] is upstream's base-class
 //!   "pure virtual" body: `SM_ERR`.
 //! - `GetVoxelAddress` truncates with Rust's saturating `as` cast, so a NaN
@@ -71,7 +73,10 @@
 //!   drawing are not ported.
 
 use crate::error::{Result, SolidError};
+use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::{Extent3d, LineHit};
+use crate::geom::polar_box::PolarBox;
+use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::tree::NodeId;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 
@@ -98,19 +103,43 @@ pub struct HierarchyId(pub usize);
 /// Voxel indices `[ix, iy, iz]` (upstream `long lVoxelAddress[3]`).
 pub type VoxelAddress = [usize; 3];
 
-/// The cached data of one surface subdivision leaf (`SmSurfaceGridElement`).
+/// The cached data of one surface subdivision leaf (`SmSurfaceGridElement`): the
+/// surface, the leaf's parameter domain, boxes and the mid-point data read by
+/// `SmLSI3LocalSolver::LocalSolve`.
 ///
-/// Building one needs `SmBezierPatch`, `SmPseudoBox` and `SmPolarBox`, which are
-/// not ported yet, so this type has no values until those units land.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceGridElement {}
+/// CO-PORTED in `intersect.ray_tracer`: the data members only. `Init` (which
+/// computes them from a surface subdivision tree node) needs `SmBezierPatch`, whose
+/// cache is not ported yet (see [`Grid::add_element`]); [`Grid::add_surface_element`]
+/// takes a leaf with the data already filled in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceGridElement<O> {
+    /// `m_pSurface`: the leaf's surface.
+    pub surface: O,
+    /// `m_sUVDomain`: the leaf's parameter domain.
+    pub uv_domain: Extent2d,
+    /// `m_sBBox` (the derived class's own copy): the leaf's bounding box.
+    pub bbox: Extent3d,
+    /// `m_sPseudoBox`: the leaf's pseudo box.
+    pub pseudo_box: PseudoBox,
+    /// `m_sPolarBox`: the leaf's polar box.
+    pub polar_box: PolarBox,
+    /// `m_sMidPoint`: the surface point at the middle of the domain.
+    pub mid_point: Vec3,
+    /// `m_sMidDU`: the `u` derivative there.
+    pub mid_du: Vec3,
+    /// `m_sMidDV`: the `v` derivative there.
+    pub mid_dv: Vec3,
+    /// `m_sMidNormal`: the unit normal there.
+    pub mid_normal: Vec3,
+}
 
 /// What a [`GridElement`] stands for (the derived `SmGridElement` classes, and
 /// what their `GetElement` returns).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::large_enum_variant)] // boxing the surface leaf would end `Copy`
 pub enum GridItem<O> {
     /// `SmSurfaceGridElement`: one leaf of a surface subdivision.
-    Surface(SurfaceGridElement),
+    Surface(SurfaceGridElement<O>),
     /// `SmPolygonGridElement`: a leaf node of an `SmBrepCache` surface tree.
     Polygon(NodeId),
     /// `SmHierarchyGridElement`: back reference to its owning hierarchy element
@@ -664,15 +693,39 @@ impl<O: Copy> Grid<O> {
             ElementSource::PolyBrep(node) => GridElement::polygon(node),
             ElementSource::UserData(o) => GridElement::user(o),
         };
+        self.register_element(&mut ge, bbox, OP)
+    }
+
+    /// `AddElement(SM_GE_SURFACE)` with the leaf data supplied by the caller instead
+    /// of computed by `SmSurfaceGridElement::Init` from a subdivision tree node
+    /// (which needs the unported surface cache, so [`Grid::add_element`] with
+    /// [`ElementSource::Surface`] cannot run yet): lists the element in every voxel
+    /// that `bbox` meets.
+    pub fn add_surface_element(
+        &mut self,
+        leaf: SurfaceGridElement<O>,
+        bbox: &Extent3d,
+    ) -> Result<ElementId> {
+        let mut ge = GridElement::init(GridItem::Surface(leaf));
+        self.register_element(&mut ge, bbox, "geom::grid::Grid::add_surface_element")
+    }
+
+    /// The tail of `AddElement`: sphere bound, box, pool entry and voxel lists.
+    fn register_element(
+        &mut self,
+        ge: &mut GridElement<O>,
+        bbox: &Extent3d,
+        op: &'static str,
+    ) -> Result<ElementId> {
         let sb = bbox.sphere_bound();
         ge.sphere_center = sb.center;
         ge.sphere_radius = sb.radius;
         ge.bbox = *bbox;
         let id = ElementId(self.elements.len());
-        self.elements.push(ge);
+        self.elements.push(*ge);
 
         for a in self.find_voxels_in_box(bbox) {
-            self.voxel_mut(a, OP)?
+            self.voxel_mut(a, op)?
                 .elements
                 .get_or_insert_with(Vec::new)
                 .push(id);
