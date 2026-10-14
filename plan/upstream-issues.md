@@ -91,7 +91,7 @@ by area within each severity.
 - **How found:** read during porting (`topology.brep_data`); UB-1 is one instance.
 - **Confirmed:** no (the difftest guard keeps such streams away from the C++ side), except through UB-1.
 - **Severity:** crash/UB.
-- **Rust port:** Uses `0` for the uninitialised locals, rejects counts the remaining input cannot hold (`InvalidInput`) and appends records as they are read.
+- **Rust port:** Uses `0` for the uninitialised locals, rejects counts the remaining input cannot hold (`InvalidInput`), appends records as they are read, and stops a record loop with `InvalidInput` once the stream has failed or hit end of data before the declared count (otherwise each further record would consume no input and the count bound would not cap memory).
 
 #### UB-76. `ReadCurveFromDB` indexes `rAllAttributes` past its end after a failed attribute line skip [PSIRT]
 - **Location:** `source/SMLib/src/SmBrepData.cpp:5480` `SmBrepData::ReadCurveFromDB` and `:5736` `ReadSurfaceFromDB`, after `SmAttribute.cpp:260` (`GOTO_NEXT_ATTLINE` in `SmAttributeData::ReadIndexedAttributesFromDB`).

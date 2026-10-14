@@ -45,8 +45,16 @@
 //!   one as they are read instead of preallocated, and a count larger than the
 //!   remaining input is [`SolidError::InvalidInput`] before the first record
 //!   ([`DatabaseReader::ensure_available`] with one byte per record: every record of
-//!   a complete stream consumes at least one byte). Upstream would loop over the
-//!   count on a failed stream; such inputs read uninitialised locals further on.
+//!   a complete stream consumes at least one byte). That bound alone does not cap
+//!   memory: upstream ignores each record's read status, so once the stream has
+//!   failed or hit end of data every further record consumes no input and is still
+//!   appended zero-filled, and a crafted count close to the remaining byte count would
+//!   allocate `count * size_of::<record>()`. The port therefore also checks the stream
+//!   before each record (and each composite item or segment) and returns
+//!   [`SolidError::InvalidInput`] once it is no longer good. The check runs before a
+//!   record, never after the last one, so a complete stream whose final record ends
+//!   exactly at end of data still reads fully. Upstream would loop over the count on
+//!   a failed stream; such inputs read uninitialised locals further on.
 //! - **Statuses.** Upstream ignores the status of every record read and of
 //!   `ReadIndexedAttributesFromDB`. Records can only fail on a short binary read or a
 //!   missing stream, which the port treats as fatal errors (upstream: undefined
@@ -290,6 +298,22 @@ fn checked_count(db: &DatabaseReader, count: u64, op: &'static str) -> Result<us
     })?;
     db.ensure_available(n, 1, op)?;
     Ok(n)
+}
+
+/// Rejects the next record of a declared count once the stream has failed or reached
+/// its end: from then on every extraction stores nothing and consumes no input, so
+/// the remaining records could only be zero-filled copies (see the module docs).
+/// Called before each record, never after the last one, so a complete stream whose
+/// final record ends exactly at end of data reads fully.
+fn ensure_more(s: Option<&InputStream>, op: &'static str) -> Result<()> {
+    if s.is_some_and(InputStream::good) {
+        Ok(())
+    } else {
+        Err(SolidError::InvalidInput {
+            operation: op,
+            reason: "stream ended before all declared records were read",
+        })
+    }
 }
 
 // ---- records ----------------------------------------------------------------------------
@@ -1346,6 +1370,7 @@ impl BrepData {
         // Region Data
         let n = checked_count(db, bd.num_regions, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = RegionData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.regions.push(r);
@@ -1365,6 +1390,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = ShellData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.shells.push(r);
@@ -1385,6 +1411,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = FaceuseData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.faceuses.push(r);
@@ -1403,6 +1430,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = FaceData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.faces.push(r);
@@ -1421,6 +1449,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = LoopData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.loops.push(r);
@@ -1443,6 +1472,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = EuData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.edgeuses.push(r);
@@ -1460,6 +1490,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = EdgeData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.edges.push(r);
@@ -1477,6 +1508,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             let mut r = VertexData::zeroed();
             r.read_from_db(version, attrs, db, persist_attribs)?;
             bd.vertices.push(r);
@@ -1493,6 +1525,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             if ascii {
                 ext_ulong(stream(db)?, &mut index);
                 next_line(db);
@@ -1512,6 +1545,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             if ascii {
                 ext_ulong(stream(db)?, &mut index);
                 next_line(db);
@@ -1531,6 +1565,7 @@ impl BrepData {
         }
         let n = checked_count(db, count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             if ascii {
                 ext_ulong(stream(db)?, &mut index);
                 next_line(db);
@@ -1643,6 +1678,7 @@ fn read_composite_list(
         list.push(*count);
         let n = checked_count(db, *count, OP_READ)?;
         for _ in 0..n {
+            ensure_more(db.in_stream(), OP_READ)?;
             // composite faces initialise these to 0, composite edges leave them
             // uninitialised (see the module docs)
             let mut item_count: u64 = 0;
@@ -1655,6 +1691,7 @@ fn read_composite_list(
                 let m = checked_count(db, item_count, OP_READ)?;
                 let s = stream(db)?;
                 for _ in 0..m {
+                    ensure_more(Some(s), OP_READ)?;
                     ext_ulong(s, &mut item);
                     list.push(item);
                 }
@@ -1664,6 +1701,7 @@ fn read_composite_list(
                 list.push(item_count);
                 let m = checked_count(db, item_count, OP_READ)?;
                 for _ in 0..m {
+                    ensure_more(db.in_stream(), OP_READ)?;
                     item = db.read_ulong()?;
                     list.push(item);
                 }
@@ -1779,6 +1817,7 @@ fn read_old_composite(
     // for every segment
     let n = checked_count(db, num_segments, OP_CURVE)?;
     for ii in 0..n {
+        ensure_more(db.in_stream(), OP_CURVE)?;
         let mut gap_start = 0.0;
         let mut gap_end = 0.0;
         let mut same_sense: u64 = 0;
@@ -2106,6 +2145,107 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         let mut db = binary_reader(Bin(Vec::new()).d(0.0).0);
+        assert!(BrepData::read_from_db(&k, 30, &mut attrs, &mut db, false).is_err());
+    }
+
+    /// [`DISK_HEAD`] with one bilinear B-spline surface whose last knot ends exactly
+    /// at end of data (no trailing newline).
+    fn disk_with_surface_at_eof() -> String {
+        DISK_HEAD.replace(
+            "0 Surfaces In Brep\n",
+            "1 Surfaces In Brep\n0 - Surface:\nSurface Type: 15002\n1 1\n1 1\n0\n\
+             0 0 0\n1 0 0\n0 1 0\n1 1 1\n0\n0\n1\n1\n0\n0\n1\n1",
+        )
+    }
+
+    #[test]
+    fn last_record_ending_at_eof_reads_fully() {
+        let k = Kernel::default();
+        let mut store = AttributeStore::new();
+        let mut all = Vec::new();
+        let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
+        let text = disk_with_surface_at_eof();
+        assert!(!text.ends_with('\n'));
+        let mut db = ascii_reader(&text);
+        let bd = BrepData::read_from_db(&k, 30, &mut attrs, &mut db, true).unwrap();
+        assert_eq!(bd.surfaces.len(), 1);
+        assert_eq!(bd.vertices.len(), 1);
+        // the final extraction hit end of data
+        assert!(db.in_stream().is_some_and(InputStream::eof));
+        // the same stream with a trailing newline reads the same records
+        let mut db = ascii_reader(&format!("{text}\n"));
+        let bd2 = BrepData::read_from_db(&k, 30, &mut attrs, &mut db, true).unwrap();
+        assert_eq!(bd2.surfaces.len(), 1);
+        assert_eq!(bd2.vertices, bd.vertices);
+    }
+
+    #[test]
+    fn huge_count_on_a_failed_ascii_stream_is_rejected() {
+        let k = Kernel::default();
+        let mut store = AttributeStore::new();
+        let mut all = Vec::new();
+        let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
+        // Vertex count close to the remaining byte count, then end of data: every
+        // further record would consume nothing (zero-filled, ~80 bytes each in memory).
+        let head = DISK_HEAD.split("//Vertex Data").next().unwrap().to_owned();
+        let pad = 1 << 20;
+        let text = format!(
+            "{head}//Vertex Data\n{pad} Vertices In Brep\n//cols\n{}",
+            " ".repeat(pad + 64)
+        );
+        let mut db = ascii_reader(&text);
+        let start = std::time::Instant::now();
+        let r = BrepData::read_from_db(&k, 30, &mut attrs, &mut db, true);
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::InvalidInput { reason, .. })
+                    if reason == "stream ended before all declared records were read"
+            ),
+            "{r:?}"
+        );
+        assert!(start.elapsed().as_secs() < 5);
+    }
+
+    #[test]
+    fn huge_count_on_a_failed_binary_stream_is_rejected() {
+        let k = Kernel::default();
+        let mut store = AttributeStore::new();
+        let mut all = Vec::new();
+        let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
+        // One composite edge declaring as many items as there are bytes left, then
+        // end of data.
+        let pad = 1usize << 20;
+        let mut bytes = Bin(Vec::new())
+            .d(0.0)
+            .d(0.0)
+            .d(0.0)
+            .d(1e-5)
+            .b(0)
+            .b(0)
+            .l(0) // regions
+            .l(0) // start region
+            .l(0) // shells
+            .l(1) // cfaces
+            .l(pad as u64) // items of the composite face
+            .0;
+        bytes.extend(std::iter::repeat_n(0u8, pad));
+        let mut db = binary_reader(bytes);
+        let r = BrepData::read_from_db(&k, 30, &mut attrs, &mut db, false);
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        // a huge record count ends the same way
+        let mut bytes = Bin(Vec::new())
+            .d(0.0)
+            .d(0.0)
+            .d(0.0)
+            .d(1e-5)
+            .b(0)
+            .b(0)
+            .l(pad as u64) // regions
+            .l(0)
+            .0;
+        bytes.extend(std::iter::repeat_n(0u8, pad));
+        let mut db = binary_reader(bytes);
         assert!(BrepData::read_from_db(&k, 30, &mut attrs, &mut db, false).is_err());
     }
 

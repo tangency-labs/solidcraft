@@ -2699,6 +2699,17 @@ with `CreateCanonical`, `MakeNurb` and `MakeNurbWithSweepParams` co-ported (unit
   version <= 32 composites and offsets, type code 1). Upstream test files (`.smb` under
   `TestFiles/pt_TestFiles`, 186 read with `ReadFromFile`, 170 also with `ReadFromDB`, and
   the two part files' B-reps at version 32) are trusted past the first unknown kind.
+- **Record loops stop on a failed stream (security review, 2026-10-13).** The one-byte
+  per record bound (`checked_count`) assumed every record consumes input, but records
+  ignore their read status (UB-75): once the stream fails or hits end of data each
+  further record consumes nothing and is still appended zero-filled, so a count close
+  to the remaining byte count allocated `count * size_of::<record>()` (a 100 MB file
+  could cost tens of GB, per array). `ensure_more` now checks the stream before each
+  record, composite item and old composite segment and returns `InvalidInput`
+  ("stream ended before all declared records were read"). It runs before a record,
+  never after the last, so a stream whose final record ends exactly at end of data
+  (eofbit set, no trailing newline) reads fully. Only streams that are undefined
+  upstream (UB-75) change; the difftest results are unchanged.
 - **Deferred.** Offset surfaces (`surface.offset_surface`) and, in version 38 files,
   planes, cones and extrusions (`surface.plane_p2`, `surface.cone_p1`,
   `surface.surf_of_extrusion_p2`) are `Unported` on the Rust side.
