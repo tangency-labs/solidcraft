@@ -1,0 +1,7324 @@
+{
+  "cases": [
+    {
+      "name": "static_0_0_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_0_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_0_1_2",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_0_1_3",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_3_0_4",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_3_0_5",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_3_1_6",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_3_1_7",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_4_0_8",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_4_0_9",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_4_1_10",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_4_1_11",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_5_0_12",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_5_0_13",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_5_1_14",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_0_5_1_15",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 0,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_0_0_16",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_0_0_17",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_0_1_18",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_0_1_19",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_3_0_20",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_3_0_21",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_3_1_22",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_3_1_23",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_4_0_24",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_4_0_25",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_4_1_26",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_4_1_27",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_5_0_28",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_5_0_29",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_5_1_30",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_1_5_1_31",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 1,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_0_0_32",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_0_0_33",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_0_1_34",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_0_1_35",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_3_0_36",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_3_0_37",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_3_1_38",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_3_1_39",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_4_0_40",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_4_0_41",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_4_1_42",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_4_1_43",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_5_0_44",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_5_0_45",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_5_1_46",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_2_5_1_47",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 2,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_0_0_48",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_0_0_49",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_0_1_50",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_0_1_51",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_3_0_52",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_3_0_53",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_3_1_54",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_3_1_55",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_4_0_56",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_4_0_57",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_4_1_58",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_4_1_59",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_5_0_60",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_5_0_61",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_5_1_62",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_3_5_1_63",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 3,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_0_0_64",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_0_0_65",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_0_1_66",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_0_1_67",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 0,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_3_0_68",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_3_0_69",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_3_1_70",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_3_1_71",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 3,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_4_0_72",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_4_0_73",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_4_1_74",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_4_1_75",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 4,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_5_0_76",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_5_0_77",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_5_1_78",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "static_4_5_1_79",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:2046,2181,2296,2485,3271; source/SMLib/src/SmBrepCache.cpp:181 (real MakeShellVertex B-reps; empty shapes only)",
+      "inputs": {
+        "op": "static",
+        "entry": 4,
+        "operation": 5,
+        "request": 1,
+        "tolerance": 1e-05,
+        "point": [
+          0.3,
+          0.2,
+          0.4
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ]
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_5_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_6_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_7_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "face_excluded_from_shape_8_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface and CreateWireEdgeFromCurve; empty-shape exclusion only, no claim of face solve coverage)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_5_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 5,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_6_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 6,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_7_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 7,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_0_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_0_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 0,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_3_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_3_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 3,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_4_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_4_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 4,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_5_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_5_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 5,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_14_0",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": false,
+        "included": true
+      }
+    },
+    {
+      "name": "face_included_without_shape_limit_8_14_1",
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer)",
+      "inputs": {
+        "op": "static",
+        "entry": 8,
+        "operation": 14,
+        "request": 0,
+        "tolerance": 1e-05,
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "first": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.1,
+            0.3
+          ]
+        ],
+        "second": [
+          [
+            -0.7,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.1,
+            0.4
+          ]
+        ],
+        "swap": true,
+        "included": true
+      }
+    }
+  ]
+}

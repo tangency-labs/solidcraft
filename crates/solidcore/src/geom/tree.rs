@@ -15,6 +15,7 @@
 //! | [`Tree::set_owner_object`]             | `SmTree::SetOwnerObject`                        |
 //! | [`Tree::owner_object`]                 | `SmTree::GetOwnerObject`                        |
 //! | [`Tree::node_owner_object`]            | `SmTreeNode::GetOwnerObject`                    |
+//! | [`Tree::map_objects`]                 | Rust handle adapter (no numerical changes)       |
 //! | [`Tree::top_node`]                     | `SmTree::GetTopNode`                            |
 //! | [`Tree::TYPE`], [`Tree::type_code`]    | `SmTree::GetType` (`SmTree_TYPE`)               |
 //! | [`Tree::type_string`]                  | `SmTree::GetTypeString`                         |
@@ -683,6 +684,67 @@ impl<O: Copy + PartialEq> Tree<O> {
     #[must_use]
     pub fn lists(&self) -> &[ObjectList<O>] {
         &self.lists
+    }
+
+    /// Copies this tree with object handles translated by `map`, preserving node
+    /// and list ids, traversal order, boxes and decomposition data.
+    ///
+    /// This Rust adapter lets typed shape trees participate in a solver over a
+    /// caller's common object-handle type. `map` must name the same target object
+    /// every time it receives the same source handle.
+    ///
+    /// # Errors
+    /// Any error returned by `map`.
+    pub fn map_objects<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> Result<P>,
+    ) -> Result<Tree<P>> {
+        let mut lists = Vec::new();
+        for item in &self.lists {
+            lists.push(ObjectList {
+                next: item.next,
+                bbox: item.bbox,
+                object: item.object.map(&map).transpose()?,
+            });
+        }
+        let mut nodes = Vec::new();
+        for node in &self.nodes {
+            let data = match node.data {
+                NodeData::None => NodeData::None,
+                NodeData::ObjectList(head) => NodeData::ObjectList(head),
+                NodeData::Curve(span) => NodeData::Curve(span),
+                NodeData::Surface(aux) => NodeData::Surface(SurfaceAux {
+                    split_dir: aux.split_dir,
+                    is_marked: aux.is_marked,
+                    node_class: aux.node_class,
+                    face: aux.face.map(&map).transpose()?,
+                    surface: aux.surface.map(&map).transpose()?,
+                    slot: aux.slot,
+                }),
+            };
+            nodes.push(TreeNode {
+                parent: node.parent,
+                child1: node.child1,
+                child2: node.child2,
+                bbox: node.bbox,
+                aux_type: node.aux_type,
+                data,
+                geom_type: node.geom_type,
+            });
+        }
+        Ok(Tree {
+            max_elements_per_node: self.max_elements_per_node,
+            min_size_ratio: self.min_size_ratio,
+            node_reduction: self.node_reduction,
+            owner: self.owner,
+            top: self.top,
+            nodes,
+            lists,
+            curve_spans: self.curve_spans.clone(),
+            curve_parents: self.curve_parents.clone(),
+            owner_curve: self.owner_curve.map(&map).transpose()?,
+            owner_surface: self.owner_surface.map(map).transpose()?,
+        })
     }
 
     /// The node `id`.
@@ -1546,6 +1608,38 @@ mod tests {
         t.node_mut(r).unwrap().child2 = Some(rt);
         t.set_top_node(Some(root));
         (t, [root, l, r, lb, lt, rb, rt])
+    }
+
+    #[test]
+    fn mapped_surface_tree_preserves_neighbors_and_classification() {
+        let (mut tree, [root, _, _, leaf, _, _, _]) = grid();
+        tree.set_owner_surface(Some(7));
+        if let NodeData::Surface(aux) = &mut tree.node_mut(leaf).unwrap().data {
+            aux.face = Some(3);
+            aux.surface = Some(7);
+            aux.node_class = NodeClass::Inside;
+            aux.is_marked = true;
+        }
+        let mapped = tree
+            .map_objects(|object| Ok(u64::from(object) + 1000))
+            .unwrap();
+        assert_eq!(mapped.top, Some(root));
+        assert_eq!(mapped.owner_surface, Some(1007));
+        assert_eq!(
+            mapped.neighbors(leaf).unwrap(),
+            tree.neighbors(leaf).unwrap()
+        );
+        let NodeData::Surface(aux) = mapped.node(leaf).unwrap().data else {
+            panic!("mapped surface lost its classification data");
+        };
+        assert_eq!(aux.face, Some(1003));
+        assert_eq!(aux.surface, Some(1007));
+        assert_eq!(aux.node_class, NodeClass::Inside);
+        assert!(aux.is_marked);
+        assert!(tree
+            .map_objects::<u64>(|_| Err(SolidError::sm_err("test resolver")))
+            .is_err());
+        assert_eq!(tree.owner_surface, Some(7));
     }
 
     #[test]

@@ -7,3 +7,4 @@
 //! each lives in its own submodule.
 
 pub mod p1;
+pub mod p2;

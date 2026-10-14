@@ -117,11 +117,13 @@ pub enum LocalKind {
     CurveEdge = 8,
     /// `SmTLSEdgeEdge`.
     EdgeEdge = 9,
+    /// `SmTLSCurveVertex` (owned by `topology_solver_p2`).
+    CurveVertex = 10,
 }
 
 impl LocalKind {
     /// Every kind, in code order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Base,
         Self::Point,
         Self::PointVertex,
@@ -132,6 +134,7 @@ impl LocalKind {
         Self::Curve,
         Self::CurveEdge,
         Self::EdgeEdge,
+        Self::CurveVertex,
     ];
 
     /// The kind with code `code`.
@@ -331,7 +334,7 @@ fn line(rd: &mut Reader<'_>) -> Result<(), FfiError> {
         return Err(bad("line: domain too small"));
     }
     let scale = rd.finite()?;
-    if scale <= 1e-6 {
+    if scale <= 0.0 {
         return Err(bad("line: scale not positive"));
     }
     rd.flag()?;
@@ -595,7 +598,7 @@ struct Spec {
 
 fn solver(rd: &mut Reader<'_>, objs: &[Entry], hd: Header) -> Result<Spec, FfiError> {
     let (op, nvec) = (hd.op, hd.nvec);
-    let kind = LocalKind::from_code(rd.index(9)?).ok_or_else(|| bad("solver kind"))?;
+    let kind = LocalKind::from_code(rd.index(10)?).ok_or_else(|| bad("solver kind"))?;
     let swap = rd.flag()?;
     rd.vec3()?;
     let pv = rd.object(objs.len())?;
@@ -616,7 +619,7 @@ fn solver(rd: &mut Reader<'_>, objs: &[Entry], hd: Header) -> Result<Spec, FfiEr
     }
     let point_curve = matches!(
         kind,
-        LocalKind::PointCurve | LocalKind::PointEdge | LocalKind::VertexEdge
+        LocalKind::PointCurve | LocalKind::PointEdge | LocalKind::VertexEdge | LocalKind::CurveVertex
     );
     if point_curve && !point_curve_op(op) {
         return Err(bad("operation not accepted by GlobalPointSolve"));
@@ -639,7 +642,7 @@ fn solver(rd: &mut Reader<'_>, objs: &[Entry], hd: Header) -> Result<Spec, FfiEr
     if owner.is_some() && kind != LocalKind::PointCurve {
         return Err(bad("curve owner only for the point/curve solver"));
     }
-    if kind == LocalKind::CurveEdge {
+    if matches!(kind, LocalKind::CurveEdge | LocalKind::CurveVertex) {
         let Some(Entry::Curve(info, _)) = entry(objs, curve) else {
             return Err(bad("curve/edge solver needs a curve"));
         };
@@ -689,6 +692,8 @@ fn call(
         },
         LocalKind::PointEdge => is_edge_curve(second),
         LocalKind::VertexEdge => is_vertex(first) && is_edge_curve(second),
+        // CurveVertex always reads pObj2 as the vertex, independently of swap.
+        LocalKind::CurveVertex => is_vertex(entry(objs, o2)),
         // NER(pCurve) checks the second curve for NULL
         LocalKind::CurveEdge => second.is_none() || is_edge_curve(second),
         LocalKind::EdgeEdge => is_edge_curve(first) && (second.is_none() || is_edge_curve(second)),

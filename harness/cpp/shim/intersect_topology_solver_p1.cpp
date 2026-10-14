@@ -356,6 +356,7 @@ template <class F> void with_solver(SmTopologySolver& ts, const SolverSpec& s, c
     case 6: { ScLS<SmTLSVertexEdge> ls(ts, s.swap); setup_point(ls, s, objs); body(ls); break; }
     case 7: { ScLS<SmTLSCurve> ls(ts, s.swap); setup_curve(ls, s, objs); body(ls); break; }
     case 8: { ScLS<SmTLSCurveEdge> ls(ts, s.swap); setup_curve(ls, s, objs); body(ls); break; }
+    case 10: { ScLS<SmTLSCurveVertex> ls(ts, s.swap); setup_curve(ls, s, objs); body(ls); break; }
     default: { ScLS<SmTLSEdgeEdge> ls(ts, s.swap); setup_curve(ls, s, objs); body(ls); break; }
     }
 }
@@ -389,7 +390,7 @@ void put_result(std::vector<double>& o, const ScTS& ts, SmSolutionArray& sols, c
 
 // A tree `0 P size` (one node with an object list holding NULL) or `1 box n (obj box)*`
 // (a spatial tree).
-SmTree* read_tree(Rd& rd, const SmContext& ctx, const Objects& objs, SmTreeNode& node,
+SmTree* read_tree(Rd& rd, const SmContext& ctx, const Objects& objs, SmTreeNode& /*node*/,
                   SmObjectList& list)
 {
     int64_t kind = rd.idx();
@@ -397,7 +398,11 @@ SmTree* read_tree(Rd& rd, const SmContext& ctx, const Objects& objs, SmTreeNode&
     {
         SmPoint3d p = rd.vec();
         double size = rd.num();
-        return new (ctx) SmTree(p, size, &node, &list);
+        // Rust Tree::from_point stores its node in the arena. An externally
+        // supplied node is NOT registered in SmTree's node manager, so
+        // GetObjectList (and hence SolveTwoTrees) would see an empty tree.
+        // Use the managed-node constructor on both sides of this protocol.
+        return new (ctx) SmTree(p, size, NULL, &list);
     }
     SmExtent3d box = rd.box();
     SmTree* t = new (ctx) SmTree(box);

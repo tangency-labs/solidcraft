@@ -769,6 +769,7 @@ fn local_kind(code: usize) -> Result<LocalSolverKind, HarnessError> {
         7 => K::Curve,
         8 => K::CurveEdge,
         9 => K::EdgeEdge,
+        10 => K::CurveVertex,
         _ => return Err(harness("bad local solver kind")),
     })
 }
@@ -813,7 +814,7 @@ fn new_local<'a>(scene: &'a Scene, l: &LocalIn) -> Result<LocalSolver<'a, Obj>, 
                 }
             }
         }
-        7..=9 => {
+        7..=10 => {
             let ivl = l
                 .ivl
                 .map_or_else(Extent1d::new, |i| Extent1d::from_min_max(i[0], i[1]));
@@ -1600,4 +1601,22 @@ impl UnitDiff for Runner {
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         serde_json::to_value(gen_case(rng)).ok()
     }
+}
+
+/// Encodes a tree fixture for the p2 reference entry without duplicating the protocol.
+pub(super) fn p2_tree_input(case: &Case) -> Result<Vec<f64>, HarnessError> {
+    let parsed: OpIn = case.parse()?;
+    if !matches!(parsed, OpIn::Trees { .. }) { return Err(harness("p2 tree fixture requires op=trees")); }
+    Ok(cpp_input(&parsed).1)
+}
+/// Decodes the shared reference result for the p2 runner.
+pub(super) fn p2_tree_output(flat: &[f64]) -> Output { to_output(flat) }
+/// Generates a bounded tree fixture, seeded independently by the p2 unit id.
+pub(super) fn p2_tree_generate(rng: &mut Rng) -> Option<Value> { serde_json::to_value(gen_trees_case(rng)).ok() }
+
+/// Encodes a p2 local fixture using the shared object-construction protocol.
+pub(super) fn p2_local_input(case: &Case) -> Result<Vec<f64>, HarnessError> {
+    let parsed: OpIn = case.parse()?;
+    if !matches!(parsed, OpIn::Local { .. }) { return Err(harness("p2 local fixture requires op=local")); }
+    Ok(cpp_input(&parsed).1)
 }

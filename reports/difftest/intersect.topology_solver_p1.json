@@ -2522,16 +2522,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "trees_point_vertices_minimize",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.topology_solver_p1/edge.json#144",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -4598,16 +4594,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0019",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591264",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5190,16 +5182,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0089",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591334",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5218,16 +5206,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0092",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591337",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5838,16 +5822,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0166",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591411",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -6370,16 +6350,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0230",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591475",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6842,16 +6818,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0285",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591530",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -6958,16 +6930,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0299",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591544",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -7134,16 +7102,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0320",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591565",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -7906,16 +7870,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591658",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -8038,16 +7998,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0427",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591672",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -8782,16 +8738,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0517",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591762",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -9138,16 +9090,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0559",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591804",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -9210,16 +9158,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0567",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591812",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -9502,16 +9446,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0602",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591847",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10126,16 +10066,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0676",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591921",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -10638,16 +10574,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0735",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591980",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10706,16 +10638,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0743",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591988",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -10750,16 +10678,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0748",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172591993",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -10826,16 +10750,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0757",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592002",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10846,16 +10766,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0759",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592004",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10902,16 +10818,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592010",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11326,16 +11238,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0816",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592061",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -11370,16 +11278,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0821",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592066",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -11498,16 +11402,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0835",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592080",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -11558,16 +11458,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0842",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592087",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11786,16 +11682,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0868",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592113",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -12118,16 +12010,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0908",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592153",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -12810,16 +12698,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592237",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -12970,16 +12854,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1011",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592256",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -13214,28 +13094,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592283",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1039",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592284",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14154,16 +14026,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1152",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592397",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14238,28 +14106,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1162",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592407",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1163",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592408",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14390,16 +14250,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1179",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592424",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14442,16 +14298,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1185",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592430",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14610,16 +14462,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1205",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592450",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -14690,16 +14538,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592459",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14862,16 +14706,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592479",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15074,16 +14914,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592503",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15634,16 +15470,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1326",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592571",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -15894,16 +15726,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1357",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592602",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -16322,28 +16150,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1408",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592653",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1409",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592654",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -16410,16 +16230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1417",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592662",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -16454,16 +16270,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1422",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592667",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -16878,16 +16690,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1473",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592718",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17018,16 +16826,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1490",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592735",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17566,16 +17370,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1556",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592801",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17610,16 +17410,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1561",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592806",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -18234,16 +18030,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1637",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592882",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -18894,16 +18686,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1716",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592961",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -19138,16 +18926,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1745",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172592990",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19774,16 +19558,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1822",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593067",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -19914,16 +19694,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1839",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593084",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -20058,16 +19834,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1855",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593100",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -20218,16 +19990,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1874",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593119",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -20726,28 +20494,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1934",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593179",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1935",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593180",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -21058,16 +20818,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1974",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593219",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -21422,16 +21178,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2018",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593263",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -21894,16 +21646,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2075",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593320",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -21966,16 +21714,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2083",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593328",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -22330,16 +22074,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2126",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593371",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -22446,16 +22186,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2140",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593385",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -22546,16 +22282,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2152",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593397",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -22658,16 +22390,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2165",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593410",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -23638,16 +23366,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2282",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593527",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -23842,16 +23566,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2305",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593550",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -24110,16 +23830,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593582",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -25418,16 +25134,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2494",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593739",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -25582,16 +25294,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2513",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593758",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -25666,16 +25374,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2523",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593768",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -25962,16 +25666,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2558",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593803",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -26470,16 +26170,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2617",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593862",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -26578,16 +26274,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2630",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593875",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -26834,16 +26526,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2661",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593906",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -27406,16 +27094,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2727",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593972",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -27578,16 +27262,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2748",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172593993",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -27710,16 +27390,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2763",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594008",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -27794,16 +27470,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2773",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594018",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -28002,28 +27674,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2796",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594041",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2797",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594042",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -28386,16 +28050,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2841",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594086",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -29086,16 +28746,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2923",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594168",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -29602,16 +29258,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmTopologySolver::LocalSolve",
-        "unit": "intersect.topology_solver_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2984",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4917428403172594229",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -29743,13 +29395,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 371,
+  "cases_deferred": 284,
   "cases_failed": 0,
-  "cases_passed": 3161,
+  "cases_passed": 3248,
   "cases_total": 3532,
   "deferred_by_unit": {
     "curve.curve_p9": 151,
-    "intersect.topology_solver_p2": 87,
     "topology.brep_p1": 48,
     "topology.edge": 85
   },
