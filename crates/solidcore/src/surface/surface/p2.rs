@@ -1219,6 +1219,10 @@ impl Surface {
         let _ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
             AdvSurfaceIntersector::new(self, uv_domain, other, other_uv_domain, false)?;
 
+        // (SurfaceIntersector::do_point_intersection, part 4, is the basic intersector's:
+        // through TraceCurve and ComputePointValues it calls the basic
+        // ComputeSingularityPoint, not SmAdvSurfaceIntersector's override, so it cannot
+        // stand in here until the intersector parts dispatch their virtual calls)
         // UNPORTED(intersect.surface_intersector_p4): SmSurfaceIntersector::DoPointIntersection
         Err(SolidError::unported(
             "SmSurfaceIntersector::DoPointIntersection",

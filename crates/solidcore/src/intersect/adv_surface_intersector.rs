@@ -1487,6 +1487,10 @@ fn trace_curve(
     _start: TsectId,
     _curves_3d: &mut Vec<Curve>,
 ) -> Result<()> {
+    // (SurfaceIntersector::trace_curve, part 4, is the basic intersector's: its
+    // ComputePointValues calls the basic ComputeSingularityPoint, not this class's
+    // override, so it cannot stand in for the advanced intersector's TraceCurve until
+    // the intersector parts dispatch their virtual calls)
     // UNPORTED(intersect.surface_intersector_p4): SmSurfaceIntersector::TraceCurve
     Err(SolidError::unported(
         "SmSurfaceIntersector::TraceCurve",
