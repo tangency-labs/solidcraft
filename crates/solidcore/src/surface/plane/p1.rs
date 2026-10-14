@@ -2089,16 +2089,13 @@ fn create_natural_uv_trim_curves(
 
 /// `SmSurface::DropPoint(pt, domain, NULL, bSuccess, uv, dist, bIsMulti,
 /// SM_SO_NORMALIZE)`: success, uv and distance.
-fn surface_drop_point(
-    _s: &Surface,
-    _pt: Point3,
-    _domain: &Extent2d,
-) -> Result<(bool, Point2, f64)> {
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::unported(
-        "SmSurface::DropPoint",
-        "surface.surface_p5",
-    ))
+fn surface_drop_point(s: &Surface, pt: Point3, domain: &Extent2d) -> Result<(bool, Point2, f64)> {
+    let opts = crate::surface::surface::p5::DropPointOptions {
+        operation: SolverOperation::Normalize,
+        ..Default::default()
+    };
+    let r = s.drop_point::<crate::surface::surface::p4::NoObject>(pt, domain, &opts)?;
+    Ok((r.success, r.result_uv, r.gap))
 }
 
 /// The general `SmSurface::DropCurve`.

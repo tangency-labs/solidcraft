@@ -3914,14 +3914,10 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for LsiGlobalSolver<'t, '_, 
 
     fn identical_solutions(
         &self,
-        _sol1: &Solution<O>,
-        _sol2: &Solution<O>,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        // UNPORTED(surface.surface_p5): SmLSIGlobalSolver::IdenticalSolutions
-        Err(SolidError::unported(
-            "SmLSIGlobalSolver::IdenticalSolutions",
-            "surface.surface_p5",
-        ))
+        self.surface_identical_solutions(sol1, sol2)
     }
 }
 

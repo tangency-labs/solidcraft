@@ -313,19 +313,11 @@ pub(super) fn calculate_bounding_box(
 
 /// `SmSurface::IsSingularity(uv, eSingDir)`: the `SmPlane` override (a plane has no
 /// singularity); the other ported kinds run the base class body.
-fn is_singularity(surface: &Surface, _uv: Point2) -> Result<bool> {
+fn is_singularity(surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
-        SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-            Err(SolidError::unported(
-                "SmSurface::IsSingularity",
-                "surface.surface_p5",
-            ))
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
+            Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular)
         }
     }
 }

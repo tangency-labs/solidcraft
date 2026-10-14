@@ -1777,15 +1777,20 @@ fn evaluate_normal_section(eval: &[[Vec3; 3]; 3], direction: Vec3) -> Result<f64
 /// `crSurface.LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, ..)`: found flag
 /// and the solution's start parameters.
 fn surface_local_point_solve(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _point: Point3,
-    _guess: Point2,
+    surface: &Surface,
+    domain: &Extent2d,
+    point: Point3,
+    guess: Point2,
 ) -> Result<(bool, [f64; 2])> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
+    let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
+        domain,
+        SolverOperation::Minimize,
+        point,
+        guess,
+    )?;
+    Ok((
+        r.found,
+        [r.solution.start.param(0)?, r.solution.start.param(1)?],
     ))
 }
 
@@ -1815,16 +1820,17 @@ fn surface_global_point_solve(
 
 /// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.
 fn surface_drop_point(
-    _surface: &Surface,
-    _point: Point3,
-    _domain: &Extent2d,
-    _guess: Option<Point2>,
+    surface: &Surface,
+    point: Point3,
+    domain: &Extent2d,
+    guess: Option<Point2>,
 ) -> Result<(Point2, f64)> {
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::unported(
-        "SmSurface::DropPoint",
-        "surface.surface_p5",
-    ))
+    let opts = crate::surface::surface::p5::DropPointOptions {
+        guess_uv: guess,
+        ..Default::default()
+    };
+    let r = surface.drop_point::<crate::surface::surface::p4::NoObject>(point, domain, &opts)?;
+    Ok((r.result_uv, r.gap))
 }
 
 /// `m_cpSurface[0]->LocalSurfaceIntersect(..)`: found flag and the solution's start

@@ -569,21 +569,11 @@ fn global_point_solve(
         .collect())
 }
 
-/// `SmSurface::IsSingularity(uv, dir)`, virtual: `SmPlane::IsSingularity` is an inline
-/// override returning FALSE (`SmPlane.h:369`), so a plane answers it here.
-fn is_singularity(
-    surface: &crate::surface::surface::Surface,
-    _srf: &BSplineSurface,
-    _uv: Point2,
-) -> Result<bool> {
-    if let crate::surface::surface::SurfaceKind::Plane(p) = surface.kind() {
-        return Ok(p.is_singularity().0);
-    }
-    // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsSingularity",
-        unit: "surface.surface_p5",
-    })
+/// `SmSurface::IsSingularity(uv, dir)`.
+fn is_singularity(srf: &BSplineSurface, uv: Point2) -> Result<bool> {
+    // the SmSurface body (surface.surface_p5), on a surface holding a copy
+    let surface = crate::surface::surface::Surface::from(srf.copy());
+    Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular)
 }
 
 /// `SmSurface::IsClosed(domain, dir)` (unit `surface.surface_p7`), virtual:

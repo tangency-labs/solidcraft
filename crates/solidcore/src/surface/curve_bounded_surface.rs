@@ -310,14 +310,9 @@ impl CurveBoundedSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::EvaluateNormalAtSingularity`
-    /// (`surface.surface_p5`).
-    pub fn evaluate_normal_at_singularity(&self, _uv: Point2, _tol_3d: f64) -> Result<Vec3> {
-        // UNPORTED(surface.surface_p5): SmSurface::EvaluateNormalAtSingularity
-        Err(SolidError::unported(
-            "SmSurface::EvaluateNormalAtSingularity",
-            "surface.surface_p5",
-        ))
+    /// Those of [`Surface::evaluate_normal_at_singularity`] of the basis surface.
+    pub fn evaluate_normal_at_singularity(&self, uv: Point2, tol_3d: f64) -> Result<Vec3> {
+        self.basis().evaluate_normal_at_singularity(uv, tol_3d)
     }
 
     /// The default `d3dTol` of [`Self::evaluate_normal_at_singularity`].

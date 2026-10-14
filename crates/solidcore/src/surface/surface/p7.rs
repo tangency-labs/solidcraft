@@ -2146,14 +2146,10 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for SpGlobalSolver<'t, '_, O
 
     fn identical_solutions(
         &self,
-        _sol1: &Solution<O>,
-        _sol2: &Solution<O>,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        // UNPORTED(surface.surface_p5): SmSPGlobalSolver::IdenticalSolutions
-        Err(SolidError::unported(
-            "SmSPGlobalSolver::IdenticalSolutions",
-            "surface.surface_p5",
-        ))
+        self.surface_identical_solutions(sol1, sol2)
     }
 }
 

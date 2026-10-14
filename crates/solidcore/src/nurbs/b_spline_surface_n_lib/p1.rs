@@ -194,12 +194,11 @@ fn surface_nurb<'a>(surface: &'a BSplineSurface, operation: &'static str) -> Res
 
 /// `SmSurface::IsSingularity(uv, dir)`: whether `uv` is a singularity and its
 /// direction.
-fn is_singularity(_srf: &BSplineSurface, _uv: Point2) -> Result<(bool, SurfParamType)> {
-    // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-    Err(SolidError::Unported {
-        upstream: "SmSurface::IsSingularity",
-        unit: "surface.surface_p5",
-    })
+fn is_singularity(srf: &BSplineSurface, uv: Point2) -> Result<(bool, SurfParamType)> {
+    // the SmSurface body (surface.surface_p5), on a surface holding a copy
+    let surface = crate::surface::surface::Surface::from(srf.copy());
+    let s = surface.is_singularity(uv, crate::math::EFF_ZERO, false)?;
+    Ok((s.singular, s.direction))
 }
 
 /// `SmSurface::IsClosed(domain, dir)`.
