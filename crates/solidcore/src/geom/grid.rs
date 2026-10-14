@@ -689,11 +689,9 @@ impl<O: Copy> Grid<O> {
         if element.surface.is_none() {
             return Err(SolidError::sm_err(OP));
         }
-        // smsurf_GetSurfaceCache (surface::surface::p2::surface_cache) needs the
-        // surface caches:
-        // SmCacheMgr::GetOrCreateObjectCache makes surface caches through
-        // SmSurface::CacheMakeOrValidate:
-        // UNPORTED(surface.surface_p1): SmSurface::CacheMakeOrValidate
+        // DISPATCH GAP: smsurf_GetSurfaceCache (surface::surface::p1::get_surface_cache,
+        // surface.surface_p1, ported; no UNPORTED marker: the element holds a surface
+        // handle, and no store turns it into the Surface the cache is built from)
         // (then SmSurfaceCache::GetTree, SmTree::GetAllTreeNodes, and for every
         // lowest SM_AD_BEZIER_SURFACE node not classified outside:
         // AddElement(node, SM_GE_SURFACE, node box grown by the expansion tolerance))

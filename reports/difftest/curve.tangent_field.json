@@ -5243,17 +5243,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 132,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 523,
+  "cases_passed": 655,
   "cases_total": 655,
-  "deferred_by_unit": {
-    "surface.surface_p7": 132
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "curve.tangent_field"
 }

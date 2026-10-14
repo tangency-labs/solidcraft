@@ -40,8 +40,8 @@
 //!   curves (the same data, not a copy-constructed curve).
 //! - **Unported callees** return [`SolidError::Unported`]:
 //!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`),
-//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`),
-//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`). Upstream ignores the status of
+//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`). (`SmSurface::EvaluateNormal`
+//!   is `surface::surface::p7`'s, `Evaluate1stDerivatives` `surface::surface::p1`'s.) Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
 //! - Status values upstream ignores stay ignored (`EditParameterization` before
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
@@ -272,27 +272,11 @@ fn evaluate_normal_section(_surface: &BSplineSurface, _uv: Point2, _dir: Vec3) -
     })
 }
 
-/// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: `(Su, Sv)` (its body,
-/// `Evaluate(uv, 1, 1, TRUE, TRUE, TRUE, .., TRUE)`, on the B-spline).
+/// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: `(Su, Sv)`.
 fn evaluate_1st_derivatives(surface: &BSplineSurface, uv: Point2) -> Result<(Vec3, Vec3)> {
-    let m = surface.evaluate(
-        uv,
-        1,
-        1,
-        EvaluateFlags {
-            u_side: Side::Left,
-            v_side: Side::Left,
-            only_upper_half: true,
-            non_zero_tangents: true,
-        },
-    )?;
-    let d = |i: usize, j: usize| {
-        m.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .unwrap_or(Vec3::ZERO)
-    };
-    Ok((d(1, 0), d(0, 1)))
+    let (_, du, dv) =
+        crate::surface::surface::p1::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)?;
+    Ok((du, dv))
 }
 
 /// `SmCurve::LocalCurveIntersect(domain, other, other_domain, tol, guess, other_guess,

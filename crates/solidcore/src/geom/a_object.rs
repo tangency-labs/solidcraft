@@ -989,8 +989,10 @@ pub fn get_or_create_object_cache(
             Err(e) => Err(e),
         },
         CacheMaker::Surface => {
-            // (the face state of an old trimmed cache lives with the cache; an old
-            // cache is reused)
+            // The face state of an old trimmed cache (m_bFaceWasModified, the B-rep's
+            // m_bEditingEnabled) is not known here: an old cache is always reused. A
+            // caller holding the cache and its face must pass that state to
+            // validate_surface_cache itself (no caller yet).
             match crate::surface::surface::p1::validate_surface_cache(cache_type, old, false, false)
             {
                 Ok(Some(old)) => Ok(Some(old)),

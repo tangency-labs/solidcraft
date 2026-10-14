@@ -1734,24 +1734,15 @@ fn surface_is_closed(
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`
 /// (`surface::surface::p7::evaluate_1st_derivatives`).
 fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    crate::surface::surface::p7::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)
+    crate::surface::surface::p1::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)
 }
 
 // ---- unported callees ---------------------------------------------------------------------------
 
 /// `crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)`: the plane override; other kinds
 /// run `SmSurface::EvaluateNormal`.
-fn surface_evaluate_normal(surface: &Surface, _uv: Point2) -> Result<Vec3> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
-            // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-            Err(SolidError::unported(
-                "SmSurface::EvaluateNormal",
-                "surface.surface_p7",
-            ))
-        }
-    }
+fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(uv, Side::Left, Side::Left)
 }
 
 /// The principal curvatures and directions of `SmSurface::EvaluateGeometric`.

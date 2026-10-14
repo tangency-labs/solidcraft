@@ -35,20 +35,15 @@
 //! | [`pass_ss_convergence_test`]                      | `sm_PassSSConvergenceTest` (static)              |
 //! | [`check_seam_drop`]                               | `sm_CheckSeamDrop` (static)                      |
 //! | [`good_drop_result`]                              | `sm_GoodDropResult` (static)                     |
-//! | [`evaluate_1st_derivatives`] (co-ported)          | `SmSurface::Evaluate1stDerivatives` (unit `surface.surface_p1`) |
-//! | [`evaluate_2nd_derivatives`], [`SecondDerivatives`] (co-ported) | `SmSurface::Evaluate2ndDerivatives` (unit `surface.surface_p1`) |
-//! | [`evaluate_directional_derivs`] (co-ported)       | `SmSurface::EvaluateDirectionalDerivs` (unit `surface.surface_p1`) |
 //!
 //! Deviations:
 //! - **Generic bodies.** The `SmSurface` bodies that only call the evaluation virtuals
 //!   (`Evaluate`, `EvaluatePoint`, `GetNaturalUVDomain`) are generic over
 //!   [`SurfaceEvaluate`], so a caller holding a bare [`BSplineSurface`] (which does not
 //!   override them) runs the same code as one holding a [`Surface`].
-//! - **Co-ported callees.** `Evaluate1stDerivatives`, `Evaluate2ndDerivatives` and
-//!   `EvaluateDirectionalDerivs` belong to unit `surface.surface_p1` but are thin,
-//!   non-virtual wrappers around the virtual `Evaluate` that almost every function
-//!   here calls first; they are ported here (recorded as `CO-PORTED` in that unit's
-//!   plan notes) instead of being stubbed.
+//! - **Evaluation wrappers.** `Evaluate1stDerivatives`, `Evaluate2ndDerivatives` and
+//!   `EvaluateDirectionalDerivs` (first co-ported here) are
+//!   [`crate::surface::surface::p1`]'s generic functions.
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status, its
 //!   outputs keep their previous values, initially those of the default constructors
 //!   ([`Vec3::UNDEF`], [`Vec2::UNDEF`]); the port does the same, and still propagates
@@ -88,7 +83,6 @@ use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p1::directional_derivs;
 use crate::geom::geom_utility::p2::{
     evaluate_curve_continuity, frenet_from_derivatives, ContinuityType, CurveEval,
 };
@@ -110,7 +104,11 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::topology::BrepId;
 
-use super::p2::{derivative_limit, drop_vectors, normal_limit, surface_cache, SurfaceEvaluate};
+use super::p1::{
+    evaluate_1st_derivatives, evaluate_2nd_derivatives, evaluate_directional_derivs,
+    SecondDerivatives,
+};
+use super::p2::{derivative_limit, drop_vectors, normal_limit, SurfaceEvaluate};
 use super::{Surface, SurfaceKind};
 
 const OP_DEGEN: &str = "surface::surface::p7::Surface::find_degen_param_for_direction";
@@ -143,111 +141,6 @@ const fn flags(u_side: Side, v_side: Side, non_zero_tangents: bool) -> EvaluateF
         only_upper_half: true,
         non_zero_tangents,
     }
-}
-
-/// The point and first partial derivatives `(P, S_u, S_v)` at `uv`, zero first
-/// derivatives replaced by short, properly directed ones
-/// (`SmSurface::Evaluate1stDerivatives`, co-ported from unit `surface.surface_p1`).
-///
-/// # Errors
-///
-/// Those of the surface's `Evaluate`.
-pub fn evaluate_1st_derivatives<S: SurfaceEvaluate + ?Sized>(
-    surface: &S,
-    uv: Point2,
-    u_side: Side,
-    v_side: Side,
-) -> Result<(Point3, Vec3, Vec3)> {
-    let m = surface.evaluate(uv, 1, 1, flags(u_side, v_side, true))?;
-    Ok((at(&m, 0, 0)?, at(&m, 1, 0)?, at(&m, 0, 1)?))
-}
-
-/// The point and the first and second partial derivatives at a surface point
-/// ([`evaluate_2nd_derivatives`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SecondDerivatives {
-    /// `rPoint`.
-    pub point: Point3,
-    /// `rDU`.
-    pub du: Vec3,
-    /// `rDV`.
-    pub dv: Vec3,
-    /// `rDUV`.
-    pub duv: Vec3,
-    /// `rDUU`.
-    pub duu: Vec3,
-    /// `rDVV`.
-    pub dvv: Vec3,
-}
-
-/// The point and the first and second partial derivatives at `uv`, zero first
-/// derivatives replaced (`SmSurface::Evaluate2ndDerivatives`, co-ported from unit
-/// `surface.surface_p1`).
-///
-/// # Errors
-///
-/// Those of the surface's `Evaluate`.
-pub fn evaluate_2nd_derivatives<S: SurfaceEvaluate + ?Sized>(
-    surface: &S,
-    uv: Point2,
-    u_side: Side,
-    v_side: Side,
-) -> Result<SecondDerivatives> {
-    let m = surface.evaluate(uv, 2, 2, flags(u_side, v_side, true))?;
-    Ok(SecondDerivatives {
-        point: at(&m, 0, 0)?,
-        du: at(&m, 1, 0)?,
-        dv: at(&m, 0, 1)?,
-        duv: at(&m, 1, 1)?,
-        duu: at(&m, 2, 0)?,
-        dvv: at(&m, 0, 2)?,
-    })
-}
-
-/// The position and the directional derivatives up to `highest_deriv` (at most 3) of
-/// the surface along `uv_dir` at `uv`, from exact (not zero-corrected) partial
-/// derivatives (`SmSurface::EvaluateDirectionalDerivs`, co-ported from unit
-/// `surface.surface_p1`).
-///
-/// # Errors
-///
-/// `SM_ERR` for `highest_deriv > 3`; those of `Evaluate` and `smgu_DirectionalDerivs`.
-pub fn evaluate_directional_derivs<S: SurfaceEvaluate + ?Sized>(
-    surface: &S,
-    uv: Point2,
-    uv_dir: Vec2,
-    highest_deriv: usize,
-    u_side: Side,
-    v_side: Side,
-) -> Result<Vec<Vec3>> {
-    const OP: &str = "surface::surface::p7::evaluate_directional_derivs";
-    // check state
-    if highest_deriv > 3 {
-        return Err(SolidError::sm_err(OP));
-    }
-
-    // make the surface evaluation
-    let m = surface.evaluate(
-        uv,
-        highest_deriv,
-        highest_deriv,
-        flags(u_side, v_side, false),
-    )?;
-
-    // pass the call along (smgu_DirectionalDerivs reads the matrix row-major,
-    // `[i * (highest_deriv + 1) + j]`)
-    let mut derivs = Vec::new();
-    for i in 0..=highest_deriv {
-        for j in 0..=highest_deriv {
-            derivs.push(
-                m.get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .unwrap_or(Vec3::UNDEF),
-            );
-        }
-    }
-    directional_derivs(uv_dir, highest_deriv, highest_deriv, &derivs)
 }
 
 /// `Evaluate1stDerivatives` whose status upstream ignores: the outputs are
@@ -857,7 +750,9 @@ impl Surface {
     /// Only [`SolidError::Unported`].
     pub fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         match self.kind() {
-            SurfaceKind::BSpline(_) => base_evaluate_normal(self, uv, u_side, v_side),
+            SurfaceKind::BSpline(_) | SurfaceKind::Step(_) => {
+                base_evaluate_normal(self, uv, u_side, v_side)
+            }
             SurfaceKind::CurveBounded(s) => s.evaluate_normal(uv, u_side, v_side),
             SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
         }
@@ -882,7 +777,7 @@ impl Surface {
                 let (closed, continuity) = p.is_closed();
                 Ok((closed, want_continuity.then_some(continuity)))
             }
-            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) => {
+            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
                 base_is_closed(self, uv_domain, param, opt_tol, want_continuity)
             }
         }
@@ -908,13 +803,23 @@ impl Surface {
                 })
             }
             SurfaceKind::BSpline(s) => {
+                // the box expansion uses the owning face's tolerance
+                if self.face()?.is_some() {
+                    // UNPORTED(topology.face_p2): SmFace::GetTolerance
+                    return Err(SolidError::unported(
+                        "SmFace::GetTolerance",
+                        "topology.face_p2",
+                    ));
+                }
                 Ok(planar_of(s, &self.natural_uv_domain())?.is_planar(tol_3d))
             }
-            SurfaceKind::CurveBounded(_) => {
-                // UNPORTED(surface.surface_p1): SmSurface::CalculateBoundingBox
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+                // SmSurface::CalculateBoundingBox (surface::surface::p1) builds a surface
+                // cache, whose tree build needs the continuities
+                // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
                 Err(SolidError::unported(
-                    "SmSurface::CalculateBoundingBox",
-                    "surface.surface_p1",
+                    "SmSurface::CalculateContinuities",
+                    "surface.surface_p6",
                 ))
             }
         }
@@ -925,16 +830,14 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for an owned surface (`SmSurface::GetFace`).
+    /// Those of [`Surface::face`]; [`SolidError::Unported`] for a surface with a face
+    /// (`SmFace::GetBrep`).
     pub fn brep(&self) -> Result<Option<BrepId>> {
-        if self.owner().is_none() {
+        if self.face()?.is_none() {
             return Ok(None);
         }
-        // UNPORTED(surface.surface_p1): SmSurface::GetFace (then SmFace::GetBrep)
-        Err(SolidError::unported(
-            "SmSurface::GetFace",
-            "surface.surface_p1",
-        ))
+        // UNPORTED(topology.face_p4): SmFace::GetBrep
+        Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
     }
 
     /// The flat corners of the natural domain within `angle_tol_deg` and, when
@@ -943,8 +846,13 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::IsFlatCorner` (`surface.surface_p1`).
-    pub fn flat_corners(&self, angle_tol_deg: f64, want_points: bool) -> Result<FlatCorners> {
+    /// Those of [`Surface::is_flat_corner`].
+    pub fn flat_corners(
+        &self,
+        k: &crate::kernel::Kernel,
+        angle_tol_deg: f64,
+        want_points: bool,
+    ) -> Result<FlatCorners> {
         // init output
         let mut points = want_points.then_some([Vec3::UNDEF; 4]);
 
@@ -960,7 +868,7 @@ impl Surface {
         // check each corner
         let mut rtn = 0u32;
         for (c, bit) in corners.iter().zip(FLAT_CORNER_BITS) {
-            if is_flat_corner(self, *c, angle_tol_deg)? {
+            if self.is_flat_corner(k, *c, angle_tol_deg)? {
                 rtn |= bit;
             }
         }
@@ -1152,14 +1060,15 @@ impl Surface {
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
         // get surface spatial decomposition tree from Surface's cache
-        let cache = surface_cache(self)?;
-        surface_tree(&cache)?;
-        // UNPORTED(surface.surface_p1): SmSPGlobalSolver::SmSPGlobalSolver (then SolveIt)
+        // (surface::surface::p1::get_surface_cache, SurfaceCache::get_tree and
+        // SpGlobalSolver::new are ported; the cache build needs a kernel, which this
+        // signature gains with the solve)
         let _ = (uv_domain, test_point, distance_tolerance, requested);
         let _best = point_solve_best_answer_sq(op, opt_target_distance)?;
+        // UNPORTED(surface.surface_p8): SmSPGlobalSolver::LocalSolve
         Err(SolidError::unported(
-            "SmSPGlobalSolver::SmSPGlobalSolver",
-            "surface.surface_p1",
+            "SmSPGlobalSolver::LocalSolve",
+            "surface.surface_p8",
         ))
     }
 
@@ -1181,11 +1090,11 @@ impl Surface {
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
         // get target cache locals
-        let cache = surface_cache(self)?;
-        surface_tree(&cache)?;
-        // then the curve's cache and tree (SmCacheMgr::GetOrCreateObjectCache(SM_OC_CURVE),
-        // SmCurveCache::GetTree: curve::curve::p5::make_curve_cache, CurveCache::tree)
-        // UNPORTED(surface.surface_p1): SmCSGlobalSolver::SmCSGlobalSolver (then SolveIt)
+        // (the surface cache and tree, then the curve's cache and tree
+        // (SmCacheMgr::GetOrCreateObjectCache(SM_OC_CURVE), SmCurveCache::GetTree:
+        // curve::curve::p5::make_curve_cache, CurveCache::tree) and
+        // CsGlobalSolver::new are ported; the cache build needs a kernel, which this
+        // signature gains with the solve)
         let _ = (
             uv_domain,
             curve,
@@ -1195,9 +1104,10 @@ impl Surface {
             requested,
         );
         let _best = pair_solve_best_answer_sq(op, opt_target_distance, false)?;
+        // UNPORTED(surface.surface_p11): SmCSGlobalSolver::LocalSolve
         Err(SolidError::unported(
-            "SmCSGlobalSolver::SmCSGlobalSolver",
-            "surface.surface_p1",
+            "SmCSGlobalSolver::LocalSolve",
+            "surface.surface_p11",
         ))
     }
 
@@ -1218,12 +1128,10 @@ impl Surface {
         opt_vectors: &[Vec3],
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
-        let cache = surface_cache(self)?;
-        let cache2 = surface_cache(other)?;
-        surface_tree(&cache)?;
-        surface_tree(&cache2)?;
-        // UNPORTED(surface.surface_p1): SmSSGlobalSolver::SmSSGlobalSolver (then SolveIt)
+        // (both surface caches and trees and SsGlobalSolver::new are ported; the cache
+        // builds need a kernel, which this signature gains with the solve)
         let _ = (
+            other,
             uv_domain,
             other_uv_domain,
             distance_tolerance,
@@ -1231,9 +1139,10 @@ impl Surface {
             requested,
         );
         let _best = pair_solve_best_answer_sq(op, opt_target_distance, true)?;
+        // UNPORTED(surface.surface_p11): SmSSGlobalSolver::LocalSolve
         Err(SolidError::unported(
-            "SmSSGlobalSolver::SmSSGlobalSolver",
-            "surface.surface_p1",
+            "SmSSGlobalSolver::LocalSolve",
+            "surface.surface_p11",
         ))
     }
 
@@ -1335,8 +1244,8 @@ impl Surface {
             return Err(SolidError::invalid_input(OP_PROJ, "zero projection vector"));
         }
 
-        // check state - internal surface continuities are better than C0
-        let _cache = surface_cache(self)?;
+        // check state - internal surface continuities are better than C0 (the surface
+        // cache, surface::surface::p1::get_surface_cache; only reported)
         let _ = (
             uv_domain,
             curve,
@@ -2125,9 +2034,11 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         {
             // SmBezierPatch::GetPseudoBox / GetPolarBox are ported (BezierPatch::pseudo_box,
             // SurfaceCache::polar_box), and the patch (the node's m_pData) is
-            // SurfaceCache::patch(node) of the surface's cache, but the solver holds no
-            // cache until its constructor (surface.surface_p1) hands one over.
-            // UNPORTED(surface.surface_p1): SmSPGlobalSolver::SmSPGlobalSolver
+            // SurfaceCache::patch(node) of the surface's cache. DISPATCH GAP: the
+            // constructor (SpGlobalSolver::new, surface::surface::p1) takes the trees as
+            // upstream does, and a Tree does not reach its cache; handing the caches over
+            // needs them mutable (the polar boxes are built lazily). No UNPORTED marker:
+            // the constructor is ported.
             // (then the point inside the pseudo box, else the polar box of the vectors to
             // its 8 corners against the patch's polar box)
             return Err(SolidError::unported(
@@ -2208,9 +2119,11 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
                 && node2.aux_type == AuxDataType::BezierSurface
             {
                 // The patches (the nodes' m_pData) are SurfaceCache::patch(node) of the
-                // two surface caches, but the solver holds no caches until its
-                // constructor (surface.surface_p1) hands them over.
-                // UNPORTED(surface.surface_p1): SmSSGlobalSolver::SmSSGlobalSolver
+                // two surface caches. DISPATCH GAP: the constructor (SsGlobalSolver::new,
+                // surface::surface::p1) takes the trees as upstream does, and a Tree does
+                // not reach its cache; handing the caches over needs them mutable (the
+                // polar boxes are built lazily). No UNPORTED marker: the constructor is
+                // ported.
                 // (then sm_IsNodeValid of both nodes, returning SM_SUCCESS = FALSE when
                 // outside, ComputeConeBoundTo and the polar box cone tests)
                 return Err(SolidError::unported(
@@ -2260,39 +2173,17 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for SsGlobalSolver<'t, '_, O
 
 // ---- callees in units not ported yet -------------------------------------------------------
 
-/// `SmSurfaceCache::GetTree` of a surface cache.
-fn surface_tree<C>(_cache: &C) -> Result<()> {
-    // GetTree is SurfaceCache::get_tree, but no cache store resolves a surface cache's
-    // handle yet: smsurf_GetSurfaceCache makes the caches through
-    // SmSurface::CacheMakeOrValidate.
-    // UNPORTED(surface.surface_p1): SmSurface::CacheMakeOrValidate
-    Err(SolidError::unported(
-        "SmSurface::CacheMakeOrValidate",
-        "surface.surface_p1",
-    ))
-}
-
-/// `SmSurface::IsFlatCorner(uv, angle_tol_deg)`.
-fn is_flat_corner(_surface: &Surface, _uv: Point2, _angle_tol_deg: f64) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): SmSurface::IsFlatCorner
-    Err(SolidError::unported(
-        "SmSurface::IsFlatCorner",
-        "surface.surface_p1",
-    ))
-}
-
 /// `SmSurface::EvaluateSTEP(uv, 1, 1, TRUE, TRUE, TRUE, ..)`.
-fn evaluate_step(_surface: &Surface, _uv: Point2) -> Result<Vec<Vec<Vec3>>> {
-    // UNPORTED(surface.surface_p1): SmSurface::EvaluateSTEP
-    Err(SolidError::unported(
-        "SmSurface::EvaluateSTEP",
-        "surface.surface_p1",
-    ))
+fn evaluate_step(surface: &Surface, uv: Point2) -> Result<Vec<Vec<Vec3>>> {
+    surface.evaluate_step(uv, 1, 1, flags(Side::Left, Side::Left, true))
 }
 
 /// `sm_IsNodeValid`: false for a node known to lie outside its face.
 fn is_node_valid<O>(_node: &crate::geom::tree::TreeNode<O>) -> Result<bool> {
-    // UNPORTED(surface.surface_p1): sm_IsNodeValid
+    // DISPATCH GAP: sm_IsNodeValid (surface::surface::p1::is_node_valid) reads the
+    // point-test state of the surface cache owning the node's tree; a Tree does not
+    // reach its owning cache, so the solver cannot pass it yet (no UNPORTED marker: the
+    // callee is ported).
     Err(SolidError::unported("sm_IsNodeValid", "surface.surface_p1"))
 }
 
@@ -2300,19 +2191,25 @@ fn is_node_valid<O>(_node: &crate::geom::tree::TreeNode<O>) -> Result<bool> {
 /// (`SmFindSingularParamWithGivenTangentDirEFO` with `SmLocalSolve1d::SolveIt` from
 /// `start`): `(found, t)`.
 fn singular_param_solve(
-    _surface: &Surface,
-    _uv: Point2,
-    _dir: Vec3,
-    _singular_dir: SurfParamType,
-    _ivl: &Extent1d,
-    _start: f64,
-    _tol: f64,
+    surface: &Surface,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    ivl: &Extent1d,
+    start: f64,
+    tol: f64,
 ) -> Result<(bool, f64)> {
-    // UNPORTED(surface.surface_p1): SmFindSingularParamWithGivenTangentDirEFO::SmFindSingularParamWithGivenTangentDirEFO
-    Err(SolidError::unported(
-        "SmFindSingularParamWithGivenTangentDirEFO::SmFindSingularParamWithGivenTangentDirEFO",
-        "surface.surface_p1",
-    ))
+    // set up NR solver (the EFO's tolerance is SM_EFF_ZERO, not used)
+    let mut efo = super::p1::FindSingularParamWithGivenTangentDir::new(
+        surface,
+        uv,
+        dir,
+        singular_dir,
+        EFF_ZERO,
+    );
+    let mut ls = crate::geom::local_solve1d::LocalSolve1d::with_interval(*ivl, false);
+    let r = ls.solve_it(&mut efo, start, tol)?;
+    Ok((r.found, r.t))
 }
 
 /// The `SmLocalSolveNd` solve of `LocalCurveSolve` over `SmCSNormalizeENFO`
@@ -2328,11 +2225,11 @@ fn cs_normalize_local_solve(
     _intervals: &[Extent1d],
     _guess: &[f64],
 ) -> Result<Option<Vec<f64>>> {
-    // UNPORTED(surface.surface_p1): SmCSNormalizeENFO::SmCSNormalizeENFO
+    // (the evaluator, surface::surface::p1::CsNormalizeEnfo, has no Evaluate yet)
     // UNPORTED(surface.surface_p4): SmCSNormalizeENFO::Evaluate
     Err(SolidError::unported(
-        "SmCSNormalizeENFO::SmCSNormalizeENFO",
-        "surface.surface_p1",
+        "SmCSNormalizeENFO::Evaluate",
+        "surface.surface_p4",
     ))
 }
 

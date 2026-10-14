@@ -147,8 +147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -167,8 +167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0018",
@@ -239,8 +239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
+        "symbol": "SmSurface::FindTessellationSplits",
+        "unit": "surface.surface_p9"
       },
       "max_rel_err": 0.0,
       "name": "gen0026",
@@ -510,16 +510,12 @@
       "values_compared": 246
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0056",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824832",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1299,8 +1295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0143",
@@ -1423,8 +1419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0157",
@@ -2218,10 +2214,6 @@
       "values_compared": 288
     },
     {
-      "deferred": {
-        "symbol": "SmTessSrfCache subdivision surfaces",
-        "unit": "query.tess"
-      },
       "max_rel_err": 0.0,
       "name": "gen0248",
       "outcome": "pass",
@@ -2667,8 +2659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0296",
@@ -3375,8 +3367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0375",
@@ -3787,8 +3779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::SnapToKnots",
-        "unit": "surface.surface_p1"
+        "symbol": "SmTessSrfCache subdivision surfaces",
+        "unit": "query.tess"
       },
       "max_rel_err": 0.0,
       "name": "gen0420",
@@ -5074,16 +5066,12 @@
       "values_compared": 82867
     },
     {
-      "deferred": {
-        "symbol": "SmBSplineSurface::CalculateBoundingBox",
-        "unit": "surface.plane_p1"
-      },
       "max_rel_err": 0.0,
       "name": "gen0563",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825339",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -5423,17 +5411,17 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 148,
+  "cases_deferred": 152,
   "cases_failed": 0,
-  "cases_passed": 452,
+  "cases_passed": 448,
   "cases_total": 600,
   "deferred_by_unit": {
-    "query.tess": 32,
-    "surface.plane_p1": 12,
-    "surface.surface_p3": 14,
+    "query.tess": 38,
+    "surface.plane_p1": 8,
+    "surface.surface_p3": 15,
     "surface.surface_p5": 32,
     "surface.surface_p6": 57,
-    "surface.surface_p9": 1
+    "surface.surface_p9": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

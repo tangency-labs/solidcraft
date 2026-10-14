@@ -7679,9 +7679,9 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 137,
+  "cases_deferred": 109,
   "cases_failed": 0,
-  "cases_passed": 768,
+  "cases_passed": 796,
   "cases_total": 905,
   "deferred_by_unit": {
     "surface.plane_p1": 53,

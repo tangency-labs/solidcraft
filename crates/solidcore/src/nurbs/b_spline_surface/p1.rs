@@ -106,7 +106,7 @@
 //!   types to `SmSurface::IsKindOf` ([`crate::surface::surface::p2::is_kind_of`]);
 //!   a plain B-spline is never one of the analytic types `CalculateBoundingBox` and
 //!   `IsParallelToVector` test for first. `CalculateBoundingBox` also calls
-//!   `SmSurface::EvaluateNormal` (`surface.surface_p7`); its zone tolerance expansion
+//!   `SmSurface::EvaluateNormal` (`surface::surface::p7`); its zone tolerance expansion
 //!   reads `GetFace()`, and a bare B-spline has no owner (the owner is held by the
 //!   [`Surface`](crate::surface::surface::Surface) wrapper), so it uses
 //!   `SM_ZONE_TOL_3D`; `CreateOffsetSurface` passes the call to `SmSurface`, which needs
@@ -489,7 +489,9 @@ fn evaluate_normal(srf: &BSplineSurface, uv: Point2) -> Result<Vec3> {
 /// bare B-spline has no owner (the owner is held by the
 /// [`Surface`](crate::surface::surface::Surface) wrapper, whose
 /// [`calculate_bounding_box`](crate::surface::surface::Surface::calculate_bounding_box)
-/// handles a face owner before calling here): `SM_ZONE_TOL_3D`.
+/// handles a face owner before calling here): `SM_ZONE_TOL_3D`. Callers that hold a
+/// `Surface` with a face must check it first (as `Surface::calculate_bounding_box` and
+/// `Surface::is_planar` do); the patch boxes of surface caches are ownerless.
 const fn owner_zone_tolerance(_srf: &BSplineSurface) -> f64 {
     crate::geom::tol::ZONE_TOL_3D
 }

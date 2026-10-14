@@ -61,10 +61,11 @@
 //! - **Back-edges.** `CopyAndAddAnalytics` needs `SmPlane::IsNurbSurfacePlane`
 //!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
-//!   `GetMaxAnalyticDomain` `SmSurface::IsPlanar` and `IsClosed` (`surface.surface_p7`).
-//!   Those calls return [`SolidError::Unported`]. `IsDegeneratePoint` over another
-//!   domain runs the `SmSurface` base body on a copy of the B-spline wrapped as a
-//!   `Surface` (without owner).
+//!   `GetMaxAnalyticDomain` nothing unported (`SmSurface::Evaluate1stDerivatives` is
+//!   `surface::surface::p1`'s, `IsPlanar` and `IsClosed` are those of
+//!   `surface::surface::p7`). `IsDegeneratePoint` over another domain runs the
+//!   `SmSurface` base body on a copy of the B-spline wrapped as a `Surface` (without
+//!   owner).
 
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve as SmCurve;
@@ -246,25 +247,12 @@ fn sweep_circle(c: &SmCurve) -> Result<(CurveCanonical, Extent1d)> {
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: point, `S_u`, `S_v`.
 fn evaluate_1st_derivatives(srf: &BSplineSurface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    // (SmSurface::Evaluate1stDerivatives: the virtual Evaluate, non-zero tangents)
-    let m = srf.evaluate(
+    crate::surface::surface::p1::evaluate_1st_derivatives(
+        srf,
         uv,
-        1,
-        1,
-        crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags {
-            u_side: crate::nurbs::knots::Side::Left,
-            v_side: crate::nurbs::knots::Side::Left,
-            only_upper_half: true,
-            non_zero_tangents: true,
-        },
-    )?;
-    let at = |i: usize, j: usize| {
-        m.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .unwrap_or(Vec3::ZERO)
-    };
-    Ok((at(0, 0), at(1, 0), at(0, 1)))
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )
 }
 
 /// The parts of `SmPlane(point, x_dir, y_dir, (1, 1), domain)` that
@@ -1607,7 +1595,8 @@ mod tests {
         let s = patch(false);
         let unported = |r: Result<()>| matches!(r, Err(SolidError::Unported { .. }));
         assert!(unported(s.copy_and_add_analytics().map(|_| ())));
-        assert!(unported(s.max_analytic_domain().map(|_| ())));
+        // (wired through surface.surface_p1 / surface.surface_p7)
+        assert!(s.max_analytic_domain().is_ok());
         assert!(s.is_degenerate_point(1e-6, None).is_ok());
         let sub = Extent2d::from_bounds(0.0, 0.0, 0.5, 0.5);
         assert!(!s.is_degenerate_point(1e-6, Some(&sub)).unwrap());

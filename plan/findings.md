@@ -2834,6 +2834,53 @@ default cases, a 30,847-case run clean, `--perturb` SENSITIVE). The 75 deferred 
   `IsCurveIn*Domain` / `IsLineInParamDomain` volume entry points take a `&Kernel` for the
   curve bounding boxes the B-spline override computes.
 
+## surface.surface_p7 (`SmSurface`, part 7)
+
+- **Co-ported callees.** `SmSurface::Evaluate1stDerivatives`, `Evaluate2ndDerivatives` and
+  `EvaluateDirectionalDerivs` (unit `surface.surface_p1`) are non-virtual one-call wrappers of
+  the virtual `Evaluate` that nearly every function here calls first; stubbing them would
+  have deferred the whole unit. They live in `surface::surface::p7`, generic over
+  `SurfaceEvaluate`, and are recorded as `CO-PORTED` in `surface.surface_p1`'s notes. Their
+  stubs elsewhere (`b_spline_surface::p2`, `b_spline_surface_n_lib::p2`, `trim_srf_cache`,
+  `crv_on_surf`) were wired too.
+- **`SurfaceEvaluate::evaluate_normal`.** Code generic over the surface type
+  (`TangentField<S>`) needs `EvaluateNormal`'s virtual dispatch; the trait method defaults to
+  the `SmSurface` body (what `SmBSplineSurface` runs) and `Surface` dispatches to the plane and
+  curve-bounded overrides. `surface_cache::p1`'s stub assumed no ported kind overrides
+  `EvaluateNormal`; planes and curve-bounded surfaces do, so it now dispatches.
+- **`IsClosed` and a failed `smgu_FrenetFromDerivatives`.** Upstream writes the position,
+  the tangent and a zero curvature vector before returning `SM_ERR` for a zero tangent;
+  `base_is_closed` now leaves exactly that (found by comparing with the copy co-ported in
+  `intersect.surface_intersector_p1`, PR #33, which this unit's functions replace).
+- **Mislabelled stub.** `b_spline_surface::p1::is_closed` was marked
+  `UNPORTED(surface.surface_p5)` for `SmSurface::IsClosed`, which is this unit's; wired.
+  `IsPlanar` of a B-spline defers on `SmSurface::GetFace` (`surface.surface_p1`), reached
+  through `b_spline_surface::p1::owner_zone_tolerance`.
+- **Upstream quirks kept.** `GetFlatCorners` masks its return with `&=` while filling the
+  points; `SmSSGlobalSolver::BranchMayContainAnswers` returns `SM_SUCCESS` (`FALSE`) for a
+  node outside its face and `NER`'s status (`TRUE`) for a missing patch; `sm_GoodDropResult`
+  swaps the guess/result distance names; `FindDegenParamForDirection` compares a sample
+  fraction with the parameter `dS`, and on Newton failure returns `SM_ERR` with `rUV` moved
+  (the port returns `DegenParam { converged: false }`).
+- **Not difftested.** `SmSPGlobalSolver` / `SmSSGlobalSolver::BranchMayContainAnswers` need
+  surface cache trees with Bezier patch data (`surface.surface_cache_p3`); their non-normalize
+  path is the green base `SmGlobalSolver::BranchMayContainAnswers`. The shim's
+  `sm_LoadGuesses` copy takes the owner surface directly (two lines marked `ADAPTED`):
+  reaching it through a tree node needs a real `SmSurfaceCache`.
+- **Slow upstream solves.** `GlobalSurfaceSolve` (minimize) between two random surfaces
+  that intersect runs for minutes in the C++ (a continuum of zero-distance answers along
+  the intersection curve), and the global solves on 1e-4-scale surfaces with a 1e-6
+  tolerance take tens of seconds. These ops always defer on the Rust side, so the
+  generator keeps them at unit scale, drops `SM_SO_NORMALIZE` for `GlobalCurveSolve`, and
+  covers `GlobalSurfaceSolve` with fixtures on separated surfaces only.
+- **Curve-bounded surfaces** (without boundary curves) are generated too, so the
+  `EvaluateNormal` / `IsClosed` dispatch of that kind is compared.
+- **Generator note.** Ordinary random nets almost never reach `EvaluateNormal`'s fall-backs
+  (zero-corrected first derivatives keep the cross product alive); the runner adds poles,
+  exactly folded nets and pinched corners and samples boundaries, and the fixtures hit each
+  branch (pole: second-derivative substitution; fold: zero result; pinch: step-off
+  extrapolation).
+
 ## intersect.point_class (`SmPointClassification`)
 
 - **Review fixes (PR #21).** The constructor takes an `SmZoneTol3d`, already converted, and
@@ -2908,8 +2955,29 @@ default cases, a 30,847-case run clean, `--perturb` SENSITIVE). The 75 deferred 
   `SmSurfaceGridElement::Init` (`GetPseudoBox`) and `surface.surface_p2`
   (`GetPolarBox`) read patch data from a bare `Tree`, but the patches live in the
   surface cache (`BezierPatchRef` is an empty enum). A hand-over like the curve cache's
-  `set_curve_data` would close them; the stubs keep their `surface.surface_cache_p3` tag
-  until then.
+  `set_curve_data` would close them. The callees are ported (`surface.surface_cache_p1`,
+  `nurbs.b_spline_surface_p1`), so the call sites carry `DISPATCH GAP` comments and their
+  `Unported` errors name those owning units (review of PR #39).
+- **Boundary edge uses on a split (review of PR #39).** `SubdivideNode` moves a boundary
+  parent's edge uses into the children through the virtual `ImplantEdgeuse`; the port
+  called the base class's (always `SM_ERR`, ignored) from the trimmed surface cache too,
+  so the edge uses were dropped. The trim runner printed only the input nodes, so CI did
+  not see it. Now `SurfaceCache::subdivide_node_split` does the split and
+  `TrimSrfCache` re-implants each edge use with its own `implant_edgeuse` (into one
+  child, no subdivision); that needs `SmEdgeuse::GetUVTrimCurve`, so those cases defer
+  on `topology.edgeuse_p1` (poly edges on `query.poly`). The trim runner prints every
+  node of the tree; fixture `implant_then_split_boundary_leaf` covers it.
+- **Build/Get not compared yet.** Every `Build` / `Get` case defers on
+  `CalculateContinuities` (`surface.surface_p6`), so the first-generation node loop of
+  `BuildTreeBase`, the `BuildTree` cleanup and `GetTree` have no C++ comparison until
+  that unit lands.
+- **Dispatch gaps.** `GetTree` dispatches `BuildTree()` virtually (the trimmed surface
+  cache's on an `SmTrimSrfCache`); `SurfaceCache::get_tree` builds the base tree, and
+  `subdivide_node` does not repeat upstream's `GetTree()` call (it needs a built tree).
+- **Planes in the tolerance test.** An `SM_AD_AUX_DATA` node holding a plane reads the
+  plane's NURB (`GetGwNurbPointer` on an `SmBSplineSurface`); the port's plane makes its
+  NURB lazily, so the test uses `Plane::base_for_query`. Found once the generator put
+  planes on aux start nodes (the FFI had rejected them; upstream handles them).
 
 ## surface.surface_p1 (`SmSurface` part 1 and `SmSTEPSurface`, 2026-10-14)
 

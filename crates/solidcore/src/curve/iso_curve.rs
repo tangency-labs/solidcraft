@@ -404,21 +404,19 @@ fn surface_read_from_db(
 ) -> Result<BSplineSurface> {
     match Surface::read_from_db(k, surface_type, db, version)?.into_kind() {
         SurfaceKind::BSpline(s) => Ok(s),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for a non-B-spline surface
-        // (the curve holds an SmBSplineSurface until the SmSurface virtuals are ported)
+        // DISPATCH GAP: the SmSurface virtuals (surface.surface_p1, ported; no UNPORTED
+        // marker: the ported SmIsoCurve holds an SmBSplineSurface here, not any Surface)
         SurfaceKind::CurveBounded(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmCurveBoundedSurface",
-            "surface.surface_p1",
+            "curve.iso_curve",
         )),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for an SmPlane
         SurfaceKind::Plane(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmPlane",
-            "surface.surface_p1",
+            "curve.iso_curve",
         )),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for an SmSTEPSurface
         SurfaceKind::Step(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmSTEPSurface",
-            "surface.surface_p1",
+            "curve.iso_curve",
         )),
     }
 }

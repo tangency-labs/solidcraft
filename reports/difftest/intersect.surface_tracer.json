@@ -3499,8 +3499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CacheMakeOrValidate",
-        "unit": "surface.surface_p1"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0396",
@@ -3540,8 +3540,7 @@
   "cases_passed": 398,
   "cases_total": 427,
   "deferred_by_unit": {
-    "surface.surface_p6": 28,
-    "surface.surface_p7": 23
+    "surface.surface_p6": 29
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -5358,7 +5358,8 @@
   "deferred_by_unit": {
     "query.tess": 4,
     "surface.surface_p3": 29,
-    "topology.brep_p8": 60
+    "topology.brep_p8": 60,
+    "topology.edgeuse_p1": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

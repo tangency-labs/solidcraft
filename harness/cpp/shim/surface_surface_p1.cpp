@@ -270,6 +270,16 @@ void put_box(std::vector<double>& o, const SmExtent3d& e)
     put_vec(o, e.GetMax());
 }
 
+// `state basis(3V) D`.
+void put_polar(std::vector<double>& o, const SmPolarBox& b)
+{
+    o.push_back((double)b.GetPolarBoxState());
+    for (ULONG i = 0; i < 3; i++)
+        put_vec(o, *b.GetBasis(i));
+    SmExtent2d d = b.GetDomain();
+    put_dom(o, d);
+}
+
 gw_SURFACE* read_nurb(Rd& rd)
 {
     gw_INDEX n = (gw_INDEX)rd.idx();
@@ -741,7 +751,7 @@ void op_cache(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     delete s;
 }
 
-// `W S D normal pseudo expand`: CalculateBoundingBox (virtual): `status [box] [basis(3V)
+// `W S D normal pseudo expand polar`: CalculateBoundingBox (virtual), polar box last (`state basis D`): `status [box] [basis(3V)
 // intervals(3 lo hi)]`.
 void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
 {
@@ -750,9 +760,13 @@ void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     bool want_n = rd.flag();
     bool want_p = rd.flag();
     SmBoolean expand = rd.flag() ? TRUE : FALSE;
+    // the FFI asks for a polar box only of B-splines and planes (UB-81)
+    bool want_pl = rd.flag();
     SmExtent3d nb;
     SmPseudoBox pb;
-    SmStatus r = s->CalculateBoundingBox(d, want_n ? &nb : NULL, want_p ? &pb : NULL, NULL, NULL, NULL, expand);
+    SmPolarBox pl;
+    SmStatus r = s->CalculateBoundingBox(d, want_n ? &nb : NULL, want_p ? &pb : NULL, want_pl ? &pl : NULL, NULL,
+                                         NULL, expand);
     o.push_back(st(r));
     if (r == SM_SUCCESS)
     {
@@ -768,6 +782,8 @@ void op_bbox(Rd& rd, const SmContext& ctx, std::vector<double>& o)
                 o.push_back(pb.GetInterval(i).GetMax());
             }
         }
+        if (want_pl)
+            put_polar(o, pl);
     }
     delete s;
 }

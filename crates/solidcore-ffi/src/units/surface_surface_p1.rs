@@ -17,7 +17,7 @@
 //! | `DegenPoint` | `IsDegeneratePoint` (base body, virtual)               | `W S tol hasD D`      |
 //! | `DegenCurve` | `IsDegenerateCurve` (base body, virtual)               | `W S ang hasD D tol`  |
 //! | `Flat`       | `IsFlatCorner`                                         | `W S uv ang`          |
-//! | `OnBoundary` | `IsOnBoundary`                                         | `W S D uv hasTol tol` |
+//! | `OnBoundary` | `IsOnBoundary` (uv up to a domain side outside for planes and clamping B-splines) | `W S D uv hasTol tol` |
 //! | `InDomain`   | `IsInDomain`                                           | `W S D uv hasTol tol` |
 //! | `Misc`       | `operator==` (virtual, base), `IsAnalytic`, `GetFace`, `GetType` | `W S W S`   |
 //! | `Snap`       | `SnapToKnots`                                          | `W S uv tol`          |
@@ -32,7 +32,7 @@
 //! | `IsoLen`     | `SmIsoCurveLengthIFEO::Evaluate`                       | `W S u t`             |
 //! | `Step`       | `SmSTEPSurface` `GetNaturalUVDomain`, `GetDomainWithContinuity`, `GetKnots` | `S v hasIvl lo hi` |
 //! | `Cache`      | `CacheMakeOrValidate` (new cache)                      | `W S trim`            |
-//! | `BBox`       | `CalculateBoundingBox`                                 | `W S D normal pseudo expand` |
+//! | `BBox`       | `CalculateBoundingBox`                                 | `W S D normal pseudo expand polar` |
 //! | `DomCont`    | `GetDomainWithContinuity`                              | `W S cont uv V`       |
 //!
 //! The output is the op status (`0` = `SM_SUCCESS`, else the `SmStatus`) and the op's
@@ -152,6 +152,29 @@ fn wrapped(rd: &mut Reader<'_>) -> Result<(Kind, Srf), FfiError> {
     Ok((kind, srf))
 }
 
+/// A `W S` block: whether it is wrapped, its kind, its domain, and whether its B-spline
+/// evaluates out of bounds (`kind oob form N`).
+fn wrapped_full(rd: &mut Reader<'_>) -> Result<(bool, Kind, Srf, bool), FfiError> {
+    let wrap = rd.flag()?;
+    let at = rd.at;
+    let (kind, srf, _) = sized_surface(rd)?;
+    let oob = kind != Kind::Plane && rd.input.get(at + 1).copied() == Some(1.0);
+    Ok((wrap, kind, srf, oob))
+}
+
+/// A point `uv` within a side of the surface domain from it (upstream evaluates there:
+/// B-splines without out-of-bounds evaluation clamp, planes are analytic).
+fn uv_near(rd: &mut Reader<'_>, srf: &Srf) -> Result<[f64; 2], FfiError> {
+    let u = rd.finite()?;
+    let v = rd.finite()?;
+    let d = srf.dom;
+    let (w, h) = (d[2] - d[0], d[3] - d[1]);
+    if u < d[0] - w || u > d[2] + w || v < d[1] - h || v > d[3] + h {
+        return Err(bad("uv too far outside the surface domain"));
+    }
+    Ok([u, v])
+}
+
 /// A point `uv` inside the surface domain.
 fn uv_in(rd: &mut Reader<'_>, srf: &Srf) -> Result<[f64; 2], FfiError> {
     let u = rd.finite()?;
@@ -226,9 +249,13 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             rd.finite()?;
         }
         Op::OnBoundary | Op::InDomain => {
-            let (_, srf) = wrapped(rd)?;
+            let (_, kind, srf, oob) = wrapped_full(rd)?;
             rd.domain()?;
-            uv_in(rd, &srf)?;
+            if kind == Kind::Plane || (kind == Kind::BSpline && !oob) {
+                uv_near(rd, &srf)?;
+            } else {
+                uv_in(rd, &srf)?;
+            }
             opt_tol(rd)?;
         }
         Op::Misc => {
@@ -316,13 +343,20 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             rd.flag()?;
         }
         Op::BBox => {
-            let (_, srf) = wrapped(rd)?;
+            let (wrap, kind, srf, _) = wrapped_full(rd)?;
             rd.domain_in(&srf, false)?;
-            // upstream asserts that a box is asked for
-            if !rd.flag()? & !rd.flag()? {
-                return Err(bad("bounding box: ask for a normal or a pseudo box"));
-            }
+            let normal = rd.flag()?;
+            let pseudo = rd.flag()?;
             rd.flag()?;
+            let polar = rd.flag()?;
+            // upstream asserts that a box is asked for
+            if !normal && !pseudo && !polar {
+                return Err(bad("bounding box: ask for a box"));
+            }
+            // the base body recurses without bound on a polar box (UB-81)
+            if polar && (wrap || kind == Kind::CurveBounded) {
+                return Err(bad("bounding box: no polar box of curve-bounded or STEP surfaces (UB-81)"));
+            }
         }
         Op::DomCont => {
             let (_, srf) = wrapped(rd)?;

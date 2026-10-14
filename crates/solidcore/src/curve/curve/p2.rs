@@ -2140,10 +2140,10 @@ fn surface_local_curve_solve<S>(
 ) -> Result<Option<(f64, Point2)>> {
     // SmSurface::LocalCurveSolve is surface::surface::p7::Surface::local_curve_solve; its
     // evaluator is not ported yet.
-    // UNPORTED(surface.surface_p1): SmCSNormalizeENFO::SmCSNormalizeENFO (via SmSurface::LocalCurveSolve)
+    // UNPORTED(surface.surface_p4): SmCSNormalizeENFO::Evaluate (via SmSurface::LocalCurveSolve)
     Err(SolidError::Unported {
-        upstream: "SmCSNormalizeENFO::SmCSNormalizeENFO",
-        unit: "surface.surface_p1",
+        upstream: "SmCSNormalizeENFO::Evaluate",
+        unit: "surface.surface_p4",
     })
 }
 

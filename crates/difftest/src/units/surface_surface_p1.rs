@@ -160,6 +160,10 @@ enum OpIn {
         normal: bool,
         pseudo: bool,
         expand: bool,
+        /// Only for unwrapped B-splines and planes (upstream recurses on the others,
+        /// UB-81).
+        #[serde(default)]
+        polar: bool,
     },
     DomCont {
         cont: u8,
@@ -319,9 +323,10 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             normal,
             pseudo,
             expand,
+            polar,
         } => {
             o.extend(dom);
-            o.extend([flag(*normal), flag(*pseudo), flag(*expand)]);
+            o.extend([flag(*normal), flag(*pseudo), flag(*expand), flag(*polar)]);
         }
         OpIn::DomCont { cont, uv, vec } => {
             o.push(f64::from(*cont));
@@ -719,10 +724,11 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             normal,
             pseudo,
             expand,
+            polar,
         } => {
             let s = run()?;
             let mut o = Vec::new();
-            let r = s.calculate_bounding_box(&k, &dom_of(*dom), [*normal, *pseudo, false], *expand);
+            let r = s.calculate_bounding_box(&k, &dom_of(*dom), [*normal, *pseudo, *polar], *expand);
             sub(&mut o, r, |o, b| {
                 if let Some(n) = b.normal_box.filter(|_| *normal) {
                     push_box(o, &n);
@@ -735,6 +741,13 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                         let iv = p.interval(i).unwrap_or_default();
                         o.extend([iv.min(), iv.max()]);
                     }
+                }
+                if let Some(pl) = b.polar_box.as_ref().filter(|_| *polar) {
+                    o.push(f64::from(pl.state().code()));
+                    for v in pl.basis() {
+                        push3(o, *v);
+                    }
+                    push_dom(o, &pl.domain());
                 }
             })
             .map(|()| o)
@@ -774,6 +787,27 @@ fn gen_uv(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
         }
     };
     [pick(rng, d[0], d[2]), pick(rng, d[1], d[3])]
+}
+
+/// A point in `d` or, half the time, up to 20 % of the side outside it.
+fn gen_uv_near(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
+    let [u, v] = gen_uv(rng, d);
+    if rng.chance(0.5) {
+        return [u, v];
+    }
+    let off = |rng: &mut Rng, lo: f64, hi: f64| -> f64 {
+        let w = (hi - lo) * 10f64.powf(rng.uniform(-6.0, -0.7));
+        if rng.chance(0.5) {
+            lo - w
+        } else {
+            hi + w
+        }
+    };
+    match rng.below(3) {
+        0 => [off(rng, d[0], d[2]), v],
+        1 => [u, off(rng, d[1], d[3])],
+        _ => [off(rng, d[0], d[2]), off(rng, d[1], d[3])],
+    }
 }
 
 fn gen_opt_dom(rng: &mut Rng, d: [f64; 4]) -> Option<[f64; 4]> {
@@ -821,6 +855,14 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     let wrap = rng.chance(0.3);
     let d = surf_domain(&surf)?;
     let size = surf_size(&surf)?;
+    // B-splines that clamp outside their domain and planes evaluate anywhere
+    let outside_ok = match &surf {
+        SurfIn::Bspline(b) => !b.oob,
+        SurfIn::Plane(_) => true,
+        SurfIn::CurveBounded(_) => false,
+    };
+    // upstream's base CalculateBoundingBox recurses on a polar box (UB-81)
+    let polar_ok = !wrap && !matches!(surf, SurfIn::CurveBounded(_));
     let op = match rng.below(46) {
         0..=5 => OpIn::Eval {
             uv: gen_uv(rng, d),
@@ -852,7 +894,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             let dom = if rng.chance(0.5) { d } else { gen_sub_dom(rng, d) };
             OpIn::OnBoundary {
                 dom,
-                uv: gen_uv(rng, dom),
+                uv: if outside_ok { gen_uv_near(rng, dom) } else { gen_uv(rng, dom) },
                 tol: rng.chance(0.6).then(|| gen_tol(rng, size)),
             }
         }
@@ -860,7 +902,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             let dom = if rng.chance(0.5) { d } else { gen_sub_dom(rng, d) };
             OpIn::InDomain {
                 dom,
-                uv: gen_uv(rng, d),
+                uv: if outside_ok { gen_uv_near(rng, d) } else { gen_uv(rng, d) },
                 tol: rng.chance(0.6).then(|| gen_tol(rng, size)),
             }
         }
@@ -948,8 +990,16 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             OpIn::Step {
                 v,
                 ivl: rng.chance(0.5).then(|| {
-                    let x = a + (b - a) * rng.uniform(-0.2, 0.6);
-                    [x, x + (b - a) * rng.uniform(0.0, 0.8)]
+                    // sometimes just inside a domain end (ContainsValue has no tolerance)
+                    let near = |rng: &mut Rng, x: f64| x + (b - a) * 10f64.powf(rng.uniform(-14.0, -11.0));
+                    match rng.below(5) {
+                        0 => [near(rng, a), a + (b - a) * rng.uniform(0.2, 0.8)],
+                        1 => [a + (b - a) * rng.uniform(0.2, 0.8), b - (near(rng, a) - a)],
+                        _ => {
+                            let x = a + (b - a) * rng.uniform(-0.2, 0.6);
+                            [x, x + (b - a) * rng.uniform(0.0, 0.8)]
+                        }
+                    }
                 }),
             }
         }
@@ -958,11 +1008,13 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
         },
         43..=44 => {
             let pseudo = rng.chance(0.5);
+            let polar = polar_ok && rng.chance(0.6);
             OpIn::BBox {
                 dom: if rng.chance(0.5) { d } else { gen_sub_dom(rng, d) },
-                normal: !pseudo || rng.chance(0.5),
+                normal: (!pseudo && !polar) || rng.chance(0.5),
                 pseudo,
                 expand: rng.chance(0.5),
+                polar,
             }
         }
         _ => OpIn::DomCont {

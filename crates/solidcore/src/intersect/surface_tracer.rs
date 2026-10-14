@@ -1447,19 +1447,9 @@ fn flush_crv(
     Ok(())
 }
 
-/// `SmSurface::EvaluateNormal(uv, FALSE, FALSE, ..)`: the plane override; other
-/// kinds run `SmSurface::EvaluateNormal`.
-fn evaluate_normal(surface: &Surface, _uv: Point2) -> Result<Vec3> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
-            // UNPORTED(surface.surface_p7): SmSurface::EvaluateNormal
-            Err(SolidError::unported(
-                "SmSurface::EvaluateNormal",
-                "surface.surface_p7",
-            ))
-        }
-    }
+/// `SmSurface::EvaluateNormal(uv, FALSE, FALSE, ..)` (virtual).
+fn evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(uv, Side::Right, Side::Right)
 }
 
 /// `SmSurfaceTracer::FlushCurve`: empties the curve points and appends the curve

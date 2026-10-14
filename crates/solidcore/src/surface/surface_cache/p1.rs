@@ -269,20 +269,23 @@ pub(super) fn calculate_bounding_box(
 ) -> Result<BoundingBoxes> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => b.calculate_bounding_box(domain, req),
-        SurfaceKind::Plane(_) => {
-            // UNPORTED(surface.plane_p1): SmBSplineSurface::CalculateBoundingBox on an
-            // SmPlane, inherited and dispatching to the plane (IsKindOf(SmPlane_TYPE),
-            // the SmPlane::EvaluateNormal override); the plane does not re-dispatch it yet
-            Err(SolidError::unported(
-                "SmBSplineSurface::CalculateBoundingBox",
-                "surface.plane_p1",
-            ))
-        }
+        SurfaceKind::Plane(p) => crate::surface::surface::p1::plane_bounding_box(p, domain, req),
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
-            // UNPORTED(surface.surface_p1): SmSurface::CalculateBoundingBox
+            // SmSurface::CalculateBoundingBox (surface::surface::p1). Its polar box asks the
+            // surface's own cache for it, whose build asks this function again: upstream
+            // recurses without bound (UB-81), so the request is refused.
+            if req.polar {
+                return Err(SolidError::invalid_input(
+                    "surface::surface_cache::p1::calculate_bounding_box",
+                    crate::surface::surface::p1::POLAR_RECURSION,
+                ));
+            }
+            // The other boxes come from the surface's own cache, whose tree build needs
+            // the continuities.
+            // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
             Err(SolidError::unported(
-                "SmSurface::CalculateBoundingBox",
-                "surface.surface_p1",
+                "SmSurface::CalculateContinuities",
+                "surface.surface_p6",
             ))
         }
     }

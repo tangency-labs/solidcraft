@@ -159,26 +159,9 @@ fn surface_evaluate_2nd_derivatives(
     uv: Point2,
     from_left: bool,
 ) -> Result<[Vec3; 6]> {
-    // (the virtual Evaluate of the B-spline, non-zero tangents)
     let side = if from_left { Side::Left } else { Side::Right };
-    let m = srf.evaluate(
-        uv,
-        2,
-        2,
-        EvaluateFlags {
-            u_side: side,
-            v_side: side,
-            only_upper_half: true,
-            non_zero_tangents: true,
-        },
-    )?;
-    let at = |i: usize, j: usize| {
-        m.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .unwrap_or(Vec3::ZERO)
-    };
-    Ok([at(0, 0), at(1, 0), at(0, 1), at(1, 1), at(2, 0), at(0, 2)])
+    let d = crate::surface::surface::p1::evaluate_2nd_derivatives(srf, uv, side, side)?;
+    Ok([d.point, d.du, d.dv, d.duv, d.duu, d.dvv])
 }
 
 /// `SmSurface::ReadFromDB(type, db, .., version)`: the surface of the record (the
@@ -192,21 +175,19 @@ fn surface_read_from_db(
 ) -> Result<BSplineSurface> {
     match Surface::read_from_db(k, surface_type, db, version)?.into_kind() {
         SurfaceKind::BSpline(s) => Ok(s),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for a non-B-spline surface
-        // (the curve holds an SmBSplineSurface until the SmSurface virtuals are ported)
+        // DISPATCH GAP: the SmSurface virtuals (surface.surface_p1, ported; no UNPORTED
+        // marker: the ported SmCrvOnSurf holds an SmBSplineSurface here, not any Surface)
         SurfaceKind::CurveBounded(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmCurveBoundedSurface",
-            "surface.surface_p1",
+            "curve.crv_on_surf",
         )),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for an SmPlane
         SurfaceKind::Plane(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmPlane",
-            "surface.surface_p1",
+            "curve.crv_on_surf",
         )),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for an SmSTEPSurface
         SurfaceKind::Step(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmSTEPSurface",
-            "surface.surface_p1",
+            "curve.crv_on_surf",
         )),
     }
 }

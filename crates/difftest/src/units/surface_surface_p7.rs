@@ -44,9 +44,11 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p7::{
     approx_derivative_lengths, base_evaluate_normal, base_is_closed, check_seam_drop,
     compute_higher_order_derivs, compute_inward_vector, drop_points_to_tangent_plane,
-    drop_vectors_at, evaluate_1st_derivatives, evaluate_2nd_derivatives,
-    evaluate_directional_derivs, good_drop_result, load_guesses, pass_sc_convergence_test,
+    drop_vectors_at, good_drop_result, load_guesses, pass_sc_convergence_test,
     pass_ss_convergence_test,
+};
+use solidcore::surface::surface::p1::{
+    evaluate_1st_derivatives, evaluate_2nd_derivatives, evaluate_directional_derivs,
 };
 use solidcore::surface::surface::Surface;
 use solidcore::SolidError;
@@ -871,7 +873,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::Flat { angle, want } => {
-            let f = st(s.flat_corners(*angle, *want))?
+            let f = st(s.flat_corners(&solidcore::kernel::Kernel::default(), *angle, *want))?
                 .map_err(|c| harness(format!("GetFlatCorners failed: {c}")))?;
             o.extend([0.0, f64::from(f.flags)]);
             if let Some(pts) = f.points {
