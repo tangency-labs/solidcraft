@@ -64,9 +64,7 @@
 //!   unit `surface.plane_p2`) and classifies the line on this surface
 //!   (`SmCurveClassification`, unit `intersect.curve_class_p1`). The general intersection
 //!   `GlobalSurfaceIntersect` falls back to needs `SmAdvSurfaceIntersector`
-//!   (`intersect.adv_surface_intersector`); parallel extrusions reach
-//!   `SmCurve::GlobalCurveSolve` (`curve.curve_p9`) through [`intersect_generators`].
-//!   Those return [`SolidError::Unported`]; the code below the first two is ported
+//!   (`intersect.adv_surface_intersector`). Those return [`SolidError::Unported`]; the code below the first two is ported
 //!   with the callees.
 //! - **Debug code.** The `SM_DEBUG_CODE` drawing and dumps are omitted.
 
@@ -648,8 +646,7 @@ impl SurfOfExtrusion {
     ///
     /// `SM_ERR_NULL_POINTER` when the iso circle could not be made for a parallel
     /// axis (upstream dereferences `NULL`); those of [`intersect_generators`]
-    /// ([`SolidError::Unported`] for parallel vectors: `SmCurve::GlobalCurveSolve`,
-    /// unit `curve.curve_p9`).
+    /// (`SmCurve::GlobalCurveSolve` for parallel vectors).
     pub fn intersect_with_cylinder(
         &self,
         k: &Kernel,
@@ -714,8 +711,7 @@ impl SurfOfExtrusion {
     ///
     /// `SM_ERR_NULL_POINTER` for parallel extrusions when `other` has no generator
     /// (upstream dereferences `NULL`); those of [`intersect_generators`]
-    /// ([`SolidError::Unported`] for parallel vectors: `SmCurve::GlobalCurveSolve`,
-    /// unit `curve.curve_p9`).
+    /// (`SmCurve::GlobalCurveSolve` for parallel vectors).
     pub fn intersect_with_surf_of_extrusion(
         &self,
         k: &Kernel,

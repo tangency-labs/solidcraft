@@ -1302,7 +1302,7 @@ impl Volume {
             VolumeKind::BSpline(b) => b.is_curve_in_param_domain_simple(k, curve),
             VolumeKind::Twist(t) => Ok(t.is_curve_in_param_domain_simple()),
             VolumeKind::Unbend(u) => u.is_curve_in_param_domain_simple(curve),
-            VolumeKind::Bend(b) => b.is_curve_in_param_domain_simple(curve),
+            VolumeKind::Bend(b) => b.is_curve_in_param_domain_simple(k, curve),
         }
     }
 

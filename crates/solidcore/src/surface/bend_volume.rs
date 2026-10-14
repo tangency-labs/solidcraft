@@ -71,8 +71,8 @@
 //!   and ignore the parameter domain (dropped); they return upstream's
 //!   `rbFoundAnswer` (always `true`). The volume itself (`m_apObjects[0] = this`) is
 //!   the caller's object handle.
-//! - **`IsCurveInParamDomainSimple`** asks `SmCurve::IsOnPositiveSideOfPlanes`
-//!   (unit `curve.curve_p9`, not ported): [`SolidError::Unported`].
+//! - **`IsCurveInParamDomainSimple`** asks [`Curve::is_on_positive_side_of_planes`]
+//!   (`SmCurve::IsOnPositiveSideOfPlanes`) and takes the [`Kernel`] it needs.
 //! - **`ReadFromDB`** reads the two members, then the base data
 //!   ([`Volume::read_base_from_db`], status ignored as upstream). Filling a given object (`rpNewVolume != NULL`) is not
 //!   modelled; a new volume is always made.
@@ -91,6 +91,7 @@ use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, Solut
 use crate::geom::tol::{is_zero, scaled_zero2, ZONE_TOL_3D};
 use crate::geom::transform::Transform;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{
     max2, max4, min2, min4, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
 };
@@ -831,28 +832,23 @@ impl BendVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmCurve::IsOnPositiveSideOfPlanes` belongs to unit
-    /// `curve.curve_p9`.
-    pub fn is_curve_in_param_domain_simple(&self, param_curve: &Curve) -> Result<bool> {
-        let _ = param_curve;
+    /// [`SolidError::Unported`] from the curve's plane classification
+    /// ([`Curve::is_on_positive_side_of_planes`]).
+    pub fn is_curve_in_param_domain_simple(&self, k: &Kernel, param_curve: &Curve) -> Result<bool> {
         // load the 3 domain bounding planes with normals pointing into the allowed
         // 1/2 space (any 2Pi*d interval is legal - this one is centered on V=0)
-        let _plane_points = [
+        let plane_points = [
             Vec3::new(self.singularity_tol, 0.0, 0.0),
             Vec3::new(0.0, PI * self.bend_neutral_dist, 0.0),
             Vec3::new(0.0, -PI * self.bend_neutral_dist, 0.0),
         ];
-        let _plane_normals = [
+        let plane_normals = [
             Vec3::new(1.0, 0.0, 0.0),
             Vec3::new(0.0, -1.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
         ];
         // is curve coincident, touching, or on positive side of all bounding planes
-        // UNPORTED(curve.curve_p9): SmCurve::IsOnPositiveSideOfPlanes
-        Err(SolidError::unported(
-            "SmCurve::IsOnPositiveSideOfPlanes",
-            "curve.curve_p9",
-        ))
+        param_curve.is_on_positive_side_of_planes(k, &plane_points, &plane_normals)
     }
 
     /// Reads a bend volume from a database stream: the neutral distance and the
@@ -1029,14 +1025,14 @@ mod tests {
         assert!(!b.is_point_in_param_domain_simple(v(0.005, 0.0, 0.0)));
         assert!(b.is_line_in_param_domain_simple(v(1.0, -3.0, 0.0), v(2.0, 3.0, 1.0)));
         assert!(!b.is_line_in_param_domain_simple(v(1.0, -3.0, 0.0), v(-2.0, 3.0, 1.0)));
-        assert!(matches!(
-            b.is_curve_in_param_domain_simple(&Curve::from(crate::curve::line::Line::from_points(
-                v(1.0, 1.0, 0.0),
-                v(2.0, 1.0, 0.0),
-                3
-            ))),
-            Err(SolidError::Unported { .. })
-        ));
+        let k = Kernel::default();
+        let seg = |a, c| Curve::from(crate::curve::line::Line::from_points(a, c, 3));
+        assert!(b
+            .is_curve_in_param_domain_simple(&k, &seg(v(1.0, 1.0, 0.0), v(2.0, 1.0, 0.0)))
+            .unwrap());
+        assert!(!b
+            .is_curve_in_param_domain_simple(&k, &seg(v(1.0, 1.0, 0.0), v(-2.0, 1.0, 0.0)))
+            .unwrap());
     }
 
     #[test]

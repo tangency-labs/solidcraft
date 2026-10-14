@@ -81,8 +81,7 @@
 //!   parameter conversion) is returned. A failed `IntersectWithLine` in
 //!   `CreateDirectrixFromPoint` asks for the general intersection (upstream reads an
 //!   unset flag).
-//! - **Unported callees.** `sm_IntersectGenerators` projects the generators with
-//!   `SmCurve::GlobalCurveSolve` (unit `curve.curve_p9`); `STEPInversion` of a
+//! - **Unported callees.** `STEPInversion` of a
 //!   generator not perpendicular to the extrusion uses `SmBSplineSurface::STEPInversion`
 //!   (whose solves are in `surface.surface_p1` / `surface.surface_p5`). Those return
 //!   [`SolidError::Unported`].
@@ -92,6 +91,7 @@
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::error::{ignore_status, ignored, Result, SolidError};
@@ -1633,18 +1633,34 @@ enum Which {
 /// `SmCurve::GlobalCurveSolve(.., SM_SO_PROJECTED_INTERSECT, .., &unitVec, SM_SR_ALL,
 /// ..)` of the two generators.
 fn global_curve_solve_projected(
-    _gen: &Curve,
-    _gen_ivl: &Extent1d,
-    _other: &Curve,
-    _other_ivl: &Extent1d,
-    _tol: f64,
-    _unit_vec: Vec3,
+    k: &Kernel,
+    gen: &Curve,
+    gen_ivl: &Extent1d,
+    other: &Curve,
+    other_ivl: &Extent1d,
+    tol: f64,
+    unit_vec: Vec3,
 ) -> Result<SolutionArray<CurveHandle>> {
-    // UNPORTED(curve.curve_p9): SmCurve::GlobalCurveSolve
-    Err(SolidError::Unported {
-        upstream: "SmCurve::GlobalCurveSolve",
-        unit: "curve.curve_p9",
-    })
+    let (gen_handle, _) = CurveHandle::gen_pair(gen);
+    let other_handle = CurveHandle {
+        id: 4,
+        ivl: other.natural_interval(),
+    };
+    let vecs = [unit_vec];
+    gen.global_curve_solve::<CurveHandle>(
+        k,
+        gen_ivl,
+        other,
+        other_ivl,
+        SolverOperation::ProjectedIntersect,
+        tol,
+        &CurveSolveOptions {
+            target_distance: None,
+            opt_vectors: Some(&vecs),
+            handles: [Some(gen_handle), Some(other_handle)],
+        },
+        SolutionRequested::All,
+    )
 }
 
 /// The intersection curves of `surf` with another surface swept from `other_gen`
@@ -1659,9 +1675,8 @@ fn global_curve_solve_projected(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the projected curve solve
-/// (`SmCurve::GlobalCurveSolve`, unit `curve.curve_p9`); those of the evaluations and
-/// curve constructions.
+/// Those of the projected curve solve (`SmCurve::GlobalCurveSolve`, [`SolidError::Unported`]
+/// included), the evaluations and curve constructions.
 #[allow(clippy::too_many_lines)] // one upstream function
 pub fn intersect_generators(
     k: &Kernel,
@@ -1708,6 +1723,7 @@ pub fn intersect_generators(
     // ignored)
     let unit_extrusion_vec = extrusion_vec.unitize_or_z();
     let solutions = global_curve_solve_projected(
+        k,
         ext_gen,
         &ext_gen_ivl,
         other_gen,

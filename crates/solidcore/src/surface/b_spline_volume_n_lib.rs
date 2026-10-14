@@ -35,9 +35,9 @@
 //!   default boxes); [`SolidError::Unported`] still propagates.
 //! - **Contexts.** `IsCurveInParamDomainSimple` takes the [`Kernel`] its curve's
 //!   bounding box needs (upstream reads the curve's context).
-//! - **Unported callees.** `SmCurve::CalculateTightBoundingBox` (the base version; the
-//!   line override is ported) and `SmCurve::IsOnPositiveSideOfPlanes` belong to
-//!   `curve.curve_p9` and return [`SolidError::Unported`] until it lands.
+//! - **Curve callees.** `SmCurve::CalculateTightBoundingBox` (status ignored) and
+//!   `SmCurve::IsOnPositiveSideOfPlanes` are `curve.curve_p9`'s
+//!   ([`Curve::calculate_tight_bounding_box`], [`Curve::is_on_positive_side_of_planes`]).
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::{ignored, Result, SolidError};
@@ -302,9 +302,8 @@ impl BSplineVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the curve's boxes, or from
-    /// `CalculateTightBoundingBox` (other than a line's) and
-    /// `IsOnPositiveSideOfPlanes` (unit `curve.curve_p9`).
+    /// [`SolidError::Unported`] from the curve's boxes and plane classification (their
+    /// other failures are ignored as upstream).
     pub fn is_curve_in_param_domain_simple(&self, k: &Kernel, curve: &Curve) -> Result<bool> {
         // locals
         let param_domain = self.natural_param_domain();
@@ -344,11 +343,9 @@ impl BSplineVolume {
                 }
             }
             _ => {
-                // UNPORTED(curve.curve_p9): SmCurve::CalculateTightBoundingBox
-                return Err(SolidError::unported(
-                    "SmCurve::CalculateTightBoundingBox",
-                    "curve.curve_p9",
-                ));
+                if let Some(b) = ignored(curve.calculate_tight_bounding_box(k, &curve_interval))? {
+                    curve_bbox = b;
+                }
             }
         }
         if curve_bbox.is_contained_by(&param_domain, EFF_ZERO) {
@@ -360,12 +357,8 @@ impl BSplineVolume {
 
         // arrive here when more expensive check is needed: the curve against the
         // ParamBBox bounding planes
-        let _planes = param_domain.planes();
-        // UNPORTED(curve.curve_p9): SmCurve::IsOnPositiveSideOfPlanes
-        Err(SolidError::unported(
-            "SmCurve::IsOnPositiveSideOfPlanes",
-            "curve.curve_p9",
-        ))
+        let (plane_points, plane_normals) = param_domain.planes();
+        curve.is_on_positive_side_of_planes(k, &plane_points, &plane_normals)
     }
 }
 
@@ -501,14 +494,9 @@ mod tests {
         assert!(!v
             .is_curve_in_param_domain_simple(&k, &seg([2.0, 2.0, 2.0], [3.0, 3.0, 3.0]))
             .unwrap());
-        // crossing the boundary needs IsOnPositiveSideOfPlanes
-        let r = v.is_curve_in_param_domain_simple(&k, &seg([0.5, 0.5, 0.5], [1.5, 0.5, 0.5]));
-        assert!(matches!(
-            r,
-            Err(SolidError::Unported {
-                unit: "curve.curve_p9",
-                ..
-            })
-        ));
+        // crossing the boundary: the plane classification says outside
+        assert!(!v
+            .is_curve_in_param_domain_simple(&k, &seg([0.5, 0.5, 0.5], [1.5, 0.5, 0.5]))
+            .unwrap());
     }
 }

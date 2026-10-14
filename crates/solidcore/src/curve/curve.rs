@@ -15,6 +15,7 @@ pub mod p5;
 pub mod p6;
 pub mod p7;
 pub mod p8;
+pub mod p9;
 
 pub use p2::{
     Curve, CurveEvaluate, CurveKind, CurvePropertyType, LineIntersection, OwnerChange, StepOff,

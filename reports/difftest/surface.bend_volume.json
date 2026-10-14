@@ -6578,76 +6578,52 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_in",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#822 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_crossing",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#823 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_below",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#824 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_degenerate",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#825 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_degenerate_axis",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#826 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "curve_in_degenerate_out",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#827 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -6882,16 +6858,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457222",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7206,16 +7178,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0050",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457262",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7482,16 +7450,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0084",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457296",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7526,16 +7490,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0089",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457301",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7658,16 +7618,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0105",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457317",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7686,16 +7642,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0108",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457320",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7794,16 +7746,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0121",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457333",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8078,16 +8026,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0156",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457368",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8194,16 +8138,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0170",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457382",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8318,16 +8258,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0185",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457397",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8794,16 +8730,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0244",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457456",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -8870,16 +8802,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0253",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457465",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9146,16 +9074,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0287",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457499",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9550,16 +9474,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457549",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9626,16 +9546,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0346",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457558",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9694,16 +9610,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0354",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457566",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9794,16 +9706,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0366",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457578",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -9942,16 +9850,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0384",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457596",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10010,16 +9914,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0392",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457604",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10182,16 +10082,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457625",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10274,16 +10170,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0424",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457636",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10454,16 +10346,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0446",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457658",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10498,16 +10386,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0451",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457663",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10678,16 +10562,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0473",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457685",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10874,16 +10754,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0497",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457709",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10918,16 +10794,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0502",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457714",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -10938,16 +10810,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0504",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457716",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11230,16 +11098,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0540",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457752",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11306,16 +11170,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0549",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457761",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11366,16 +11226,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0556",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457768",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11394,16 +11250,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0559",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457771",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11494,16 +11346,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0571",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457783",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11586,16 +11434,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0582",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457794",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11606,16 +11450,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0584",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457796",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -11794,16 +11634,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0607",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457819",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12006,16 +11842,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457845",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12378,16 +12210,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0679",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457891",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12446,16 +12274,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0687",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457899",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12714,16 +12538,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0720",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457932",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12782,16 +12602,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0728",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457940",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12954,16 +12770,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0749",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871457961",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -13326,16 +13138,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0795",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458007",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -13378,28 +13186,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0801",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458013",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0802",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458014",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -13850,16 +13650,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0859",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458071",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14070,16 +13866,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0886",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458098",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14354,16 +14146,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0921",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458133",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14454,16 +14242,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0933",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458145",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14738,16 +14522,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0968",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458180",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14918,16 +14698,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0990",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458202",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -14978,16 +14754,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0997",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458209",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15038,16 +14810,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458216",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15362,16 +15130,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1044",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458256",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15526,16 +15290,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458276",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15602,16 +15362,12 @@
       "values_compared": 81
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1073",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458285",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15622,16 +15378,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1075",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458287",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15698,16 +15450,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1084",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458296",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -15758,16 +15506,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1091",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458303",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16418,28 +16162,20 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1173",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458385",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1174",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458386",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16506,16 +16242,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1183",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458395",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17278,16 +17010,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1279",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458491",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17650,16 +17378,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1325",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458537",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17670,16 +17394,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1327",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458539",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17722,16 +17442,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1333",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458545",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17790,16 +17506,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458553",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -17842,16 +17554,12 @@
       "values_compared": 192
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1347",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458559",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -18622,16 +18330,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::IsOnPositiveSideOfPlanes",
-        "unit": "curve.curve_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen1444",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2729115334871458656",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -19075,17 +18779,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 74,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2273,
+  "cases_passed": 2347,
   "cases_total": 2347,
-  "deferred_by_unit": {
-    "curve.curve_p9": 74
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.bend_volume"
 }

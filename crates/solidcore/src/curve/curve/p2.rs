@@ -55,7 +55,7 @@
 //! | [`output`]                                        | `sm_Output` (static)                             |
 //! | [`test_step`], [`TessStepResult`]                 | `sm_TestStep`, `SmTessStepTestResultType`        |
 //! | [`find_test_params`]                              | `sm_FindTestParams` (static)                     |
-//! | [`CcGlobalSolver`]                                | `SmCCGlobalSolver` (constructor, `BranchMayContainAnswers`) |
+//! | [`CcGlobalSolver`]                                | `SmCCGlobalSolver` (constructor, `BranchMayContainAnswers`; `LocalSolve` is unit `curve.curve_p9`) |
 //! | [`CpGlobalSolver`]                                | `SmCPGlobalSolver` (constructor, `BranchMayContainAnswers`; `LocalSolve` is unit `curve.curve_p1`) |
 //! | [`CurvePropertyGs`], [`CurvePropertyType`]        | `SmCurvePropertyGS` (constructor, `FindBestSubdivisionNode`, `BranchMayContainAnswers`), `SmCurvePropertyType` |
 //! | [`CciGlobalSolver`]                               | `SmCCIGlobalSolver` (constructor; `LocalSolve` is unit `curve.curve_p7`) |
@@ -112,14 +112,14 @@
 //!   end parameter is then the start parameter).
 //! - **Solvers.** The four curve solvers are structs holding a [`GlobalSolver`] and
 //!   implementing [`GlobalSolve`]. Their `LocalSolve` overrides belong to units
-//!   `curve.curve_p9` (`SmCCGlobalSolver`), `curve.curve_p1` (`SmCPGlobalSolver`,
+//!   `curve.curve_p9` (`SmCCGlobalSolver`, ported there; the solver carries its two
+//!   curves and the kernel, [`CcGlobalSolver::with_curves`]), `curve.curve_p1` (`SmCPGlobalSolver`,
 //!   ported there; the solver carries its curve, [`CpGlobalSolver::curve`]),
 //!   `curve.curve_p3` (`SmCurvePropertyGS`, ported there; the solver carries the
 //!   curve it evaluates, [`CurvePropertyGs::curve`], since a tree's owner object is
 //!   only the caller's handle) and `curve.curve_p7`
 //!   (`SmCCIGlobalSolver`, ported there; the solver carries its two curves and the
-//!   kernel, [`CciGlobalSolver::with_curves`]); the unported ones return
-//!   [`SolidError::Unported`]. Curve tree nodes
+//!   kernel, [`CciGlobalSolver::with_curves`]). Curve tree nodes
 //!   hold `SmBezierSpan` / `SmBezierAux1d` data built by the curve cache
 //!   ([`crate::curve::curve_cache`]), read from the tree
 //!   ([`Tree::curve_aux`], [`Tree::curve_span`]); the span end points are those the
@@ -2878,6 +2878,13 @@ pub struct CcGlobalSolver<'t, O> {
     pub interval1: Extent1d,
     /// `m_crInterval2`: interval of the second curve.
     pub interval2: Extent1d,
+    /// The curves the two trees decompose (upstream reads them back from the trees'
+    /// curve caches, `GetOwner()->GetCurve()`); `None` until set with
+    /// [`CcGlobalSolver::with_curves`].
+    pub curves: Option<[&'t Curve; 2]>,
+    /// The kernel the local solves run in (upstream reaches it through the curves'
+    /// context); `None` until set with [`CcGlobalSolver::with_curves`].
+    pub kernel: Option<&'t Kernel>,
 }
 
 impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
@@ -2893,7 +2900,23 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
             base: GlobalSolver::with_trees(tree1, tree2, 1),
             interval1,
             interval2,
+            curves: None,
+            kernel: None,
         }
+    }
+
+    /// The solver with `curve1` and `curve2`, the curves its trees were built for,
+    /// and the kernel `k`, which [`GlobalSolve::local_solve`] needs.
+    #[must_use]
+    pub const fn with_curves(
+        mut self,
+        curve1: &'t Curve,
+        curve2: &'t Curve,
+        k: &'t Kernel,
+    ) -> Self {
+        self.curves = Some([curve1, curve2]);
+        self.kernel = Some(k);
+        self
     }
 
     /// `SmCCGlobalSolver::BranchMayContainAnswers`: the base test, except for
@@ -3017,12 +3040,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CcGlobalSolver<'t, O> {
         self.may_contain_answers(branch)
     }
 
-    fn local_solve(&mut self, _branch: &Branch) -> Result<bool> {
-        // UNPORTED(curve.curve_p9): SmCCGlobalSolver::LocalSolve
-        Err(SolidError::Unported {
-            upstream: "SmCCGlobalSolver::LocalSolve",
-            unit: "curve.curve_p9",
-        })
+    fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
+        self.local_solve_branch(branch)
     }
 }
 
