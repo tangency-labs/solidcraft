@@ -72,7 +72,7 @@
 //!   for cache trees.
 //! - **Construction.** `SmSurfaceCache::SmSurfaceCache` (unit `surface.surface_cache_p3`)
 //!   only initialises fields; [`SurfaceCache::new`] does the same so the cache can
-//!   exist before its tree is built. The byte-size bookkeeping (`m_lBezierSize`,
+//!   exist before its tree is built ([`crate::surface::surface_cache::p3`] builds it). The byte-size bookkeeping (`m_lBezierSize`,
 //!   `m_lTotalBezSize`, `sm_ComputeNurbSurfaceSize`) has no counterpart.
 //!   `SmSurfaceCache::GetTree` (same unit) is only reproduced as far as returning an
 //!   existing tree: when it would build one, [`SolidError::Unported`] is returned.
@@ -109,7 +109,8 @@
 //!   list; a continuity array longer than the knot list) or dereference a null
 //!   subdivision surface, the port returns [`SolidError::InvalidInput`].
 //! - **Not ported here.** `GetNthBoundingPlane`, `AddCurvesToCache`, the destructor
-//!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction (`surface.surface_cache_p3`),
+//!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction
+//!   (`surface.surface_cache_p3`, [`crate::surface::surface_cache::p3`]),
 //!   `GetBoundingPlane`, `GetBrep`, `GetMemoryUsed`, `AssertValid`, the `Dump` and
 //!   `Draw` functions (other units or debug output).
 
@@ -144,7 +145,7 @@ pub const TYPE: i64 = 15100;
 pub const TYPE_STRING: &str = "SmSurfaceCache_TYPE";
 
 /// `SmFace_TYPE` (`TOPO_BASE_TYPE + 2`).
-const FACE_TYPE: i64 = 16002;
+pub(super) const FACE_TYPE: i64 = 16002;
 
 /// `SM_PB_SAMPLECOUNT`: sample points stored per bounding plane.
 pub const PB_SAMPLE_COUNT: usize = 5;
@@ -2128,26 +2129,6 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         Ok(out)
     }
 
-    /// `SmSurfaceCache::GetTree` as far as it returns an existing tree.
-    fn existing_tree(&self) -> Result<()> {
-        let face_owned = self
-            .surface
-            .owner()
-            .is_some_and(|o| o.type_code == FACE_TYPE);
-        if self.tree.is_none()
-            || (!self.have_t_surface_cache
-                && face_owned
-                && self.face_containment_done != FaceContainment::UnderConstruction)
-        {
-            // UNPORTED(surface.surface_cache_p3): SmSurfaceCache::GetTree (BuildTree)
-            return Err(SolidError::unported(
-                "SmSurfaceCache::GetTree",
-                "surface.surface_cache_p3",
-            ));
-        }
-        Ok(())
-    }
-
     /// Classifies every unclassified leaf inside or outside the face
     /// (`MarkFaceContainment`): each connected region of unknown leaves takes the
     /// class (and face) of a classified neighbour, else that of `PointClassify` at
@@ -2160,7 +2141,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// neighbour); `InvalidInput` for malformed trees; [`SolidError::Unported`] from
     /// `GetTree` (building a tree) and `SmTol::GetZoneTol3d` of a face.
     pub fn mark_face_containment(&mut self, k: &Kernel) -> Result<()> {
-        self.existing_tree()?;
+        self.get_tree(k)?;
         let top = self
             .tree_ref(OP_MARK)?
             .top_node()

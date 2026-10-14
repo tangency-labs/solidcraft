@@ -55,8 +55,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "Surface_sms_build",
@@ -79,8 +79,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_sms_build",
@@ -154,28 +154,20 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "implant_deferred_find_nodes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.trim_srf_cache/cases.json#17 (upstream source/SMLib/src/SmTrimSrfCache.cpp:438 (synthetic boundary regression))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "implant_deferred_subdivide",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.trim_srf_cache/cases.json#18 (upstream source/SMLib/src/SmTrimSrfCache.cpp:438 (synthetic boundary regression))",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "deferred": {
@@ -319,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -482,16 +474,12 @@
       "values_compared": 59
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0034",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626807",
-      "values_compared": 0
+      "values_compared": 29
     },
     {
       "max_rel_err": 0.0,
@@ -514,16 +502,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0037",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626810",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -562,16 +546,12 @@
       "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0042",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626815",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -682,16 +662,12 @@
       "values_compared": 35
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0056",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626829",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "deferred": {
@@ -882,21 +858,17 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0079",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626852",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0080",
@@ -954,16 +926,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0086",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626859",
-      "values_compared": 0
+      "values_compared": 78
     },
     {
       "max_rel_err": 0.0,
@@ -990,16 +958,12 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0090",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626863",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -1011,8 +975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0092",
@@ -1031,8 +995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0094",
@@ -1043,8 +1007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::SnapToKnots",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0095",
@@ -1091,8 +1055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -1103,8 +1067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -1114,16 +1078,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0102",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626875",
-      "values_compared": 0
+      "values_compared": 46
     },
     {
       "max_rel_err": 0.0,
@@ -1150,16 +1110,12 @@
       "values_compared": 76
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0106",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626879",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "max_rel_err": 0.0,
@@ -1195,8 +1151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0111",
@@ -1222,16 +1178,12 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0114",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626887",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -1242,33 +1194,25 @@
       "values_compared": 47
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0116",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626889",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0117",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626890",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0118",
@@ -1402,16 +1346,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0134",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626907",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -1430,16 +1370,12 @@
       "values_compared": 46
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0137",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626910",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -1470,21 +1406,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0141",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626914",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0142",
@@ -1534,16 +1466,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0148",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626921",
-      "values_compared": 0
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -1602,16 +1530,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0156",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626929",
-      "values_compared": 0
+      "values_compared": 44
     },
     {
       "max_rel_err": 0.0,
@@ -1622,16 +1546,12 @@
       "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0158",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626931",
-      "values_compared": 0
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,
@@ -1754,28 +1674,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0172",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626945",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0173",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626946",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -1938,16 +1850,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0193",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626966",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -1966,16 +1874,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0196",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626969",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -2034,16 +1938,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0204",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626977",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -2082,16 +1982,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0209",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626982",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -2199,8 +2095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::SnapToKnots",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0222",
@@ -2302,16 +2198,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627007",
-      "values_compared": 0
+      "values_compared": 66
     },
     {
       "max_rel_err": 0.0,
@@ -2347,8 +2239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -2367,8 +2259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0241",
@@ -2394,16 +2286,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0244",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627017",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -2474,16 +2362,12 @@
       "values_compared": 69
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0253",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627026",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -2510,16 +2394,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0257",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627030",
-      "values_compared": 0
+      "values_compared": 76
     },
     {
       "deferred": {
@@ -2562,16 +2442,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0262",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627035",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
       "max_rel_err": 0.0,
@@ -2582,16 +2458,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0264",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627037",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "deferred": {
@@ -2626,16 +2498,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0268",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627041",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -2719,8 +2587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0279",
@@ -2739,8 +2607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::SnapToKnots",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0281",
@@ -2910,16 +2778,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627074",
-      "values_compared": 0
+      "values_compared": 51
     },
     {
       "max_rel_err": 0.0,
@@ -3018,16 +2882,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0314",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627087",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3038,16 +2898,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627089",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -3154,16 +3010,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0328",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627101",
-      "values_compared": 0
+      "values_compared": 54
     },
     {
       "max_rel_err": 0.0,
@@ -3227,8 +3079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0336",
@@ -3238,16 +3090,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627110",
-      "values_compared": 0
+      "values_compared": 59
     },
     {
       "max_rel_err": 0.0,
@@ -3266,16 +3114,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0340",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627113",
-      "values_compared": 0
+      "values_compared": 94
     },
     {
       "max_rel_err": 0.0,
@@ -3318,16 +3162,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0346",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627119",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -3374,16 +3214,12 @@
       "values_compared": 73
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0352",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627125",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -3394,16 +3230,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0354",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627127",
-      "values_compared": 0
+      "values_compared": 43
     },
     {
       "max_rel_err": 0.0,
@@ -3467,8 +3299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0362",
@@ -3583,8 +3415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0376",
@@ -3706,16 +3538,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0391",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627164",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3751,8 +3579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0396",
@@ -3794,16 +3622,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0401",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627174",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "deferred": {
@@ -3818,21 +3642,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627176",
-      "values_compared": 0
+      "values_compared": 46
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0404",
@@ -3882,16 +3702,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0410",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627183",
-      "values_compared": 0
+      "values_compared": 80
     },
     {
       "max_rel_err": 0.0,
@@ -3910,16 +3726,12 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627186",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -3930,16 +3742,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0415",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627188",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "max_rel_err": 0.0,
@@ -3995,8 +3803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0422",
@@ -4022,16 +3830,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0425",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627198",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -4043,8 +3847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0427",
@@ -4154,16 +3958,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0439",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627212",
-      "values_compared": 0
+      "values_compared": 81
     },
     {
       "max_rel_err": 0.0,
@@ -4174,16 +3974,12 @@
       "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0441",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627214",
-      "values_compared": 0
+      "values_compared": 84
     },
     {
       "max_rel_err": 0.0,
@@ -4226,16 +4022,12 @@
       "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0447",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627220",
-      "values_compared": 0
+      "values_compared": 45
     },
     {
       "max_rel_err": 0.0,
@@ -4319,8 +4111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0457",
@@ -4363,8 +4155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0462",
@@ -4375,8 +4167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0463",
@@ -4454,16 +4246,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0472",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627245",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
       "deferred": {
@@ -4551,8 +4339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0482",
@@ -4602,16 +4390,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0488",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627261",
-      "values_compared": 0
+      "values_compared": 36
     },
     {
       "max_rel_err": 0.0,
@@ -4670,28 +4454,20 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0496",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627269",
-      "values_compared": 0
+      "values_compared": 27
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0497",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627270",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -4750,16 +4526,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0505",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627278",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -4834,16 +4606,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0515",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627288",
-      "values_compared": 0
+      "values_compared": 65
     },
     {
       "max_rel_err": 0.0,
@@ -4954,16 +4722,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0528",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627301",
-      "values_compared": 0
+      "values_compared": 47
     },
     {
       "max_rel_err": 0.0,
@@ -5006,16 +4770,12 @@
       "values_compared": 75
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0534",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627307",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -5087,8 +4847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0543",
@@ -5171,8 +4931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0553",
@@ -5226,16 +4986,12 @@
       "values_compared": 53
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0559",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627332",
-      "values_compared": 0
+      "values_compared": 75
     },
     {
       "max_rel_err": 0.0,
@@ -5303,8 +5059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::SnapToKnots",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0568",
@@ -5331,8 +5087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0571",
@@ -5343,8 +5099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0572",
@@ -5354,16 +5110,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0573",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627346",
-      "values_compared": 0
+      "values_compared": 26
     },
     {
       "max_rel_err": 0.0,
@@ -5382,16 +5134,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::SubdivideNode",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0576",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627349",
-      "values_compared": 0
+      "values_compared": 73
     },
     {
       "max_rel_err": 0.0,
@@ -5450,16 +5198,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0584",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627357",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -5527,8 +5271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0593",
@@ -5555,8 +5299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceCache::BuildTree",
-        "unit": "surface.surface_cache_p3"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gen0596",
@@ -5582,27 +5326,23 @@
       "values_compared": 70
     },
     {
-      "deferred": {
-        "symbol": "SmSurfaceCache::FindUVNodes",
-        "unit": "surface.surface_cache_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0599",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011627372",
-      "values_compared": 0
+      "values_compared": 57
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 158,
+  "cases_deferred": 93,
   "cases_failed": 0,
-  "cases_passed": 462,
+  "cases_passed": 527,
   "cases_total": 620,
   "deferred_by_unit": {
-    "surface.surface_cache_p3": 100,
-    "surface.surface_p1": 32,
-    "surface.surface_p3": 26
+    "surface.surface_p1": 36,
+    "surface.surface_p3": 29,
+    "surface.surface_p6": 28
   },
   "max_rel_err": 0.0,
   "pass": true,
