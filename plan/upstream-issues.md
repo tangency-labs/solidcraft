@@ -838,6 +838,25 @@ by area within each severity.
 - **Confirmed:** yes.
 - **Severity:** crash/UB.
 - **Rust port:** `create_skin_from_faces` is a stub until `primitive.primitive_creation_p3` lands; `BSplineSurface::create_skinned_surface` returns `InvalidInput` for no cross sections. The harness passes at least one face.
+
+#### UB-81. `SmCone` STEP-to-NURB conversion dereferences a missing polar curve
+- **Location:** `source/SMLib/src/SmEllipse.cpp:489`, `SmPolarConversion::ConvertToNURBSParameter` (def. `:467`), reached from `SmCone.cpp:1808` `SmCone::ConvertUVFromSTEPToNURBS` and `:1682` `SmCone::CreateIsoCircleFromPoint`.
+- **What happens:** `m_cpCurve->GetSTEPInterval()` is called without the `NER(m_cpCurve)` check that `ConvertToPolarParameter` has. A cone whose polar converter could not be set up has no curve; `SmSurfOfRevolution::MakeNurbWithSweepParams` ignores `RebuildPolarConverter`'s status, so `CreateCanonical` still succeeds.
+- **Trigger:** `new SmCylinder(O, X, Y, -1.8, 0, 360, 4.3, FALSE, FALSE, FALSE)` (a negative radius) and `MakeNurb()`, which succeeds without polar curve, then `ConvertUVFromSTEPToNURBS`.
+- **How found:** read during porting (`surface.cone_p1`).
+- **Confirmed:** no. The shim refuses the op for a cone without polar curve.
+- **Severity:** crash/UB (null dereference).
+- **Rust port:** Returns `InvalidInput`.
+
+#### UB-80. `SmCone::CreateIsoCircleFromPoint` and `GetHeight` read uninitialised parameters
+- **Location:** `SmCone.cpp:1679`-`1682` `SmCone::CreateIsoCircleFromPoint` (def. `:1620`); `SmCone.cpp:2265`-`2266` `SmCone::GetHeight` (def. `:2251`).
+- **What happens:** `CreateIsoCircleFromPoint` ignores the statuses of `STEPInversion` and `ConvertUVFromSTEPToNURBS`; when the generator drop in `SmSurfOfRevolution::STEPInversion` finds no solution the height of `sStepUV` is never written and is used anyway. `GetHeight` ignores `EvaluatePoint`'s status and subtracts uninitialised points when the conversion fails (no polar curve).
+- **Trigger:** `CreateIsoCircleFromPoint` with a reference point just outside the height interval of a steep bounded cone and a tolerance below the in-plane gap the clamp leaves; `CreateIsoCircleFromPoint` on `SmCone::CreateCanonical(O, 1, 5e-11 deg, NULL)` (no `bSwapUV`) at `(-1, 1e-13, 0.7)`, where the polar conversion fails and `sNurbUV.y` (a defaulted `SmVector2d`) is used unset; `GetHeight` of the cone of UB-81.
+- **How found:** read during porting (`surface.cone_p1`).
+- **Confirmed:** no. The shim replays the inversion and refuses those inputs.
+- **Severity:** crash/UB (uninitialised read).
+- **Rust port:** Returns the error.
+
 ### Intersection
 
 #### UB-74. `PointBasedSurfaceIntersect` writes past its 20-point array
@@ -949,6 +968,15 @@ by area within each severity.
 - **Confirmed:** no. Unbounded recursion was not observed.
 - **Severity:** hang (potential stack exhaustion).
 - **Rust port:** Stops at 200 nested splits with `InvalidInput`.
+
+#### HANG-11. `SmCone::AdjustSTEPUVDomain` never returns for a reversed sweep interval
+- **Location:** `SmCone.cpp:458` `SmCone::AdjustSTEPUVDomain` -> `SmSurfOfRevolution.cpp:300` `SmSurfOfRevolution::AdjustSTEPUVDomain` (`Reparameterize`, then `MakeNurb`).
+- **What happens:** The C++ reference run did not finish within 7 minutes. The domain is stored and the NURB rebuilt without checking `start <= end`. Which loop spins was not located.
+- **Trigger:** `SmCone::CreateCanonical(O, 1, 2, 3, cone)`, then `AdjustSTEPUVDomain(SmExtent2d(90, 0, 10, 1))`.
+- **How found:** adversarial / edge-case fixture (`surface.cone_p1`).
+- **Confirmed:** yes.
+- **Severity:** hang.
+- **Rust port:** `SmSurfOfRevolution::AdjustSTEPUVDomain` is not ported yet (`Unported`); the FFI rejects a reversed sweep.
 
 ## Nondeterminism
 
@@ -1491,6 +1519,24 @@ by area within each severity.
 - **Confirmed:** yes (fixture `trim_unit_across_period` of `surface.bend_volume`).
 - **Severity:** wrong result.
 - **Rust port:** Ported as written.
+
+#### WR-61. `SmCone::CreateCanonical` overloads misuse their arguments
+- **Location:** `SmCone.cpp:341`-`348` `SmCone::CreateCanonical(Origin, BotRadius, SemiAngleDeg, pOptHeight, bSwapUV, bInsideOut)` (def. `:308`); `SmCone.cpp:392`-`400` `SmCone::CreateCanonical(Origin, BotRadius, TopRadius, Height, ...)` (def. `:375`).
+- **What happens:** With a height, the first overload passes `FALSE` as the bounded constructor's `bInsideOut` and the caller's `bInsideOut` as `bMakeNurbGenCurve`, so an inside-out request is dropped. For `Height <= 0` the second overload builds the infinite cone with `TopRadius` as the semi-angle in degrees.
+- **Trigger:** `CreateCanonical(O, 1.0, 30.0, &h, cone, FALSE, TRUE)` gives `GetInsideOut() == FALSE`; `CreateCanonical(O, 1.0, 30.0, 0.0, cone)` gives a 30 degree cone.
+- **How found:** read during porting; compared by fixtures `canonical_semi_with_height_inside_is_mngc`, `canonical_height_zero_top_is_semi` (`surface.cone_p1`).
+- **Confirmed:** yes.
+- **Severity:** wrong result.
+- **Rust port:** Reproduces both.
+
+#### WR-62. `sm_TotalCoincidenceChecker` misses reversed coincident lines and returns `FALSE` as a status
+- **Location:** `SmCone.cpp:2501` and `:2508`, `sm_TotalCoincidenceChecker` (file static, def. `:2454`).
+- **What happens:** For lines, the reversed test computes `dDist_E_S` from `sPt01` and `sPt11` (the end of this line and the start of the other, instead of `sPt10`), so reversed coincident lines are never found. The function then returns `FALSE` (0), which is not `SM_SUCCESS`; callers' `SER` turn it into an error return.
+- **Trigger:** Lines `(0,0,0)-(1,2,3)` and `(1,2,3)-(0,0,0)`.
+- **How found:** read during porting; compared by fixture `coinc_reversed_line` (`surface.cone_p1`, a verbatim copy of the static in the shim).
+- **Confirmed:** yes.
+- **Severity:** wrong result.
+- **Rust port:** Reproduces it (`SmStatus` 0 error).
 
 ### Intersection
 

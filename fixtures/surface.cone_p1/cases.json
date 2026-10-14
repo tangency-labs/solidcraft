@@ -1,0 +1,8743 @@
+{
+ "cases": [
+  {
+   "name": "cross_deriv_build",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "cross_deriv_u0_v0.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u0_v1.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.0,
+    "v": 1.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u0_v2.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.0,
+    "v": 2.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u37_v0.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 37.0,
+    "v": 0.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u37_v1.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 37.0,
+    "v": 1.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u37_v2.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 37.0,
+    "v": 2.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u135_v0.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 135.0,
+    "v": 0.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u135_v1.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 135.0,
+    "v": 1.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u135_v2.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 135.0,
+    "v": 2.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u250_v0.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 250.0,
+    "v": 0.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u250_v1.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 250.0,
+    "v": 1.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv_u250_v2.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 250.0,
+    "v": 2.5,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "cross_deriv3_u37_v1.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 37.0,
+    "v": 1.5,
+    "hu": 3,
+    "hv": 3
+   }
+  },
+  {
+   "name": "cross_deriv1_u37_v1.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 37.0,
+    "v": 1.5,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "cross_deriv3_u250_v2.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 250.0,
+    "v": 2.5,
+    "hu": 3,
+    "hv": 3
+   }
+  },
+  {
+   "name": "cross_deriv1_u250_v2.5",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:980 (TestSmConeSTEPCrossDerivative)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 250.0,
+    "v": 2.5,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "general_cylinder_build",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:1341 (SmCylinder::CreateCanonical(2), SmCone::CreateCanonical(1,2,3))",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "general_cylinder_copy",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:1341 (SmCylinder::CreateCanonical(2), SmCone::CreateCanonical(1,2,3))",
+   "inputs": {
+    "op": "copy",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "general_cylinder_eq_cone",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:1341 (SmCylinder::CreateCanonical(2), SmCone::CreateCanonical(1,2,3))",
+   "inputs": {
+    "op": "eq",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 2.0
+     }
+    },
+    "other": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "general_cone_eq_self",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:1341 (SmCylinder::CreateCanonical(2), SmCone::CreateCanonical(1,2,3))",
+   "inputs": {
+    "op": "eq",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "other": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "general_cone_copy",
+   "upstream_ref": "SM_API_test TestSmGeneral.cpp:1341 (SmCylinder::CreateCanonical(2), SmCone::CreateCanonical(1,2,3))",
+   "inputs": {
+    "op": "copy",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "fillet_cylinder_build",
+   "upstream_ref": "prog_test smFilletTest.cpp:3629",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      5.0,
+      0.0,
+      12.0
+     ],
+     "x": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 5.0
+     }
+    }
+   }
+  },
+  {
+   "name": "fillet_cylinder_adjust",
+   "upstream_ref": "prog_test smFilletTest.cpp:3629",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      5.0,
+      0.0,
+      12.0
+     ],
+     "x": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 5.0
+     }
+    },
+    "dom": [
+     0.0,
+     0.0,
+     180.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "topo_cylinder_adjust",
+   "upstream_ref": "prog_test smTopoTest.cpp:1161",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 2.0
+     }
+    },
+    "dom": [
+     0.0,
+     -1.0,
+     360.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "topo_coax_A_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -20.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 40.0
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_coax_B0_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_coax_B0_inversion",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     0.0,
+     50.0,
+     11.5
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "topo_coax_B0_iso_v",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 180.0,
+      "height": 3.0
+     }
+    },
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "topo_coax_B1_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 356.0,
+      "height": 200.0
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_coax_B1_inversion",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 356.0,
+      "height": 200.0
+     }
+    },
+    "p": [
+     0.0,
+     50.0,
+     0.0
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "topo_coax_B1_iso_v",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 356.0,
+      "height": 200.0
+     }
+    },
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "topo_coax_B2_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_coax_B2_inversion",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0
+     }
+    },
+    "p": [
+     0.0,
+     50.0,
+     0.0
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "topo_coax_B2_iso_v",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0
+     }
+    },
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "topo_coax_B3_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_coax_B3_inversion",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0
+     }
+    },
+    "p": [
+     0.0,
+     50.0,
+     0.0
+    ],
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "topo_coax_B3_iso_v",
+   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0
+     }
+    },
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i0_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f0_s0_i1_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i0_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f0_s1_i1_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i0_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f1_s0_i1_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i0_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_build",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_to_step0",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.1,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_to_step1",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.7,
+    "v": 0.95
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_to_step2",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_to_step3",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 1.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_to_nurbs",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 123.0,
+    "v": 110.0
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_eval",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "u": 0.3,
+    "v": 0.6,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_iso_u",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "param": 0,
+    "iso": 0.25
+   }
+  },
+  {
+   "name": "topo_flags_f1_s1_i1_iso_v_dom",
+   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      -100.0
+     ],
+     "x": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "y": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 50.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 200.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "param": 1,
+    "iso": 0.25,
+    "dom": [
+     0.1,
+     0.1,
+     0.6,
+     0.9
+    ],
+    "uv": true
+   }
+  },
+  {
+   "name": "analytic_cylinder_build",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cylinder_copy",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "copy",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cylinder_adjust",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "dom": [
+     0.0,
+     -1.0,
+     360.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_point0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_point1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 0.3,
+    "v": 0.1
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_point2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_point3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 1.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_point4",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 0.9,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_step0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cylinder_to_nurbs0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_step1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 90.0,
+    "v": 2.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cylinder_to_nurbs1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 90.0,
+    "v": 2.0
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_step2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 270.0,
+    "v": 10.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cylinder_to_nurbs2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 270.0,
+    "v": 10.0
+   }
+  },
+  {
+   "name": "analytic_cylinder_eval_step3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 359.0,
+    "v": 0.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cylinder_to_nurbs3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1.0
+     }
+    },
+    "u": 359.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone_build",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cone_copy",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "copy",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cone_adjust",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "dom": [
+     0.0,
+     -1.0,
+     360.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "analytic_cone_eval_point0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone_eval_point1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.3,
+    "v": 0.1
+   }
+  },
+  {
+   "name": "analytic_cone_eval_point2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cone_eval_point3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 1.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "analytic_cone_eval_point4",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.9,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone_eval_step0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone_to_nurbs0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cone_eval_step1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 90.0,
+    "v": 2.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone_to_nurbs1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 90.0,
+    "v": 2.0
+   }
+  },
+  {
+   "name": "analytic_cone_eval_step2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 270.0,
+    "v": 10.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone_to_nurbs2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 270.0,
+    "v": 10.0
+   }
+  },
+  {
+   "name": "analytic_cone_eval_step3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 359.0,
+    "v": 0.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone_to_nurbs3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 45.0
+     }
+    },
+    "u": 359.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone0_build",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cone0_copy",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "copy",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cone0_adjust",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "dom": [
+     0.0,
+     -1.0,
+     360.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_point0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_point1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.3,
+    "v": 0.1
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_point2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_point3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 1.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_point4",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.9,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_step0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_to_nurbs0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.0,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_step1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 90.0,
+    "v": 2.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_to_nurbs1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 90.0,
+    "v": 2.0
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_step2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 270.0,
+    "v": 10.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_to_nurbs2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 270.0,
+    "v": 10.0
+   }
+  },
+  {
+   "name": "analytic_cone0_eval_step3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 359.0,
+    "v": 0.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_to_nurbs3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 359.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_build",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_copy",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "copy",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_adjust",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "dom": [
+     0.0,
+     -1.0,
+     360.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_point0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_point1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 0.3,
+    "v": 0.1
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_point2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_point3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 1.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_point4",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_point",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 0.9,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_step0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 0.5,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_to_nurbs0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 0.0,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_step1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 90.0,
+    "v": 2.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_to_nurbs1",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 90.0,
+    "v": 2.0
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_step2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 270.0,
+    "v": 10.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_to_nurbs2",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 270.0,
+    "v": 10.0
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_eval_step3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 359.0,
+    "v": 0.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "analytic_cone0_inside_to_nurbs3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:5440 (my_test_analytic_surfaces)",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0,
+      "inside": true
+     }
+    },
+    "u": 359.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "cyl_radius_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 0.0
+     }
+    }
+   }
+  },
+  {
+   "name": "cyl_radius_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 1e-12
+     }
+    }
+   }
+  },
+  {
+   "name": "cyl_radius_2eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 2e-12
+     }
+    }
+   }
+  },
+  {
+   "name": "cyl_radius_negative",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": -1.0
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_radius_diff_eq_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 1.0,
+      "top": 1.000000000001,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_radius_diff_above_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 1.0,
+      "top": 1.0000000000011,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_radius_diff_below_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 1.0,
+      "top": 1.0000000000009,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_semi_eq_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 1.0,
+      "semi": 1e-12
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_semi_below_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 1.0,
+      "semi": 9.9e-13
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_semi_above_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 1.0,
+      "semi": 1.01e-12
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_semi_neg_tiny_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 1.0,
+      "semi": -1e-13
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_apex_bottom",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 2.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_apex_top",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 2.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_apex_top_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 2.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0,
+      "inside": true,
+      "swap": true
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_zero_radii",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_zero_radii_to_nurbs",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "to_nurbs",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    },
+    "u": 10.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "bounded_zero_radii_to_step",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "to_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "bounded_zero_radii_eval0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.5,
+    "hu": 0,
+    "hv": 0
+   }
+  },
+  {
+   "name": "bounded_partial_sweep",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 1.0,
+      "top": 3.0,
+      "start": -90.0,
+      "end": 45.0,
+      "height": 4.0,
+      "make_nurb_gen": true
+     }
+    }
+   }
+  },
+  {
+   "name": "bounded_full_negative_sweep",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 1.0,
+      "top": 3.0,
+      "start": -360.0,
+      "end": 0.0,
+      "height": 4.0
+     }
+    }
+   }
+  },
+  {
+   "name": "canonical_height_zero_top_is_semi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 30.0,
+      "height": 0.0
+     }
+    }
+   }
+  },
+  {
+   "name": "canonical_height_negative_top_is_semi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": -20.0,
+      "height": -1.0,
+      "swap": true
+     }
+    }
+   }
+  },
+  {
+   "name": "canonical_semi_with_height_inside_is_mngc",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 30.0,
+      "height": 2.0,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_negative_semi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 2.0,
+      "semi": -30.0
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_semi_89",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 1.0,
+      "semi": 89.9
+     }
+    }
+   }
+  },
+  {
+   "name": "cyl_unbounded_swap_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_unbounded",
+      "radius": 3.0,
+      "swap": true,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "unbounded_zero_base_zero_semi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 0.0,
+      "semi": 0.0
+     }
+    }
+   }
+  },
+  {
+   "name": "huge_build",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      1000000.0,
+      -2000000.0,
+      500000.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1000000.0,
+      "top": 2000000.0,
+      "height": 3000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "huge_eval_step",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      1000000.0,
+      -2000000.0,
+      500000.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1000000.0,
+      "top": 2000000.0,
+      "height": 3000000.0
+     }
+    },
+    "u": 123.0,
+    "v": 1500000.0,
+    "hu": 2,
+    "hv": 2
+   }
+  },
+  {
+   "name": "huge_inversion",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      1000000.0,
+      -2000000.0,
+      500000.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1000000.0,
+      "top": 2000000.0,
+      "height": 3000000.0
+     }
+    },
+    "p": [
+     2500000.0,
+     -2000000.0,
+     2000000.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "tiny_build",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "cone": {
+     "origin": [
+      1e-06,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1e-06,
+      "top": 2e-06,
+      "height": 3e-06
+     }
+    }
+   }
+  },
+  {
+   "name": "tiny_eval_step",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      1e-06,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1e-06,
+      "top": 2e-06,
+      "height": 3e-06
+     }
+    },
+    "u": 45.0,
+    "v": 1e-06,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "tiny_iso_v",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      1e-06,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1e-06,
+      "top": 2e-06,
+      "height": 3e-06
+     }
+    },
+    "param": 1,
+    "iso": 1.5e-06
+   }
+  },
+  {
+   "name": "eval_step_order4",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 10.0,
+    "v": 1.0,
+    "hu": 4,
+    "hv": 4
+   }
+  },
+  {
+   "name": "eval_step_unequal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 10.0,
+    "v": 1.0,
+    "hu": 3,
+    "hv": 1
+   }
+  },
+  {
+   "name": "eval_step_unequal2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 10.0,
+    "v": 1.0,
+    "hu": 1,
+    "hv": 3
+   }
+  },
+  {
+   "name": "eval_step_outside_clamped",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 400.0,
+    "v": -5.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "eval_step_outside_oob",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval_step",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     },
+     "oob": true
+    },
+    "u": 400.0,
+    "v": -5.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "eval_upper_half",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.3,
+    "v": 0.4,
+    "hu": 2,
+    "hv": 2,
+    "upper": true
+   }
+  },
+  {
+   "name": "eval_upper_half_unequal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.3,
+    "v": 0.4,
+    "hu": 2,
+    "hv": 1,
+    "upper": true
+   }
+  },
+  {
+   "name": "eval_order5",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.3,
+    "v": 0.4,
+    "hu": 5,
+    "hv": 0
+   }
+  },
+  {
+   "name": "eval_right_side",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.5,
+    "hu": 1,
+    "hv": 1,
+    "u_left": false,
+    "v_left": false,
+    "non_zero": false
+   }
+  },
+  {
+   "name": "eval_at_apex",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.0,
+    "hu": 1,
+    "hv": 1
+   }
+  },
+  {
+   "name": "eval_at_apex_zero_tangents",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eval",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "u": 0.5,
+    "v": 0.0,
+    "hu": 1,
+    "hv": 1,
+    "non_zero": false
+   }
+  },
+  {
+   "name": "inversion_apex",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "inversion_beyond_apex",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "p": [
+     -1.0,
+     0.0,
+     -1.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "inversion_seam_guess_hi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     2.0,
+     0.0,
+     3.0
+    ],
+    "tol": 1e-06,
+    "guess": [
+     350.0,
+     2.9
+    ]
+   }
+  },
+  {
+   "name": "inversion_seam_guess_lo",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     2.0,
+     0.0,
+     3.0
+    ],
+    "tol": 1e-06,
+    "guess": [
+     10.0,
+     0.1
+    ]
+   }
+  },
+  {
+   "name": "inversion_off_surface",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     5.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "inversion_outside_sweep",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "inversion",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 1.0,
+      "top": 2.0,
+      "start": 0.0,
+      "end": 90.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     -1.5,
+     0.0,
+     1.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "positive_beyond_apex",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "positive",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 0.0,
+      "semi": 45.0
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     -3.0
+    ]
+   }
+  },
+  {
+   "name": "positive_negative_semi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "positive",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_unbounded",
+      "base": 2.0,
+      "semi": -30.0
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "positive_cylinder",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "positive",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_canonical",
+      "radius": 2.0
+     }
+    },
+    "p": [
+     1.0,
+     2.0,
+     -3.0
+    ]
+   }
+  },
+  {
+   "name": "iso_circle_on_axis",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "iso_circle_apex_plane",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 2.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    },
+    "p": [
+     3.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "iso_circle_above",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     1.0,
+     1.0,
+     4.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "iso_circle_tol_boundary",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "p": [
+     1.0,
+     1.0,
+     3.0000009
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "iso_circle_swap_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     1.0,
+     1.0,
+     2.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "adjust_past_apex_min",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "dom": [
+     0.0,
+     -4.0,
+     360.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "adjust_past_apex_max",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "adjust",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 2.0,
+      "top": 0.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    },
+    "dom": [
+     0.0,
+     0.0,
+     360.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "transform_identity",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "transform_identity_unit_scale",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "transform_nonuniform",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "origin": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "scale": [
+     1.0,
+     2.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "transform_negative_scale",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "origin": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "scale": [
+     -1.0,
+     -1.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "transform_move",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "origin": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "x": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "y": [
+     -1.0,
+     0.0,
+     0.0
+    ],
+    "scale": [
+     2.0,
+     2.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "eq_cone_vs_cylinder_same_shape",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 2.0,
+      "top": 2.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 3.0
+     }
+    },
+    "other": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cyl_bounded",
+      "radius": 2.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 3.0
+     }
+    }
+   }
+  },
+  {
+   "name": "eq_inside_out_differs",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "other": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0,
+      "inside": true
+     }
+    }
+   }
+  },
+  {
+   "name": "iso_degenerate_apex_row",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "cone_bounded",
+      "bot": 0.0,
+      "top": 2.0,
+      "start": 0.0,
+      "end": 360.0,
+      "height": 2.0
+     }
+    },
+    "param": 1,
+    "iso": 0.0
+   }
+  },
+  {
+   "name": "iso_line_inside_out_dom",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0,
+      "inside": true
+     }
+    },
+    "param": 0,
+    "iso": 0.3,
+    "dom": [
+     0.0,
+     0.2,
+     1.0,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "iso_circle_partial_dom",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "param": 1,
+    "iso": 1.5,
+    "dom": [
+     0.1,
+     0.0,
+     0.4,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "iso_outside_domain",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "iso",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 1.0,
+      "top": 2.0,
+      "height": 3.0
+     }
+    },
+    "param": 1,
+    "iso": 10.0
+   }
+  },
+  {
+   "name": "coinc_same_line",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "line",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      2,
+      3
+     ]
+    },
+    "a_dom": [
+     0.0,
+     1.0
+    ],
+    "b": {
+     "kind": "line",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      2,
+      3
+     ]
+    },
+    "b_dom": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coinc_reversed_line",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "line",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      2,
+      3
+     ]
+    },
+    "a_dom": [
+     0.0,
+     1.0
+    ],
+    "b": {
+     "kind": "line",
+     "a": [
+      1,
+      2,
+      3
+     ],
+     "b": [
+      0,
+      0,
+      0
+     ]
+    },
+    "b_dom": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coinc_distinct_lines",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker (return FALSE)",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "line",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      2,
+      3
+     ]
+    },
+    "a_dom": [
+     0.0,
+     1.0
+    ],
+    "b": {
+     "kind": "line",
+     "a": [
+      0,
+      0,
+      1
+     ],
+     "b": [
+      1,
+      2,
+      3
+     ]
+    },
+    "b_dom": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coinc_full_circles_reversed",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "d": [
+      0.0,
+      360.0
+     ],
+     "r": 1.0
+    },
+    "a_dom": [
+     0.0,
+     360.0
+    ],
+    "b": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "d": [
+      0.0,
+      360.0
+     ],
+     "r": 1.0
+    },
+    "b_dom": [
+     0.0,
+     360.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coinc_arcs_reversed",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "d": [
+      0.0,
+      90.0
+     ],
+     "r": 1.0
+    },
+    "a_dom": [
+     0.0,
+     90.0
+    ],
+    "b": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "d": [
+      -90.0,
+      0.0
+     ],
+     "r": 1.0
+    },
+    "b_dom": [
+     -90.0,
+     0.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coinc_arcs_same",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "d": [
+      0.0,
+      90.0
+     ],
+     "r": 1.0
+    },
+    "a_dom": [
+     0.0,
+     90.0
+    ],
+    "b": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "d": [
+      0.0,
+      90.0
+     ],
+     "r": 1.000000001
+    },
+    "b_dom": [
+     0.0,
+     90.0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coinc_circle_vs_line",
+   "upstream_ref": "SmCone.cpp sm_TotalCoincidenceChecker",
+   "inputs": {
+    "op": "coincidence",
+    "a": {
+     "kind": "circle",
+     "c": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "d": [
+      0.0,
+      90.0
+     ],
+     "r": 1.0
+    },
+    "a_dom": [
+     0.0,
+     90.0
+    ],
+    "b": {
+     "kind": "line",
+     "a": [
+      1,
+      0,
+      0
+     ],
+     "b": [
+      0,
+      1,
+      0
+     ]
+    },
+    "b_dom": [
+     0.0,
+     1.0
+    ],
+    "tol": 1e-06
+   }
+  }
+ ]
+}

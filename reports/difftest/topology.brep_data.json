@@ -263,8 +263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
+        "symbol": "SmSurfOfRevolution::ReadFromDB",
+        "unit": "surface.surf_of_revolution_p3"
       },
       "max_rel_err": 0.0,
       "name": "file_Defeature_Platte",
@@ -287,8 +287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
+        "symbol": "SmSurfOfRevolution::ReadFromDB",
+        "unit": "surface.surf_of_revolution_p3"
       },
       "max_rel_err": 0.0,
       "name": "file_Defeature_defillet",
@@ -19284,10 +19284,10 @@
   "cases_passed": 2318,
   "cases_total": 2379,
   "deferred_by_unit": {
-    "surface.cone_p1": 2,
     "surface.offset_surface": 46,
     "surface.plane_p2": 11,
-    "surface.surf_of_extrusion_p2": 2
+    "surface.surf_of_extrusion_p2": 2,
+    "surface.surf_of_revolution_p3": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -40,8 +40,8 @@
 //!   [`crate::surface::surface::SurfaceKind`] with the units porting its remaining
 //!   virtual overrides (`_p2`, `_p3`). The NURB and polar-converter rebuilds reach
 //!   `CreateIsoParametricCurve` through a `SweepIsoFn` so that a derived class
-//!   (`SmTorus`, [`crate::surface::torus`]) supplies its override, as upstream's
-//!   virtual call does.
+//!   (`SmTorus`, [`crate::surface::torus`]; `SmCone`, [`crate::surface::cone`])
+//!   supplies its override, as upstream's virtual call does.
 //! - **Generator.** `m_pGenCurve` is a [`Curve`] of a kind derived from
 //!   `SmBSplineCurve` (B-spline, ellipse, line, hyperbola, parabola); the other kinds
 //!   are rejected (`InvalidInput`) where upstream casts. It is only `None` for the
@@ -134,7 +134,7 @@ fn gen_base(c: &Curve) -> Result<&BSplineCurve> {
 
 /// The `SmBSplineCurve` base object of a generator, mutably (`None` for a kind not
 /// derived from `SmBSplineCurve`).
-fn gen_base_mut(c: &mut Curve) -> Option<&mut BSplineCurve> {
+pub(crate) fn gen_base_mut(c: &mut Curve) -> Option<&mut BSplineCurve> {
     match c.kind_mut() {
         CurveKind::BSpline(b) => Some(b),
         CurveKind::Ellipse(e) => Some(&mut e.base),
@@ -150,7 +150,7 @@ const fn not_b_spline() -> SolidError {
 }
 
 /// `GetSTEPInterval` of a generator.
-fn gen_step_interval(c: &Curve) -> Result<Extent1d> {
+pub(crate) fn gen_step_interval(c: &Curve) -> Result<Extent1d> {
     match c.kind() {
         CurveKind::BSpline(b) => Ok(b.step_interval()),
         CurveKind::Ellipse(e) => Ok(e.step_interval()),
@@ -176,7 +176,7 @@ fn gen_evaluate_step(k: &Kernel, c: &Curve, t: f64, num_derivs: usize) -> Result
 }
 
 /// `GetMaxAnalyticDomain` of a generator.
-fn gen_max_analytic_domain(c: &Curve) -> Result<Extent1d> {
+pub(crate) fn gen_max_analytic_domain(c: &Curve) -> Result<Extent1d> {
     match c.kind() {
         CurveKind::BSpline(b) => b.max_analytic_domain(),
         CurveKind::Ellipse(e) => Ok(e.max_analytic_domain()),
