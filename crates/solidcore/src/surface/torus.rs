@@ -53,10 +53,10 @@
 //!   an ellipse, which upstream casts to `SmCircle`, is `InvalidInput`.
 //!   `RebuildSTEPFromNURBParameters` returns `FALSE` (`SM_SUCCESS`) when the
 //!   constant-u iso curves are not circles; that is `Ok(())` with nothing changed.
-//! - **Unported callees.** `Transform` finishes in `SmSurfOfRevolution::Transform` and
-//!   `ReadFromDB` in `SmSurfOfRevolution::ReadFromDB` (both unit
-//!   `surface.surf_of_revolution_p3`); they return [`SolidError::Unported`] after the
-//!   torus's own part.
+//! - **Parent calls.** `Transform` finishes in `SmSurfOfRevolution::Transform`
+//!   (status ignored), its polar-converter rebuild given the torus's iso circles as
+//!   upstream's virtual call does; `ReadFromDB` reads the parent record with
+//!   [`SurfOfRevolution::read_from_db`] into the torus's base.
 
 use core::ops::Div;
 
@@ -951,15 +951,14 @@ impl Torus {
     /// # Errors
     ///
     /// `SM_ERR` for a non-uniform scale or one below `SM_EFF_ZERO`;
-    /// [`SolidError::Unported`] from `SmSurfOfRevolution::Transform` (unit
-    /// `surface.surf_of_revolution_p3`), after the radii are scaled.
+    /// [`SolidError::Unported`] from `SmSurfOfRevolution::Transform` (whose other
+    /// statuses upstream ignores), after the radii are scaled.
     pub fn transform(
         &mut self,
         k: &Kernel,
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
-        let _ = k;
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -981,12 +980,18 @@ impl Torus {
         self.major_radius *= d_scale;
         self.minor_radius *= d_scale;
 
-        // finish the call in the parent function (status ignored upstream)
-        // UNPORTED(surface.surf_of_revolution_p3): SmSurfOfRevolution::Transform
-        Err(SolidError::unported(
-            "SmSurfOfRevolution::Transform",
-            "surface.surf_of_revolution_p3",
-        ))
+        // finish the call in the parent function (status ignored upstream), whose
+        // polar-converter rebuild reaches the torus's iso circles
+        let shape = self.shape();
+        ignore_status(
+            self.base
+                .transform_using(k, rotate_n_move, scale, &|s, k, p, t| {
+                    Ok(iso_curve(s, shape, k, p, t, None)?.curve)
+                }),
+        )?;
+
+        // all done
+        Ok(())
     }
 
     // ---- I/O ------------------------------------------------------------------------
@@ -997,11 +1002,9 @@ impl Torus {
     ///
     /// # Errors
     ///
-    /// A failed binary read; [`SolidError::Unported`] for the surface of revolution
-    /// record (`SmSurfOfRevolution::ReadFromDB`, unit `surface.surf_of_revolution_p3`).
-    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
-        let _ = version;
-
+    /// A failed binary read; those of the surface of revolution record
+    /// ([`SurfOfRevolution::read_from_db`]).
+    pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         // init output object
         let mut torus = Self::empty();
 
@@ -1025,11 +1028,10 @@ impl Torus {
         }
 
         // read the parent object
-        // UNPORTED(surface.surf_of_revolution_p3): SmSurfOfRevolution::ReadFromDB
-        Err(SolidError::unported(
-            "SmSurfOfRevolution::ReadFromDB",
-            "surface.surf_of_revolution_p3",
-        ))
+        torus.base = SurfOfRevolution::read_from_db(k, db, version)?;
+
+        // all done
+        Ok(torus)
     }
 }
 
@@ -1278,7 +1280,7 @@ mod tests {
     #[test]
     fn read_reaches_the_base_record() {
         let mut db = DatabaseReader::new();
-        let r = Torus::read_from_db(&mut db, 0);
+        let r = Torus::read_from_db(&Kernel::default(), &mut db, 0);
         assert!(r.is_err());
     }
 }

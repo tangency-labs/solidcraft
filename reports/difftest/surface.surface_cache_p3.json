@@ -344,7 +344,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0037",
@@ -676,7 +676,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0075",
@@ -808,7 +808,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0089",
@@ -2296,7 +2296,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0257",
@@ -2400,7 +2400,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0268",
@@ -2624,7 +2624,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0292",
@@ -3224,7 +3224,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0359",
@@ -5092,7 +5092,7 @@
     {
       "deferred": {
         "symbol": "SmPlane::CreateIsoParametricCurve",
-        "unit": "surface.plane_p1"
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0566",
@@ -5417,7 +5417,7 @@
   "cases_total": 600,
   "deferred_by_unit": {
     "query.tess": 38,
-    "surface.plane_p1": 8,
+    "surface.surface_cache_p1": 8,
     "surface.surface_p3": 15,
     "surface.surface_p5": 32,
     "surface.surface_p6": 57,

@@ -917,7 +917,7 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
         } => {
             let a2p = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             let mut t = s.clone();
-            t.transform(&a2p, scale.map(v3)).and_then(|()| {
+            t.transform(k, &a2p, scale.map(v3)).and_then(|()| {
                 o.push(SUCCESS);
                 put_state(k, o, &t)
             })

@@ -448,7 +448,7 @@ fn push_gen(o: &mut Vec<f64>, g: &Gen) -> Result<(), FfiError> {
     Ok(())
 }
 
-fn push_surf(o: &mut Vec<f64>, s: &Surf) -> Result<(), FfiError> {
+pub(crate) fn push_surf(o: &mut Vec<f64>, s: &Surf) -> Result<(), FfiError> {
     match &s.build {
         Build::Canonical { point, axis } => {
             finite(point, "axis point")?;

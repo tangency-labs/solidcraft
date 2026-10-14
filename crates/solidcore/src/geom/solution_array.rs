@@ -278,6 +278,13 @@ pub trait SolutionObject: Copy + PartialEq {
     fn natural_interval(&self) -> Option<Extent1d> {
         None
     }
+
+    /// For a surface object, its natural parameter domain
+    /// (`SmSurface::GetNaturalUVDomain`) when the handle can reach the surface;
+    /// `None` (the default) when it cannot.
+    fn natural_uv_domain(&self) -> Option<crate::geom::extent2d::Extent2d> {
+        None
+    }
 }
 
 /// One point of a solution space (`SmSolutionEnd`): a solution value (typically
@@ -1080,9 +1087,14 @@ fn evaluate_surface<O>(_surface: &O, _u: f64, _v: f64) -> Result<Point3> {
 /// `SmSurface::GetNaturalUVDomain`. The surface is ported
 /// (`surface::surface::p2::Surface::natural_uv_domain`), but a solution object is an
 /// opaque handle `O` with no way to reach it yet.
-fn surface_natural_uv_domain<O>(_surface: &O) -> Result<crate::geom::extent2d::Extent2d> {
-    // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain (needs a
-    // handle-to-surface lookup on SolutionObject)
+fn surface_natural_uv_domain<O: SolutionObject>(
+    surface: &O,
+) -> Result<crate::geom::extent2d::Extent2d> {
+    if let Some(domain) = surface.natural_uv_domain() {
+        return Ok(domain);
+    }
+    // UNPORTED(surface.surface_p2): SmSurface::GetNaturalUVDomain (a handle that
+    // cannot reach its surface)
     Err(SolidError::Unported {
         upstream: "SmSurface::GetNaturalUVDomain",
         unit: "surface.surface_p2",

@@ -750,7 +750,7 @@ impl Surface {
     /// Only [`SolidError::Unported`].
     pub fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         match self.kind() {
-            SurfaceKind::BSpline(_) | SurfaceKind::Step(_) => {
+            SurfaceKind::BSpline(_) | SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Step(_) => {
                 base_evaluate_normal(self, uv, u_side, v_side)
             }
             SurfaceKind::CurveBounded(s) => s.evaluate_normal(uv, u_side, v_side),
@@ -777,7 +777,10 @@ impl Surface {
                 let (closed, continuity) = p.is_closed();
                 Ok((closed, want_continuity.then_some(continuity)))
             }
-            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::Step(_) => {
                 base_is_closed(self, uv_domain, param, opt_tol, want_continuity)
             }
         }
@@ -812,6 +815,10 @@ impl Surface {
                     ));
                 }
                 Ok(planar_of(s, &self.natural_uv_domain())?.is_planar(tol_3d))
+            }
+            // SmSurfOfRevolution inherits SmBSplineSurface::CalculateBoundingBox
+            SurfaceKind::SurfOfRevolution(s) => {
+                Ok(planar_of(s.base(), &self.natural_uv_domain())?.is_planar(tol_3d))
             }
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
                 // SmSurface::CalculateBoundingBox (surface::surface::p1) builds a surface

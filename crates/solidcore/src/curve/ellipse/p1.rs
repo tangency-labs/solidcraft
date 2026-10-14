@@ -39,7 +39,7 @@
 //! | [`PolarConversion::convert_to_polar_parameter`]    | `SmPolarConversion::ConvertToPolarParameter`      |
 //! | [`PolarConversion::is_current`]                    | `SmPolarConversion::IsCurrent`                    |
 //! | [`PolarConversion::assert_valid`]                  | `SmPolarConversion::AssertValid`                  |
-//! | [`PolarConversion::read_from_db`]                  | `SmPolarConversion::ReadFromDB`                   |
+//! | [`PolarConversion::read_from_db`], [`PolarConversion::read_from_db_with_curve`] | `SmPolarConversion::ReadFromDB` (ellipse back pointer; null back pointer, from `SmSurfOfRevolution::ReadFromDB`) |
 //!
 //! Deviations:
 //! - **Circle class.** `SmCircle` derives from `SmEllipse` without data of its own;
@@ -62,7 +62,9 @@
 //! - **Polar converter.** As in `p2`, the converter's curve is always the owning
 //!   ellipse (borrowed). `SmPolarConversion::ReadFromDB` of a converter that owns a
 //!   copy of its curve (`bHasCurve`, never written for an ellipse's own converter)
-//!   returns `InvalidInput`.
+//!   returns `InvalidInput`; [`PolarConversion::read_from_db_with_curve`] (added by
+//!   `surface.surf_of_revolution_p3`) reads that copy for the surface of revolution's
+//!   converter, which owns its sweep circle.
 //! - **Undefined behaviour.** Where upstream would read an uninitialised value (an
 //!   unreadable ASCII count or flag, a failed `ConvertTFromSTEPToNURBS` in
 //!   `AssertValid`, a missing polar curve in `ConvertToPolarParameter`'s callers,
@@ -480,6 +482,82 @@ impl PolarConversion {
     /// uninitialised), counts larger than the stream, or a stored copy of the curve
     /// (`bHasCurve`, see the module deviations).
     pub fn read_from_db(db: &mut DatabaseReader) -> Result<Self> {
+        let (pc, has_curve) = Self::read_tables(db)?;
+
+        // containing curve
+        if has_curve {
+            return Err(SolidError::invalid_input(
+                OP_READ_POLAR,
+                "a polar converter owning a copy of its curve is not modelled",
+            ));
+        }
+        Ok(Self::finish_back_pointer(db, pc, true))
+    }
+
+    /// Reads a table that may own a copy of its curve (`ReadFromDB` with a null
+    /// `cpCurve`, as `SmSurfOfRevolution::ReadFromDB` calls it): after the tables, a
+    /// stored curve (`bHasCurve`) is read with its type header; without one the
+    /// table has no curve (the null back pointer). Returns the table and the curve
+    /// it owns.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PolarConversion::read_from_db`]'s table reads;
+    /// [`SolidError::InvalidInput`] for a stored curve that is not an ellipse
+    /// (upstream casts it). The statuses of the curve's type header and reader are
+    /// ignored, as upstream (a failed read leaves the table without curve), except
+    /// [`SolidError::Unported`].
+    pub fn read_from_db_with_curve(
+        k: &Kernel,
+        db: &mut DatabaseReader,
+        version: u64,
+    ) -> Result<(Self, Option<Ellipse>)> {
+        let (mut pc, has_curve) = Self::read_tables(db)?;
+        if !has_curve {
+            // m_cpCurve is the (null) back pointer passed in
+            return Ok((Self::finish_back_pointer(db, pc, false), None));
+        }
+
+        // read m_cpCurve object from file (statuses ignored upstream)
+        if db.file_type() == FileType::Ascii {
+            db.go_to_next_line();
+        }
+        let header = ignored(db.read_type(true))?;
+        let curve = match header {
+            Some(h) => match (h.type_code, h.dim) {
+                (Some(ty), Some(dim)) => ignored(Curve::read_from_db(k, ty, db, dim, version))?,
+                // (an unread header: upstream passes uninitialised values on)
+                _ => None,
+            },
+            None => None,
+        };
+        let ellipse = match curve.map(Curve::into_kind) {
+            None => None,
+            Some(CurveKind::Ellipse(e)) => Some(e),
+            Some(_) => {
+                return Err(SolidError::invalid_input(
+                    OP_READ_POLAR,
+                    "the stored polar curve is not an ellipse",
+                ))
+            }
+        };
+        pc.has_curve = ellipse.is_some();
+        Ok((pc, ellipse))
+    }
+
+    /// The end of a read whose table has no stored curve: the back pointer
+    /// (`has_back_pointer`: the ellipse being read; else null), then the ASCII line
+    /// break.
+    fn finish_back_pointer(db: &mut DatabaseReader, mut pc: Self, has_back_pointer: bool) -> Self {
+        pc.has_curve = has_back_pointer;
+        if db.file_type() == FileType::Ascii {
+            db.go_to_next_line();
+        }
+        pc
+    }
+
+    /// The tables of [`PolarConversion::read_from_db`] and the has-curve flag.
+    fn read_tables(db: &mut DatabaseReader) -> Result<(Self, bool)> {
         let bad = |reason: &'static str| SolidError::invalid_input(OP_READ_POLAR, reason);
         let ascii = db.file_type() == FileType::Ascii;
 
@@ -567,19 +645,7 @@ impl PolarConversion {
                 .collect();
         }
 
-        // containing curve
-        if has_curve {
-            return Err(bad(
-                "a polar converter owning a copy of its curve is not modelled",
-            ));
-        }
-
-        // m_cpCurve is the back pointer to the ellipse being read
-        pc.has_curve = true;
-        if ascii {
-            db.go_to_next_line();
-        }
-        Ok(pc)
+        Ok((pc, has_curve))
     }
 }
 

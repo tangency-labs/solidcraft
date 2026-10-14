@@ -819,6 +819,13 @@ geom_utility_p2 3270 green; all `max_rel_err` 0. fmt, clippy, tests and wasm32 p
   covered by Rust unit tests only.
 - **Misleading `seeds` field.** The difftest report's `seeds` field shows the CLI value, not
   the number of cases a runner actually generated.
+- **Self-tagged iso curve stubs.** `surface/surface_cache/p1.rs` keeps
+  `UNPORTED(surface.surface_cache_p1)` stubs for `SmPlane::CreateIsoParametricCurve` and
+  `SmSurfOfRevolution::CreateIsoParametricCurve`, although that unit and the units that
+  ported both overrides (`surface.plane_p1`, `surface.surf_of_revolution_p1`) are partial.
+  The cache stores iso curves as `BSplineCurve`, so the `SmLine` / `SmCircle` results
+  cannot be stored. Whoever changes `SurfaceCache` iso curve storage to `Curve` must wire
+  them (grep the tag). No difftest case reaches them today.
 
 ## Wave 0 verification (independent check, 2026-10-12)
 

@@ -629,10 +629,10 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let d = dom_of(*dom);
             let mut o = vec![0.0];
             (|| -> Result<(), SolidError> {
-                sub(&mut o, s.convert_domain_from_step_to_nurbs(&d), |o, x| {
+                sub(&mut o, s.convert_domain_from_step_to_nurbs(&k, &d), |o, x| {
                     push_dom(o, &x);
                 })?;
-                sub(&mut o, s.convert_domain_from_nurbs_to_step(&d), |o, x| {
+                sub(&mut o, s.convert_domain_from_nurbs_to_step(&k, &d), |o, x| {
                     push_dom(o, &x);
                 })
             })()

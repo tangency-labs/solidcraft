@@ -1,0 +1,3300 @@
+{
+ "cases": [
+  {
+   "name": "adv_cylinders_intersect",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -3.75612237417407,
+        -0.3425025433696816,
+        4.098624917543753
+       ],
+       "b": [
+        -3.459601733094948,
+        -0.6223704020422227,
+        9.081972135137173
+       ]
+      },
+      "build": {
+       "mode": "ctor",
+       "origin": [
+        -1.7627834871367023,
+        -0.22389428693803287,
+        3.986677774074736
+       ],
+       "x": [
+        -0.9966694435186839,
+        -0.05930412821582437,
+        0.055973571734508246
+       ],
+       "y": [
+        0.055973571734508246,
+        -0.9966694435186839,
+        -0.05930412821582437
+       ],
+       "domain": [
+        0,
+        0,
+        240.0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "adv_cylinders_intersect_reverse",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -3.75612237417407,
+       -0.3425025433696816,
+       4.098624917543753
+      ],
+      "b": [
+       -3.459601733094948,
+       -0.6223704020422227,
+       9.081972135137173
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -1.7627834871367023,
+       -0.22389428693803287,
+       3.986677774074736
+      ],
+      "x": [
+       -0.9966694435186839,
+       -0.05930412821582437,
+       0.055973571734508246
+      ],
+      "y": [
+       0.055973571734508246,
+       -0.9966694435186839,
+       -0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -0.006661112962632165,
+        0.11860825643164874,
+        -0.11194714346901649
+       ],
+       "b": [
+        0.28985952811648985,
+        -0.16125960224089236,
+        4.871400074124403
+       ]
+      },
+      "build": {
+       "mode": "ctor",
+       "origin": [
+        -2.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        0.9966694435186839,
+        0.05930412821582437,
+        -0.055973571734508246
+       ],
+       "y": [
+        -0.055973571734508246,
+        0.9966694435186839,
+        0.05930412821582437
+       ],
+       "domain": [
+        0,
+        0,
+        240.0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "adv_cylinders_intersect_no_tol",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -3.75612237417407,
+        -0.3425025433696816,
+        4.098624917543753
+       ],
+       "b": [
+        -3.459601733094948,
+        -0.6223704020422227,
+        9.081972135137173
+       ]
+      },
+      "build": {
+       "mode": "ctor",
+       "origin": [
+        -1.7627834871367023,
+        -0.22389428693803287,
+        3.986677774074736
+       ],
+       "x": [
+        -0.9966694435186839,
+        -0.05930412821582437,
+        0.055973571734508246
+       ],
+       "y": [
+        0.055973571734508246,
+        -0.9966694435186839,
+        -0.05930412821582437
+       ],
+       "domain": [
+        0,
+        0,
+        240.0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    }
+   }
+  },
+  {
+   "name": "adv_cylinder_self",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution"
+    },
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "adv_cylinder_drop_mid",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     -2.0196603946639637,
+     2.850074401219781,
+     2.669585993444183
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "adv_cylinder_drop_outside_sweep",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     -1.6838189642569144,
+     -3.1299422598923226,
+     2.313761224149237
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "adv_cylinder_drop_axis",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     -1.9406958717841756,
+     -0.05597357173450822,
+     0.996669443518684
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "adv_cylinder_drop_seam_vec",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0.5509777370125344,
+     0.0922867488050527,
+     0.8567355141824134
+    ],
+    "vec": [
+     -0.055973571734508246,
+     0.9966694435186839,
+     0.05930412821582437
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "adv_cylinder_to_nurbs",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "to_nurbs",
+    "u": 120.0,
+    "v": 0.25
+   }
+  },
+  {
+   "name": "adv_cylinder_transform",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "transform",
+    "frame": {
+     "origin": [
+      0.23721651286329762,
+      -0.22389428693803287,
+      3.986677774074736
+     ],
+     "x": [
+      -0.9966694435186839,
+      -0.05930412821582437,
+      0.055973571734508246
+     ],
+     "y": [
+      0.055973571734508246,
+      -0.9966694435186839,
+      -0.05930412821582437
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_cylinder_rebuild",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "adv_cylinder_copy",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "adv_cylinder_read_ascii",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "read_db",
+    "binary": false,
+    "version": 30
+   }
+  },
+  {
+   "name": "adv_cylinder_read_binary",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:2995 (my_ssi_analytic_demo test 2: two 240 degree cylinders of radius 2, height 5, the second moved 4 along the axis and turned 180 degrees)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "b": [
+       0.28985952811648985,
+       -0.16125960224089236,
+       4.871400074124403
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -2.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "domain": [
+       0,
+       0,
+       240.0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "read_db",
+    "binary": true,
+    "version": 33
+   }
+  },
+  {
+   "name": "general_bezier_copy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "general_bezier_to_nurbs_20",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "to_nurbs",
+    "u": 20.0,
+    "v": 0.37
+   }
+  },
+  {
+   "name": "general_bezier_to_nurbs_250",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "to_nurbs",
+    "u": 250.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "general_bezier_drop_nonplanar",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     3,
+     1
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "general_bezier_rebuild",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "general_bezier_transform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "transform",
+    "frame": {
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      2,
+      2,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "general_bezier_transform_nonuniform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "transform",
+    "frame": {
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      2,
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "general_bezier_reparam",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "reparam",
+    "dom": [
+     -1,
+     2,
+     3,
+     7
+    ]
+   }
+  },
+  {
+   "name": "general_bezier_update",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "update"
+   }
+  },
+  {
+   "name": "general_bezier_read_ascii",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1380 (cubic generator about Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0.4,
+        0.5
+       ],
+       [
+        3.2,
+        -0.2,
+        1.7
+       ],
+       [
+        2.7,
+        0.3,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "read_db",
+    "binary": false,
+    "version": 30
+   }
+  },
+  {
+   "name": "planar_bezier_drop",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0,
+        0.5
+       ],
+       [
+        3.2,
+        0,
+        1.7
+       ],
+       [
+        2.7,
+        0,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     3,
+     1
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "planar_bezier_drop_intersect",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0,
+        0.5
+       ],
+       [
+        3.2,
+        0,
+        1.7
+       ],
+       [
+        2.7,
+        0,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 0,
+    "point": [
+     0,
+     2.5,
+     0.5
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "planar_bezier_drop_normalize",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0,
+        0.5
+       ],
+       [
+        3.2,
+        0,
+        1.7
+       ],
+       [
+        2.7,
+        0,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 5,
+    "point": [
+     0,
+     3,
+     1
+    ],
+    "tol": 1e-06,
+    "requested": 0
+   }
+  },
+  {
+   "name": "planar_bezier_drop_maximize",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0,
+        0.5
+       ],
+       [
+        3.2,
+        0,
+        1.7
+       ],
+       [
+        2.7,
+        0,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 4,
+    "point": [
+     0,
+     3,
+     1
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "planar_bezier_rebuild_rotated",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0,
+        0.5
+       ],
+       [
+        3.2,
+        0,
+        1.7
+       ],
+       [
+        2.7,
+        0,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "rebuild",
+    "edit": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "planar_bezier_rebuild_squashed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        2.5,
+        0,
+        0.5
+       ],
+       [
+        3.2,
+        0,
+        1.7
+       ],
+       [
+        2.7,
+        0,
+        3.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "rebuild",
+    "edit": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      0.5,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "surfaces_line_copy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "surfaces_line_drop",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     3,
+     1.5
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "surfaces_line_drop_apex_side",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     0,
+     5
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "surfaces_line_drop_target",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     3,
+     1.5
+    ],
+    "tol": 1e-06,
+    "target": 0.1,
+    "requested": 1
+   }
+  },
+  {
+   "name": "surfaces_line_to_nurbs",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "to_nurbs",
+    "u": 90.0,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "surfaces_line_update_sub",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.2,
+     0.6,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "surfaces_line_reparam",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "reparam",
+    "dom": [
+     0,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "surfaces_line_x_cylinder",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        1.5,
+        0,
+        -1
+       ],
+       "b": [
+        1.5,
+        0,
+        4
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "surfaces_line_x_cone_flip",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        1.5,
+        0,
+        3
+       ],
+       "b": [
+        1.5,
+        0,
+        -1
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        -1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "surfaces_line_x_coincident",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        1.5,
+        0,
+        1.5
+       ],
+       "b": [
+        1,
+        0,
+        3
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "surfaces_line_x_offset_axis",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        2.5,
+        0,
+        0
+       ],
+       "b": [
+        2.5,
+        0,
+        3
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0.5,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "surfaces_line_x_tilted_axis",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        2,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        3
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0.1,
+        0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "surfaces_line_x_cone",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "cone",
+     "frame": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ]
+     ],
+     "r0": 1.0,
+     "r1": 2.0,
+     "h": 3.0
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "surfaces_line_x_sphere",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line revolved about the Z axis)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       3
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "sphere",
+     "frame": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       1,
+       0
+      ]
+     ],
+     "r": 1.5
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "torus_x_cylinder_tangent",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        4,
+        0,
+        -2
+       ],
+       "b": [
+        4,
+        0,
+        2
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "torus_x_cylinder_crossing",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "intersect",
+    "other": {
+     "kind": "revolution",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        3,
+        0,
+        -2
+       ],
+       "b": [
+        3,
+        0,
+        2
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "point": [
+        0,
+        0,
+        0
+       ],
+       "axis": [
+        0,
+        0,
+        1
+       ]
+      },
+      "swap": false
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "torus_drop_seam",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     4.5,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "torus_drop_seam_back",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     4.5,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     -1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "torus_drop_gen_seam",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     4.5,
+     0
+    ],
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "torus_read_binary",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "read_db",
+    "binary": true,
+    "version": 30
+   }
+  },
+  {
+   "name": "torus_swap_read",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "read_db",
+    "binary": false,
+    "version": 33
+   }
+  },
+  {
+   "name": "torus_rebuild",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "torus_swap_rebuild",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       3,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "tiny_cone_drop",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0002,
+       0,
+       0
+      ],
+      "b": [
+       0.0001,
+       0,
+       0.0003
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     0.0003,
+     0.00015
+    ],
+    "tol": 1e-10,
+    "requested": 1
+   }
+  },
+  {
+   "name": "huge_cone_drop",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       20000.0,
+       0,
+       0
+      ],
+      "b": [
+       10000.0,
+       0,
+       30000.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false
+    },
+    "op": "drop",
+    "operation": 3,
+    "point": [
+     0,
+     30000.0,
+     15000.0
+    ],
+    "tol": 0.01,
+    "requested": 1
+   }
+  }
+ ]
+}

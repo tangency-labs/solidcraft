@@ -110,7 +110,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 #[cfg(test)]
 use crate::math::EFF_ZERO_DEG;
-use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
@@ -131,7 +131,6 @@ const OP_STEP: &str = "surface::surface::p1::StepSurface";
 const OP_FACE: &str = "surface::surface::p1::Surface::face";
 const OP_CACHE: &str = "surface::surface::p1::validate_surface_cache";
 const OP_IVL: &str = "surface::surface::p1::find_uv_curve_ivl_in_domain";
-const OP_DOMAIN: &str = "surface::surface::p1::Surface::convert_domain";
 const OP_BOX: &str = "surface::surface::p1::Surface::calculate_bounding_box";
 
 /// Why a polar box of a curve-bounded or STEP surface is refused.
@@ -952,6 +951,13 @@ impl Surface {
                 s.basis()
                     .evaluate_step(uv, highest_u_deriv, highest_v_deriv, flags)
             }
+            // the SmSurfOfRevolution override (the side and half flags are not used)
+            SurfaceKind::SurfOfRevolution(s) => {
+                let d = s.evaluate_step_at(uv, highest_u_deriv, highest_v_deriv)?;
+                Ok(d.chunks(highest_v_deriv + 1)
+                    .map(<[Vec3]>::to_vec)
+                    .collect())
+            }
             SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::Step(_) => {
                 // pass the call along
                 self.evaluate(
@@ -976,6 +982,7 @@ impl Surface {
     pub fn evaluate_step_point(&self, uv: Point2) -> Result<Point3> {
         match self.kind() {
             SurfaceKind::CurveBounded(s) => s.basis().evaluate_step_point(uv),
+            SurfaceKind::SurfOfRevolution(s) => s.evaluate_step_point_at(uv),
             SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::Step(_) => {
                 self.evaluate_point(uv)
             }
@@ -998,6 +1005,15 @@ impl Surface {
     ) -> Result<Vec<Vec<Vec3>>> {
         match self.kind() {
             SurfaceKind::BSpline(s) => s.evaluate_simple(
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags.u_side == Side::Left,
+                flags.v_side == Side::Left,
+                flags.only_upper_half,
+            ),
+            // inherited from SmBSplineSurface
+            SurfaceKind::SurfOfRevolution(s) => s.base().evaluate_simple(
                 uv,
                 highest_u_deriv,
                 highest_v_deriv,
@@ -1201,9 +1217,13 @@ impl Surface {
     /// # Errors
     ///
     /// Those of `SetMinMax`.
-    pub fn convert_domain_from_step_to_nurbs(&self, anal_domain: &Extent2d) -> Result<Extent2d> {
-        let min_nurb_uv = self.convert_uv_from_step_to_nurbs(anal_domain.min());
-        let max_nurb_uv = self.convert_uv_from_step_to_nurbs(anal_domain.max());
+    pub fn convert_domain_from_step_to_nurbs(
+        &self,
+        k: &Kernel,
+        anal_domain: &Extent2d,
+    ) -> Result<Extent2d> {
+        let min_nurb_uv = self.convert_uv_from_step_to_nurbs(k, anal_domain.min())?;
+        let max_nurb_uv = self.convert_uv_from_step_to_nurbs(k, anal_domain.max())?;
 
         // InsideOut reverses the generator direction. With SwapUV that direction is U,
         // not V, so order the converted endpoints in both coordinates.
@@ -1222,22 +1242,16 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// `SetMinMax`'s error (a reversed `u` interval); upstream then also sets the
-    /// output to `nurb_domain`.
-    pub fn convert_domain_from_nurbs_to_step(&self, nurb_domain: &Extent2d) -> Result<Extent2d> {
-        let min_step_uv = self.convert_uv_from_nurbs_to_step(nurb_domain.min());
-        let max_step_uv = self.convert_uv_from_nurbs_to_step(nurb_domain.max());
-
-        // set output - InsideOut swaps the GenCurve min to max traversal direction
-        let mut d = Extent2d::new();
-        d.set_min_max_coords(
-            min_step_uv.x,
-            min_step_uv.y.min(max_step_uv.y),
-            max_step_uv.x,
-            min_step_uv.y.max(max_step_uv.y),
-        )
-        .map_err(|_| SolidError::sm_err(OP_DOMAIN))?;
-        Ok(d)
+    /// Those of the conversions; `SetMinMax`'s `InvalidInput` (`SM_ERR_INVALID_INPUT`:
+    /// a reversed `u` interval); upstream then also sets the output to `nurb_domain`.
+    pub fn convert_domain_from_nurbs_to_step(
+        &self,
+        k: &Kernel,
+        nurb_domain: &Extent2d,
+    ) -> Result<Extent2d> {
+        convert_domain_from_nurbs_to_step_with(nurb_domain, |uv| {
+            self.convert_uv_from_nurbs_to_step(k, uv)
+        })
     }
 
     // ---- caches and sizes -----------------------------------------------------------
@@ -1262,7 +1276,8 @@ impl Surface {
         expand_pos_boxes_by_zone_tol_3d: bool,
     ) -> Result<SurfaceBoxes> {
         match self.kind() {
-            SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) => {
+            // (SmSurfOfRevolution inherits the B-spline override)
+            SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SurfOfRevolution(_) => {
                 // the B-spline override expands by its face's tolerance (GetFace()):
                 // the owner is held here, not by the B-spline
                 if expand_pos_boxes_by_zone_tol_3d && (want[0] || want[1]) && self.face()?.is_some()
@@ -1283,6 +1298,9 @@ impl Surface {
                 };
                 let r = match self.kind() {
                     SurfaceKind::BSpline(s) => s.calculate_bounding_box(uv_domain, &req)?,
+                    SurfaceKind::SurfOfRevolution(s) => {
+                        s.base().calculate_bounding_box(uv_domain, &req)?
+                    }
                     SurfaceKind::Plane(p) => plane_bounding_box(p, uv_domain, &req)?,
                     _ => unreachable_kind()?,
                 };
@@ -1546,6 +1564,8 @@ impl Surface {
     pub fn is_degenerate_point(&self, tol_3d: f64, uv_domain: Option<&Extent2d>) -> Result<bool> {
         match self.kind() {
             SurfaceKind::BSpline(s) => s.is_degenerate_point(tol_3d, uv_domain),
+            // inherited from SmBSplineSurface
+            SurfaceKind::SurfOfRevolution(s) => s.base().is_degenerate_point(tol_3d, uv_domain),
             SurfaceKind::Plane(p) => p.base_for_query().is_degenerate_point(tol_3d, uv_domain),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
                 base_is_degenerate_point(self, tol_3d, uv_domain)
@@ -1568,6 +1588,11 @@ impl Surface {
     ) -> Result<bool> {
         match self.kind() {
             SurfaceKind::BSpline(s) => s.is_degenerate_curve(angle_tol_deg, uv_domain, opt_3d_tol),
+            // inherited from SmBSplineSurface
+            SurfaceKind::SurfOfRevolution(s) => {
+                s.base()
+                    .is_degenerate_curve(angle_tol_deg, uv_domain, opt_3d_tol)
+            }
             SurfaceKind::Plane(p) => {
                 p.base_for_query()
                     .is_degenerate_curve(angle_tol_deg, uv_domain, opt_3d_tol)
@@ -2123,6 +2148,31 @@ pub fn evaluate_normal_section(eval: &mut [[Vec3; 3]; 3], direction: Vec3) -> Re
     Ok((plane_proj, curvature))
 }
 
+/// The body of `SmSurface::ConvertDomainFromNURBSToSTEP`, with the surface's virtual
+/// `ConvertUVFromNURBSToSTEP` as `to_step` (shared by [`Surface`] and the surfaces of
+/// revolution, which reach it without a [`Surface`] wrapper).
+///
+/// # Errors
+///
+/// Those of `to_step`; `SetMinMax`'s `InvalidInput` (a reversed `u` interval).
+pub(crate) fn convert_domain_from_nurbs_to_step_with(
+    nurb_domain: &Extent2d,
+    to_step: impl Fn(Point2) -> Result<Point2>,
+) -> Result<Extent2d> {
+    let min_step_uv = to_step(nurb_domain.min())?;
+    let max_step_uv = to_step(nurb_domain.max())?;
+
+    // set output - InsideOut swaps the GenCurve min to max traversal direction
+    let mut d = Extent2d::new();
+    d.set_min_max_coords(
+        min_step_uv.x,
+        min2(min_step_uv.y, max_step_uv.y),
+        max_step_uv.x,
+        max2(min_step_uv.y, max_step_uv.y),
+    )?;
+    Ok(d)
+}
+
 /// Whether a step from `prev_uv` to `curr_uv` crossed a seam or a pole
 /// (`sm_CrossedSeamOrPole`): never on planes and bilinear B-splines; else a step
 /// longer than 0.4 of the domain side in `u` or in `v`.
@@ -2139,6 +2189,13 @@ pub fn crossed_seam_or_pole(
     match surface.kind() {
         SurfaceKind::Plane(_) => return false,
         SurfaceKind::BSpline(b) => {
+            if b.degree(SurfParamType::U) == 1 && b.degree(SurfParamType::V) == 1 {
+                return false;
+            }
+        }
+        // an SmSurfOfRevolution is an SmBSplineSurface
+        SurfaceKind::SurfOfRevolution(s) => {
+            let b = s.base();
             if b.degree(SurfParamType::U) == 1 && b.degree(SurfParamType::V) == 1 {
                 return false;
             }

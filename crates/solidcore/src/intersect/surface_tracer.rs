@@ -1647,7 +1647,10 @@ fn surface_drop_curve(
             let r = p.drop_curve(k, uv_domain, curve, interval, approx_tol, true, false)?;
             Ok((r.max_drop_to_surf, r.max_approx_dev, r.uv_curves))
         }
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::CurveBounded(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::Step(_) => {
             // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
             Err(SolidError::unported(
                 "SmSurface::DropCurve",

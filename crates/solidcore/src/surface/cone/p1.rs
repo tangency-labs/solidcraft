@@ -92,15 +92,15 @@
 //!   [`Cone::set_out_of_bounds_enabled`] already propagates the flag to the generator.
 //! - **ASCII `ReadFromDB`.** A failed numeric extraction leaves the field at its
 //!   initial value (`UNDEF_DOUBLE` for the radius and semi-angle); C++11 `>>` stores `0`.
-//!   Not observable while the read ends in [`SolidError::Unported`]
-//!   (`surface.surf_of_revolution_p3`); revisit when that unit wires `ReadFromDB`.
+//!   The record then fails anyway: the surface of revolution record that follows
+//!   cannot be read from the failed stream.
 //! - **`sm_TotalCoincidenceChecker`** returns `FALSE` (`0`, not `SM_SUCCESS`) for two
 //!   lines that are not coincident: that is the `SmStatus` 0 error here.
 //! - **Unported callees.** `AdjustSTEPUVDomain` past its radius checks calls
-//!   `SmSurfOfRevolution::AdjustSTEPUVDomain` (unit `surface.surf_of_revolution_p2`);
-//!   `Transform` past its argument checks calls `SmSurfOfRevolution::Transform` and
-//!   `ReadFromDB` past the cone's own data calls `SmSurfOfRevolution::ReadFromDB` (unit
-//!   `surface.surf_of_revolution_p3`): [`SolidError::Unported`].
+//!   `SmSurfOfRevolution::AdjustSTEPUVDomain` (unit `surface.surf_of_revolution_p2`):
+//!   [`SolidError::Unported`]. `Transform` finishes in `SmSurfOfRevolution::Transform`
+//!   (its polar-converter rebuild given the cone's iso curves, as upstream's virtual
+//!   call does) and `ReadFromDB` in [`SurfOfRevolution::read_from_db`].
 //! - **NURB.** The queries expect the NURB made ([`Cone::make_nurb`], as the
 //!   `CreateCanonical` functions do); upstream's `GetNaturalUVDomain` makes a missing
 //!   one through the `const` object, here its domain is then `[0, 0] x [0, 0]`.
@@ -1750,9 +1750,10 @@ impl Cone {
     /// # Errors
     ///
     /// `SM_ERR` for a non-uniform or non-positive scale; [`SolidError::Unported`]
-    /// otherwise (`SmSurfOfRevolution::Transform`, unit `surface.surf_of_revolution_p3`).
+    /// from `SmSurfOfRevolution::Transform` (whose other statuses upstream ignores).
     pub fn transform(
         &mut self,
+        k: &Kernel,
         rotate_n_move: &Axis2Placement,
         opt_scale: Option<Vec3>,
     ) -> Result<()> {
@@ -1775,12 +1776,16 @@ impl Cone {
             scale = s.x;
         }
 
-        // UNPORTED(surface.surf_of_revolution_p3): SmSurfOfRevolution::Transform
-        // (status ignored upstream)
-        ignore_status::<()>(Err(SolidError::unported(
-            "SmSurfOfRevolution::Transform",
-            "surface.surf_of_revolution_p3",
-        )))?;
+        // finish the call in the parent function (status ignored upstream), whose
+        // polar-converter rebuild reaches the cone's iso curves (the virtual
+        // CreateIsoParametricCurve)
+        let inside_out = self.inside_out;
+        ignore_status(
+            self.rev
+                .transform_using(k, rotate_n_move, opt_scale, &|s, k, p, t| {
+                    Ok(cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve)
+                }),
+        )?;
 
         // update cone size
         self.base_radius *= scale;
@@ -1826,13 +1831,12 @@ impl Cone {
     ///
     /// # Errors
     ///
-    /// Those of the binary reads; [`SolidError::Unported`] for the surface of
-    /// revolution (`SmSurfOfRevolution::ReadFromDB`, unit
-    /// `surface.surf_of_revolution_p3`).
+    /// Those of the binary reads and of the surface of revolution record
+    /// ([`SurfOfRevolution::read_from_db`]).
     pub fn read_from_db(
-        _k: &Kernel,
+        k: &Kernel,
         db: &mut DatabaseReader,
-        _version: u64,
+        version: u64,
         cylinder: bool,
     ) -> Result<Self> {
         // init output object
@@ -1867,11 +1871,11 @@ impl Cone {
             cone.inside_out = db.read_boolean()? != 0;
         }
 
-        // UNPORTED(surface.surf_of_revolution_p3): SmSurfOfRevolution::ReadFromDB
-        Err(SolidError::unported(
-            "SmSurfOfRevolution::ReadFromDB",
-            "surface.surf_of_revolution_p3",
-        ))
+        // read the parent object
+        cone.rev = SurfOfRevolution::read_from_db(k, db, version)?;
+
+        // all done
+        Ok(cone)
     }
 }
 
@@ -2257,15 +2261,22 @@ mod tests {
             .adjust_step_uv_domain(&Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
             .unwrap_err()
             .is_unported());
-        assert!(c.transform(&Axis2Placement::IDENTITY, None).is_ok());
+        assert!(c.transform(&k(), &Axis2Placement::IDENTITY, None).is_ok());
         assert!(matches!(
-            c.transform(&Axis2Placement::IDENTITY, Some(Vec3::new(1.0, 2.0, 1.0))),
+            c.transform(
+                &k(),
+                &Axis2Placement::IDENTITY,
+                Some(Vec3::new(1.0, 2.0, 1.0))
+            ),
             Err(SolidError::Upstream { code: SM_ERR, .. })
         ));
         assert!(c
-            .transform(&Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 2.0, 2.0)))
-            .unwrap_err()
-            .is_unported());
+            .transform(
+                &k(),
+                &Axis2Placement::IDENTITY,
+                Some(Vec3::new(2.0, 2.0, 2.0))
+            )
+            .is_ok());
         // huge orders fail cleanly
         assert!(c
             .evaluate_step(Point2::new(0.0, 1.0), usize::MAX, 1)
@@ -2289,7 +2300,8 @@ mod tests {
         assert!(!e.is_unported());
         let mut db = DatabaseReader::new();
         db.open_for_read(b"1.5\n30\n1\n".to_vec(), FileType::Ascii);
-        assert!(Cone::read_from_db(&k(), &mut db, 30, true)
+        // the surface of revolution record is missing
+        assert!(!Cone::read_from_db(&k(), &mut db, 30, true)
             .unwrap_err()
             .is_unported());
     }

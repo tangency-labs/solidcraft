@@ -189,6 +189,10 @@ fn surface_read_from_db(
             "SmSurface virtuals of an SmSTEPSurface",
             "curve.crv_on_surf",
         )),
+        SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
+            "SmSurface virtuals of an SmSurfOfRevolution",
+            "curve.crv_on_surf",
+        )),
     }
 }
 

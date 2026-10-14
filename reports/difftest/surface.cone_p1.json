@@ -1922,16 +1922,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "transform_move",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/cases.json#238 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -17046,28 +17042,20 @@
       "values_compared": 250
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "review_c123_tr_id_[2.0, 2.0, 2.0]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#1876 (upstream review adversarial)",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "review_c123_tr_nid_[2.0, 2.0, 2.0]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#1877 (upstream review adversarial)",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -17166,28 +17154,20 @@
       "values_compared": 250
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "review_unb30r1_tr_id_[2.0, 2.0, 2.0]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#1890 (upstream review adversarial)",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "review_unb30r1_tr_nid_[2.0, 2.0, 2.0]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#1891 (upstream review adversarial)",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -17286,28 +17266,20 @@
       "values_compared": 258
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "review_cyl_tr_id_[2.0, 2.0, 2.0]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#1904 (upstream review adversarial)",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "review_cyl_tr_nid_[2.0, 2.0, 2.0]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#1905 (upstream review adversarial)",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -155370,16 +155342,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159428",
-      "values_compared": 0
+      "values_compared": 166
     },
     {
       "max_rel_err": 0.0,
@@ -156418,16 +156386,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0154",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159555",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -156462,16 +156426,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0159",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159560",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -156482,16 +156442,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0161",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159562",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -156602,28 +156558,20 @@
       "values_compared": 251
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0175",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159576",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0176",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159577",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -156930,16 +156878,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159615",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -157214,16 +157158,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0249",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159650",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "deferred": {
@@ -157342,16 +157282,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0264",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159665",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -157402,16 +157338,12 @@
       "values_compared": 257
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159672",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -157450,16 +157382,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0276",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159677",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -157470,16 +157398,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0278",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159679",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -157546,16 +157470,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0287",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159688",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -157602,16 +157522,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0293",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159694",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -157678,16 +157594,12 @@
       "values_compared": 257
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0302",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159703",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -157746,16 +157658,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0310",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159711",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -157782,16 +157690,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0314",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159715",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -157818,16 +157722,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0318",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159719",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -157838,16 +157738,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0320",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159721",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -157858,16 +157754,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0322",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159723",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -157886,16 +157778,12 @@
       "values_compared": 28
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0325",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159726",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -158258,16 +158146,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0371",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159772",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -158710,16 +158594,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0427",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159828",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -158842,16 +158722,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0443",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159844",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -159022,16 +158898,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0464",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159865",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -159306,16 +159178,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159900",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -159526,16 +159394,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0526",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159927",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -159654,16 +159518,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0541",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159942",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -159714,16 +159574,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0548",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159949",
-      "values_compared": 0
+      "values_compared": 222
     },
     {
       "max_rel_err": 0.0,
@@ -159734,16 +159590,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0550",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159951",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -159942,16 +159794,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0575",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390159976",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -160290,16 +160138,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0616",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160017",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -160538,16 +160382,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0646",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160047",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -160914,16 +160754,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0691",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160092",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -161222,16 +161058,12 @@
       "values_compared": 191
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0727",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160128",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -161670,16 +161502,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0781",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160182",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "deferred": {
@@ -161898,16 +161726,12 @@
       "values_compared": 249
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0808",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160209",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -162706,16 +162530,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0907",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160308",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -162990,16 +162810,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0941",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160342",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "deferred": {
@@ -163046,16 +162862,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0947",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160348",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -163674,16 +163486,12 @@
       "values_compared": 249
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1023",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160424",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -164090,16 +163898,12 @@
       "values_compared": 257
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160475",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -164686,16 +164490,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1147",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160548",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -165182,16 +164982,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1208",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160609",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -165490,16 +165286,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1246",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160647",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -165550,16 +165342,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1253",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160654",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -165618,16 +165406,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1261",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160662",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -166178,28 +165962,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1328",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160729",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1329",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160730",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -166426,16 +166202,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1357",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160758",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -166454,16 +166226,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160761",
-      "values_compared": 0
+      "values_compared": 192
     },
     {
       "max_rel_err": 0.0,
@@ -166630,16 +166398,12 @@
       "values_compared": 257
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1381",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160782",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "deferred": {
@@ -166774,16 +166538,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1398",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160799",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -167106,16 +166866,12 @@
       "values_compared": 173
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160838",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -167290,16 +167046,12 @@
       "values_compared": 29
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1459",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160860",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -167426,16 +167178,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1475",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160876",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -167502,16 +167250,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1484",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160885",
-      "values_compared": 0
+      "values_compared": 258
     },
     {
       "max_rel_err": 0.0,
@@ -167602,16 +167346,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmSurfOfRevolution::Transform",
-        "unit": "surface.surf_of_revolution_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1496",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5844057181390160897",
-      "values_compared": 0
+      "values_compared": 250
     },
     {
       "max_rel_err": 0.0,
@@ -167639,13 +167379,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 521,
+  "cases_deferred": 456,
   "cases_failed": 0,
-  "cases_passed": 20173,
+  "cases_passed": 20238,
   "cases_total": 20694,
   "deferred_by_unit": {
-    "surface.surf_of_revolution_p2": 456,
-    "surface.surf_of_revolution_p3": 65
+    "surface.surf_of_revolution_p2": 456
   },
   "max_rel_err": 0.0,
   "pass": true,

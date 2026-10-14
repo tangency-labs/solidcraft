@@ -1077,7 +1077,11 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
     match s.map(Surface::kind) {
         Some(sp2::SurfaceKind::BSpline(b)) => dump_bss(o, b),
         // `put_state` of a surface that is not a B-spline
-        Some(sp2::SurfaceKind::CurveBounded(_) | sp2::SurfaceKind::Plane(_) | sp2::SurfaceKind::Step(_))
+        Some(
+            sp2::SurfaceKind::CurveBounded(_)
+            | sp2::SurfaceKind::Plane(_)
+            | sp2::SurfaceKind::SurfOfRevolution(_) | sp2::SurfaceKind::Step(_),
+        )
         | None => o.push(0.0),
     }
 }
@@ -1252,10 +1256,12 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
         }),
         OpIn::Reverse { dir } => {
             let dir = param_of(*dir)?;
-            edit(&mut s, |x| x.reverse(dir))
+            edit(&mut s, |x| x.reverse(&Kernel::default(), dir))
         }
-        OpIn::Reparam { dom } => edit(&mut s, |x| x.reparameterize(&dom_of(*dom))),
-        OpIn::Swap => edit(&mut s, Surface::swap_uv),
+        OpIn::Reparam { dom } => edit(&mut s, |x| {
+            x.reparameterize(&Kernel::default(), &dom_of(*dom))
+        }),
+        OpIn::Swap => edit(&mut s, |x| x.swap_uv(&Kernel::default())),
         OpIn::Transform {
             origin,
             x,
@@ -1263,7 +1269,9 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             scale,
         } => {
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
-            edit(&mut s, |srf| srf.transform(&ax, scale.map(v3)))
+            edit(&mut s, |srf| {
+                srf.transform(&Kernel::default(), &ax, scale.map(v3))
+            })
         }
         OpIn::Trim { dom } => {
             let mut d = dom_of(*dom);
@@ -1351,6 +1359,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
         OpIn::DropFast { dom, p } => record(|_| {
             match &s {
                 Some(x) => x.drop_point_fast::<Handle>(
+                    &Kernel::default(),
                     &dom_of(*dom),
                     SolverOperation::Minimize,
                     v3(*p),
@@ -1367,8 +1376,8 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             let uv = p2(*uv);
             let (a, b) = match &s {
                 Some(x) => (
-                    x.convert_uv_from_step_to_nurbs(uv),
-                    x.convert_uv_from_nurbs_to_step(uv),
+                    x.convert_uv_from_step_to_nurbs(&Kernel::default(), uv)?,
+                    x.convert_uv_from_nurbs_to_step(&Kernel::default(), uv)?,
                 ),
                 None => (base_convert_uv(uv), base_convert_uv(uv)),
             };

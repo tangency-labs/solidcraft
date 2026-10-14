@@ -8,8 +8,10 @@
 //! adds methods to [`SurfOfRevolution`] (or free functions).
 
 pub mod p1;
+pub mod p3;
 
 pub use p1::{
     test_for_iso_circles, DirectrixAtGeneratorParam, IsoCircles, RevolutionIsoCurve,
     SurfOfRevolution,
 };
+pub use p3::Revolved;
