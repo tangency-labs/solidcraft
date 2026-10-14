@@ -95,8 +95,9 @@
 //!   value after them (`GetNaturalUVDomain`, `GetDegree`, ...) the port returns the
 //!   same value.
 //! - **Unported callees.** The intersection drivers (`GlobalSurfaceIntersect`,
-//!   `PointBasedSurfaceIntersect`) need `SmAdvSurfaceIntersector`
-//!   (`intersect.adv_surface_intersector`); `CurveOnClassify` needs
+//!   `PointBasedSurfaceIntersect`) build the `SmAdvSurfaceIntersector` and then need
+//!   `SmSurfaceIntersector::DoIntersection` / `DoPointIntersection`
+//!   (`intersect.surface_intersector_p5` / `_p4`); `CurveOnClassify` needs
 //!   `SmCurveClassification` (`intersect.curve_class_p*`); `CreatePlaneWith3DCurves`
 //!   needs `SmTrimmingTools` (`topology.trimming_tools`); `smsurf_GetSurfaceCache`
 //!   needs the cache store to make surface caches (`SmSurface::CacheMakeOrValidate`,
@@ -165,6 +166,7 @@ use crate::geom::tol::{are_same, eff_zero_param, scaled_zero2, tol3d};
 use crate::geom::tree::{AuxDataType, Tree, TreeNode, TreeOwner};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::intersect::adv_surface_intersector::{AdvSurfaceIntersector, NoSurfaceHandle};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
@@ -1118,21 +1120,26 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmAdvSurfaceIntersector`
-    /// (`intersect.adv_surface_intersector`).
+    /// Those of the intersector's construction; [`SolidError::Unported`]:
+    /// `SmSurfaceIntersector::DoIntersection` (`intersect.surface_intersector_p5`).
     pub fn global_surface_intersect(
         &self,
-        _uv_domain: &Extent2d,
-        _other: &Self,
-        _other_uv_domain: &Extent2d,
-        _use_surface_edges: [bool; 2],
+        uv_domain: &Extent2d,
+        other: &Self,
+        other_uv_domain: &Extent2d,
+        use_surface_edges: [bool; 2],
         _approx_tol_3d: Option<f64>,
         _ang_tol_rad: Option<f64>,
     ) -> Result<SurfaceIntersection> {
-        // UNPORTED(intersect.adv_surface_intersector): SmAdvSurfaceIntersector::SmAdvSurfaceIntersector
+        let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+            AdvSurfaceIntersector::new(self, uv_domain, other, other_uv_domain, false)?;
+        ssi.base
+            .set_use_surface_edges(use_surface_edges[0], use_surface_edges[1]);
+
+        // UNPORTED(intersect.surface_intersector_p5): SmSurfaceIntersector::DoIntersection
         Err(SolidError::unported(
-            "SmAdvSurfaceIntersector::SmAdvSurfaceIntersector",
-            "intersect.adv_surface_intersector",
+            "SmSurfaceIntersector::DoIntersection",
+            "intersect.surface_intersector_p5",
         ))
     }
 
@@ -1143,14 +1150,14 @@ impl Surface {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for point lists of different lengths or of 20
-    /// points or more (upstream writes past its arrays);
-    /// [`SolidError::Unported`]: `SmAdvSurfaceIntersector`
-    /// (`intersect.adv_surface_intersector`).
+    /// points or more (upstream writes past its arrays); those of the intersector's
+    /// construction; [`SolidError::Unported`]: `SmSurfaceIntersector::DoPointIntersection`
+    /// (`intersect.surface_intersector_p4`).
     pub fn point_based_surface_intersect(
         &self,
-        _uv_domain: &Extent2d,
-        _other: &Self,
-        _other_uv_domain: &Extent2d,
+        uv_domain: &Extent2d,
+        other: &Self,
+        other_uv_domain: &Extent2d,
         surface1_points: &[Point2],
         surface2_points: &[Point2],
         _extend: [bool; 2],
@@ -1177,10 +1184,14 @@ impl Surface {
             })
             .collect();
 
-        // UNPORTED(intersect.adv_surface_intersector): SmAdvSurfaceIntersector::DoPointIntersection
+        // allocate the surf/surf intersector
+        let _ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+            AdvSurfaceIntersector::new(self, uv_domain, other, other_uv_domain, false)?;
+
+        // UNPORTED(intersect.surface_intersector_p4): SmSurfaceIntersector::DoPointIntersection
         Err(SolidError::unported(
-            "SmAdvSurfaceIntersector::DoPointIntersection",
-            "intersect.adv_surface_intersector",
+            "SmSurfaceIntersector::DoPointIntersection",
+            "intersect.surface_intersector_p4",
         ))
     }
 

@@ -648,6 +648,23 @@ impl Enc {
     }
 }
 
+/// Appends the shim encoding of surface `s` to `v` (shared with the
+/// `intersect.adv_surface_intersector` shim, which reads surfaces the same way).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a rejected surface.
+pub(crate) fn encode_surface(v: &mut Vec<f64>, s: &SurfaceIn) -> Result<(), FfiError> {
+    let mut e = Enc {
+        v: core::mem::take(v),
+        npoints: 0,
+        ncurves: 0,
+    };
+    let r = e.surface(s);
+    *v = e.v;
+    r
+}
+
 /// Encodes `prog` for the shim.
 ///
 /// # Errors

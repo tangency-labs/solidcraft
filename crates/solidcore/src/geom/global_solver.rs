@@ -22,7 +22,7 @@
 //! | [`GlobalSolver::set_solver_operation`] .. [`GlobalSolver::set_at_distance`] | `SetSolverOperation` .. `SetAtDistance` |
 //! | [`GlobalSolve`]                              | the virtual interface of `SmGlobalSolver`        |
 //! | [`GlobalSolve::solve_it`], [`SolveRequest`]  | `SmGlobalSolver::SolveIt` (and its arguments)    |
-//! | [`GlobalSolve::solve_branch`]                | `SmGlobalSolver::SolveBranch`                    |
+//! | [`GlobalSolve::solve_branch`], [`solve_branch`] | `SmGlobalSolver::SolveBranch`                 |
 //! | [`GlobalSolve::branch_may_contain_answers`], [`GlobalSolver::branch_may_contain_answers`] | `SmGlobalSolver::BranchMayContainAnswers` |
 //! | [`GlobalSolve::are_ready_for_local_solve`], [`GlobalSolver::are_ready_for_local_solve`] | `SmGlobalSolver::AreReadyForLocalSolve` |
 //! | `find_largest_non_leaf` (private)            | `sm_FindLargestNonLeaf`                          |
@@ -1378,6 +1378,43 @@ fn combine_min_max<O: SolutionObject>(
     Ok(None)
 }
 
+/// `SmGlobalSolver::SolveBranch`, the base behaviour of
+/// [`GlobalSolve::solve_branch`] (callable from an override): culls `branch`,
+/// locally solves it when ready and recurses into its subdivisions, all through
+/// `solver`'s hooks.
+///
+/// # Errors
+///
+/// Those of the hooks.
+pub fn solve_branch<'t, O, S>(solver: &mut S, branch: &Branch) -> Result<()>
+where
+    O: SolutionObject + 't,
+    S: GlobalSolve<'t, O> + ?Sized,
+{
+    // no more work - these nodes no longer contain possible answer
+    if !solver.branch_may_contain_answers(branch)? {
+        return Ok(());
+    }
+
+    // check for leaf nodes
+    if solver.are_ready_for_local_solve(branch)? {
+        // make the leafNode/leafNode call to Local solver.
+        let needs_more_subdivision = solver.local_solve(branch)?;
+
+        // done with this branch when LocalSolver is done
+        if !needs_more_subdivision {
+            return Ok(());
+        }
+    }
+
+    // get the children to this solverNode
+    let (child1, child2) = solver.subdivide(branch)?;
+
+    // recurse for each childNode
+    solver.solve_branch(&child1)?;
+    solver.solve_branch(&child2)
+}
+
 /// The overridable interface of a global solver (the virtual methods of
 /// `SmGlobalSolver`). Implementors expose their [`GlobalSolver`] state and
 /// override the hooks they specialise; the base behaviour of each hook is
@@ -1431,28 +1468,7 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
     /// `SolveBranch`: recursively culls, subdivides and locally solves
     /// `branch`.
     fn solve_branch(&mut self, branch: &Branch) -> Result<()> {
-        // no more work - these nodes no longer contain possible answer
-        if !self.branch_may_contain_answers(branch)? {
-            return Ok(());
-        }
-
-        // check for leaf nodes
-        if self.are_ready_for_local_solve(branch)? {
-            // make the leafNode/leafNode call to Local solver.
-            let needs_more_subdivision = self.local_solve(branch)?;
-
-            // done with this branch when LocalSolver is done
-            if !needs_more_subdivision {
-                return Ok(());
-            }
-        }
-
-        // get the children to this solverNode
-        let (child1, child2) = self.subdivide(branch)?;
-
-        // recurse for each childNode
-        self.solve_branch(&child1)?;
-        self.solve_branch(&child2)
+        solve_branch(self, branch)
     }
 
     /// `SolveIt`: runs the solve described by `request` from the top nodes of

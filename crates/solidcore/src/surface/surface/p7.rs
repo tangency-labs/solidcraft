@@ -76,8 +76,8 @@
 //!   `SmFindSingularParamWithGivenTangentDirEFO`, `sm_IsNodeValid`, `IsFlatCorner`,
 //!   `EvaluateSTEP`, `GetFace` and the base `CalculateBoundingBox`
 //!   (`surface.surface_p1`; the solver constructors also hand over the caches holding
-//!   the patch data of tree nodes); `SmAdvSurfaceIntersector`
-//!   (`intersect.adv_surface_intersector`).
+//!   the patch data of tree nodes); `SmSurfaceIntersector::DoIntersection`
+//!   (`intersect.surface_intersector_p5`).
 
 use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
@@ -1263,12 +1263,12 @@ impl Surface {
         // then: the cache's SurfaceCache::surface_continuity (only reported), the curve's
         // CalculateContinuities (only reported), the projection distance (given, or 4x the
         // largest box distance), the curve's linear sweep along the unit vector times the
-        // distance (translated back by half when not given), and:
-        // UNPORTED(intersect.adv_surface_intersector): SmAdvSurfaceIntersector::SmAdvSurfaceIntersector
-        // (then DoIntersection)
+        // distance (translated back by half when not given), the intersector
+        // (`AdvSurfaceIntersector::new` of this surface and the sweep), and:
+        // UNPORTED(intersect.surface_intersector_p5): SmSurfaceIntersector::DoIntersection
         Err(SolidError::unported(
-            "SmAdvSurfaceIntersector::SmAdvSurfaceIntersector",
-            "intersect.adv_surface_intersector",
+            "SmSurfaceIntersector::DoIntersection",
+            "intersect.surface_intersector_p5",
         ))
     }
 }

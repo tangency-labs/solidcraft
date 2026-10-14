@@ -1741,7 +1741,7 @@ fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Ve
 
 /// `crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)`: the plane override; other kinds
 /// run `SmSurface::EvaluateNormal`.
-fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
+pub(crate) fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
     surface.evaluate_normal(uv, Side::Left, Side::Left)
 }
 
@@ -1817,7 +1817,7 @@ fn surface_drop_point(
 
 /// `m_cpSurface[0]->LocalSurfaceIntersect(..)`: found flag and the solution's start
 /// parameters `[u0, v0, u1, v1]`.
-fn surface_local_surface_intersect(
+pub(crate) fn surface_local_surface_intersect(
     _surface: &Surface,
     _domain: &Extent2d,
     _other: &Surface,
