@@ -10,6 +10,7 @@
 pub mod p1;
 pub mod p2;
 pub mod p7;
+pub mod p9;
 
 pub use p1::StepSurface;
 pub use p2::{Surface, SurfaceKind};

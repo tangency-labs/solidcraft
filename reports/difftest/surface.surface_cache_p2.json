@@ -182,16 +182,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_subdiv_block",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_cache_p2/cases.json#22 (upstream prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms))",
-      "values_compared": 0
+      "values_compared": 2507
     },
     {
       "max_rel_err": 0.0,
@@ -410,16 +406,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_subdiv_block",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_cache_p2/cases.json#49 (upstream prog_test smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 167
     },
     {
       "max_rel_err": 0.0,
@@ -639,8 +631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
       },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_subdiv_block",
@@ -1294,16 +1286,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0047",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453034",
-      "values_compared": 0
+      "values_compared": 1187
     },
     {
       "max_rel_err": 0.0,
@@ -1354,16 +1342,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0054",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453041",
-      "values_compared": 0
+      "values_compared": 107
     },
     {
       "max_rel_err": 0.0,
@@ -2098,16 +2082,12 @@
       "values_compared": 412
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0142",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453129",
-      "values_compared": 0
+      "values_compared": 527
     },
     {
       "max_rel_err": 0.0,
@@ -2978,16 +2958,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453234",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3058,16 +3034,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453243",
-      "values_compared": 0
+      "values_compared": 24167
     },
     {
       "max_rel_err": 0.0,
@@ -3570,16 +3542,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0317",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453304",
-      "values_compared": 0
+      "values_compared": 227
     },
     {
       "max_rel_err": 0.0,
@@ -4610,16 +4578,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0440",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453427",
-      "values_compared": 0
+      "values_compared": 167
     },
     {
       "max_rel_err": 0.0,
@@ -4702,16 +4666,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0451",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453438",
-      "values_compared": 0
+      "values_compared": 827
     },
     {
       "max_rel_err": 0.0,
@@ -5898,16 +5858,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0593",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453580",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -7642,16 +7598,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0796",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453783",
-      "values_compared": 0
+      "values_compared": 917
     },
     {
       "max_rel_err": 0.0,
@@ -7679,14 +7631,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 109,
+  "cases_deferred": 97,
   "cases_failed": 0,
-  "cases_passed": 796,
+  "cases_passed": 808,
   "cases_total": 905,
   "deferred_by_unit": {
+    "intersect.curve_class_p4": 1,
     "surface.surface_cache_p1": 53,
-    "surface.surface_p5": 43,
-    "surface.surface_p9": 13
+    "surface.surface_p5": 43
   },
   "max_rel_err": 0.0,
   "pass": true,

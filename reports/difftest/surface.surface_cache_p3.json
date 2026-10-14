@@ -238,16 +238,12 @@
       "values_compared": 1259
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824802",
-      "values_compared": 0
+      "values_compared": 6451
     },
     {
       "deferred": {
@@ -4274,16 +4270,12 @@
       "values_compared": 154
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::FindTessellationSplits",
-        "unit": "surface.surface_p9"
-      },
       "max_rel_err": 0.0,
       "name": "gen0476",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825252",
-      "values_compared": 0
+      "values_compared": 10357
     },
     {
       "max_rel_err": 0.0,
@@ -5411,17 +5403,16 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 152,
+  "cases_deferred": 150,
   "cases_failed": 0,
-  "cases_passed": 448,
+  "cases_passed": 450,
   "cases_total": 600,
   "deferred_by_unit": {
     "query.tess": 38,
     "surface.surface_cache_p1": 8,
     "surface.surface_p3": 15,
     "surface.surface_p5": 32,
-    "surface.surface_p6": 57,
-    "surface.surface_p9": 2
+    "surface.surface_p6": 57
   },
   "max_rel_err": 0.0,
   "pass": true,

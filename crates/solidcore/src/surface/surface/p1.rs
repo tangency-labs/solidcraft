@@ -2512,6 +2512,12 @@ impl EvalFunction for FindSingularParamWithGivenTangentDir<'_> {
 pub struct CsiGlobalSolver<'t, 's, O> {
     /// The `SmGlobalSolver` state.
     pub base: GlobalSolver<'t, O>,
+    /// Curve geometry supplied by the caller for leaf solves (part 9).
+    pub curve: Option<&'s Curve>,
+    /// Cache supplying the surface patches for leaf solves (part 9).
+    pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// Geometry context supplied for leaf solves (part 9).
+    pub kernel: Option<&'s Kernel>,
     /// `m_pSurf`.
     pub surface: Option<&'s Surface>,
     /// `m_bFoundCoincidence`.
@@ -2535,6 +2541,9 @@ impl<'t, 's, O: SolutionObject> CsiGlobalSolver<'t, 's, O> {
     ) -> Self {
         Self {
             base: GlobalSolver::with_trees(curve_tree, surface_tree, 3),
+            curve: None,
+            surface_cache: None,
+            kernel: None,
             surface,
             found_coincidence,
             interval,

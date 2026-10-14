@@ -635,7 +635,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             tree.set_top_node(Some(NodeId(0)));
             *cache.auxs_mut() = vec![aux_data(*dom, 0)];
             cache.set_tree(Some(tree));
-            let r = cache.subdivide_by_block(NodeId(0));
+            let r = cache.subdivide_by_block(&k, NodeId(0));
             let mut o = Vec::new();
             match r {
                 Ok(()) => o.push(0.0),

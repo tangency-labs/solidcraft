@@ -648,7 +648,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             && node_surface.is_some()
         {
             // tessellate this node completely in a single pass
-            self.subdivide_by_block(node)?;
+            self.subdivide_by_block(k, node)?;
             self.switch_to_fast_subdivision = false;
             return Ok(());
         }

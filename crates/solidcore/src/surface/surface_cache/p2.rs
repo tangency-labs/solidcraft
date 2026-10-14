@@ -771,10 +771,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// `SM_ERR_NULL_POINTER` for a node without surface; `SM_ERR` for a malformed
     /// node grid; `InvalidInput` for a node without surface data;
-    /// [`SolidError::Unported`] from `SmSurface::FindTessellationSplits`
-    /// (`surface.surface_p9`) and the iso curve linearity tests.
+    /// Errors from tessellation split selection and the iso curve linearity tests.
     #[allow(clippy::too_many_lines)] // one upstream routine
-    pub fn subdivide_by_block(&mut self, node: NodeId) -> Result<()> {
+    pub fn subdivide_by_block(&mut self, k: &Kernel, node: NodeId) -> Result<()> {
         // locals
         let fields = {
             let tree = self
@@ -813,8 +812,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         let ang_deg = opts.ang_tol_rad * 180.0 / PI;
         // UDir tessellation points
-        let mut v_splits = find_tessellation_splits(
-            &surface,
+        let mut v_splits = surface.find_tessellation_splits(
+            k,
             SurfParamType::U,
             &uv_domain,
             opts.chord_height_tolerance,
@@ -823,8 +822,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             check_diagonals,
         )?;
         // VDir tessellation points
-        let mut u_splits = find_tessellation_splits(
-            &surface,
+        let mut u_splits = surface.find_tessellation_splits(
+            k,
             SurfParamType::V,
             &uv_domain,
             opts.chord_height_tolerance,
@@ -1074,24 +1073,6 @@ const fn zero_box() -> Extent3d {
     Extent3d::from_bounds(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 }
 
-/// `SmSurface::FindTessellationSplits(eSurfParam, crUVDomain, dChordHeightTolerance,
-/// dAngleTolDeg, dMaximumSideLength, rSplits, bCheckDiagonals)`.
-fn find_tessellation_splits(
-    _surface: &Surface,
-    _param: SurfParamType,
-    _uv_domain: &Extent2d,
-    _chord_height_tolerance: f64,
-    _angle_tol_deg: f64,
-    _maximum_side_length: f64,
-    _check_diagonals: bool,
-) -> Result<Vec<f64>> {
-    // UNPORTED(surface.surface_p9): SmSurface::FindTessellationSplits
-    Err(SolidError::unported(
-        "SmSurface::FindTessellationSplits",
-        "surface.surface_p9",
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1251,7 +1232,9 @@ mod tests {
                 a.surface = None;
             }
         }
-        let e = c.subdivide_by_block(NodeId(0)).expect_err("null");
+        let e = c
+            .subdivide_by_block(&Kernel::default(), NodeId(0))
+            .expect_err("null");
         assert!(matches!(e, SolidError::Upstream { code: 1006, .. }));
     }
 

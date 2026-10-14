@@ -844,3 +844,21 @@ geom_utility_p2 3270 green; all `max_rel_err` 0. fmt, clippy, tests and wasm32 p
   extend `math.rs`, or re-export from it, rather than create duplicate types, and update
   `rust_module` to match. *Resolved for `Vec2`:* `geom.vector2d` moved `Vec2`/`Point2` into `geom::vector2d`
   and `math` re-exports them; `geom.vector3d` can do the same for `Vec3`.
+
+## Surface tessellation and iso boundaries (2026-10-14, PR #6 review)
+
+`surface.surface_p9` is partial: 778 cases (178 fixtures and 600 generated),
+727 bit-identical, zero failed and 51 deferred (`intersect.curve_class_p4`: 50;
+`surface.surface_p6`: 1), with no absolute floors. All 96 review regressions
+and all 16 explicit analytic-plane cases without diagonals pass. The regression
+corpus reproduced 32 failures before the degeneracy/max-side fixes.
+
+The solver uses the existing surface_p1 `CsiGlobalSolver` and constructor;
+surface/node/point helpers call the ported p1 implementations. The disjoint CSI
+fixture now passes; crossing reaches `surface.surface_p6`. End-to-end CSI is
+still unverified. `FindTessellationSplits` is wired into block subdivision:
+cache p2 compares 808/905 cases (97 deferred), cache p3 450/600 (150 deferred).
+The latest-main revolution surface also has 18 direct C++ comparisons (canonical
+cylinder, virtual iso curves), all bit-identical. The committed reports give the
+current deferral owners; earlier tables above
+are historical snapshots.
