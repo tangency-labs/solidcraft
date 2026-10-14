@@ -40,9 +40,9 @@
 //!
 //! Deviations:
 //! - **Derived class.** `SmSurfOfExtrusion` derives from `SmBSplineSurface`; the base
-//!   object is the [`SurfOfExtrusion::base`] field. The surface joins
-//!   [`crate::surface::surface::SurfaceKind`] with the unit porting its remaining
-//!   virtual overrides (`surface.surf_of_extrusion_p2`).
+//!   object is the [`SurfOfExtrusion::base`] field. The surface is not a
+//!   [`crate::surface::surface::SurfaceKind`] yet: its overrides need a [`Kernel`] the
+//!   `Surface` dispatchers do not take (see `surface.surf_of_extrusion_p2`).
 //! - **Generator.** `m_pGenCurve` is a [`Curve`] of a kind derived from
 //!   `SmBSplineCurve` (B-spline, ellipse, line, hyperbola, parabola); other kinds are
 //!   rejected (`InvalidInput`) where upstream casts. It is `None` only for the empty
@@ -140,7 +140,7 @@ const MAX_DERIV: usize = 5;
 // ---- the generator (a curve derived from SmBSplineCurve) -------------------------------
 
 /// The `SmBSplineCurve` base object of a generator.
-fn gen_base(c: &Curve) -> Result<&BSplineCurve> {
+pub(super) fn gen_base(c: &Curve) -> Result<&BSplineCurve> {
     match c.kind() {
         CurveKind::BSpline(b) => Ok(b),
         CurveKind::Ellipse(e) => Ok(e.base()),
@@ -208,7 +208,7 @@ fn gen_max_analytic_domain(c: &Curve) -> Result<Extent1d> {
 /// The generator `c` with the out-of-bounds flag `enabled`
 /// (`SmTemporaryChangeValue<SmBoolean>(m_pGenCurve->GetOutOfBoundsEnabled(), ..)`):
 /// only the B-spline evaluation reads the flag, so only that kind is copied.
-fn gen_with_out_of_bounds(c: &Curve, enabled: bool) -> Option<Curve> {
+pub(super) fn gen_with_out_of_bounds(c: &Curve, enabled: bool) -> Option<Curve> {
     match c.kind() {
         CurveKind::BSpline(b) if b.is_out_of_bounds_enabled() != enabled => {
             let mut b = b.clone();

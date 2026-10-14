@@ -459,7 +459,7 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfOfExtrusion::ReadFromDB",
+        "symbol": "SurfaceKind::SurfOfExtrusion",
         "unit": "surface.surf_of_extrusion_p2"
       },
       "max_rel_err": 0.0,
@@ -1159,7 +1159,7 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfOfExtrusion::ReadFromDB",
+        "symbol": "SurfaceKind::SurfOfExtrusion",
         "unit": "surface.surf_of_extrusion_p2"
       },
       "max_rel_err": 0.0,

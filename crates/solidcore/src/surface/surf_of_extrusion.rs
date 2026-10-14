@@ -7,5 +7,7 @@
 //! methods to [`SurfOfExtrusion`] (or free functions).
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{CurveOrientType, GeneratorIntersection, SurfOfExtrusion};
+pub use p2::{ExtrusionIntersection, IntersectTarget};

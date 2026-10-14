@@ -55,7 +55,7 @@ pub const MIN_GENERATED: usize = 800;
 /// `surface.surf_of_extrusion_p1` runner.
 pub struct Runner;
 
-fn harness(msg: impl Into<String>) -> HarnessError {
+pub(crate) fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
@@ -63,18 +63,18 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 
 /// An inline 3D curve: Euclidean control points, optional weights, degree, knots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct InlineCrv {
-    cpts: Vec<[f64; 3]>,
+pub(crate) struct InlineCrv {
+    pub(crate) cpts: Vec<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    weights: Option<Vec<f64>>,
-    p: usize,
-    u: Vec<f64>,
+    pub(crate) weights: Option<Vec<f64>>,
+    pub(crate) p: usize,
+    pub(crate) u: Vec<f64>,
 }
 
 /// A generator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum GenIn {
+pub(crate) enum GenIn {
     BSpline(InlineCrv),
     Line {
         a: [f64; 3],
@@ -114,7 +114,7 @@ enum GenIn {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
-enum BuildIn {
+pub(crate) enum BuildIn {
     Canonical {
         vec: [f64; 3],
     },
@@ -129,13 +129,13 @@ enum BuildIn {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SurfIn {
-    gen: GenIn,
-    build: BuildIn,
+pub(crate) struct SurfIn {
+    pub(crate) gen: GenIn,
+    pub(crate) build: BuildIn,
     #[serde(default)]
-    oob: bool,
+    pub(crate) oob: bool,
     #[serde(default)]
-    swap: bool,
+    pub(crate) swap: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,7 +216,7 @@ struct Inputs {
 
 // ---- C++ side -------------------------------------------------------------------------
 
-fn cpts4(c: &InlineCrv) -> Result<Vec<[f64; 4]>, HarnessError> {
+pub(crate) fn cpts4(c: &InlineCrv) -> Result<Vec<[f64; 4]>, HarnessError> {
     match &c.weights {
         None => Ok(c.cpts.iter().map(|&[x, y, z]| [x, y, z, NOW]).collect()),
         Some(w) => {
@@ -232,7 +232,7 @@ fn cpts4(c: &InlineCrv) -> Result<Vec<[f64; 4]>, HarnessError> {
     }
 }
 
-fn ffi_gen(g: &GenIn) -> Result<ffi::Gen, HarnessError> {
+pub(crate) fn ffi_gen(g: &GenIn) -> Result<ffi::Gen, HarnessError> {
     Ok(match g {
         GenIn::BSpline(c) => ffi::Gen::BSpline(ffi::BSplineData {
             cpts: cpts4(c)?,
@@ -273,7 +273,7 @@ fn ffi_gen(g: &GenIn) -> Result<ffi::Gen, HarnessError> {
     })
 }
 
-fn ffi_surf(s: &SurfIn) -> Result<ffi::Surf, HarnessError> {
+pub(crate) fn ffi_surf(s: &SurfIn) -> Result<ffi::Surf, HarnessError> {
     Ok(ffi::Surf {
         gen: ffi_gen(&s.gen)?,
         build: match &s.build {
@@ -386,30 +386,30 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 
 // ---- Rust side ------------------------------------------------------------------------
 
-fn flag(b: bool) -> f64 {
+pub(crate) fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
 }
 
-fn v3(p: [f64; 3]) -> Vec3 {
+pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     let [x, y, z] = p;
     Vec3::new(x, y, z)
 }
 
-fn push_v(o: &mut Vec<f64>, v: Vec3) {
+pub(crate) fn push_v(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
-fn push_dom(o: &mut Vec<f64>, d: &Extent2d) {
+pub(crate) fn push_dom(o: &mut Vec<f64>, d: &Extent2d) {
     o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
 }
 
-fn dom4(d: [f64; 4]) -> Extent2d {
+pub(crate) fn dom4(d: [f64; 4]) -> Extent2d {
     let [a, b, c, e] = d;
     Extent2d::from_bounds(a, b, c, e)
 }
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
-fn status(e: &SolidError) -> f64 {
+pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
@@ -427,7 +427,7 @@ impl SolutionObject for SurfHandle {
     }
 }
 
-fn rust_gen(k: &Kernel, g: &GenIn) -> Result<Curve, HarnessError> {
+pub(crate) fn rust_gen(k: &Kernel, g: &GenIn) -> Result<Curve, HarnessError> {
     Ok(match g {
         GenIn::BSpline(c) => {
             let pw = cpts4(c)?
@@ -499,7 +499,7 @@ fn rust_gen(k: &Kernel, g: &GenIn) -> Result<Curve, HarnessError> {
 }
 
 /// Builds the surface; `Ok(Err(e))` when the construction fails.
-fn rust_surf(
+pub(crate) fn rust_surf(
     k: &Kernel,
     s: &SurfIn,
 ) -> Result<solidcore::Result<SurfOfExtrusion>, HarnessError> {
@@ -531,7 +531,7 @@ fn step_interval(c: &Curve) -> Extent1d {
     }
 }
 
-fn nurb_of(c: &Curve) -> Option<&NurbCurve> {
+pub(crate) fn nurb_of(c: &Curve) -> Option<&NurbCurve> {
     match c.kind() {
         CurveKind::BSpline(b) => b.gw_nurb(),
         CurveKind::Ellipse(e) => e.base().gw_nurb(),
@@ -542,7 +542,7 @@ fn nurb_of(c: &Curve) -> Option<&NurbCurve> {
     }
 }
 
-fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
+pub(crate) fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.push(flag(c.is_some()));
     let Some(c) = c else { return };
     o.push(c.type_code() as f64);
@@ -560,7 +560,7 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
-fn put_state(o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
+pub(crate) fn put_state(o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
     o.extend([
         flag(s.is_kind_of(SURF_OF_EXTRUSION_TYPE)?),
         flag(s.is_kind_of(B_SPLINE_SURFACE_TYPE)?),
@@ -800,7 +800,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- generation -----------------------------------------------------------------------
 
-fn unit_vec(rng: &mut Rng) -> [f64; 3] {
+pub(crate) fn unit_vec(rng: &mut Rng) -> [f64; 3] {
     loop {
         let [x, y, z] = rng.point3(-1.0, 1.0);
         let l = (x * x + y * y + z * z).sqrt();
@@ -810,31 +810,31 @@ fn unit_vec(rng: &mut Rng) -> [f64; 3] {
     }
 }
 
-fn add(a: [f64; 3], b: [f64; 3], s: f64) -> [f64; 3] {
+pub(crate) fn add(a: [f64; 3], b: [f64; 3], s: f64) -> [f64; 3] {
     let [ax, ay, az] = a;
     let [bx, by, bz] = b;
     [ax + s * bx, ay + s * by, az + s * bz]
 }
 
-fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
+pub(crate) fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
     let [x, y, z] = a;
     [s * x, s * y, s * z]
 }
 
-fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(crate) fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     let [ax, ay, az] = a;
     let [bx, by, bz] = b;
     [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
 }
 
-fn normalize(a: [f64; 3]) -> [f64; 3] {
+pub(crate) fn normalize(a: [f64; 3]) -> [f64; 3] {
     let [x, y, z] = a;
     let l = (x * x + y * y + z * z).sqrt();
     [x / l, y / l, z / l]
 }
 
 /// A clamped knot vector for `n + 1` control points of degree `p` on `[a, b]`.
-fn knots(rng: &mut Rng, n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
+pub(crate) fn knots(rng: &mut Rng, n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
     let inner = n - p;
     let mut ts: Vec<f64> = (0..inner)
         .map(|i| (i as f64 + 1.0) / (inner as f64 + 1.0))
@@ -851,9 +851,9 @@ fn knots(rng: &mut Rng, n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
 }
 
 /// A frame: origin, unit X, unit Y, unit Z (the generator plane normal).
-type Frame = ([f64; 3], [f64; 3], [f64; 3], [f64; 3]);
+pub(crate) type Frame = ([f64; 3], [f64; 3], [f64; 3], [f64; 3]);
 
-fn frame(rng: &mut Rng, size: f64) -> Frame {
+pub(crate) fn frame(rng: &mut Rng, size: f64) -> Frame {
     let origin = if rng.chance(0.3) {
         [0.0, 0.0, 0.0]
     } else {
@@ -874,12 +874,12 @@ fn frame(rng: &mut Rng, size: f64) -> Frame {
 }
 
 /// A point of the frame's X/Y plane at `(a, b)`, out of plane by `off`.
-fn in_frame(f: &Frame, a: f64, b: f64, off: f64) -> [f64; 3] {
+pub(crate) fn in_frame(f: &Frame, a: f64, b: f64, off: f64) -> [f64; 3] {
     let (o, x, y, z) = f;
     add(add(add(*o, *x, a), *y, b), *z, off)
 }
 
-fn gen_generator(rng: &mut Rng, f: &Frame, planar: bool, size: f64) -> GenIn {
+pub(crate) fn gen_generator(rng: &mut Rng, f: &Frame, planar: bool, size: f64) -> GenIn {
     let off = |rng: &mut Rng| {
         if planar {
             0.0
@@ -1016,7 +1016,7 @@ fn gen_vec(rng: &mut Rng, f: &Frame) -> [f64; 3] {
     }
 }
 
-fn gen_surf(rng: &mut Rng) -> SurfIn {
+pub(crate) fn gen_surf(rng: &mut Rng) -> SurfIn {
     let size = match rng.below(10) {
         0 => 1e-3,
         1 => 1e3,

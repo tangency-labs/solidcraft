@@ -179,6 +179,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::cone::Cone;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::plane::Plane;
+use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p1::StepSurface;
 use crate::surface::torus::Torus;
@@ -1043,11 +1044,18 @@ impl Surface {
         match surface_type {
             B_SPLINE_SURFACE_TYPE => Ok(Self::from(BSplineSurface::read_from_db(db, version)?)),
             PLANE_TYPE => Ok(Self::from(Plane::read_from_db(db, version)?)),
-            // UNPORTED(surface.surf_of_extrusion_p2): SmSurfOfExtrusion::ReadFromDB
-            SURF_OF_EXTRUSION_TYPE => Err(SolidError::unported(
-                "SmSurfOfExtrusion::ReadFromDB",
-                "surface.surf_of_extrusion_p2",
-            )),
+            SURF_OF_EXTRUSION_TYPE => {
+                // SmSurfOfExtrusion::ReadFromDB reads the whole record.
+                let _surf = SurfOfExtrusion::read_from_db(k, db, version)?;
+                // DISPATCH GAP: the surface of extrusion is not a SurfaceKind yet (its
+                // SmSurface overrides need a Kernel the Surface dispatchers do not take;
+                // see plan/findings.md), so no Surface can hold it (no UNPORTED marker:
+                // the reader is ported; the error names the extrusion's unit).
+                Err(SolidError::unported(
+                    "SurfaceKind::SurfOfExtrusion",
+                    "surface.surf_of_extrusion_p2",
+                ))
+            }
             SURF_OF_REVOLUTION_TYPE => {
                 Ok(Self::from(SurfOfRevolution::read_from_db(k, db, version)?))
             }

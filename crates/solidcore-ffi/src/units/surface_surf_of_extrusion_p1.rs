@@ -317,7 +317,7 @@ fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {
+pub(crate) fn finite(v: &[f64], what: &str) -> Result<(), FfiError> {
     if v.iter().all(|x| x.is_finite()) {
         Ok(())
     } else {
@@ -337,7 +337,7 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 }
 
 /// Checks two axes are long enough and far from parallel.
-fn axes(x: [f64; 3], y: [f64; 3], what: &str) -> Result<(), FfiError> {
+pub(crate) fn axes(x: [f64; 3], y: [f64; 3], what: &str) -> Result<(), FfiError> {
     finite(&x, what)?;
     finite(&y, what)?;
     let (lx, ly) = (len(x), len(y));
@@ -348,7 +348,7 @@ fn axes(x: [f64; 3], y: [f64; 3], what: &str) -> Result<(), FfiError> {
 }
 
 /// Checks an ordered finite domain, with positive extents when `strict`.
-fn domain(d: [f64; 4], strict: bool, what: &str) -> Result<(), FfiError> {
+pub(crate) fn domain(d: [f64; 4], strict: bool, what: &str) -> Result<(), FfiError> {
     finite(&d, what)?;
     let [a, b, c, e] = d;
     let ok = if strict {
@@ -371,7 +371,7 @@ fn angular(d0: f64, d1: f64, what: &str) -> Result<(), FfiError> {
 }
 
 /// Checks a clamped knot vector of degree `p`.
-fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
+pub(crate) fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
     finite(knots, what)?;
     let m = knots
         .len()
@@ -409,7 +409,7 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
 }
 
 /// Checks 3D control points sharing their rational marker.
-fn check_points(pts: &[[f64; 4]], what: &str) -> Result<(), FfiError> {
+pub(crate) fn check_points(pts: &[[f64; 4]], what: &str) -> Result<(), FfiError> {
     let mut first: Option<bool> = None;
     for &[x, y, z, w] in pts {
         finite(&[x, y, z], what)?;
@@ -537,7 +537,7 @@ fn push_gen(o: &mut Vec<f64>, g: &Gen) -> Result<(), FfiError> {
     Ok(())
 }
 
-fn push_surf(o: &mut Vec<f64>, s: &Surf) -> Result<(), FfiError> {
+pub(crate) fn push_surf(o: &mut Vec<f64>, s: &Surf) -> Result<(), FfiError> {
     let (mode, tail): (f64, Vec<f64>) = match &s.build {
         Build::Canonical { vec } => {
             finite(vec, "extrusion vector")?;

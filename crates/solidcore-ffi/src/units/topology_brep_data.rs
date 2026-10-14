@@ -254,8 +254,9 @@ enum Read {
 }
 
 /// Simulates upstream's reads on the bytes (strictly: anything that could make an
-/// extraction fail is rejected).
-struct Sim<'a> {
+/// extraction fail is rejected). Also the guard of the `surface.surf_of_extrusion_p2`
+/// record reads ([`Sim::for_record`]).
+pub(crate) struct Sim<'a> {
     data: &'a [u8],
     pos: usize,
     binary: bool,
@@ -272,7 +273,20 @@ fn is_space(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
 }
 
-impl Sim<'_> {
+impl<'a> Sim<'a> {
+    /// A simulator over a geometry record (no attribute table, nothing trusted).
+    pub(crate) fn for_record(data: &'a [u8], binary: bool) -> Self {
+        Sim {
+            data,
+            pos: 0,
+            binary,
+            eof: false,
+            table: Vec::new(),
+            depth: 0,
+            trust: false,
+        }
+    }
+
     fn peek(&self) -> Option<u8> {
         self.data.get(self.pos).copied()
     }
@@ -487,7 +501,7 @@ impl Sim<'_> {
 
     // ---- common reads ----------------------------------------------------------------
 
-    fn ulong(&mut self) -> Result<u64, FfiError> {
+    pub(crate) fn ulong(&mut self) -> Result<u64, FfiError> {
         if self.binary {
             self.b_u64()
         } else {
@@ -503,7 +517,7 @@ impl Sim<'_> {
         }
     }
 
-    fn boolean(&mut self) -> Result<(), FfiError> {
+    pub(crate) fn boolean(&mut self) -> Result<(), FfiError> {
         if self.binary {
             self.take(4).map(|_| ())
         } else {
@@ -511,7 +525,7 @@ impl Sim<'_> {
         }
     }
 
-    fn double(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn double(&mut self) -> Result<f64, FfiError> {
         if self.binary {
             self.b_f64()
         } else {
@@ -527,7 +541,7 @@ impl Sim<'_> {
         Ok(c)
     }
 
-    fn lines(&mut self, n: usize) {
+    pub(crate) fn lines(&mut self, n: usize) {
         if !self.binary {
             for _ in 0..n {
                 self.next_line();
@@ -918,7 +932,7 @@ impl Sim<'_> {
     // ---- geometry --------------------------------------------------------------------
 
     /// `ReadType`: the type code (and dimension).
-    fn read_type(&mut self, with_dim: bool) -> Result<(i64, u64), FfiError> {
+    pub(crate) fn read_type(&mut self, with_dim: bool) -> Result<(i64, u64), FfiError> {
         if self.binary {
             let t = self.b_u64()? as i64;
             let d = if with_dim { self.b_u64()? } else { 0 };
@@ -987,7 +1001,7 @@ impl Sim<'_> {
     }
 
     /// `SmBSplineCurve::ReadFromDB`.
-    fn bspline_curve(&mut self, version: u64) -> Result<(), FfiError> {
+    pub(crate) fn bspline_curve(&mut self, version: u64) -> Result<(), FfiError> {
         let (n, p, rat, read_dim) = if self.binary {
             let n = self.b_u64()? as i64;
             let p = i64::from(self.b_i16()?);
@@ -1065,7 +1079,7 @@ impl Sim<'_> {
         Ok(Read::Done)
     }
 
-    fn bspline_surface(&mut self, version: u64) -> Result<(), FfiError> {
+    pub(crate) fn bspline_surface(&mut self, version: u64) -> Result<(), FfiError> {
         let (n, m, p, q, rat) = if self.binary {
             let n = self.b_u64()? as i64;
             let m = self.b_u64()? as i64;
