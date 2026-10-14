@@ -132,13 +132,13 @@ const OP_LINE: &str = "surface::plane::p1::Plane::global_line_intersect";
 #[derive(Debug)]
 pub struct Plane {
     /// The `SmBSplineSurface` part (the NURB representation).
-    base: BSplineSurface,
+    pub(super) base: BSplineSurface,
     /// `m_vPosition`: origin, unit X axis and unit Y axis.
-    position: Axis2Placement,
+    pub(super) position: Axis2Placement,
     /// `m_vAnalUVDomain`: the analytic (STEP) domain.
-    anal_uv_domain: Extent2d,
+    pub(super) anal_uv_domain: Extent2d,
     /// `m_vUVScale`: the u and v scales.
-    uv_scale: Vec2,
+    pub(super) uv_scale: Vec2,
 }
 
 /// The result of [`Plane::coincidence_check`].
@@ -341,7 +341,7 @@ impl Plane {
 
     /// Makes the NURB when missing (`GetOrCreateGwNurbPointer` of a non-`const`
     /// method; a failure leaves the plane without NURB).
-    fn ensure_nurb(&mut self) {
+    pub(super) fn ensure_nurb(&mut self) {
         if self.base.gw_nurb().is_none() {
             let _ = self.make_nurb();
         }

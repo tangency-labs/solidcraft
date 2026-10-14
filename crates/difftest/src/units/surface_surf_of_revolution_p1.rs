@@ -29,6 +29,7 @@ use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::tol::approx_tol3d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
@@ -665,7 +666,9 @@ fn rust_op(
                 Ok(p) => p,
             };
             let [a, b, c, d] = *dom;
-            s.intersect_with_plane(&plane, &Extent2d::from_bounds(a, b, c, d), *tol)
+            // the shim passes `SmApproxTol3d(tol)`: |tol|, SM_USE_DEFAULT -> zone tol / 2
+            let tol = tol.map(|t| approx_tol3d(k, t));
+            s.intersect_with_plane(k, &plane, &Extent2d::from_bounds(a, b, c, d), tol)
                 .map(|(more, x)| {
                     o.extend([0.0, flag(more), x.curves_3d.len() as f64]);
                     for c in &x.curves_3d {

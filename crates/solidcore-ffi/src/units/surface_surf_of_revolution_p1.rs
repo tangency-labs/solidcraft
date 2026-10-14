@@ -539,8 +539,10 @@ fn push_op(o: &mut Vec<f64>, op: &Op) -> Result<(), FfiError> {
             finite(origin, "plane")?;
             axes(*x, *y, "plane")?;
             domain(*dom, "plane domain")?;
+            // the shim reads it into an `SmApproxTol3d`, which takes |tol| (and maps
+            // SM_USE_DEFAULT to the zone tolerance), so any finite value is valid
             let t = tol.unwrap_or(0.0);
-            if !(t.is_finite() && t >= 0.0) {
+            if !t.is_finite() {
                 return Err(bad("plane: tolerance"));
             }
             o.extend_from_slice(origin);

@@ -1072,17 +1072,17 @@ fn dump_bss(o: &mut Vec<f64>, s: &BSplineSurface) {
     }
 }
 
-/// `put_state`: `0` for the base class, else the B-spline state.
+/// `put_state`: `0` for the base class, else the B-spline state (of a plane's B-spline
+/// part).
 fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
     match s.map(Surface::kind) {
         Some(sp2::SurfaceKind::BSpline(b)) => dump_bss(o, b),
+        // an SmPlane is an SmBSplineSurface: its B-spline part
+        Some(sp2::SurfaceKind::Plane(p)) => dump_bss(o, p.base()),
         // `put_state` of a surface that is not a B-spline
-        Some(
-            sp2::SurfaceKind::CurveBounded(_)
-            | sp2::SurfaceKind::Plane(_)
-            | sp2::SurfaceKind::SurfOfRevolution(_) | sp2::SurfaceKind::Step(_),
-        )
-        | None => o.push(0.0),
+        // an SmSurfOfRevolution is an SmBSplineSurface: its NURB
+        Some(sp2::SurfaceKind::SurfOfRevolution(r)) => dump_bss(o, r.base()),
+        Some(sp2::SurfaceKind::CurveBounded(_) | sp2::SurfaceKind::Step(_)) | None => o.push(0.0),
     }
 }
 
@@ -1441,6 +1441,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             record(|o| {
                 let x = s.as_ref().ok_or_else(base_err)?;
                 let r = x.global_surface_intersect(
+                    &Kernel::default(),
                     &dom_of(*dom),
                     &other,
                     &dom_of(*other_dom),

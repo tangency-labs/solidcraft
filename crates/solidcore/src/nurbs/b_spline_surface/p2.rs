@@ -58,8 +58,9 @@
 //! - **`SetCanonical`** passes no domain to `CreateCanonical` (as upstream), so the
 //!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only
 //!   the NURB is replaced: form and knot type stay those of the surface.
-//! - **Back-edges.** `CopyAndAddAnalytics` needs `SmPlane::IsNurbSurfacePlane`
-//!   (`surface.plane_p2`, then `surface.cone_p2`, `surface.sphere`,
+//! - **Back-edges.** `CopyAndAddAnalytics` returns the [`Surface`] that
+//!   `SmPlane::IsNurbSurfacePlane` recognises, else needs the recognisers after it
+//!   (`surface.cone_p2`, `surface.sphere`,
 //!   `surface.surf_of_revolution_p2`, `surface.surf_of_extrusion_p2`);
 //!   `GetMaxAnalyticDomain` nothing unported (`SmSurface::Evaluate1stDerivatives` is
 //!   `surface::surface::p1`'s, `IsPlanar` and `IsClosed` are those of
@@ -91,6 +92,7 @@ use crate::nurbs::nurbs_srf::{is_nsrf_degenerate, split_srf};
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch};
 use crate::surface::plane::Plane;
+use crate::surface::surface::Surface;
 
 use super::p1::{
     BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, CanonicalSurfaceData, SurfParamType,
@@ -200,13 +202,13 @@ fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
 
 // ---- unported callees ---------------------------------------------------------------
 
-/// `SmPlane::IsNurbSurfacePlane` (then the cone, sphere, revolution and extrusion
+/// `SmCone::IsNurbSurfaceCone` (then the sphere, revolution and extrusion
 /// recognisers).
-fn is_nurb_surface_plane(_srf: &BSplineSurface) -> Result<Option<BSplineSurface>> {
-    // UNPORTED(surface.plane_p2): SmPlane::IsNurbSurfacePlane
+fn is_nurb_surface_cone(_srf: &BSplineSurface) -> Result<Option<Surface>> {
+    // UNPORTED(surface.cone_p2): SmCone::IsNurbSurfaceCone
     Err(SolidError::Unported {
-        upstream: "SmPlane::IsNurbSurfacePlane",
-        unit: "surface.plane_p2",
+        upstream: "SmCone::IsNurbSurfaceCone",
+        unit: "surface.cone_p2",
     })
 }
 
@@ -301,7 +303,7 @@ fn surface_is_degenerate_point(
     tol_3d: f64,
     uv_domain: Option<&Extent2d>,
 ) -> Result<bool> {
-    let s = crate::surface::surface::Surface::from(srf.clone());
+    let s = Surface::from(srf.clone());
     crate::surface::surface::p1::base_is_degenerate_point(&s, tol_3d, uv_domain)
 }
 
@@ -334,16 +336,20 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the recognisers (`SmPlane::IsNurbSurfacePlane`, ...)
-    /// are not ported.
-    pub fn copy_and_add_analytics(&self) -> Result<Self> {
+    /// Those of [`Plane::is_nurb_surface_plane`]; [`SolidError::Unported`]: the
+    /// recognisers after the plane (`SmCone::IsNurbSurfaceCone`, ...) are not ported.
+    pub fn copy_and_add_analytics(&self) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
-        // SmPlane (then SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion)
-        if let Some(analytic) = is_nurb_surface_plane(self)? {
+        // SmPlane
+        if let Some(plane) = Plane::is_nurb_surface_plane(self, 1.0)? {
+            return Ok(Surface::from(plane));
+        }
+        // SmCone (then SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion)
+        if let Some(analytic) = is_nurb_surface_cone(self)? {
             return Ok(analytic);
         }
         // arrive here - make sure it's a copy
-        Ok(self.copy())
+        Ok(Surface::from(self.copy()))
     }
 
     /// The 3D iso-parametric curve at `iso_parameter` (`CreateIsoParametricCurve`):

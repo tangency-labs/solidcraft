@@ -239,8 +239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::ReadFromDB",
+        "unit": "surface.cone_p1"
       },
       "max_rel_err": 0.0,
       "name": "file_Defeature_LShape_I",
@@ -251,8 +251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::ReadFromDB",
+        "unit": "surface.cone_p1"
       },
       "max_rel_err": 0.0,
       "name": "file_Defeature_LShape_II",
@@ -274,16 +274,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_brep1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#11 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 1919
     },
     {
       "deferred": {
@@ -315,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::ReadFromDB",
+        "unit": "surface.cone_p1"
       },
       "max_rel_err": 0.0,
       "name": "file_Defeature_flathead_screw_top",
@@ -326,64 +322,44 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_inset_cube",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#16 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 915
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_inset_cube_1x1fillet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#17 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 1049
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_inset_cube_1x2fillet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#18 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 1183
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_inset_cube_1x3fillet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#19 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 1317
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_inset_cube_3x1fillet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#20 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 1317
     },
     {
       "max_rel_err": 0.0,
@@ -2443,8 +2419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::ReadFromDB",
+        "unit": "surface.cone_p1"
       },
       "max_rel_err": 0.0,
       "name": "file_Solids_OffsetBoxCylOnCorner_edited",
@@ -2455,8 +2431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::ReadFromDB",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::ReadFromDB",
+        "unit": "surface.cone_p1"
       },
       "max_rel_err": 0.0,
       "name": "file_Solids_OffsetBoxCylOnCorner_healed",
@@ -19279,14 +19255,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 61,
+  "cases_deferred": 55,
   "cases_failed": 0,
-  "cases_passed": 2318,
+  "cases_passed": 2324,
   "cases_total": 2379,
   "deferred_by_unit": {
-    "surface.cone_p1": 2,
+    "surface.cone_p1": 7,
     "surface.offset_surface": 46,
-    "surface.plane_p2": 11,
     "surface.surf_of_extrusion_p2": 2
   },
   "max_rel_err": 0.0,

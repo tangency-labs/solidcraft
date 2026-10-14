@@ -3,6 +3,414 @@
   "cases": [
     {
       "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#0",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#1",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#2",
+      "values_compared": 70
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#3",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#4",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#5",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#6",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#7",
+      "values_compared": 100
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#8",
+      "values_compared": 70
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#9",
+      "values_compared": 60
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#10",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#11",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#12",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#13",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#14",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#15",
+      "values_compared": 60
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#16",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#17",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#18",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#19",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#20",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#21",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#22",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#23",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_bsp_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#24",
+      "values_compared": 37
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_bsp_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#25",
+      "values_compared": 70
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_bsp_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#26",
+      "values_compared": 70
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_bsp_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#27",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_bsp_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#28",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_bsp_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#29",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_swap_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#30",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_swap_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#31",
+      "values_compared": 100
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_swap_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#32",
+      "values_compared": 70
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_swap_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#33",
+      "values_compared": 60
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_swap_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#34",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_swap_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#35",
+      "values_compared": 42
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_oob_axial_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#36",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_oob_axial_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#37",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_oob_normal_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#38",
+      "values_compared": 70
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_oob_normal_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#39",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_oob_normal_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#40",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_oob_axial_tiny_dom",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#41",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_top_tangent",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#42",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_top_tangent_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#43",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_torus_equator",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#44",
+      "values_compared": 80
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_flat_on",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#45",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_offset_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#46",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_half_axial_neg_side",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#47",
+      "values_compared": 62
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_use_default",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#48",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_neg_tol",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#49",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "adv_sor_line_axial_neg_tol_big",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_revolution_p1/adv.json#50",
+      "values_compared": 48
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "general_bezier_build",
       "outcome": "pass",
       "pass": true,
@@ -226,16 +634,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surfaces_line_plane_normal",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surf_of_revolution_p1/cases.json#28 (upstream tests/SM_API_test/src/TestSmSurfaces.cpp:787 (line from base to top radius revolved about the Z axis))",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -374,16 +778,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "edge_partial_plane_axis",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surf_of_revolution_p1/cases.json#46 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -442,16 +842,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "edge_circle_gen_plane_normal",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surf_of_revolution_p1/cases.json#54 (upstream edge case)",
-      "values_compared": 0
+      "values_compared": 120
     },
     {
       "max_rel_err": 0.0,
@@ -2134,16 +2530,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0058",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578476",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2274,16 +2666,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0075",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578493",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2454,16 +2842,12 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0097",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578515",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -2498,16 +2882,12 @@
       "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0102",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578520",
-      "values_compared": 0
+      "values_compared": 80
     },
     {
       "max_rel_err": 0.0,
@@ -2550,16 +2930,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0108",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578526",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2658,28 +3034,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0121",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578539",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0122",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578540",
-      "values_compared": 0
+      "values_compared": 41
     },
     {
       "max_rel_err": 0.0,
@@ -2938,16 +3306,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0155",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578573",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -2974,16 +3338,12 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0159",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578577",
-      "values_compared": 0
+      "values_compared": 80
     },
     {
       "max_rel_err": 0.0,
@@ -3026,16 +3386,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0165",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578583",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -3366,16 +3722,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0207",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578625",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -3426,16 +3778,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578632",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3478,16 +3826,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0220",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578638",
-      "values_compared": 0
+      "values_compared": 52
     },
     {
       "max_rel_err": 0.0,
@@ -3698,28 +4042,20 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578665",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0248",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578666",
-      "values_compared": 0
+      "values_compared": 78
     },
     {
       "max_rel_err": 0.0,
@@ -3730,16 +4066,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0250",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578668",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3894,16 +4226,12 @@
       "values_compared": 204
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0270",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578688",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3954,28 +4282,20 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0277",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578695",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0278",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578696",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -4346,16 +4666,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0325",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578743",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -4670,16 +4986,12 @@
       "values_compared": 62
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0365",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578783",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4858,16 +5170,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578806",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -5662,16 +5970,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0488",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578906",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -6026,16 +6330,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0533",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578951",
-      "values_compared": 0
+      "values_compared": 100
     },
     {
       "max_rel_err": 0.0,
@@ -6078,16 +6378,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0539",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578957",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -6106,16 +6402,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0542",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578960",
-      "values_compared": 0
+      "values_compared": 62
     },
     {
       "max_rel_err": 0.0,
@@ -6150,16 +6442,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0547",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578965",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6234,16 +6522,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::TrimCurveToPlaneDomain",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0557",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4440998236234578975",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -6583,17 +6867,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 31,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 776,
-  "cases_total": 807,
-  "deferred_by_unit": {
-    "surface.plane_p2": 31
-  },
+  "cases_passed": 858,
+  "cases_total": 858,
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.surf_of_revolution_p1"
 }

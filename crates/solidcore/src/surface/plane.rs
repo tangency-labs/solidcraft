@@ -6,5 +6,6 @@
 //! its own submodule and adds methods to [`Plane`].
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{Coincidence, Plane, PlaneDropCurve, PlaneIsoCurve};

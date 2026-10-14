@@ -59,8 +59,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "Surface_copy_anal",
@@ -186,16 +186,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_copy_anal",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p2/cases.json#22 (upstream pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input))",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -315,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "offset_nurb_copy_anal",
@@ -1067,8 +1063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0058",
@@ -2179,8 +2175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -2399,8 +2395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0218",
@@ -2443,8 +2439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0223",
@@ -3843,8 +3839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0393",
@@ -4431,8 +4427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0465",
@@ -4603,8 +4599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0485",
@@ -6159,8 +6155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPlane::IsNurbSurfacePlane",
-        "unit": "surface.plane_p2"
+        "symbol": "SmCone::IsNurbSurfaceCone",
+        "unit": "surface.cone_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0673",
@@ -7203,13 +7199,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 62,
+  "cases_deferred": 61,
   "cases_failed": 0,
-  "cases_passed": 807,
+  "cases_passed": 808,
   "cases_total": 869,
   "deferred_by_unit": {
     "intersect.surface_intersector_p5": 1,
-    "surface.plane_p2": 11,
+    "surface.cone_p2": 10,
     "surface.surface_p4": 13,
     "surface.surface_p5": 36,
     "topology.trimming_tools": 1
