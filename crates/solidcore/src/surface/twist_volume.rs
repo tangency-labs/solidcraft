@@ -65,8 +65,8 @@
 //!   caller's solutions in place exactly as upstream; the volume itself
 //!   (`m_apObjects[0] = this`) is the caller's object handle. The unused parameter
 //!   guess of the local solve is dropped.
-//! - **`ReadFromDB`** reads the two members, then needs `SmVolume::ReadFromDB` (unit
-//!   `surface.volume_p2`, not ported): [`SolidError::Unported`]. Filling a given
+//! - **`ReadFromDB`** reads the two members, then the base data
+//!   ([`Volume::read_base_from_db`], status ignored as upstream). Filling a given
 //!   object (`rpNewVolume != NULL`) is not modelled; a new volume is always made.
 //! - **Unused arguments** upstream ignores (the from-left flags, zero-tangent and
 //!   zero-sampling options of the evaluations, the curve of
@@ -86,6 +86,7 @@ use crate::math::{max4, EFF_ZERO_DEG, INFINITE_PARAMETER, PI, UNDEF_DOUBLE};
 use crate::surface::volume::p1::{
     concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
+use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 pub use crate::surface::volume::p1::TWIST_VOLUME_TYPE;
@@ -746,14 +747,14 @@ impl TwistVolume {
     }
 
     /// Reads a twist volume from a database stream: the period and the minimum
-    /// distance, then the volume base data (`ReadFromDB`). The database version
-    /// is for that base read (unused until it is ported).
+    /// distance, then the volume base data (`ReadFromDB`), whose status upstream
+    /// ignores.
     ///
     /// # Errors
     ///
-    /// A failed binary read; [`SolidError::Unported`] for the base-class read
-    /// (`SmVolume::ReadFromDB`, unit `surface.volume_p2`).
-    pub fn read_from_db(db: &mut DatabaseReader, _version: u64) -> Result<Volume> {
+    /// A failed binary read; the base read's undefined cases
+    /// ([`SolidError::Unsupported`]) and [`SolidError::Unported`].
+    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Volume> {
         // a new SmTwistVolume() (period 0, minimum SM_UNDEF_DOUBLE)
         let mut twist = Self::new();
         if db.file_type() == FileType::Ascii {
@@ -769,13 +770,10 @@ impl TwistVolume {
             twist.twist_period_dist = db.read_double()?;
             twist.period_min_dist = db.read_double()?;
         }
-        let _volume = Volume::new(VolumeKind::Twist(twist));
-        // The members are read; the base-class read that follows is not ported yet.
-        // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-        Err(SolidError::unported(
-            "SmVolume::ReadFromDB",
-            "surface.volume_p2",
-        ))
+        let mut volume = Volume::new(VolumeKind::Twist(twist));
+        // read base class data (status ignored)
+        ignore_read(volume.read_base_from_db(db, version))?;
+        Ok(volume)
     }
 }
 

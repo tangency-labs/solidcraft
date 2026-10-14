@@ -6794,16 +6794,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_ascii",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.bend_volume/cases.json#846 (upstream source/SMLib/src/SmBendVolume.cpp (no upstream test builds an SmBendVolume; unit edge case))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -19079,13 +19075,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 75,
+  "cases_deferred": 74,
   "cases_failed": 0,
-  "cases_passed": 2272,
+  "cases_passed": 2273,
   "cases_total": 2347,
   "deferred_by_unit": {
-    "curve.curve_p9": 74,
-    "surface.volume_p2": 1
+    "curve.curve_p9": 74
   },
   "max_rel_err": 0.0,
   "pass": true,

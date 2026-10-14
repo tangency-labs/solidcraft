@@ -515,10 +515,10 @@ soft_depends_on = ["geom.tol"]
 est_lines = 681
 layer = 5
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "partial"
+status = "green"
 claimed_by = "swarm-geom.transform-a1"
 claimed_at = "2026-10-12T20:43:11Z"
-notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 3042 cases (42 fixtures + 3000 generated), 3039 pass, 3 deferred (surface.volume_p2 3; geom.pseudo_box and surface.volume_p1 wired), max_rel_err 0; 20k-seed run clean"
+notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest green: 3042 cases (42 fixtures + 3000 generated), 3042 pass, 0 deferred (geom.pseudo_box, surface.volume_p1 and surface.volume_p2 wired; promoted by surface.volume_p2), max_rel_err 0; 20k-seed run clean"
 
 [[unit]]
 id = "nlib.crv_fit_p1"
@@ -1050,7 +1050,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = "swarm-curve.crv_in_volume-a1"
 claimed_at = "2026-10-13T01:00:34Z"
-notes = "difftest 2030 cases (1854 pass, 176 deferred: intersect.curve_class_p4 175, surface.volume_p2 1; surface.volume_p1 wired; SmVolume::EvaluatePoint co-ported by surface.unbend_volume); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest 2030 cases (1855 pass, 175 deferred: intersect.curve_class_p4 175; surface.volume_p1 and surface.volume_p2 wired); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_cache"
@@ -1299,10 +1299,10 @@ soft_depends_on = ["geom.extent1d", "geom.tol"]
 est_lines = 649
 layer = 16
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "partial"
+status = "green"
 claimed_by = "swarm-surface.twist_volume-a1"
 claimed_at = "2026-10-13T03:03:30Z"
-notes = "difftest: 1572 cases (default seeds), 1569 pass, 3 deferred (ReadFromDB -> surface.volume_p2 SmVolume::ReadFromDB); max_rel_err 0; wiring dropped surface.volume_p1 deferred 99 -> 39. 25 fns; largest: SmTwistVolume::Evaluate, SmTwistVolume::EvaluateSimple, SmTwistVolume::EvaluateBoundingBoxSimple, SmTwistVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "difftest green: 1572 cases (default seeds), 1572 pass, 0 deferred (ReadFromDB wired by surface.volume_p2); max_rel_err 0; wiring dropped surface.volume_p1 deferred 99 -> 39. 25 fns; largest: SmTwistVolume::Evaluate, SmTwistVolume::EvaluateSimple, SmTwistVolume::EvaluateBoundingBoxSimple, SmTwistVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "curve.curve_p3"
@@ -1638,7 +1638,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "PARTIAL: difftest 2347 cases (847 fixture + 1500 generated), 2272 pass bit-identical, 75 deferred (curve.curve_p9 74: IsCurveInParamDomainSimple -> SmCurve::IsOnPositiveSideOfPlanes; surface.volume_p2 1: ReadFromDB base read), max_rel_err 0; 30k-seed run clean (30847 cases); --perturb SENSITIVE; wired into surface.volume_p1 dispatch (VolumeKind::Bend now carries BendVolume; no UNPORTED(surface.bend_volume) stubs remain); component constructor ported as BendVolume::create; 27 fns; largest: SmBendVolume::EvaluateBoundingBoxSimple, SmBendVolume::Evaluate, SmBendVolume::EvaluateSimple, SmBendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2347 cases (847 fixture + 1500 generated), 2273 pass bit-identical, 74 deferred (curve.curve_p9 74: IsCurveInParamDomainSimple -> SmCurve::IsOnPositiveSideOfPlanes), max_rel_err 0 (ReadFromDB base read wired by surface.volume_p2); 30k-seed run clean (30847 cases); --perturb SENSITIVE; wired into surface.volume_p1 dispatch (VolumeKind::Bend now carries BendVolume; no UNPORTED(surface.bend_volume) stubs remain); component constructor ported as BendVolume::create; 27 fns; largest: SmBendVolume::EvaluateBoundingBoxSimple, SmBendVolume::Evaluate, SmBendVolume::EvaluateSimple, SmBendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.cone_p1"
@@ -1722,7 +1722,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "PARTIAL: difftest 1874 cases (374 fixture + 1500 generated), 1807 pass bit-identical, 67 deferred (surface.surface_p8 66: IsCurveInParamDomainSimple -> SmCurve::HasPlaneCrossings -> SmSurface::GlobalCurveIntersect; surface.volume_p2 1: ReadFromDB base read), max_rel_err 0; 30k-seed run clean (30374 cases); --perturb SENSITIVE; CO-PORTED from surface.volume_p2: SmVolume::EvaluatePoint (Volume::evaluate_point) and SmVolume::IsPointInParamDomain (private helper); wired: surface.volume_p1 (deferred 39 -> 2), curve.crv_in_volume (its SmVolume::EvaluatePoint stub now calls the co-port: surface.volume_p2 deferred 33 -> 1); component constructor ported as UnbendVolume::create; 29 fns; largest: SmUnbendVolume::Evaluate, SmUnbendVolume::EvaluateSimple, SmUnbendVolume::EvaluateBoundingBoxSimple, SmUnbendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 1874 cases (374 fixture + 1500 generated), 1808 pass bit-identical, 66 deferred (surface.surface_p8 66: IsCurveInParamDomainSimple -> SmCurve::HasPlaneCrossings -> SmSurface::GlobalCurveIntersect; ReadFromDB base read wired by surface.volume_p2), max_rel_err 0; 30k-seed run clean (30374 cases); --perturb SENSITIVE; co-ports of SmVolume::EvaluatePoint and SmVolume::IsPointInParamDomain replaced by surface.volume_p2's (PR #26); wired: surface.volume_p1 (deferred 39 -> 2), curve.crv_in_volume (its SmVolume::EvaluatePoint stub now calls the co-port: surface.volume_p2 deferred 33 -> 1); component constructor ported as UnbendVolume::create; 29 fns; largest: SmUnbendVolume::Evaluate, SmUnbendVolume::EvaluateSimple, SmUnbendVolume::EvaluateBoundingBoxSimple, SmUnbendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.cone_p2"
@@ -1775,10 +1775,10 @@ soft_depends_on = ["geom.transform", "surface.b_spline_volume", "surface.bend_vo
 est_lines = 1490
 layer = 25
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "CO-PORTED in surface.unbend_volume (PR #20): SmVolume::EvaluatePoint -> surface::volume::Volume::evaluate_point (defined in surface/unbend_volume.rs; SmCrvInVolume::EvaluatePoint calls it), SmVolume::IsPointInParamDomain -> surface::unbend_volume::is_point_in_param_domain (private); move both here when porting; 18 fns; largest: SmVolume::EvaluateBoundingBoxSimple, SmVolume::EvaluateBoundingBox, SmVolume::EvaluatePseudoBoxSimple, SmVolume::InvMapPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "difftest partial: 11220 cases (9220 fixtures incl. 5014 bend and 2290 unbend cases + 2000 generated), 10922 pass, 298 deferred (curve.curve_p9 162: bend IsCurveInParamDomainSimple -> SmCurve::IsOnPositiveSideOfPlanes; surface.surface_p8 136: unbend IsCurveInParamDomainSimple -> SmCurve::HasPlaneCrossings), max_rel_err 0; 100k-seed run clean; --perturb SENSITIVE; after surface.bend_volume (PR #22): bend overrides (EvaluateBoundingBoxSimple, GlobalPointSolveSimple, LocalPointSolveSimple, ReadFromDB) dispatched, SmBendVolume::ReadFromDB reads the base data (removes the bend unit's deferred read_db case), shim builds default and component bends (kinds 6, 7); the bend and unbend ReadDb FFI guards reuse this unit's strict text grammar; after surface.unbend_volume (PR #20): its CO-PORTED SmVolume::EvaluatePoint / IsPointInParamDomain replaced by this unit's, unbend overrides and SmUnbendVolume::ReadFromDB wired (shim builds component unbends); wired UNPORTED(surface.volume_p2) in geom.transform, surface.twist_volume, curve.crv_in_volume, geom.tol, intersect.point_class (volume branch; not exercised) (geom.transform and surface.twist_volume promoted to green). 18 fns; largest: SmVolume::EvaluateBoundingBoxSimple, SmVolume::EvaluateBoundingBox, SmVolume::EvaluatePseudoBoxSimple, SmVolume::InvMapPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_p7"
@@ -1932,7 +1932,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "PARTIAL: difftest 2511 cases (511 fixture: Combine precedence matrix, LoadFromIntersection kinds/offsets up to 9/8/7, curve and real SmEllipse/SmCircle projections, every class with a NULL object, tolerance sentinels incl. -SM_USE_DEFAULT; 2000 generated scripts), 2197 pass bit-identical, 314 deferred (surface.surface_p4 216, topology.vertex 49, topology.edge 27, topology.face_p2 15, topology.face_p4 4, topology.edgeuse_p1 3); review fixes: constructor stores its SmZoneTol3d as is, MergeIntoObject calls SmVertex::SetTolerance (SM_USE_OLDTOL), base SmTopology tolerance/IsConnectedTo for kinds without overrides, curve tolerance via Curve::edge; back-edges wired: SmTol point-classification overloads (geom.tol note), surface.trim_srf_cache face_point_classify now blocked only by query.face_p2. 53 fns; largest: SmPointClassification::MergeIntoObject, SmPointClassification::ComputePointParameters, SmPointClassification::Combine, SmPointClassification::GetGap3d; cycle back-edges (call into later units; stub or co-port): topology.vertex(8), topology.edge(7), topology.edgeuse_p1(5), topology.brep_p9(3), topology.face_p2(3), topology.face_p4(3), topology.brep_p4(2), topology.loopuse(2), topology.shell(1), topology.topology(1), topology.vertexuse(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2511 cases (511 fixture: Combine precedence matrix, LoadFromIntersection kinds/offsets up to 9/8/7, curve and real SmEllipse/SmCircle projections, every class with a NULL object, tolerance sentinels incl. -SM_USE_DEFAULT; 2000 generated scripts), 2197 pass bit-identical, 314 deferred (surface.surface_p4 216, topology.vertex 49, topology.edge 27, topology.face_p2 15, topology.face_p4 4, topology.edgeuse_p1 3); review fixes: constructor stores its SmZoneTol3d as is, MergeIntoObject calls SmVertex::SetTolerance (SM_USE_OLDTOL), base SmTopology tolerance/IsConnectedTo for kinds without overrides, curve tolerance via Curve::edge; back-edges wired: surface.volume_p2 (SmVolume::GlobalPointSolve / EvaluatePoint; volume branch not exercised by the shim), SmTol point-classification overloads (geom.tol note), surface.trim_srf_cache face_point_classify now blocked only by query.face_p2. 53 fns; largest: SmPointClassification::MergeIntoObject, SmPointClassification::ComputePointParameters, SmPointClassification::Combine, SmPointClassification::GetGap3d; cycle back-edges (call into later units; stub or co-port): topology.vertex(8), topology.edge(7), topology.edgeuse_p1(5), topology.brep_p9(3), topology.face_p2(3), topology.face_p4(3), topology.brep_p4(2), topology.loopuse(2), topology.shell(1), topology.topology(1), topology.vertexuse(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.srf_in_volume"

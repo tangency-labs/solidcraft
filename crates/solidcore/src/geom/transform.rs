@@ -49,15 +49,14 @@
 //!   volume's), and [`Transform::approx_eq`] is the member comparison
 //!   `operator==` runs after `SmVolume::operator==` (same type, equal compounding
 //!   maps) has passed. The volume base is [`crate::surface::volume::Volume`] with
-//!   kind `Transform`. Calls the transform makes into the unported part of the
-//!   volume base (`SmVolume::ReadFromDB`, `SmVolume::EvaluatePoint`, unit
-//!   `surface.volume_p2`) return [`SolidError::Unported`].
+//!   kind `Transform`: [`Transform::read_from_db`] returns that volume, and
+//!   `EvaluateBoundingBoxSimple` takes the volume's `SmVolume::EvaluatePoint` as a
+//!   function.
 //! - **Pseudo boxes.** `EvaluateBoundingBoxSimple` keeps upstream's in/out pointers
 //!   as `Option<&mut _>` outputs (the unbounded branch only resets intervals, so the
 //!   outputs' previous state matters). A requested output without a parameter
 //!   pseudo box is [`SolidError::InvalidInput`] (upstream dereferences the null
-//!   pointer, `plan/findings.md`); the unaligned bounded branch needs
-//!   `SmVolume::EvaluatePoint` and returns [`SolidError::Unported`].
+//!   pointer, `plan/findings.md`).
 //! - Out-params become return values. `InvTransformPoint`, `InvTransformVector`
 //!   and `InvEvaluateGuessPointSimple` return `Err` (upstream `SM_ERR`, code 1001)
 //!   for a singular axes sub-matrix, where upstream leaves the output unset.
@@ -86,7 +85,10 @@ use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, Solut
 use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::INFINITE_PARAMETER;
-use crate::surface::volume::p1::{is_kind_of as volume_is_kind_of, Discontinuities3d};
+use crate::surface::volume::p1::{
+    is_kind_of as volume_is_kind_of, Discontinuities3d, Volume, VolumeKind,
+};
+use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 /// `GW_MAX_DERIV`: the highest derivative `EvaluateSimple` accepts.
@@ -428,21 +430,23 @@ impl Transform {
     /// `plan/findings.md`), permuted/negated to the pseudo box's basis order, and
     /// `proj_box` circumscribes the result. For an unaligned pseudo box and an
     /// unbounded `param_box` both outputs are made unbounded (the pseudo box keeps
-    /// its previous basis, as upstream). With neither output requested nothing
-    /// happens.
+    /// its previous basis, as upstream); for a bounded `param_box` both outputs
+    /// grow by the images of its corners under `evaluate_point` (the volume's
+    /// compounding `SmVolume::EvaluatePoint`, whose failures leave the undefined
+    /// point). With neither output requested nothing happens.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] when an output is requested without
     /// `param_pseudo_box` (upstream dereferences the null pointer);
-    /// [`SolidError::Unported`] for an unaligned pseudo box with a bounded
-    /// `param_box` (it needs `SmVolume::EvaluatePoint`).
+    /// [`SolidError::Unported`] from `evaluate_point`.
     pub fn evaluate_bounding_box_simple(
         &self,
         param_box: &Extent3d,
         param_pseudo_box: Option<&PseudoBox>,
         mut proj_box: Option<&mut Extent3d>,
-        proj_pseudo_box: Option<&mut PseudoBox>,
+        mut proj_pseudo_box: Option<&mut PseudoBox>,
+        mut evaluate_point: impl FnMut(Point3) -> Result<Point3>,
     ) -> Result<()> {
         // no work - no output
         if proj_box.is_none() && proj_pseudo_box.is_none() {
@@ -530,14 +534,30 @@ impl Transform {
                 pb.set_unbounded();
             }
         } else {
-            if let Some(pb) = proj_pseudo_box {
+            if let Some(pb) = proj_pseudo_box.as_deref_mut() {
                 *pb = this_proj_pb;
             }
-            // UNPORTED(surface.volume_p2): SmVolume::EvaluatePoint
-            return Err(SolidError::Unported {
-                upstream: "SmVolume::EvaluatePoint",
-                unit: "surface.volume_p2",
-            });
+            // accumulate the corner mappings into the output boxes (an affine map
+            // takes convex polygons to convex polygons)
+            for ii in [0.0, 1.0] {
+                for jj in [0.0, 1.0] {
+                    for kk in [0.0, 1.0] {
+                        let uvw = param_box.evaluate(ii, jj, kk);
+                        // EvaluatePoint (status ignored: a fresh, undefined point)
+                        let xyz = match evaluate_point(uvw) {
+                            Ok(p) => p,
+                            Err(e) if e.is_unported() => return Err(e),
+                            Err(_) => Vec3::UNDEF,
+                        };
+                        if let Some(b) = proj_box.as_deref_mut() {
+                            b.add_point(xyz);
+                        }
+                        if let Some(pb) = proj_pseudo_box.as_deref_mut() {
+                            pb.add_point(xyz);
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -634,14 +654,14 @@ impl Transform {
         false
     }
 
-    /// Reads a transform from a database stream: the four matrix rows, then the
-    /// volume base data (`ReadFromDB`).
+    /// Reads a transform volume from a database stream: the four matrix rows, then
+    /// the volume base data (`ReadFromDB`), whose status upstream ignores.
     ///
     /// # Errors
     ///
-    /// A failed binary read; [`SolidError::Unported`] for the base-class read
-    /// (`SmVolume::ReadFromDB`, unit `surface.volume_p2`).
-    pub fn read_from_db(db: &mut DatabaseReader) -> Result<Self> {
+    /// A failed binary matrix read; the base read's undefined cases
+    /// ([`SolidError::Unsupported`]) and [`SolidError::Unported`].
+    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Volume> {
         let mut t = Self::IDENTITY;
         if db.file_type() == FileType::Ascii {
             for r in 0..4 {
@@ -666,12 +686,10 @@ impl Transform {
                 }
             }
         }
-        // The matrix is read; the base-class read that follows is not ported yet.
-        // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-        Err(SolidError::Unported {
-            upstream: "SmVolume::ReadFromDB",
-            unit: "surface.volume_p2",
-        })
+        let mut volume = Volume::new(VolumeKind::Transform(t));
+        // read base class data (status ignored)
+        ignore_read(volume.read_base_from_db(db, version))?;
+        Ok(volume)
     }
 
     /// `SmTransform_TYPE` (`GetType`).
@@ -798,15 +816,18 @@ mod tests {
         assert_eq!(t.class_string(), "SmTransform");
         let d = t.natural_param_domain();
         assert_eq!(d.u_min(), -INFINITE_PARAMETER);
-        assert_eq!(t.evaluate_bounding_box_simple(&d, None, None, None), Ok(()));
+        assert_eq!(
+            t.evaluate_bounding_box_simple(&d, None, None, None, Ok),
+            Ok(())
+        );
         let mut b = Extent3d::new();
         assert!(t
-            .evaluate_bounding_box_simple(&d, None, Some(&mut b), None)
+            .evaluate_bounding_box_simple(&d, None, Some(&mut b), None, Ok)
             .is_err());
         let pb = PseudoBox::new();
         let mut proj_pb = PseudoBox::new();
         assert_eq!(
-            t.evaluate_bounding_box_simple(&d, Some(&pb), Some(&mut b), Some(&mut proj_pb)),
+            t.evaluate_bounding_box_simple(&d, Some(&pb), Some(&mut b), Some(&mut proj_pb), Ok),
             Ok(())
         );
         assert_eq!(b.u_min(), -INFINITE_PARAMETER);

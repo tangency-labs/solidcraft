@@ -114,7 +114,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::{self, ObjectRef};
-use crate::geom::solution_array::SolutionEnd;
+use crate::geom::solution_array::{ObjectKind, SolutionEnd, SolutionObject};
 use crate::geom::tol::{
     xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, zone_tol_3d, SmallTopoType, UNINIT_TOL,
     ZONE_TOL_3D,
@@ -912,9 +912,9 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// `SM_ERR` when the point does not drop onto the curve or has no single drop
     /// point on the surface (also at a hundred times the source zone tolerance) or
-    /// volume; the errors of [`Curve::drop_point`]; [`SolidError::Unported`] for
-    /// surfaces and volumes (their point solves, units `surface.surface_p4` and
-    /// `surface.volume_p2`) and topology objects.
+    /// volume; the errors of [`Curve::drop_point`] and [`Volume::global_point_solve`];
+    /// [`SolidError::Unported`] for surfaces (their point solve, unit
+    /// `surface.surface_p4`) and topology objects.
     pub fn compute_point_parameters(
         &mut self,
         k: &Kernel,
@@ -1035,7 +1035,7 @@ impl<O: ClassObject> PointClassification<O> {
         // when point classifies to a volume branch
         else if let Some(volume) = obj_volume {
             let param_domain = volume.natural_param_domain()?;
-            let Some(solution) = volume_global_point_solve(volume, point, &param_domain)? else {
+            let Some(solution) = volume_global_point_solve(k, volume, point, &param_domain)? else {
                 return Err(SolidError::sm_err(OP_COMPUTE));
             };
 
@@ -1055,8 +1055,7 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// `SM_ERR` when the parameters are not set or the classification has no point
     /// (unknown, nothing, region); the errors of the evaluations;
-    /// [`SolidError::Unported`] for volumes (`SmVolume::EvaluatePoint`, unit
-    /// `surface.volume_p2`) and topology objects.
+    /// [`SolidError::Unported`] for topology objects.
     pub fn find_obj_point_3d(&self, geometry: &impl ClassGeometry<O>) -> Result<Point3> {
         if !self.are_parameters_set() {
             return Err(SolidError::sm_err(OP_FIND));
@@ -1473,27 +1472,40 @@ fn surface_global_point_solve(
     ))
 }
 
-/// `SmVolume::GlobalPointSolve(point, bFoundAnswer, solutions, &domain)`: the start of
-/// the first solution when one was found.
-fn volume_global_point_solve(
-    _volume: &Volume,
-    _point: Point3,
-    _param_domain: &Extent3d,
-) -> Result<Option<SolutionEnd>> {
-    // UNPORTED(surface.volume_p2): SmVolume::GlobalPointSolve
-    Err(SolidError::unported(
-        "SmVolume::GlobalPointSolve",
-        "surface.volume_p2",
-    ))
+/// The solution handle of the volume point solve, whose solutions never leave
+/// [`volume_global_point_solve`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VolumeHandle;
+
+impl SolutionObject for VolumeHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Volume
+    }
 }
 
-/// `SmVolume::EvaluatePoint(uvw, point)`.
-fn volume_evaluate_point(_volume: &Volume, _uvw: Point3) -> Result<Point3> {
-    // UNPORTED(surface.volume_p2): SmVolume::EvaluatePoint
-    Err(SolidError::unported(
-        "SmVolume::EvaluatePoint",
-        "surface.volume_p2",
-    ))
+/// `SmVolume::GlobalPointSolve(point, bFoundAnswer, solutions, &domain)` (compounding,
+/// the default): the start of the first solution when one was found. A found answer
+/// without a solution (upstream then reads past the empty array) is `SM_ERR`.
+fn volume_global_point_solve(
+    k: &Kernel,
+    volume: &Volume,
+    point: Point3,
+    param_domain: &Extent3d,
+) -> Result<Option<SolutionEnd>> {
+    let (found, solutions) =
+        volume.global_point_solve(k, point, Some(param_domain), true, VolumeHandle)?;
+    if !found {
+        return Ok(None);
+    }
+    solutions
+        .get(0)
+        .map(|s| Some(s.start))
+        .ok_or(SolidError::sm_err(OP_COMPUTE))
+}
+
+/// `SmVolume::EvaluatePoint(uvw, point)` (compounding, the default).
+fn volume_evaluate_point(volume: &Volume, uvw: Point3) -> Result<Point3> {
+    volume.evaluate_point(uvw, true)
 }
 
 /// `SmVertex::GetPoint`.

@@ -16,9 +16,8 @@
 //! rest as `out`. `trim` and `inv_guess` report their outputs with any status, as
 //! upstream writes them on failure too.
 //!
-//! Deferred cases: `read_db`, whose base-class read `SmVolume::ReadFromDB` belongs to
-//! unit `surface.volume_p2`, and `curve_in`, whose `SmCurve::IsOnPositiveSideOfPlanes`
-//! belongs to unit `curve.curve_p9`.
+//! Deferred cases: `curve_in`, whose `SmCurve::IsOnPositiveSideOfPlanes` belongs to
+//! unit `curve.curve_p9`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

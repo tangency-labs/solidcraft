@@ -314,40 +314,28 @@
       "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_ascii",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.transform/cases.json#39 (upstream source/SMLib/src/SmTransform.cpp:1950)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_ascii_rotated",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.transform/cases.json#40 (upstream source/SMLib/src/SmTransform.cpp:1950)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_binary",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.transform/cases.json#41 (upstream source/SMLib/src/SmTransform.cpp:1988)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -24351,17 +24339,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 3,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3039,
+  "cases_passed": 3042,
   "cases_total": 3042,
-  "deferred_by_unit": {
-    "surface.volume_p2": 3
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "geom.transform"
 }

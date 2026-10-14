@@ -32,8 +32,11 @@
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: finite
 //! values within [`MAX_COORD`], derivative orders that fit the shim's arrays (`n <= 5`;
-//! upstream rejects `n > 3` before writing), and byte values for `ReadDb`.
+//! upstream rejects `n > 3` before writing), and for `ReadDb` byte values forming a text that
+//! `surface_volume_p2::check_text` accepts (the base read has null and
+//! uninitialised cases).
 
+use crate::units::surface_volume_p2;
 use crate::{call_with_buffer, FfiError};
 
 /// Largest derivative order the shim's evaluation arrays hold.
@@ -205,9 +208,13 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         }
         Op::ReadDb => {
             let n = r.index(MAX_BYTES)?;
+            let mut data = Vec::new();
             for _ in 0..n {
-                r.index(255)?;
+                data.push(r.index(255)? as u8);
             }
+            // the base read that follows (`SmVolume::ReadFromDB`) has null and
+            // uninitialised cases: the strict text grammar of `surface.volume_p2`
+            surface_volume_p2::check_text(surface_volume_p2::BEND_VOLUME_TYPE, &data)?;
         }
     }
     if r.at != input.len() {

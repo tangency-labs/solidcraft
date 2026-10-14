@@ -238,16 +238,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_unknown_volume_type",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.crv_in_volume/upstream.json#29 (upstream source/SMLib/src/SmCrvInVolume.cpp:1404 (ReadFromDB))",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -16947,13 +16943,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 176,
+  "cases_deferred": 175,
   "cases_failed": 0,
-  "cases_passed": 1854,
+  "cases_passed": 1855,
   "cases_total": 2030,
   "deferred_by_unit": {
-    "intersect.curve_class_p4": 175,
-    "surface.volume_p2": 1
+    "intersect.curve_class_p4": 175
   },
   "max_rel_err": 0.0,
   "pass": true,

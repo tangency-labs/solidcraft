@@ -632,6 +632,11 @@ pub struct DatabaseReader {
 /// overflows the stack. Real models nest a handful of levels.
 pub const MAX_READ_NESTING: u32 = 64;
 
+/// The `reason` of the [`SolidError::InvalidInput`] that
+/// [`DatabaseReader::enter_nested`] returns past [`MAX_READ_NESTING`]. Readers that
+/// ignore a nested read's status as upstream does must still propagate this one.
+pub const NESTING_LIMIT_REASON: &str = "objects nested too deeply in the database stream";
+
 impl Default for DatabaseReader {
     fn default() -> Self {
         Self::new()
@@ -742,7 +747,7 @@ impl DatabaseReader {
         if self.nesting >= MAX_READ_NESTING {
             return Err(SolidError::InvalidInput {
                 operation,
-                reason: "objects nested too deeply in the database stream",
+                reason: NESTING_LIMIT_REASON,
             });
         }
         self.nesting += 1;

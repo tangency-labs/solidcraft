@@ -554,40 +554,28 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_ascii",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.twist_volume/cases.json#69 (upstream source/SMLib/src/SmTwistVolume.cpp:2070 (ReadFromDB of the WriteToDB layout))",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_ascii_no_orient",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.twist_volume/cases.json#70 (upstream source/SMLib/src/SmTwistVolume.cpp:2070 (ReadFromDB of the WriteToDB layout))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVolume::ReadFromDB",
-        "unit": "surface.volume_p2"
-      },
       "max_rel_err": 0.0,
       "name": "read_db_ascii_next",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.twist_volume/cases.json#71 (upstream source/SMLib/src/SmTwistVolume.cpp:2070 (ReadFromDB of the WriteToDB layout))",
-      "values_compared": 0
+      "values_compared": 39
     },
     {
       "max_rel_err": 0.0,
@@ -12591,17 +12579,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 3,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 1569,
+  "cases_passed": 1572,
   "cases_total": 1572,
-  "deferred_by_unit": {
-    "surface.volume_p2": 3
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "surface.twist_volume"
 }

@@ -9,8 +9,8 @@
 //! `op` with vectors `w`, flag `flag`, integer `n` and (for `read_db`) the database
 //! text `data`. The result `r` is the operation's values with booleans as
 //! `1.0`/`0.0` and statuses as their upstream codes (`SM_ERR` = 1001,
-//! `SM_ERR_INVALID_INPUT` = 1007). Operations reaching the unported volume base or
-//! the unaligned pseudo-box branch of `EvaluateBoundingBoxSimple` are deferred on the Rust side.
+//! `SM_ERR_INVALID_INPUT` = 1007). `read_db` reads a whole transform volume (its
+//! base data through `surface.volume_p2`) and compares the matrix.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use solidcore::geom::pseudo_box::PseudoBox;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject};
 use solidcore::geom::transform::Transform;
 use solidcore::geom::vector3d::Vec3;
-use solidcore::surface::volume::Discontinuities3d;
+use solidcore::surface::volume::{Discontinuities3d, Volume, VolumeKind};
 use solidcore::math::{EFF_ZERO, PI};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
@@ -392,6 +392,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
                 (i.n != 0).then_some(&param_pb),
                 (i.n == 1).then_some(&mut proj_box),
                 (i.n == 2).then_some(&mut proj_pb),
+                |p| Volume::new(VolumeKind::Transform(a)).evaluate_point(p, true),
             );
             match r {
                 Ok(()) => {
@@ -412,10 +413,13 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             };
             let mut db = DatabaseReader::new();
             db.open_for_read(db_bytes(i)?, ft);
-            match Transform::read_from_db(&mut db) {
-                Ok(t) => {
+            match Transform::read_from_db(&mut db, 30) {
+                Ok(v) => {
+                    let VolumeKind::Transform(t) = v.kind() else {
+                        return Err(HarnessError::new("read_db did not make a transform"));
+                    };
                     out.push(0.0);
-                    put_mat(&mut out, &t);
+                    put_mat(&mut out, t);
                 }
                 Err(e) => return Ok(Err(e)),
             }

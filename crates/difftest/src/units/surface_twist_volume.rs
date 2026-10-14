@@ -15,8 +15,8 @@
 //! `InvalidInput`, `-1` for a Rust error upstream cannot produce) and the rest as
 //! `out`.
 //!
-//! Deferred cases: `read_db`, whose base-class read `SmVolume::ReadFromDB` belongs to
-//! unit `surface.volume_p2`.
+//! `read_db` reads the members and the base-class data (`SmVolume::ReadFromDB`, unit
+//! `surface.volume_p2`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

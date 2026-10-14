@@ -6,5 +6,7 @@
 //! in its own submodule and adds methods to [`Volume`].
 
 pub mod p1;
+pub mod p2;
 
 pub use p1::{DirectionDiscontinuities, Discontinuities3d, EvalOptions, Volume, VolumeKind};
+pub use p2::InvPoints;

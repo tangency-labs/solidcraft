@@ -36,8 +36,6 @@
 //! | [`UnbendVolume::is_curve_in_param_domain_simple`] | `IsCurveInParamDomainSimple`                   |
 //! | [`UnbendVolume::read_from_db`]                    | `ReadFromDB`                                   |
 //! | [`UNBEND_VOLUME_TYPE`], [`is_kind_of`], [`Volume::type_code`] and friends | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`), `IsKindOf` |
-//! | `is_point_in_param_domain` (private)              | `SmVolume::IsPointInParamDomain` (CO-PORTED from `surface.volume_p2`) |
-//! | [`Volume::evaluate_point`]                        | `SmVolume::EvaluatePoint` (CO-PORTED from `surface.volume_p2`) |
 //!
 //! Deviations:
 //! - **Volume base.** The unbend is the [`VolumeKind::Unbend`] variant of a
@@ -66,16 +64,11 @@
 //!   upstream) leaves the previous edge's boxes in place. The parameter pseudo box is
 //!   unused upstream and dropped; the aliasing copies of the inputs are not needed.
 //! - **Solvers.** `GlobalPointSolveSimple` checks the *projection* point with
-//!   `SmVolume::IsPointInParamDomain` (as upstream). That base method and the
-//!   `EvaluatePoint` it calls belong to the unported unit `surface.volume_p2` and are
-//!   co-ported here (`CO-PORTED(surface.volume_p2)`: `IsPointInParamDomain` as a
-//!   private helper, `EvaluatePoint` as [`Volume::evaluate_point`], which
-//!   `SmCrvInVolume::EvaluatePoint` now calls too, so the edge curves of
-//!   `EvaluateBoundingBoxSimple` evaluate); the status of `EvaluatePoint` is ignored
-//!   in `IsPointInParamDomain` as upstream, except that [`SolidError::Unported`]
-//!   propagates. The solvers return upstream's `rbFoundAnswer` (`true` whenever they
-//!   succeed); the volume itself (`m_apObjects[0] = this`) is the caller's object
-//!   handle. The unused parameter guess of the local solve is dropped.
+//!   [`Volume::is_point_in_param_domain`] (`SmVolume::IsPointInParamDomain`, unit
+//!   `surface.volume_p2`), as upstream. The solvers return upstream's
+//!   `rbFoundAnswer` (`true` whenever they succeed); the volume itself
+//!   (`m_apObjects[0] = this`) is the caller's object handle. The unused parameter
+//!   guess of the local solve is dropped.
 //! - **`IsCurveInParamDomainSimple`** builds the half-plane `SmPlane` and asks
 //!   `SmCurve::HasPlaneCrossings`, which needs `SmSurface::GlobalCurveIntersect`
 //!   (unit `surface.surface_p8`, not ported): [`SolidError::Unported`].
@@ -86,9 +79,8 @@
 //!   `GlobalPointSolveSimple`).
 //! - **`IsLineInParamDomainSimple`** compares the end points' `y` with the
 //!   singularity tolerance (not zero) in its discontinuity test; ported as written.
-//! - **`ReadFromDB`** reads the two members, then needs `SmVolume::ReadFromDB` (unit
-//!   `surface.volume_p2`, not ported; its status is ignored upstream):
-//!   [`SolidError::Unported`]. Filling a given object (`rpNewVolume != NULL`) is not
+//! - **`ReadFromDB`** reads the two members, then the base data
+//!   ([`Volume::read_base_from_db`], status ignored as upstream). Filling a given object (`rpNewVolume != NULL`) is not
 //!   modelled; a new volume is always made.
 //! - **Unused arguments** upstream ignores (the from-left flags, zero-tangent and
 //!   zero-sampling options of the evaluations, the parameter domain of
@@ -120,6 +112,7 @@ use crate::surface::plane::p1::Plane;
 use crate::surface::volume::p1::{
     concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
+use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 pub use crate::surface::volume::p1::UNBEND_VOLUME_TYPE;
@@ -733,7 +726,7 @@ impl UnbendVolume {
         solutions.set_size(1);
 
         // check - crProjPoint must be in a valid domain
-        if !is_point_in_param_domain(volume, proj_point, true)? {
+        if !volume.is_point_in_param_domain(proj_point, true)? {
             return Err(SolidError::sm_err(OP_GLOBAL));
         }
 
@@ -924,14 +917,14 @@ impl UnbendVolume {
     }
 
     /// Reads an unbend volume from a database stream: the neutral distance and the
-    /// singularity tolerance, then the volume base data (`ReadFromDB`). The database
-    /// version is for that base read (unused until it is ported).
+    /// singularity tolerance, then the volume base data
+    /// ([`Volume::read_base_from_db`], status ignored as upstream).
     ///
     /// # Errors
     ///
-    /// A failed binary read; [`SolidError::Unported`] for the base-class read
-    /// (`SmVolume::ReadFromDB`, unit `surface.volume_p2`).
-    pub fn read_from_db(db: &mut DatabaseReader, _version: u64) -> Result<Volume> {
+    /// A failed binary read; the base read's undefined cases
+    /// ([`SolidError::Unsupported`]) and [`SolidError::Unported`].
+    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Volume> {
         // a new SmUnbendVolume() (neutral distance 0, tolerance SM_UNDEF_DOUBLE)
         let mut unbend = Self::new();
         if db.file_type() == FileType::Ascii {
@@ -947,60 +940,14 @@ impl UnbendVolume {
             unbend.unbend_neutral_dist = db.read_double()?;
             unbend.singularity_tol = db.read_double()?;
         }
-        let _volume = Volume::new(VolumeKind::Unbend(unbend));
-        // The members are read; the base-class read that follows is not ported yet.
-        // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-        Err(SolidError::unported(
-            "SmVolume::ReadFromDB",
-            "surface.volume_p2",
-        ))
+        let mut volume = Volume::new(VolumeKind::Unbend(unbend));
+        // read base class data (status ignored)
+        ignore_read(volume.read_base_from_db(db, version))?;
+        Ok(volume)
     }
-}
-
-/// `SmVolume::IsPointInParamDomain`: the parameter point is in the simple map's
-/// domain and, with `with_compounding`, its image is in every next map's domain.
-// CO-PORTED(surface.volume_p2): SmVolume::IsPointInParamDomain
-fn is_point_in_param_domain(
-    volume: &Volume,
-    param_point: Point3,
-    with_compounding: bool,
-) -> Result<bool> {
-    // pass the call along
-    let mut is_in = volume.is_point_in_param_domain_simple(param_point)?;
-
-    // when asked - check compounded volumes as well
-    if let (true, true, Some(next)) = (is_in, with_compounding, volume.next_map()) {
-        // map crParamPoint to 1stOutSpace (which equals NextInSpace); status ignored
-        let next_in_space_point =
-            ignored(volume.evaluate_point(param_point, true))?.unwrap_or(Vec3::UNDEF);
-
-        // Check the NextInSpacePoint
-        is_in &= next
-            .is_point_in_in_space_domain(next_in_space_point, true)?
-            .0;
-    }
-    Ok(is_in)
 }
 
 impl Volume {
-    /// The out-space image of the parameter point: [`Volume::evaluate`] of the
-    /// position, through the next maps when `with_compounding`
-    /// (`SmVolume::EvaluatePoint`, co-ported from unit `surface.volume_p2`).
-    ///
-    /// # Errors
-    ///
-    /// Those of [`Volume::evaluate`].
-    // CO-PORTED(surface.volume_p2): SmVolume::EvaluatePoint
-    pub fn evaluate_point(&self, param_point: Point3, with_compounding: bool) -> Result<Point3> {
-        // pass the call along
-        let opts = EvalOptions {
-            with_compounding,
-            ..EvalOptions::default()
-        };
-        let d = self.evaluate(param_point, 0, &opts)?;
-        Ok(d.first().copied().unwrap_or(Vec3::UNDEF))
-    }
-
     /// The in-space point on the unbend axis at `w = 0`: the orient origin
     /// (`GetUnbendOrigin`).
     #[must_use]

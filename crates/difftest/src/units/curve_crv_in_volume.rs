@@ -15,8 +15,8 @@
 //! produce) and the rest as `out`.
 //!
 //! Deferred cases: what reaches the unported parts: the curve classification of
-//! uncached breaks (`intersect.curve_class_*`) and the volume's `EvaluatePoint` /
-//! `ReadFromDB` (`surface.volume_p2`). Every run has at least [`MIN_GENERATED`]
+//! uncached breaks (`intersect.curve_class_*`) and the unported volume kinds. Every
+//! run has at least [`MIN_GENERATED`]
 //! generated cases; generated inputs the ffi wrapper rejects are redrawn.
 
 use serde::{Deserialize, Serialize};

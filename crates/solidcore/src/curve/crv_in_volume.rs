@@ -30,10 +30,8 @@
 //! | `SetContext` (dropped)                         | `SetContext`                                      |
 //!
 //! Deviations:
-//! - **Volumes.** The volume is a [`Volume`] (unit `surface.volume_p1`).
-//!   `SmVolume::EvaluatePoint` (unit `surface.volume_p2`) is the co-port
-//!   [`Volume::evaluate_point`] (unit `surface.unbend_volume`); `SmVolume::ReadFromDB`
-//!   and the queries of the unported volume kinds return [`SolidError::Unported`].
+//! - **Volumes.** The volume is a [`Volume`] (units `surface.volume_p1`, `_p2`);
+//!   the queries of the unported volume kinds return [`SolidError::Unported`].
 //! - **Curve classification.** `GetKnots` classifies the base curve against the
 //!   volume's knot iso-planes with `SmCurveClassification` (units
 //!   `intersect.curve_class_p1`, `_p4`, `_p8`); that call returns
@@ -117,22 +115,14 @@ pub const CONTINUITY_ANGLE: f64 = 0.5;
 
 // ---- back-edges ----------------------------------------------------------------------
 
-/// `SmVolume::EvaluatePoint` (co-ported by unit `surface.unbend_volume`).
+/// `SmVolume::EvaluatePoint` (with compounding).
 fn volume_evaluate_point(volume: &Volume, point: Point3) -> Result<Point3> {
     volume.evaluate_point(point, true)
 }
 
 /// `SmVolume::ReadFromDB` of a volume of type `volume_type`.
-fn volume_read_from_db(
-    _volume_type: i64,
-    _db: &mut DatabaseReader,
-    _version: u64,
-) -> Result<Volume> {
-    // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-    Err(SolidError::unported(
-        "SmVolume::ReadFromDB",
-        "surface.volume_p2",
-    ))
+fn volume_read_from_db(volume_type: i64, db: &mut DatabaseReader, version: u64) -> Result<Volume> {
+    Volume::read_from_db(volume_type, db, version)
 }
 
 /// The parameter intervals of the `SmCurveClassification` of `curve` over `interval`

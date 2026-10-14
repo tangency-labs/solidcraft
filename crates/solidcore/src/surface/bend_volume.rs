@@ -73,9 +73,8 @@
 //!   the caller's object handle.
 //! - **`IsCurveInParamDomainSimple`** asks `SmCurve::IsOnPositiveSideOfPlanes`
 //!   (unit `curve.curve_p9`, not ported): [`SolidError::Unported`].
-//! - **`ReadFromDB`** reads the two members, then needs `SmVolume::ReadFromDB` (unit
-//!   `surface.volume_p2`, not ported; its status is ignored upstream):
-//!   [`SolidError::Unported`]. Filling a given object (`rpNewVolume != NULL`) is not
+//! - **`ReadFromDB`** reads the two members, then the base data
+//!   ([`Volume::read_base_from_db`], status ignored as upstream). Filling a given object (`rpNewVolume != NULL`) is not
 //!   modelled; a new volume is always made.
 //! - **Unused arguments** upstream ignores (the from-left flags, zero-tangent and
 //!   zero-sampling options of the evaluations) are dropped where the call is local
@@ -98,6 +97,7 @@ use crate::math::{
 use crate::surface::volume::p1::{
     concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
+use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 pub use crate::surface::volume::p1::BEND_VOLUME_TYPE;
@@ -856,14 +856,14 @@ impl BendVolume {
     }
 
     /// Reads a bend volume from a database stream: the neutral distance and the
-    /// singularity tolerance, then the volume base data (`ReadFromDB`). The database
-    /// version is for that base read (unused until it is ported).
+    /// singularity tolerance, then the volume base data
+    /// ([`Volume::read_base_from_db`], status ignored as upstream) (`ReadFromDB`).
     ///
     /// # Errors
     ///
-    /// A failed binary read; [`SolidError::Unported`] for the base-class read
-    /// (`SmVolume::ReadFromDB`, unit `surface.volume_p2`).
-    pub fn read_from_db(db: &mut DatabaseReader, _version: u64) -> Result<Volume> {
+    /// A failed binary read; the base read's undefined cases
+    /// ([`SolidError::Unsupported`]), its nesting bound and [`SolidError::Unported`].
+    pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Volume> {
         // a new SmBendVolume() (neutral distance 0, tolerance SM_UNDEF_DOUBLE)
         let mut bend = Self::new();
         if db.file_type() == FileType::Ascii {
@@ -879,13 +879,10 @@ impl BendVolume {
             bend.bend_neutral_dist = db.read_double()?;
             bend.singularity_tol = db.read_double()?;
         }
-        let _volume = Volume::new(VolumeKind::Bend(bend));
-        // The members are read; the base-class read that follows is not ported yet.
-        // UNPORTED(surface.volume_p2): SmVolume::ReadFromDB
-        Err(SolidError::unported(
-            "SmVolume::ReadFromDB",
-            "surface.volume_p2",
-        ))
+        let mut volume = Volume::new(VolumeKind::Bend(bend));
+        // read base class data (status ignored)
+        ignore_read(volume.read_base_from_db(db, version))?;
+        Ok(volume)
     }
 }
 
@@ -1118,5 +1115,22 @@ mod tests {
         assert_eq!(BendVolume::new().bend_neutral_dist(), 0.0);
         assert_eq!(bend(1.0).legal_min_u(), 0.01 - EFF_ZERO);
         assert_eq!(clamp_to_period(4.0, -PI, PI), 4.0 - 2.0 * PI);
+    }
+
+    #[test]
+    fn read_from_db_reads_the_base_data() {
+        let text = "2.5\n0.01\n1\nObject Type 22008\n1 0 0 0\n0 1 0 0\n0 0 1 0\n1 2 3 1\n0\n0\n0\n";
+        let mut db = DatabaseReader::new();
+        db.open_for_read(text.as_bytes().to_vec(), FileType::Ascii);
+        let vol = BendVolume::read_from_db(&mut db, 30).unwrap();
+        let VolumeKind::Bend(b) = vol.kind() else {
+            panic!("not a bend")
+        };
+        assert_eq!(b.bend_neutral_dist(), 2.5);
+        assert_eq!(b.singularity_tol(), 0.01);
+        assert!(vol.orient_map().is_none());
+        let next = vol.next_map().unwrap();
+        assert!(matches!(next.kind(), VolumeKind::Transform(_)));
+        assert!(next.next_map().is_none());
     }
 }

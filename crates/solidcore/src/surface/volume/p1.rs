@@ -311,18 +311,18 @@ impl Discontinuities3d {
 #[derive(Debug, Clone)]
 pub struct Volume {
     /// The concrete class and its data.
-    kind: VolumeKind,
+    pub(super) kind: VolumeKind,
     /// `m_pOwner` (not used upstream beyond `SetOwner`).
     owner: Option<ObjectRef>,
     /// `m_pNextMap`: `Evaluate(x) = NextMap(ThisMap(x))`.
-    next_map: Option<Box<Volume>>,
+    pub(super) next_map: Option<Box<Volume>>,
     /// `m_lNextOwnerFlag`: `0` the next map is shared (a copy of this volume keeps
     /// it as is), `1` / `2` it is owned (a copy copies it with its virtual `Copy`).
-    next_owner_flag: u64,
+    pub(super) next_owner_flag: u64,
     /// `m_pOrientMap`: parameter space to in-space (`None` = identity).
-    orient_map: Option<Transform>,
+    pub(super) orient_map: Option<Transform>,
     /// `m_pInvOrientMap`: in-space back to parameter space.
-    inv_orient_map: Option<Transform>,
+    pub(super) inv_orient_map: Option<Transform>,
 }
 
 impl Volume {
