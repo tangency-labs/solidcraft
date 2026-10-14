@@ -1,0 +1,519 @@
+//! FFI wrappers for unit `surface.srf_in_volume`.
+//!
+//! Shim: `harness/cpp/shim/surface_srf_in_volume.cpp` (`sc_surface_srf_in_volume_eval`).
+//! Upstream: `source/SMLib/src/SmSrfInVolume.cpp`, `source/SMLib/inc/SmSrfInVolume.h`.
+//!
+//! Every input starts with a block building the `SmSrfInVolume` `c` the op runs on: a
+//! surface block (`0 oob form n m p q r s cpts(x y z w) u v`: an
+//! `SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`, or `1 O[3] N[3]`: `SmPlane(O, N)`), a
+//! volume block (`n` maps, each `kind [T[12]] has_orient [O[12]]` with kind `0` a plain
+//! `SmVolume`, `1` an `SmTransform(ctx, origin, X, Y, &Z)` from the twelve numbers `T`,
+//! `2` a default `SmTwistVolume`, `3` a default `SmUnbendVolume`; `O` becomes the orient
+//! map; maps are chained with `AddNextMap(map, 2)`, as unit `surface.volume_p1`), then
+//! `in_param copy_flag owner_flag` (the constructor's arguments). Every output starts
+//! with the status (`0` = `SM_SUCCESS`, else the `SmStatus`); the rest:
+//!
+//! | [`Op`]        | upstream                                   | parameters                    | outputs |
+//! |---------------|--------------------------------------------|-------------------------------|---------|
+//! | `Info`        | `GetType`, `GetDegree`, `Get*UVDomain`, `GetMaxAnalyticDomain`, `Owns*`, `ConvertUVFrom*`, `IsKindOf` | `uv nt T[nt]` | `type du dv natural[4] step[4] max[4] owns_s owns_v st_a uv st_b uv kind[nt]` state |
+//! | `Eval`        | `Evaluate`                                 | `uv hu hv ul vl oh nz`        | defined entries of `D[hu+1][hv+1]` (on success) |
+//! | `EvalSimple`  | `EvaluateSimple`                           | `uv hu hv ul vl oh`           | as `Eval` |
+//! | `EvalPoint`   | `EvaluatePoint`                            | `uv`                          | point |
+//! | `Normal`      | `EvaluateNormal`                           | `uv ul vl`                    | normal |
+//! | `Knots`       | `GetKnots`                                 | `v_dir has_ivl a b`           | `nk K nm M` |
+//! | `StepInv`     | `STEPInversion`                            | `dom P tol`                   | `uv loc` |
+//! | `Reverse`     | `Reverse`                                  | `v_dir`                       | state |
+//! | `SwapUv`      | `SwapUV`                                   |                               | state |
+//! | `Trim`        | `TrimWithDomain`                           | `dom`                         | `dom'` state |
+//! | `Transform`   | `Transform`                                | `O X Y has_scale S`           | state |
+//! | `Split`       | `SplitAt`                                  | `v_dir t`                     | state of each half |
+//! | `Copy`        | `Copy` (copy constructor)                  |                               | state of the copy |
+//! | `Equal`       | `operator==`                               | `self` [object block]         | flag |
+//! | `SetOwner`    | `SetOwnerFlag`                             | `flag`                        | state |
+//! | `MakeOwner`   | `MakeOwner`                                |                               | state |
+//! | `SetBase`     | `SetBaseSurface`                           | surface block `in_param copy owns` | state |
+//! | `SetVolume`   | `SetVolume`                                | volume block `copy owns`      | state |
+//! | `Mirror`      | `CreateMirrorSurface`                      | `O X Y`                       | (status only) |
+//! | `Exact`       | `MakeExactBSplineIfPossible`               |                               | (status only) |
+//!
+//! `uv` is two numbers, `dom` `u0 v0 u1 v1`, `ul vl oh nz` flags. A state is
+//! `owner_flag in_param` the base surface (`type has_nurb [n m p q r s cpts knots]`)
+//! and the volume chain (`n` then per map `type [matrix(16) if a transform] has_orient
+//! [O(16)] has_inv [I(16)]`).
+//!
+//! [`eval`] accepts only what upstream handles without undefined behaviour: finite
+//! values, well-formed clamped B-splines, planes with a non-zero normal, derivative
+//! orders up to 3 (upstream's fixed arrays), a plain `SmVolume` head map only where
+//! nothing copies the volume (its `Copy` fails and the copy would share it),
+//! `STEPInversion` and `Transform` only through transform maps, domains and split
+//! parameters inside the base B-spline's domain, and placements with independent axes.
+
+use crate::{call_with_buffer, FfiError};
+
+/// Most maps in a volume chain.
+pub const MAX_MAPS: usize = 3;
+/// Largest control point index.
+pub const MAX_INDEX: usize = 16;
+/// Largest degree.
+pub const MAX_DEGREE: usize = 5;
+/// Largest coordinate magnitude.
+pub const MAX_COORD: f64 = 1.0e6;
+/// Largest derivative order `Evaluate` accepts.
+pub const MAX_DERIV: usize = 3;
+
+const NOW: f64 = -f64::MAX;
+
+/// Shim operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum Op {
+    Info,
+    Eval,
+    EvalSimple,
+    EvalPoint,
+    Normal,
+    Knots,
+    StepInv,
+    Reverse,
+    SwapUv,
+    Trim,
+    Transform,
+    Split,
+    Copy,
+    Equal,
+    SetOwner,
+    MakeOwner,
+    SetBase,
+    SetVolume,
+    Mirror,
+    Exact,
+}
+
+impl Op {
+    /// The shim's op code.
+    #[must_use]
+    pub fn code(self) -> i32 {
+        self as i32
+    }
+}
+
+mod sys {
+    extern "C" {
+        pub fn sc_surface_srf_in_volume_eval(
+            op: i32,
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+    }
+}
+
+fn bad(msg: impl Into<String>) -> FfiError {
+    FfiError::InvalidArgument(msg.into())
+}
+
+/// Sequential reader over the input.
+struct Reader<'a> {
+    input: &'a [f64],
+    at: usize,
+}
+
+/// What a validated object block says about the object.
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
+struct Block {
+    /// The base surface's parameter domain `[u0, v0, u1, v1]` (`None` for a plane).
+    domain: Option<[f64; 4]>,
+    /// The head map is a plain `SmVolume`.
+    head_base: bool,
+    /// Every map is an `SmTransform`.
+    all_transforms: bool,
+    /// The last map is an `SmTransform`.
+    last_transform: bool,
+    /// The constructor copies the volume.
+    copies_volume: bool,
+}
+
+impl Reader<'_> {
+    fn num(&mut self) -> Result<f64, FfiError> {
+        let v = self
+            .input
+            .get(self.at)
+            .copied()
+            .ok_or_else(|| bad("input too short"))?;
+        self.at += 1;
+        Ok(v)
+    }
+
+    fn finite(&mut self) -> Result<f64, FfiError> {
+        let v = self.num()?;
+        if !v.is_finite() || v.abs() > MAX_COORD {
+            return Err(bad("non-finite or huge value"));
+        }
+        Ok(v)
+    }
+
+    fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
+        (0..k).map(|_| self.finite()).collect()
+    }
+
+    fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
+        Ok([self.finite()?, self.finite()?, self.finite()?])
+    }
+
+    fn nonzero3(&mut self) -> Result<[f64; 3], FfiError> {
+        let v = self.vec3()?;
+        if v.iter().map(|c| c * c).sum::<f64>() < 1e-12 {
+            return Err(bad("zero vector"));
+        }
+        Ok(v)
+    }
+
+    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
+        let v = self.num()?;
+        if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
+            return Err(bad(format!("bad index/count {v} (max {max})")));
+        }
+        Ok(v as usize)
+    }
+
+    fn flag(&mut self) -> Result<bool, FfiError> {
+        Ok(self.index(1)? == 1)
+    }
+
+    fn done(&self) -> Result<(), FfiError> {
+        if self.at != self.input.len() {
+            return Err(bad("trailing input"));
+        }
+        Ok(())
+    }
+
+    /// A `uv` point of bounded size.
+    fn uv(&mut self) -> Result<[f64; 2], FfiError> {
+        Ok([self.finite()?, self.finite()?])
+    }
+
+    /// A placement `O X Y`: independent axes.
+    fn placement(&mut self) -> Result<(), FfiError> {
+        self.vec3()?;
+        let x = self.nonzero3()?;
+        let y = self.nonzero3()?;
+        let cross = [
+            x[1] * y[2] - x[2] * y[1],
+            x[2] * y[0] - x[0] * y[2],
+            x[0] * y[1] - x[1] * y[0],
+        ];
+        let c2: f64 = cross.iter().map(|c| c * c).sum();
+        let l2: f64 = x.iter().map(|c| c * c).sum::<f64>() * y.iter().map(|c| c * c).sum::<f64>();
+        if c2 < 1e-6 * l2 {
+            return Err(bad("placement axes parallel"));
+        }
+        Ok(())
+    }
+}
+
+/// Checks a clamped knot vector of degree `p`.
+fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiError> {
+    let m = knots
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| bad(format!("{what}: no knots")))?;
+    if knots.windows(2).any(|w| w.first() > w.last()) {
+        return Err(bad(format!("{what}: knots not non-decreasing")));
+    }
+    let (Some(&a), Some(&b)) = (knots.first(), knots.last()) else {
+        return Err(bad(format!("{what}: empty knots")));
+    };
+    let short = || bad(format!("{what}: knots too short"));
+    if m < 2 * p + 1 {
+        return Err(short());
+    }
+    let head = knots.get(..=p).ok_or_else(short)?;
+    let tail = knots.get(m - p..).ok_or_else(short)?;
+    let inner = knots.get(p + 1..m - p).ok_or_else(short)?;
+    if a >= b || head.iter().any(|&k| k != a) || tail.iter().any(|&k| k != b) {
+        return Err(bad(format!("{what}: knots not clamped")));
+    }
+    if b - a < 1e-6 * a.abs().max(b.abs()).max(1.0) {
+        return Err(bad(format!("{what}: parameter range too small")));
+    }
+    if inner.iter().any(|&k| k == a || k == b) {
+        return Err(bad(format!("{what}: end multiplicity above degree + 1")));
+    }
+    let mut run = 1;
+    for w in inner.windows(2) {
+        run = if w.first() == w.last() { run + 1 } else { 1 };
+        if run > p {
+            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+        }
+    }
+    Ok((a, b))
+}
+
+/// Checks `k` control points sharing their rational marker.
+fn check_points(rd: &mut Reader<'_>, k: usize) -> Result<(), FfiError> {
+    let mut w0 = None;
+    for _ in 0..k {
+        let x = rd.num()?;
+        let y = rd.num()?;
+        let z = rd.num()?;
+        let w = rd.num()?;
+        let rational = w != NOW;
+        if *w0.get_or_insert(rational) != rational {
+            return Err(bad("surface: mixed rationality"));
+        }
+        if rational && !(1e-3..=1e3).contains(&w) {
+            return Err(bad("surface: weight out of range"));
+        }
+        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+            return Err(bad("surface: point out of range"));
+        }
+    }
+    Ok(())
+}
+
+/// A surface block; returns its parameter domain (`None` for a plane).
+fn surface(rd: &mut Reader<'_>) -> Result<Option<[f64; 4]>, FfiError> {
+    if rd.index(1)? == 1 {
+        rd.vec3()?;
+        rd.nonzero3()?;
+        return Ok(None);
+    }
+    rd.flag()?;
+    rd.index(11)?;
+    let n = rd.index(MAX_INDEX)?;
+    let m = rd.index(MAX_INDEX)?;
+    let p = rd.index(MAX_DEGREE)?;
+    let q = rd.index(MAX_DEGREE)?;
+    let r = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
+    let s = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
+    if p == 0 || p > n || q == 0 || q > m || r != n + p + 1 || s != m + q + 1 {
+        return Err(bad(
+            "surface: need 1 <= p <= n, 1 <= q <= m, r = n+p+1, s = m+q+1",
+        ));
+    }
+    check_points(rd, (n + 1) * (m + 1))?;
+    let u = rd.finites(r + 1)?;
+    let v = rd.finites(s + 1)?;
+    let (u0, u1) = check_knots(&u, p, "surface u")?;
+    let (v0, v1) = check_knots(&v, q, "surface v")?;
+    Ok(Some([u0, v0, u1, v1]))
+}
+
+/// A volume block; returns (head is a plain volume, all maps transforms, last map
+/// transform).
+fn volume(rd: &mut Reader<'_>) -> Result<(bool, bool, bool), FfiError> {
+    let n = rd.index(MAX_MAPS)?;
+    if n == 0 {
+        return Err(bad("volume without maps"));
+    }
+    let (mut head_base, mut all_transforms, mut last_transform) = (false, true, false);
+    for i in 0..n {
+        let kind = rd.index(3)?;
+        if kind == 1 {
+            for _ in 0..4 {
+                rd.vec3()?;
+            }
+        }
+        if i == 0 {
+            head_base = kind == 0;
+        }
+        all_transforms &= kind == 1;
+        last_transform = kind == 1;
+        if rd.flag()? {
+            for _ in 0..4 {
+                rd.vec3()?;
+            }
+        }
+    }
+    Ok((head_base, all_transforms, last_transform))
+}
+
+/// An object block (see the module docs).
+fn object_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
+    let domain = surface(rd)?;
+    let (head_base, all_transforms, last_transform) = volume(rd)?;
+    rd.flag()?;
+    let copy_flag = rd.index(3)?;
+    rd.index(3)?;
+    let copies_volume = copy_flag == 2 || copy_flag == 3;
+    if head_base && copies_volume {
+        return Err(bad("constructor copies a plain volume"));
+    }
+    Ok(Block {
+        domain,
+        head_base,
+        all_transforms,
+        last_transform,
+        copies_volume,
+    })
+}
+
+/// A parameter inside the base surface's domain by a margin (anywhere bounded for a
+/// plane).
+fn inside(rd: &mut Reader<'_>, c: &Block, v_dir: bool) -> Result<f64, FfiError> {
+    let t = rd.finite()?;
+    if let Some([u0, v0, u1, v1]) = c.domain {
+        let (a, b) = if v_dir { (v0, v1) } else { (u0, u1) };
+        let m = 1e-3 * (b - a);
+        if t < a + m || t > b - m {
+            return Err(bad("parameter not inside the domain"));
+        }
+    }
+    Ok(t)
+}
+
+fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
+    match op {
+        Op::Info => {
+            rd.uv()?;
+            let nt = rd.index(64)?;
+            for _ in 0..nt {
+                rd.finite()?;
+            }
+        }
+        Op::Eval | Op::EvalSimple => {
+            rd.uv()?;
+            rd.index(MAX_DERIV)?;
+            rd.index(MAX_DERIV)?;
+            let flags = if op == Op::Eval { 4 } else { 3 };
+            for _ in 0..flags {
+                rd.flag()?;
+            }
+        }
+        Op::EvalPoint => {
+            rd.uv()?;
+        }
+        Op::Normal => {
+            rd.uv()?;
+            rd.flag()?;
+            rd.flag()?;
+        }
+        Op::Knots => {
+            rd.flag()?;
+            rd.flag()?;
+            rd.finite()?;
+            rd.finite()?;
+        }
+        Op::StepInv => {
+            if !c.all_transforms {
+                return Err(bad("step inversion: only transform maps"));
+            }
+            for _ in 0..4 {
+                rd.finite()?;
+            }
+            rd.vec3()?;
+            let tol = rd.finite()?;
+            if tol <= 0.0 {
+                return Err(bad("step inversion: need a positive tolerance"));
+            }
+        }
+        Op::Reverse => {
+            rd.flag()?;
+        }
+        Op::SwapUv | Op::MakeOwner | Op::Exact => {}
+        Op::Trim => {
+            let [u0, v0, u1, v1] = [rd.finite()?, rd.finite()?, rd.finite()?, rd.finite()?];
+            if let Some([a0, b0, a1, b1]) = c.domain {
+                let (mu, mv) = (1e-3 * (a1 - a0), 1e-3 * (b1 - b0));
+                if u0 < a0 || u1 > a1 || v0 < b0 || v1 > b1 || u1 - u0 < mu || v1 - v0 < mv {
+                    return Err(bad("trim: domain not a proper part of the surface domain"));
+                }
+            } else if u1 <= u0 || v1 <= v0 {
+                return Err(bad("trim: empty domain"));
+            }
+        }
+        Op::Transform => {
+            if !c.last_transform {
+                return Err(bad("transform: the last map must be a transform"));
+            }
+            rd.placement()?;
+            rd.flag()?;
+            rd.vec3()?;
+        }
+        Op::Split => {
+            if c.head_base {
+                return Err(bad("split copies the volume"));
+            }
+            let v_dir = rd.flag()?;
+            inside(rd, c, v_dir)?;
+        }
+        Op::Copy => {
+            if c.head_base {
+                return Err(bad("copy of a plain volume"));
+            }
+        }
+        Op::Equal => {
+            if !rd.flag()? {
+                object_block(rd)?;
+            }
+        }
+        Op::SetOwner => {
+            rd.index(3)?;
+        }
+        Op::SetBase => {
+            surface(rd)?;
+            rd.flag()?;
+            rd.flag()?;
+            rd.flag()?;
+        }
+        Op::SetVolume => {
+            volume(rd)?;
+            rd.flag()?;
+            rd.flag()?;
+        }
+        Op::Mirror => {
+            if !c.all_transforms || c.copies_volume {
+                return Err(bad("mirror: only transform maps"));
+            }
+            rd.placement()?;
+        }
+    }
+    if op == Op::MakeOwner && c.head_base {
+        return Err(bad("make owner copies a plain volume"));
+    }
+    if op == Op::Exact && !c.all_transforms {
+        return Err(bad("exact: only transform maps"));
+    }
+    Ok(())
+}
+
+/// Checks `input` for `op` (layouts in the module docs).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input [`eval`] rejects.
+pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    let c = object_block(&mut rd)?;
+    validate_op(op, &mut rd, &c)?;
+    rd.done()
+}
+
+/// Runs `op` on `input` (layouts in the module docs); returns the shim's output record.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
+/// for a shim failure.
+pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate(op, input)?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: input is valid for input.len() reads and holds exactly what the shim
+        // reads for `op` (validated above: well-formed blocks, every index, count and
+        // flag the shim passes to upstream, no copy of a plain volume); buf is valid
+        // for buf.len() writes and the shim honours the capacity; len is valid.
+        unsafe {
+            sys::sc_surface_srf_in_volume_eval(
+                op.code(),
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}

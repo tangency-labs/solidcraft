@@ -753,6 +753,7 @@ impl Surface {
                 base_evaluate_normal(self, uv, u_side, v_side)
             }
             SurfaceKind::CurveBounded(s) => s.evaluate_normal(uv, u_side, v_side),
+            SurfaceKind::SrfInVolume(s) => s.evaluate_normal(uv, u_side, v_side),
             SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
         }
     }
@@ -778,8 +779,7 @@ impl Surface {
             }
             SurfaceKind::BSpline(_)
             | SurfaceKind::CurveBounded(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::Step(_) => {
+            | SurfaceKind::SrfInVolume(_) => {
                 base_is_closed(self, uv_domain, param, opt_tol, want_continuity)
             }
         }
@@ -815,14 +815,8 @@ impl Surface {
                 }
                 Ok(planar_of(s, &self.natural_uv_domain())?.is_planar(tol_3d))
             }
-            // SmSurfOfRevolution inherits SmBSplineSurface::CalculateBoundingBox
-            SurfaceKind::SurfOfRevolution(s) => {
-                Ok(planar_of(s.base(), &self.natural_uv_domain())?.is_planar(tol_3d))
-            }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
-                // SmSurface::CalculateBoundingBox (surface::surface::p1) builds a surface
-                // cache, whose tree build needs the continuities
-                // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
+            SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => {
+                // UNPORTED(surface.surface_p1): SmSurface::CalculateBoundingBox
                 Err(SolidError::unported(
                     "SmSurface::CalculateContinuities",
                     "surface.surface_p6",

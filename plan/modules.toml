@@ -1943,10 +1943,10 @@ soft_depends_on = ["geom.axis2_placement", "geom.extent2d", "geom.vector2d"]
 est_lines = 779
 layer = 30
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "31 fns; largest: SmSrfInVolume::Evaluate, SmSrfInVolume::SmSrfInVolume, SmSrfInVolume::ReadFromDB, SmSrfInVolume::STEPInversion; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 2000 generated cases (B-spline and plane base surfaces; transform, twist, unbend and plain volume chains with orient maps; every owned op), 1816 pass bit-identical, 184 deferred (surface.surface_p1 94: SmSurface::operator==; surface.volume_p2 77: InvEvaluatePoint/InvMapPoint, Mirror, MakeExactBSplineOutSurfaceFrom*Space; surface.plane_p2 13: SmPlane::Transform/TrimWithDomain); ReadFromDB is not difftested (SmVolume::ReadFromDB unported: every valid stream defers). Added SurfaceKind::SrfInVolume (boxed) and its arms in surface::surface::p2/p7, surface_cache p1/p2/p3, curve crv_on_surf/iso_curve, intersect::surface_tracer. Plane NURB is made on demand upstream also by const methods: the difftest dump makes it on both sides. SmVolume::Mirror and MakeExactBSplineOutSurfaceFrom{Param,In}Space are tagged surface.volume_p2 (not in units.json). No UNPORTED(surface.srf_in_volume) stubs existed. 31 fns; largest: SmSrfInVolume::Evaluate, SmSrfInVolume::SmSrfInVolume, SmSrfInVolume::ReadFromDB, SmSrfInVolume::STEPInversion; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "surface.surface_p10"

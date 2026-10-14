@@ -1112,9 +1112,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                     ProgIn::FirstPatch { node } => {
                         let own = match cache.surface().kind() {
                             SurfaceKind::BSpline(b) => b.gw_nurb(),
-                            SurfaceKind::CurveBounded(_)
-                            | SurfaceKind::Plane(_)
-                            | SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Step(_) => None,
+                            SurfaceKind::CurveBounded(_) | SurfaceKind::Plane(_) | SurfaceKind::SrfInVolume(_) => None,
                         };
                         match cache.first_bezier_patch(NodeId(*node)) {
                             Ok(None) => o.push(0.0),

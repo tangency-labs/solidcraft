@@ -202,8 +202,7 @@ pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
-        SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => None,
+        SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => None,
     }
 }
 
@@ -239,16 +238,7 @@ fn create_iso_parametric_curve(
     match surface.kind() {
         SurfaceKind::BSpline(b) => bspline_iso_curve(k, b, param, iso, domain),
         SurfaceKind::Plane(_) => Err(plane_iso_unported()),
-        // UNPORTED(surface.surface_cache_p1): SmSurfOfRevolution::CreateIsoParametricCurve.
-        // Ported as SurfOfRevolution::create_iso_parametric_curve
-        // (surface.surf_of_revolution_p1), but it makes an SmCircle in the sweep
-        // direction and this cache holds its iso curves as BSplineCurve, which would drop
-        // the SmEllipse overrides; wiring it needs Curve storage here.
-        SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
-            "SmSurfOfRevolution::CreateIsoParametricCurve",
-            "surface.surface_cache_p1",
-        )),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+        SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::CreateIsoParametricCurve
             Err(SolidError::unported(
                 "SmSurface::CreateIsoParametricCurve",
@@ -299,8 +289,15 @@ pub(super) fn calculate_bounding_box(
             // the continuities.
             // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
             Err(SolidError::unported(
-                "SmSurface::CalculateContinuities",
-                "surface.surface_p6",
+                "SmBSplineSurface::CalculateBoundingBox",
+                "surface.plane_p1",
+            ))
+        }
+        SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => {
+            // UNPORTED(surface.surface_p1): SmSurface::CalculateBoundingBox
+            Err(SolidError::unported(
+                "SmSurface::CalculateBoundingBox",
+                "surface.surface_p1",
             ))
         }
     }
@@ -311,10 +308,7 @@ pub(super) fn calculate_bounding_box(
 fn is_singularity(surface: &Surface, _uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
-        SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
             Err(SolidError::unported(
                 "SmSurface::IsSingularity",
