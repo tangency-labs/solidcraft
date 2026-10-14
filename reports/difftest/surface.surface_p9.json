@@ -759,6 +759,378 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "csi_domain_disjoint",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#0 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_disjoint_negative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#1 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_touching_u_edge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#2 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_touching_corner",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#3 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_domain_narrow_u",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#4 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_sliver_u",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#5 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_domain_narrow_v",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#6 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_sliver_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#7 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_zero_width",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#8 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_domain_narrow_off_line",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#9 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "csi_domain_sliver_tiny_off_line",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#10 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_domain_partial_overlap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#11 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_domain_superset",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#12 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_scale_1e6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#13 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::LocalCurveIntersect",
+        "unit": "surface.surface_p6"
+      },
+      "max_rel_err": 0.0,
+      "name": "csi_scale_1e6_oblique",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#14 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_chord_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#15 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_angle_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#16 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_maxside_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#17 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_maxside_1e6_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#18 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "iso_scale_1e6_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#19 (upstream source/SMLib/src/SmSurface.cpp:14877 (guard narrowing follow-up to PR #6))",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_saddle_scale_1e6_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#20 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_chord_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#21 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_angle_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#22 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_maxside_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#23 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_scale_1e6_maxside_1e6_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#24 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "iso_scale_1e6_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#25 (upstream source/SMLib/src/SmSurface.cpp:14877 (guard narrowing follow-up to PR #6))",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_saddle_scale_1e6_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#26 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_0.0001_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#27 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 66
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_0.0001_angle_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#28 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_0.0001_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#29 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 66
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_0.0001_angle_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#30 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "iso_chord_0.0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#31 (upstream source/SMLib/src/SmSurface.cpp:14877 (guard narrowing follow-up to PR #6))",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_1e-05_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#32 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_1e-05_angle_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#33 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_1e-05_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#34 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 130
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_chord_1e-05_angle_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#35 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "iso_chord_1e-05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#36 (upstream source/SMLib/src/SmSurface.cpp:14877 (guard narrowing follow-up to PR #6))",
+      "values_compared": 32
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_maxside_1000_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#37 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_maxside_1000_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#38 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_maxside_1000_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#39 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_maxside_1e+06_dir0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#40 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_maxside_1e+06_dir1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#41 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 6
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "splits_maxside_1e+06_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#42 (upstream source/SMLib/src/SmSurface.cpp:11644 (guard narrowing follow-up to PR #6))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "review_curved_0_0_0",
       "outcome": "pass",
       "pass": true,
@@ -6431,13 +6803,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 51,
+  "cases_deferred": 58,
   "cases_failed": 0,
-  "cases_passed": 727,
-  "cases_total": 778,
+  "cases_passed": 763,
+  "cases_total": 821,
   "deferred_by_unit": {
     "intersect.curve_class_p4": 50,
-    "surface.surface_p6": 1
+    "surface.surface_p6": 8
   },
   "max_rel_err": 0.0,
   "pass": true,

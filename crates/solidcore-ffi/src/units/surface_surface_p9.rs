@@ -1,8 +1,8 @@
 //! Safe wrappers for `surface.surface_p9`; shim: `surface_surface_p9.cpp`.
 //! Upstream: `source/SMLib/src/SmSurface.cpp` (tessellation, iso boundaries and CSI).
-//! Inputs are one non-rational quadratic 3x3 Bezier patch or a real unit plane,
-//! a domain within [0,1]^2,
-//! bounded controls and, for CSI, a non-degenerate line. No counts cross the FFI.
+//! Inputs are one non-rational quadratic 3x3 Bezier patch, a real unit plane or a
+//! canonical revolution, finite values (a split/iso domain within [0,1]^2) and,
+//! for CSI, a non-degenerate line. No counts cross the FFI.
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -67,28 +67,33 @@ pub fn eval_surface_kind(
     line: [[f64; 3]; 2],
 ) -> Result<Vec<f64>, FfiError> {
     let invalid = || FfiError::InvalidArgument("unsafe surface p9 input".into());
+    // Only finite values are required: scale, chord height, maximum side and
+    // the CSI domain (disjoint, touching or sliver) are all defined in C++.
+    // The angle range and the [0,1] split/iso domain stay bounded as before.
     if !(0..=2).contains(&surface_kind)
+        // The one-node Rust CSI harness tree does not model `BuildTree`, which
+        // subdivides a revolution; keep revolution CSI out of the comparison.
         || (surface_kind == 2 && op == 2)
         || !(0..=2).contains(&op)
         || !(0..=9).contains(&direction)
-        || net
-            .iter()
-            .flatten()
-            .any(|v| !v.is_finite() || v.abs() > 10.0)
-        || domain
-            .iter()
-            .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
-        || domain[2] - domain[0] < 1e-4
-        || domain[3] - domain[1] < 1e-4
+        || net.iter().flatten().any(|v| !v.is_finite())
+        || domain.iter().any(|v| !v.is_finite())
+        || (op != 2
+            && (domain.iter().any(|v| !(0.0..=1.0).contains(v))
+                || domain[2] - domain[0] < 1e-4
+                || domain[3] - domain[1] < 1e-4))
         || controls.iter().any(|v| !v.is_finite())
-        || (controls[0] != 0.0 && !(1e-3..=10.0).contains(&controls[0].abs()))
         || (controls[1] != 0.0 && !(1.0..=90.0).contains(&controls[1].abs()))
-        || (controls[2] != 0.0 && !(0.05..=100.0).contains(&controls[2].abs()))
-        || line
-            .iter()
-            .flatten()
-            .any(|v| !v.is_finite() || v.abs() > 20.0)
+        || line.iter().flatten().any(|v| !v.is_finite())
     {
+        return Err(invalid());
+    }
+    // `FindTessellationSplits` converts `max_length / max_side + 1` to ULONG and
+    // allocates that many splits. An iso curve of a 3x3 net is no longer than its
+    // control polygon (< 7 * max |net|), so this keeps the count finite and below
+    // the Rust port's documented 1,000,000-split limit.
+    let net_max = net.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
+    if op == 0 && controls[2] > 0.0 && net_max / controls[2] > 1e5 {
         return Err(invalid());
     }
     if op == 0 && direction > 1 {
@@ -158,5 +163,26 @@ mod tests {
                 vec![0.0, 0.0, 1.0]
             );
         }
+    }
+
+    #[test]
+    fn accepts_scale_and_csi_domain_rejects_unbounded_split_count() {
+        let mut net = [[0.0; 3]; 9];
+        for (index, p) in net.iter_mut().enumerate() {
+            *p = [(index / 3) as f64 * 5e5, (index % 3) as f64 * 5e5, 0.0];
+        }
+        let line = [[5e5, 5e5, -5e6], [5e5, 5e5, 5e6]];
+        let unit = [0.0, 0.0, 1.0, 1.0];
+        assert!(eval(0, false, &net, unit, 0, [2e4, 15.0, 1e6], false, line).is_ok());
+        assert!(eval(1, false, &net, unit, 0, [1e-5, 0.0, 0.0], false, line).is_ok());
+        assert!(eval(2, false, &net, [2.0, 2.0, 3.0, 3.0], 0, [0.0; 3], false, line).is_ok());
+        assert!(matches!(
+            eval(0, false, &net, unit, 0, [0.0, 0.0, 1.0], false, line),
+            Err(FfiError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            eval(0, false, &net, [2.0, 2.0, 3.0, 3.0], 0, [0.0; 3], false, line),
+            Err(FfiError::InvalidArgument(_))
+        ));
     }
 }

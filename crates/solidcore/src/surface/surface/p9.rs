@@ -62,33 +62,51 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
     }
 }
 
+/// `CreateIsoParametricCurve` through the surface virtual: the B-spline view
+/// used for lengths and point spacing, and the curve as upstream types it
+/// (`SmLine` for planes, `SmCircle` for revolution sweeps), whose own
+/// `IsDegenerate` override upstream calls.
+fn typed_iso_curve(
+    k: &Kernel,
+    surface: &Surface,
+    direction: SurfParamType,
+    value: f64,
+) -> Result<(BSplineCurve, Curve)> {
+    if let SurfaceKind::Plane(p) = surface.kind() {
+        let line = p
+            .create_iso_parametric_curve(direction, value, None, false)?
+            .curve;
+        let base = line.base_with_nurb()?.into_owned();
+        return Ok((base, Curve::from(line)));
+    }
+    if let SurfaceKind::SurfOfRevolution(s) = surface.kind() {
+        let iso = s.create_iso_parametric_curve(k, direction, value, None)?;
+        let base = match iso.curve.kind() {
+            crate::curve::curve::CurveKind::BSpline(c) => c.copy(),
+            crate::curve::curve::CurveKind::Ellipse(c) => c.base().copy(),
+            _ => {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "unexpected revolution iso curve kind",
+                ))
+            }
+        };
+        return Ok((base, iso.curve));
+    }
+    let base = bss(surface)?
+        .create_iso_parametric_curve(k, direction, value, IsoCurveOptions::default())?
+        .curve;
+    let typed = Curve::from(base.clone());
+    Ok((base, typed))
+}
+
 fn iso_curve(
     k: &Kernel,
     surface: &Surface,
     direction: SurfParamType,
     value: f64,
 ) -> Result<BSplineCurve> {
-    if let SurfaceKind::Plane(p) = surface.kind() {
-        return Ok(p
-            .create_iso_parametric_curve(direction, value, None, false)?
-            .curve
-            .base_with_nurb()?
-            .into_owned());
-    }
-    if let SurfaceKind::SurfOfRevolution(s) = surface.kind() {
-        let iso = s.create_iso_parametric_curve(k, direction, value, None)?;
-        return match iso.curve.kind() {
-            crate::curve::curve::CurveKind::BSpline(c) => Ok(c.copy()),
-            crate::curve::curve::CurveKind::Ellipse(c) => Ok(c.base().copy()),
-            _ => Err(SolidError::invalid_input(
-                OP,
-                "unexpected revolution iso curve kind",
-            )),
-        };
-    }
-    Ok(bss(surface)?
-        .create_iso_parametric_curve(k, direction, value, IsoCurveOptions::default())?
-        .curve)
+    Ok(typed_iso_curve(k, surface, direction, value)?.0)
 }
 
 fn implicit_iso(
@@ -215,11 +233,14 @@ impl Surface {
                 } else {
                     uv.x
                 };
-                let curve = iso_curve(k, self, direction, iso)?;
-                let generic = Curve::from(curve.clone());
-                if generic.is_degenerate(EFF_ZERO, None)? {
+                let (curve, typed) = typed_iso_curve(k, self, direction, iso)?;
+                // `pBSC->IsDegenerate()` is virtual: a revolution circle uses
+                // `SmEllipse::IsDegenerate` (radius < tol/2 or arc < tol) and a
+                // plane line `SmLine::IsDegenerate`, not the B-spline test.
+                if typed.is_degenerate(EFF_ZERO, None)? {
                     continue;
                 }
+                let generic = Curve::from(curve.clone());
                 length = generic.approximate_length(&interval, 30, false)?.0;
                 if length > max_length {
                     max_length = length;

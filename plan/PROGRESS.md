@@ -2,15 +2,13 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**138 / 261 units ported** (87 green, 51 partial), **182,714 / 387,903 upstream lines (47.1%)**. 14 claimed, 0 blocked, 109 todo.
+**139 / 261 units ported** (88 green, 51 partial), **184,341 / 387,903 upstream lines (47.5%)**. 15 claimed, 0 blocked, 107 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
 ## Ready to claim now
 
 - [ ] ▶️ `surface.cone_p2` (1656 lines) — ready
-- [ ] ▶️ `topology.proto_topology_p1` (2746 lines) — ready
-- [ ] ▶️ `surface.surface_point_solve_p2` (1882 lines) — ready
 - [ ] ▶️ `intersect.surface_intersector_p4` (1570 lines) — ready
 
 ## Claimable now, dependencies still missing
@@ -127,7 +125,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 - [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.surf_of_revolution_p2` (1369 lines) — in progress: #51 @froglemonade2 (ready for review)
-- [ ] 🔨 `surface.plane_p2` (1627 lines) — in progress: #40 @bherbruck (ready for review)
 - [ ] 🔨 `surface.surface_p4` (2270 lines) — in progress: #49 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.surf_of_extrusion_p2` (1420 lines) — in progress: #57 @bherbruck (ready for review)
 - [ ] 🔨 `surface.surface_p5` (2321 lines) — in progress: #50 @froglemonade2 (ready for review)
@@ -136,9 +133,11 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (draft)
 - [ ] 🔨 `intersect.curve_class_p7` (2248 lines) — in progress: #65 @bherbruck (draft)
 - [ ] 🔨 `intersect.ray_tracer` (1246 lines) — in progress: #48 @froglemonade2 (ready for review)
+- [ ] 🔨 `topology.proto_topology_p1` (2746 lines) — in progress: #67 @bherbruck (draft)
+- [ ] 🔨 `surface.surface_point_solve_p2` (1882 lines) — in progress: #66 @bherbruck (draft)
 - [ ] 🔨 `topology.edgeuse_p1` (1157 lines) — in progress: #55 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.topology_solver_p2` (1391 lines) — in progress: #60 @0xlillith (draft)
-- [ ] 🔨 `query.loop` (830 lines) — in progress: #63 @bherbruck (draft)
+- [ ] 🔨 `query.loop` (830 lines) — in progress: #63 @bherbruck (ready for review)
 
 ## By module
 
@@ -253,7 +252,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
 
-### surface (23/40)
+### surface (24/40)
 
 - [ ] 🟡 `surface.volume_p1` (2014 lines) — partial, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
@@ -262,7 +261,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.curve_bounded_surface` (324 lines) — partial, 535 cases
 - [ ] 🟡 `surface.surface_cache_p1` (1944 lines) — partial, 872 cases
 - [ ] 🟡 `surface.plane_p1` (1934 lines) — partial, 2705 cases
-- [ ] 🟡 `surface.surf_of_revolution_p1` (1522 lines) — partial, 807 cases
+- [x] ✅ `surface.surf_of_revolution_p1` (1522 lines) — green, 858 cases
 - [ ] 🟡 `surface.surface_p9` (1252 lines) — partial, 778 cases
 - [ ] 🟡 `surface.trim_srf_cache` (966 lines) — partial, 621 cases
 - [ ] 🟡 `surface.b_spline_volume_n_lib` (310 lines) — partial, 2420 cases
@@ -278,7 +277,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_cache_p3` (1703 lines) — partial, 600 cases
 - [ ] 🟡 `surface.volume_p2` (1490 lines) — partial, 11220 cases
 - [ ] 🟡 `surface.surface_p7` (2406 lines) — partial, 3660 cases
-- [ ] 🔨 `surface.plane_p2` (1627 lines) — in progress: #40 @bherbruck (ready for review)
+- [ ] 🟡 `surface.plane_p2` (1627 lines) — partial, 2218 cases
 - [ ] 🔨 `surface.surface_p4` (2270 lines) — in progress: #49 @froglemonade2 (ready for review)
 - [ ] ⏳ `surface.sphere` (2861 lines) — waiting
 - [ ] 🔨 `surface.surf_of_extrusion_p2` (1420 lines) — in progress: #57 @bherbruck (ready for review)
@@ -293,7 +292,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `surface.surface_p11` (1789 lines) — waiting
 - [ ] ⏳ `surface.surface_p8` (2374 lines) — waiting
 - [ ] 🟡 `surface.surface_point_solve_p1` (1771 lines) — partial, 1035 cases
-- [ ] ▶️ `surface.surface_point_solve_p2` (1882 lines) — ready
+- [ ] 🔨 `surface.surface_point_solve_p2` (1882 lines) — in progress: #66 @bherbruck (draft)
 - [ ] ⏳ `surface.surface_point_solve_p3` (1282 lines) — waiting
 
 ### topology (3/31)
@@ -301,7 +300,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [x] ✅ `topology.database_io` (363 lines) — green, 2059 cases
 - [x] ✅ `topology.topology` (389 lines) — green, 657 cases
 - [ ] 🟡 `topology.brep_data` (1466 lines) — partial, 2379 cases
-- [ ] ▶️ `topology.proto_topology_p1` (2746 lines) — ready
+- [ ] 🔨 `topology.proto_topology_p1` (2746 lines) — in progress: #67 @bherbruck (draft)
 - [ ] 🔨 `topology.edgeuse_p1` (1157 lines) — in progress: #55 @bherbruck (ready for review)
 - [ ] ⏳ `topology.face_p2` (1827 lines) — waiting
 - [ ] ⏳ `topology.edgeuse_p2` (600 lines) — waiting
@@ -369,7 +368,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ### query (0/10)
 
 - [ ] ⏳ `query.edge` (1025 lines) — waiting
-- [ ] 🔨 `query.loop` (830 lines) — in progress: #63 @bherbruck (draft)
+- [ ] 🔨 `query.loop` (830 lines) — in progress: #63 @bherbruck (ready for review)
 - [ ] ⏳ `query.face_p2` (1161 lines) — waiting
 - [ ] ⏳ `query.face_p3` (1620 lines) — waiting
 - [ ] ⏳ `query.poly` (2119 lines) — waiting
