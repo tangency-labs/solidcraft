@@ -1194,6 +1194,7 @@ mod tests {
     use super::*;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+    use crate::surface::bend_volume::BendVolume;
     use crate::surface::volume::VolumeKind;
     use crate::topology::database_io::InputStream;
 
@@ -1212,7 +1213,13 @@ mod tests {
     }
 
     fn civ(owner: u64) -> CrvInVolume {
-        CrvInVolume::new(base(), true, Volume::new(VolumeKind::Bend), 0, owner)
+        CrvInVolume::new(
+            base(),
+            true,
+            Volume::new(VolumeKind::Bend(BendVolume::new())),
+            0,
+            owner,
+        )
     }
 
     fn cached(owner: u64) -> CrvInVolume {
@@ -1232,10 +1239,22 @@ mod tests {
 
     #[test]
     fn construct_and_flags() {
-        let c = CrvInVolume::new(base(), false, Volume::new(VolumeKind::Bend), 3, 0);
+        let c = CrvInVolume::new(
+            base(),
+            false,
+            Volume::new(VolumeKind::Bend(BendVolume::new())),
+            3,
+            0,
+        );
         assert_eq!(c.owner_flag(), 3);
         assert!(c.owns_curve() && c.owns_volume());
-        let c = CrvInVolume::new(base(), false, Volume::new(VolumeKind::Bend), 1, 4);
+        let c = CrvInVolume::new(
+            base(),
+            false,
+            Volume::new(VolumeKind::Bend(BendVolume::new())),
+            1,
+            4,
+        );
         assert_eq!(c.owner_flag(), 5);
         assert!(!c.owns_curve() && !c.owns_volume());
         assert_eq!(c.copy().owner_flag(), 0);
@@ -1265,17 +1284,13 @@ mod tests {
     }
 
     #[test]
-    fn uncached_knots_and_eval_are_unported() {
+    fn uncached_knots_are_unported() {
         let mut c = civ(3);
         assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
-        assert!(matches!(
-            c.evaluate(0.5, 2, true, true),
-            Err(SolidError::Unported { .. })
-        ));
-        assert!(matches!(
-            c.evaluate_point(0.5),
-            Err(SolidError::Unported { .. })
-        ));
+        // the bend volume evaluates (a default bend divides by its zero neutral
+        // distance)
+        assert_eq!(c.evaluate(0.5, 2, true, true).unwrap().len(), 3);
+        assert!(c.evaluate_point(0.5).is_ok());
     }
 
     #[test]

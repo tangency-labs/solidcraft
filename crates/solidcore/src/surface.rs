@@ -9,6 +9,7 @@
 
 pub mod b_spline_volume;
 pub mod b_spline_volume_n_lib;
+pub mod bend_volume;
 pub mod curve_bounded_surface;
 pub mod plane;
 pub mod surf_of_revolution;
