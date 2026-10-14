@@ -207,7 +207,7 @@ fn classify_against_surface(
 ) -> Result<Vec<Extent1d>> {
     // UNPORTED(intersect.curve_class_p4): SmCurveClassification::SmCurveClassification
     // UNPORTED(intersect.curve_class_p8): SmCurveClassification::IntersectUVDiscontinuties
-    // UNPORTED(intersect.curve_class_p1): SmCurveClassification::GetSize, SmCurveClassification::GetAt
+    // (then the intervals: intersect::curve_class::CurveClassification::size / at)
     Err(SolidError::unported(
         "SmCurveClassification::SmCurveClassification",
         "intersect.curve_class_p4",

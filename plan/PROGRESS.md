@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**134 / 261 units ported** (87 green, 47 partial), **175,672 / 387,903 upstream lines (45.3%)**. 17 claimed, 0 blocked, 110 todo.
+**135 / 261 units ported** (87 green, 48 partial), **176,924 / 387,903 upstream lines (45.6%)**. 16 claimed, 0 blocked, 110 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -19,7 +19,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `surface.surface_p6` (2150 lines) — missing: `surface.surface_p4`, `surface.surface_p5`
 - [ ] `surface.surface_p10` (2172 lines) — missing: `surface.surface_p5`
 - [ ] `intersect.surface_drop_lib_p1` (1478 lines) — missing: `surface.surface_p3`
-- [ ] `surface.surface_p11` (1789 lines) — missing: `surface.surface_p3`, `surface.surface_p5`, `surface.surface_p6`, `surface.surface_p9`
+- [ ] `surface.surface_p11` (1789 lines) — missing: `surface.surface_p3`, `surface.surface_p5`, `surface.surface_p6`
 - [ ] `surface.surface_p8` (2374 lines) — missing: `surface.surface_p3`, `surface.surface_p4`, `surface.surface_p5`, `surface.surface_p6`
 - [ ] `intersect.curve_class_p7` (2248 lines) — missing: `intersect.curve_class_p1`
 - [ ] `intersect.surface_drop_curve` (2014 lines) — missing: `surface.surface_p5`
@@ -127,7 +127,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ## In progress
 
 - [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
-- [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (ready for review)
 - [ ] 🔨 `surface.surf_of_revolution_p2` (1369 lines) — in progress: #51 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.plane_p2` (1627 lines) — in progress: #40 @bherbruck (ready for review)
 - [ ] 🔨 `surface.surface_p4` (2270 lines) — in progress: #49 @froglemonade2 (ready for review)
@@ -257,7 +256,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
 
-### surface (21/40)
+### surface (22/40)
 
 - [ ] 🟡 `surface.volume_p1` (2014 lines) — partial, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
@@ -267,7 +266,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_cache_p1` (1944 lines) — partial, 872 cases
 - [ ] 🟡 `surface.plane_p1` (1934 lines) — partial, 2705 cases
 - [ ] 🟡 `surface.surf_of_revolution_p1` (1522 lines) — partial, 807 cases
-- [ ] 🔨 `surface.surface_p9` (1252 lines) — in progress: #6 @0xlillith (ready for review)
+- [ ] 🟡 `surface.surface_p9` (1252 lines) — partial, 778 cases
 - [ ] 🟡 `surface.trim_srf_cache` (966 lines) — partial, 621 cases
 - [ ] 🟡 `surface.b_spline_volume_n_lib` (310 lines) — partial, 2420 cases
 - [ ] 🟡 `surface.bend_volume` (945 lines) — partial, 2347 cases

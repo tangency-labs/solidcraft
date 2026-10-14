@@ -1985,10 +1985,10 @@ soft_depends_on = ["curve.crv_on_surf", "curve.curve_p3", "curve.curve_p6", "geo
 est_lines = 2087
 layer = 31
 tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "71 fns; largest: sm_ApplyPointSolution, sm_SetXSectEdgeThroughPoint, sm_MakeConsistentClassifications, sm_SetXSectCurveThroughPoint; cycle back-edges (call into later units; stub or co-port): topology.edge(14), topology.face_p2(4), topology.edgeuse_p1(3), boolean.topology_intersector_p1(2), topology.vertex(2), query.face_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "partial (PR #47): difftest 2088 cases (2013 generated/usage + 75 adversarial review fixtures), 1908 pass, 0 fail, 180 deferred (surface.surface_p4 54, surface.surface_p6 52, surface.surface_p1 27, surface.surface_p5 20, topology.face_p2 10, topology.edge 9, intersect.curve_class_p4 6, topology.vertex 2; on merging main, SmTol::GetZoneTol3d(SmSurface), smsurf_GetSurfaceCache and SmSurface::ApproximateSize wired to surface.surface_p1, moving 52 cases to surface.surface_p6 CalculateContinuities; still UNPORTED(surface.surface_p1): SmTol::MapTo2d(.., SmCurve, SmSurface) and SmCrvOnSurf over a non-B-spline surface), max_rel_err 0; --perturb 1908/1908 detected; 71 fns; largest: sm_ApplyPointSolution, sm_SetXSectEdgeThroughPoint, sm_MakeConsistentClassifications, sm_SetXSectCurveThroughPoint; cycle back-edges (call into later units; stub or co-port): topology.edge(14), topology.face_p2(4), topology.edgeuse_p1(3), boolean.topology_intersector_p1(2), topology.vertex(2), query.face_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "intersect.surface_drop_lib_p1"

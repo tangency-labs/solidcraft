@@ -473,6 +473,11 @@ impl Line {
         &self.base
     }
 
+    /// The `SmBSplineCurve` base object, mutable (for the base-class edits).
+    pub(crate) fn base_mut(&mut self) -> &mut BSplineCurve {
+        &mut self.base
+    }
+
     /// Image-space dimension (`SmCurve::GetDim`).
     #[must_use]
     pub const fn dim(&self) -> u64 {

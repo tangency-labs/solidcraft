@@ -200,6 +200,11 @@ impl Hyperbola {
         &self.base
     }
 
+    /// The `SmBSplineCurve` base object, mutable (for the base-class edits).
+    pub(crate) fn base_mut(&mut self) -> &mut BSplineCurve {
+        &mut self.base
+    }
+
     /// The placement: center, semi axis and semi imaginary axis directions.
     #[must_use]
     pub const fn position(&self) -> &Axis2Placement {

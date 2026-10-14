@@ -365,6 +365,12 @@ impl Plane {
         self.anal_uv_domain
     }
 
+    /// The out-of-bounds evaluation flag of the `SmBSplineSurface` part, mutable
+    /// (`SmBSplineSurface::GetOutOfBoundsEnabled`, inherited).
+    pub fn out_of_bounds_enabled_mut(&mut self) -> &mut bool {
+        self.base.out_of_bounds_enabled_mut()
+    }
+
     /// The natural (NURB) domain (`SmBSplineSurface::GetNaturalUVDomain`, inherited):
     /// the knot range of the NURB, made on a copy when missing; `(0, 0, 0, 0)` when
     /// none can be made.

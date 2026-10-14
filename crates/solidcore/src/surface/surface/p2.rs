@@ -1105,12 +1105,12 @@ impl Surface {
     /// [`SolidError::Unported`]: `SmCurveClassification` (units
     /// `intersect.curve_class_*`).
     pub fn curve_on_classify<C: ?Sized>(&self, _classification: &mut C) -> Result<()> {
-        // UNPORTED(intersect.curve_class_p1): SmCurveClassification::ReSet
+        // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
         // (then SetFace, SetSurface1, SetSurface2, IntersectNaturalBounds
         // (intersect.curve_class_p8) and the end interval classifications)
         Err(SolidError::unported(
             "SmCurveClassification::ReSet",
-            "intersect.curve_class_p1",
+            "intersect.curve_class_p2",
         ))
     }
 

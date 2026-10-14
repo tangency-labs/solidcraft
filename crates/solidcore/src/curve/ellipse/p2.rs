@@ -892,6 +892,11 @@ impl Ellipse {
         &self.base
     }
 
+    /// The `SmBSplineCurve` base object, mutable (for the base-class edits).
+    pub(crate) fn base_mut(&mut self) -> &mut BSplineCurve {
+        &mut self.base
+    }
+
     /// The polar conversion table (`m_vPolarConverter`).
     #[must_use]
     pub const fn polar_converter(&self) -> &PolarConversion {
