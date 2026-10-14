@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**136 / 261 units ported** (87 green, 49 partial), **179,011 / 387,903 upstream lines (46.1%)**. 15 claimed, 0 blocked, 110 todo.
+**137 / 261 units ported** (87 green, 50 partial), **180,782 / 387,903 upstream lines (46.6%)**. 14 claimed, 0 blocked, 110 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -11,6 +11,7 @@ Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on
 - [ ] ▶️ `surface.cone_p2` (1656 lines) — ready
 - [ ] ▶️ `intersect.curve_class_p7` (2248 lines) — ready
 - [ ] ▶️ `topology.proto_topology_p1` (2746 lines) — ready
+- [ ] ▶️ `surface.surface_point_solve_p2` (1882 lines) — ready
 
 ## Claimable now, dependencies still missing
 
@@ -27,10 +28,9 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `intersect.surface_drop_lib_p2` (1080 lines) — missing: `intersect.surface_drop_lib_p1`, `surface.surface_p5`
 - [ ] `intersect.curve_class_p2` (1928 lines) — missing: `intersect.curve_class_p7`
 - [ ] `intersect.surface_drop_lib_p3` (2062 lines) — missing: `intersect.surface_drop_lib_p1`, `intersect.surface_drop_lib_p2`, `surface.offset_surface`, `surface.surface_p3` +2 more
-- [ ] `surface.surface_point_solve_p2` (1882 lines) — missing: `surface.surface_point_solve_p1`
 - [ ] `intersect.curve_class_p3` (1986 lines) — missing: `intersect.curve_class_p2`, `intersect.curve_class_p7`
 - [ ] `intersect.curve_class_p4` (2022 lines) — missing: `intersect.curve_class_p2`, `intersect.curve_class_p7`
-- [ ] `surface.surface_point_solve_p3` (1282 lines) — missing: `surface.surface_p4`, `surface.surface_point_solve_p1`, `surface.surface_point_solve_p2`
+- [ ] `surface.surface_point_solve_p3` (1282 lines) — missing: `surface.surface_p4`, `surface.surface_point_solve_p2`
 - [ ] `intersect.curve_class_p6` (2213 lines) — missing: `intersect.curve_class_p2`, `intersect.curve_class_p3`, `intersect.curve_class_p4`, `intersect.curve_class_p7`
 - [ ] `intersect.surface_intersector_p4` (1570 lines) — missing: `intersect.surface_intersector_p3`
 - [ ] `topology.face_p2` (1827 lines) — missing: `surface.offset_surface`, `topology.edgeuse_p1`
@@ -136,7 +136,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.surface_p3` (1794 lines) — in progress: #52 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (draft)
 - [ ] 🔨 `intersect.ray_tracer` (1246 lines) — in progress: #48 @froglemonade2 (ready for review)
-- [ ] 🔨 `surface.surface_point_solve_p1` (1771 lines) — in progress: #58 @bherbruck (ready for review)
 - [ ] 🔨 `topology.edgeuse_p1` (1157 lines) — in progress: #55 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.surface_intersector_p3` (1932 lines) — in progress: #56 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.topology_solver_p2` (1391 lines) — in progress: #60 @0xlillith (draft)
@@ -255,7 +254,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
 
-### surface (22/40)
+### surface (23/40)
 
 - [ ] 🟡 `surface.volume_p1` (2014 lines) — partial, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
@@ -294,8 +293,8 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (draft)
 - [ ] ⏳ `surface.surface_p11` (1789 lines) — waiting
 - [ ] ⏳ `surface.surface_p8` (2374 lines) — waiting
-- [ ] 🔨 `surface.surface_point_solve_p1` (1771 lines) — in progress: #58 @bherbruck (ready for review)
-- [ ] ⏳ `surface.surface_point_solve_p2` (1882 lines) — waiting
+- [ ] 🟡 `surface.surface_point_solve_p1` (1771 lines) — partial, 1035 cases
+- [ ] ▶️ `surface.surface_point_solve_p2` (1882 lines) — ready
 - [ ] ⏳ `surface.surface_point_solve_p3` (1282 lines) — waiting
 
 ### topology (3/31)

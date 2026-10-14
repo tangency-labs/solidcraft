@@ -2307,10 +2307,10 @@ soft_depends_on = ["curve.curve_p1", "curve.curve_p4", "curve.curve_p6", "geom.g
 est_lines = 1932
 layer = 34
 tests = ["prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection", "prog_test:my_test_surface_interface", "prog_test:my_test_ssi", "prog_test:my_test_tsurf_section", "prog_test:my_test_planar_section"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "5 fns; largest: SmSurfaceIntersector::FindBoundaryStartPoints, SmSurfaceIntersector::TestPoint, SmSurfaceIntersector::ComputeNextPoint, sm_UpdateTsectPoint; cycle back-edges (call into later units; stub or co-port): topology.edge(2), topology.edgeuse_p1(1), topology.edgeuse_p3(1), topology.face_p4(1); unit-SCC #22 (220 units); 150 upstream test entry points reach this unit"
+notes = "5 fns; largest: SmSurfaceIntersector::FindBoundaryStartPoints, SmSurfaceIntersector::TestPoint, SmSurfaceIntersector::ComputeNextPoint, sm_UpdateTsectPoint; unit-SCC #22 (220 units); 150 upstream test entry points reach this unit; PARTIAL (PR #56): difftest 1527 cases (17 inline edge cases, 10 fixture cases from my_test_planar_section on shovel.srf, 1500 generated programs: plane/plane traces at angles down to 1e-6 with through, start and end points, random programs on planes, B-spline and curve-bounded surfaces, boundary start point searches, scales 1e-6..1e5), 851 pass bit-identical (max_rel_err 0), 676 deferred (surface.surface_p11 353, surface.surface_p3 135, surface.surface_p8 79, surface.plane_p1 64, surface.surface_p5 28, blend.fillet_executive_p1 13, surface.surface_p6 4); --perturb SENSITIVE 851/851. UNPORTED stubs: SmSurface::GlobalCurveIntersect (surface.surface_p8), SmSurface::DropAndTrimCurve (intersect.surface_drop_lib_p1), SmSurface::IsSingularity of non-planes (surface.surface_p5). The face edge branch (static constexpr bGWCAddEdgeThroughPoints = FALSE) and the bStopAtSingularity = FALSE code are dead upstream and not ported, so the planned topology back-edges (topology.edge, topology.edgeuse_p1, topology.edgeuse_p3, topology.face_p4) are not needed. find_boundary_start_points fetches caches with smsurf_GetSurfaceCache (tree build reaches surface.surface_p6); find_boundary_start_points_with_caches takes them from the caller."
 
 [[unit]]
 id = "surface.surface_point_solve_p3"
