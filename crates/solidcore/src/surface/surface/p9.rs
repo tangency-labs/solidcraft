@@ -52,11 +52,12 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::CreateIsoParametricCurve
+        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+            // `SmIsoCurve` holds B-spline surfaces only (plan/findings.md, surface.surface_p5)
+            // UNPORTED(curve.iso_curve): SmIsoCurve over a non-B-spline surface
             Err(SolidError::unported(
-                "SmSurface::CreateIsoParametricCurve",
-                "surface.surface_p5",
+                "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+                "curve.iso_curve",
             ))
         }
     }
@@ -467,19 +468,19 @@ fn intersect_surface_curve(
             deviation: x.deviation,
         }))
 }
-fn filter_solution<O>(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _conts: [[ContinuityType; 2]; 3],
-    _solution: &Solution<O>,
+fn filter_solution<O: SolutionObject>(
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    conts: [[ContinuityType; 2]; 3],
+    solution: &Solution<O>,
 ) -> Result<bool> {
-    // UNPORTED(surface.surface_p5): sm_FilterSolution
-    Err(SolidError::unported(
-        "sm_FilterSolution",
-        "surface.surface_p5",
-    ))
+    // conts: the surface u and v continuities, then the curve's
+    let [u_conts, v_conts, t_conts] = conts;
+    super::p5::filter_solution(
+        surface, domain, curve, interval, u_conts, v_conts, t_conts, solution,
+    )
 }
 fn nearby_intersection(
     surface: &Surface,
@@ -493,16 +494,13 @@ fn nearby_intersection(
     Ok(c.found_guess.then_some((c.new_uv_guess, c.new_t_guess)))
 }
 fn surface_point_solve<O: Copy>(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _point: Point3,
-    _guess: Point2,
+    surface: &Surface,
+    domain: &Extent2d,
+    point: Point3,
+    guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
-    ))
+    let r = surface.local_point_solve::<O>(domain, SolverOperation::Minimize, point, guess)?;
+    Ok((r.found, r.solution))
 }
 
 impl<'a, O: SolutionObject + 'a> GlobalSolve<'a, O> for CsiGlobalSolver<'a, '_, O> {
@@ -517,14 +515,10 @@ impl<'a, O: SolutionObject + 'a> GlobalSolve<'a, O> for CsiGlobalSolver<'a, '_, 
     }
     fn identical_solutions(
         &self,
-        _first: &Solution<O>,
-        _second: &Solution<O>,
+        first: &Solution<O>,
+        second: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        // UNPORTED(surface.surface_p5): SmCSIGlobalSolver::IdenticalSolutions
-        Err(SolidError::unported(
-            "SmCSIGlobalSolver::IdenticalSolutions",
-            "surface.surface_p5",
-        ))
+        super::p5::csi_identical_solutions(&self.base, self.surface, first, second)
     }
 }
 

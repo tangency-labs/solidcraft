@@ -3819,13 +3819,27 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   `Unported` (`curve.iso_curve`) for those kinds. Upstream builds the iso curve over the
   surface itself; fixing it means `IsoCurve` holding a `Surface` (a change to
   `curve.iso_curve` and its users).
-- **Still `UNPORTED(surface.surface_p5)`, not wireable here:** `SmSurface::DropPoint` in
-  `curve::curve::p2` and `SmSurface::LocalPointSolve` in `nurbs::b_spline_curve_n_lib` are
-  generic over `SurfaceEvaluate` (the trait has no `DropPoint` / `LocalPointSolve`; adding
-  them to the trait would give both a `Surface` to call); the `SmCrvOnSurf` branch of
-  `curve_p6` also needs the dropped `pOptSurfCrvOnSurf` and `pOptCrvOrientation`
-  arguments; `SurfOfRevolution::convert_uv_from_nurbs_to_step`'s local point solve
-  (`surf_of_revolution/p1.rs`) needs an `SmSTEPSurface` of the surface of revolution.
+- **Still `UNPORTED(surface.surface_p5)`:** the `SmCrvOnSurf` branch of `curve_p6` needs the dropped
+  `pOptSurfCrvOnSurf` and `pOptCrvOrientation` arguments of `DropPoint`; `SmSurface::DropPoint` and
+  `LocalPointSolve` of the generic callers (`curve::curve::p2`, `nurbs::b_spline_curve_n_lib`) go through
+  `SurfaceEvaluate::{drop_point_minimize, local_point_solve_minimize}`.
 - **Kernel arguments.** `Surface::drop_point` and `Surface::cover_other_coincident_surface`
   call `drop_point_fast` / `convert_domain_from_*` with a default `Kernel` (they read only
   tolerances); `drop_point` should take the caller's kernel once its callers have one.
+
+## intersect.curve_class_p1 (`SmCurveClassification`, part 1, PR #47 review, 2026-10-14)
+
+- **CI red on clippy with the C++ feature.** `cargo clippy --workspace --all-targets
+  --features difftest/cpp -- -D warnings` reported 11 errors in the runner
+  (`crates/difftest/src/units/intersect_curve_class_p1.rs`: identical match arms in
+  `gen_tol`, needless range loop and unchecked indexing in `gen_script`, `range_plus_one`,
+  `default_trait_access`). A plain `cargo clippy` does not build the `cpp`-gated
+  runner, so run clippy with `--features difftest/cpp` too. Fixed without changing the RNG call order: the
+  generated cases are identical in name, value count and outcome.
+- **UV trim curves only reached by fixtures.** The generator always passes `uvc: []` to
+  `xsect_curve`, so `SetIntersectionCurveThroughPoint` with UV trim curves is covered
+  only by `fixtures/intersect.curve_class_p1/adversarial.json` (75 cases: UV-curve,
+  huge/tiny-scale and out-of-range-UV xsect/apply cases, analytic Line/Circle/Ellipse/
+  Hermite source curves, a container case past `MIN_ARRAY_SIZE`). At unit and huge scale
+  the UV-curve cases defer on `SmSurface::LocalPointSolve` (`surface.surface_p5`, 20
+  cases); only the tiny-scale ones are compared until that unit lands.

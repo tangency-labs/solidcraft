@@ -335,17 +335,13 @@ fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize)
 /// `SmSurface::LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, found, sol)`:
 /// whether an answer was found, the solution value and the parameters of
 /// `sol.m_vStart`.
-fn surface_local_point_solve<S>(
-    _surface: &S,
-    _domain: &Extent2d,
-    _point: Point3,
-    _guess: Vec2,
+fn surface_local_point_solve<S: SurfaceEvaluate>(
+    surface: &S,
+    domain: &Extent2d,
+    point: Point3,
+    guess: Vec2,
 ) -> Result<(bool, f64, Vec2)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::Unported {
-        upstream: "SmSurface::LocalPointSolve",
-        unit: "surface.surface_p5",
-    })
+    surface.local_point_solve_minimize(domain, point, guess)
 }
 
 /// `SmSurface::Evaluate(uv, 1, 1, TRUE, TRUE, TRUE, vals)`: `vals[i][j]` is the

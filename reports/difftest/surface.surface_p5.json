@@ -556,7 +556,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -604,7 +604,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0009",
@@ -668,7 +668,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -680,7 +680,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -708,7 +708,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0019",
@@ -784,7 +784,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0026",
@@ -1064,7 +1064,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0058",
@@ -1112,7 +1112,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0063",
@@ -1124,7 +1124,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0064",
@@ -1136,7 +1136,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0065",
@@ -1268,7 +1268,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0078",
@@ -1324,7 +1324,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0084",
@@ -1412,7 +1412,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0093",
@@ -1520,7 +1520,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0104",
@@ -1584,7 +1584,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0110",
@@ -1608,7 +1608,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0112",
@@ -1748,7 +1748,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0127",
@@ -1960,7 +1960,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0150",
@@ -1980,7 +1980,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0152",
@@ -2112,7 +2112,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0167",
@@ -2124,7 +2124,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0168",
@@ -2168,7 +2168,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0172",
@@ -2192,7 +2192,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0174",
@@ -2340,7 +2340,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0189",
@@ -2352,7 +2352,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0190",
@@ -2772,7 +2772,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0234",
@@ -2804,7 +2804,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0237",
@@ -2904,7 +2904,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0247",
@@ -3032,7 +3032,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0261",
@@ -3228,7 +3228,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0283",
@@ -3292,7 +3292,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0289",
@@ -3404,7 +3404,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0301",
@@ -3444,7 +3444,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0305",
@@ -3504,7 +3504,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0311",
@@ -3524,7 +3524,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0313",
@@ -3628,7 +3628,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0324",
@@ -3696,7 +3696,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0332",
@@ -3708,7 +3708,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0333",
@@ -3728,7 +3728,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0335",
@@ -3768,7 +3768,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0339",
@@ -4136,7 +4136,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0376",
@@ -4248,7 +4248,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0387",
@@ -4288,7 +4288,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0391",
@@ -4436,7 +4436,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0407",
@@ -4476,7 +4476,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0411",
@@ -4544,7 +4544,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0417",
@@ -4620,7 +4620,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0424",
@@ -4872,7 +4872,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0450",
@@ -4884,7 +4884,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0451",
@@ -4960,7 +4960,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0458",
@@ -5224,7 +5224,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0485",
@@ -5388,7 +5388,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0503",
@@ -5400,7 +5400,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0504",
@@ -5468,7 +5468,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0511",
@@ -5500,7 +5500,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0514",
@@ -5532,7 +5532,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0517",
@@ -5580,7 +5580,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0522",
@@ -5632,7 +5632,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0528",
@@ -5672,7 +5672,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0532",
@@ -5736,7 +5736,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0538",
@@ -5828,7 +5828,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0547",
@@ -5856,7 +5856,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0550",
@@ -5972,7 +5972,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0562",
@@ -6072,7 +6072,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0573",
@@ -6108,7 +6108,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0576",
@@ -6348,7 +6348,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0601",
@@ -6368,7 +6368,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0603",
@@ -6388,7 +6388,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0605",
@@ -6460,7 +6460,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0613",
@@ -6540,7 +6540,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0621",
@@ -6580,7 +6580,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0625",
@@ -6620,7 +6620,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0629",
@@ -6860,7 +6860,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0653",
@@ -6880,7 +6880,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0655",
@@ -6968,7 +6968,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0664",
@@ -7020,7 +7020,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0670",
@@ -7048,7 +7048,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0673",
@@ -7068,7 +7068,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0675",
@@ -7080,7 +7080,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0676",
@@ -7092,7 +7092,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0677",
@@ -7252,7 +7252,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0694",
@@ -7284,7 +7284,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0697",
@@ -7540,7 +7540,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0724",
@@ -7728,7 +7728,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0743",
@@ -7852,7 +7852,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0756",
@@ -7924,7 +7924,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0764",
@@ -8020,7 +8020,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0773",
@@ -8040,7 +8040,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0775",
@@ -8096,7 +8096,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0781",
@@ -8288,7 +8288,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0799",
@@ -8300,7 +8300,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0800",
@@ -8312,7 +8312,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0801",
@@ -8424,7 +8424,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0814",
@@ -8436,7 +8436,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0815",
@@ -8560,7 +8560,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0828",
@@ -8712,7 +8712,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0844",
@@ -9016,7 +9016,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0875",
@@ -9044,7 +9044,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0878",
@@ -9464,7 +9464,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0923",
@@ -9632,7 +9632,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0941",
@@ -9800,7 +9800,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0960",
@@ -9812,7 +9812,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0961",
@@ -9856,7 +9856,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0965",
@@ -9892,7 +9892,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0969",
@@ -9916,7 +9916,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0971",
@@ -9964,7 +9964,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0976",
@@ -10204,7 +10204,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1000",
@@ -10304,7 +10304,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1010",
@@ -10400,7 +10400,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1021",
@@ -10456,7 +10456,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1027",
@@ -10536,7 +10536,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1035",
@@ -10604,7 +10604,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1042",
@@ -10768,7 +10768,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1059",
@@ -10916,7 +10916,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1075",
@@ -11036,7 +11036,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1088",
@@ -11056,7 +11056,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1090",
@@ -11084,7 +11084,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1093",
@@ -11176,7 +11176,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1102",
@@ -11196,7 +11196,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1104",
@@ -11296,7 +11296,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1115",
@@ -11340,7 +11340,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1120",
@@ -11456,7 +11456,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1132",
@@ -11488,7 +11488,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1135",
@@ -11612,7 +11612,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1148",
@@ -11632,7 +11632,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1150",
@@ -11688,7 +11688,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1156",
@@ -11708,7 +11708,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1158",
@@ -11740,7 +11740,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1161",
@@ -11752,7 +11752,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1162",
@@ -11780,7 +11780,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1165",
@@ -11888,7 +11888,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1176",
@@ -12080,7 +12080,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1197",
@@ -12112,7 +12112,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1200",
@@ -12132,7 +12132,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1202",
@@ -12220,7 +12220,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1211",
@@ -12288,7 +12288,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1217",
@@ -12364,7 +12364,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1225",
@@ -12408,7 +12408,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1229",
@@ -12540,7 +12540,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1242",
@@ -12656,7 +12656,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1254",
@@ -12800,7 +12800,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1270",
@@ -12876,7 +12876,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1278",
@@ -12888,7 +12888,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1279",
@@ -12916,7 +12916,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1282",
@@ -12952,7 +12952,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1286",
@@ -13004,7 +13004,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1291",
@@ -13032,7 +13032,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1294",
@@ -13056,7 +13056,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1296",
@@ -13092,7 +13092,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1300",
@@ -13216,7 +13216,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1312",
@@ -13304,7 +13304,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1321",
@@ -13348,7 +13348,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1325",
@@ -13380,7 +13380,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1328",
@@ -13400,7 +13400,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1330",
@@ -13432,7 +13432,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1333",
@@ -13500,7 +13500,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1340",
@@ -13520,7 +13520,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1342",
@@ -13544,7 +13544,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1344",
@@ -13728,7 +13728,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1362",
@@ -13784,7 +13784,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1368",
@@ -14020,7 +14020,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1394",
@@ -14032,7 +14032,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1395",
@@ -14084,7 +14084,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1401",
@@ -14140,7 +14140,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1407",
@@ -14152,7 +14152,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1408",
@@ -14296,7 +14296,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1424",
@@ -14440,7 +14440,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1439",
@@ -14568,7 +14568,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1452",
@@ -14660,7 +14660,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1461",
@@ -14716,7 +14716,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1467",
@@ -14728,7 +14728,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1468",
@@ -14828,7 +14828,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1477",
@@ -14900,7 +14900,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1485",
@@ -14928,7 +14928,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1488",
@@ -14940,7 +14940,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1489",
@@ -15000,7 +15000,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1495",
@@ -15032,7 +15032,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1498",
@@ -15052,7 +15052,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1500",
@@ -15180,7 +15180,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1514",
@@ -15284,7 +15284,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1525",
@@ -15296,7 +15296,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1526",
@@ -15456,7 +15456,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1541",
@@ -15468,7 +15468,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1542",
@@ -15488,7 +15488,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1544",
@@ -15500,7 +15500,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1545",
@@ -15556,7 +15556,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1550",
@@ -15636,7 +15636,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1559",
@@ -15680,7 +15680,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1564",
@@ -15884,7 +15884,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1584",
@@ -16184,7 +16184,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1615",
@@ -16196,7 +16196,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1616",
@@ -16208,7 +16208,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1617",
@@ -16316,7 +16316,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1628",
@@ -16456,7 +16456,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1642",
@@ -16488,7 +16488,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1645",
@@ -16532,7 +16532,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1650",
@@ -16544,7 +16544,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1651",
@@ -16620,7 +16620,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1658",
@@ -16668,7 +16668,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1663",
@@ -16688,7 +16688,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1665",
@@ -16708,7 +16708,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1667",
@@ -16744,7 +16744,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1671",
@@ -16920,7 +16920,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1689",
@@ -16940,7 +16940,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1691",
@@ -16960,7 +16960,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1693",
@@ -17036,7 +17036,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1700",
@@ -17260,7 +17260,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1723",
@@ -17284,7 +17284,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1725",
@@ -17296,7 +17296,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1726",
@@ -17448,7 +17448,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1742",
@@ -17468,7 +17468,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1744",
@@ -17624,7 +17624,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1760",
@@ -17704,7 +17704,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1768",
@@ -17748,7 +17748,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1772",
@@ -17812,7 +17812,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1779",
@@ -17824,7 +17824,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1780",
@@ -17852,7 +17852,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1783",
@@ -17908,7 +17908,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1789",
@@ -17948,7 +17948,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1793",
@@ -18096,7 +18096,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1809",
@@ -18188,7 +18188,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1818",
@@ -18312,7 +18312,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1831",
@@ -18344,7 +18344,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1834",
@@ -18400,7 +18400,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1840",
@@ -18568,7 +18568,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1858",
@@ -18644,7 +18644,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1866",
@@ -18656,7 +18656,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1867",
@@ -18796,7 +18796,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1882",
@@ -18876,7 +18876,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1890",
@@ -18908,7 +18908,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1893",
@@ -18988,7 +18988,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1901",
@@ -19080,7 +19080,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1910",
@@ -19128,7 +19128,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1915",
@@ -19268,7 +19268,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1929",
@@ -19340,7 +19340,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1936",
@@ -19384,7 +19384,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1940",
@@ -19436,7 +19436,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1945",
@@ -19448,7 +19448,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1946",
@@ -19572,7 +19572,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1958",
@@ -19744,7 +19744,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1975",
@@ -19764,7 +19764,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1977",
@@ -19788,7 +19788,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1979",
@@ -19864,7 +19864,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1987",
@@ -19936,7 +19936,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1995",
@@ -19980,7 +19980,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1999",
@@ -20092,7 +20092,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2011",
@@ -20244,7 +20244,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2027",
@@ -20292,7 +20292,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2032",
@@ -20344,7 +20344,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2037",
@@ -20356,7 +20356,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2038",
@@ -20660,7 +20660,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2069",
@@ -20784,7 +20784,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2082",
@@ -20924,7 +20924,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2098",
@@ -20960,7 +20960,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2102",
@@ -20972,7 +20972,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2103",
@@ -20984,7 +20984,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2104",
@@ -21132,7 +21132,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2120",
@@ -21188,7 +21188,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2126",
@@ -21200,7 +21200,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2127",
@@ -21212,7 +21212,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2128",
@@ -21224,7 +21224,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2129",
@@ -21616,7 +21616,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2172",
@@ -21648,7 +21648,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2175",
@@ -21776,7 +21776,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2189",
@@ -21788,7 +21788,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2190",
@@ -21848,7 +21848,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2196",
@@ -21916,7 +21916,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2203",
@@ -21984,7 +21984,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2210",
@@ -22056,7 +22056,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2218",
@@ -22068,7 +22068,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2219",
@@ -22240,7 +22240,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2237",
@@ -22312,7 +22312,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2245",
@@ -22344,7 +22344,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2248",
@@ -22356,7 +22356,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2249",
@@ -22436,7 +22436,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2257",
@@ -22480,7 +22480,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2261",
@@ -22580,7 +22580,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2271",
@@ -22696,7 +22696,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2282",
@@ -22720,7 +22720,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2284",
@@ -22732,7 +22732,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2285",
@@ -22776,7 +22776,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2289",
@@ -22844,7 +22844,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2296",
@@ -22876,7 +22876,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2299",
@@ -22900,7 +22900,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2301",
@@ -22996,7 +22996,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2310",
@@ -23008,7 +23008,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2311",
@@ -23296,7 +23296,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2341",
@@ -23360,7 +23360,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2348",
@@ -23380,7 +23380,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2350",
@@ -23448,7 +23448,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2356",
@@ -23544,7 +23544,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2366",
@@ -23556,7 +23556,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2367",
@@ -23640,7 +23640,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2375",
@@ -23728,7 +23728,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2384",
@@ -23892,7 +23892,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2401",
@@ -23996,7 +23996,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2412",
@@ -24048,7 +24048,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2417",
@@ -24104,7 +24104,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2423",
@@ -24176,7 +24176,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2430",
@@ -24188,7 +24188,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2431",
@@ -24236,7 +24236,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2436",
@@ -24292,7 +24292,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2442",
@@ -24400,7 +24400,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2452",
@@ -24476,7 +24476,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2460",
@@ -24868,7 +24868,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2502",
@@ -24972,7 +24972,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2513",
@@ -25236,7 +25236,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2540",
@@ -25272,7 +25272,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2543",
@@ -25336,7 +25336,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2550",
@@ -25420,7 +25420,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2558",
@@ -25644,7 +25644,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2582",
@@ -25752,7 +25752,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2593",
@@ -25780,7 +25780,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2596",
@@ -25800,7 +25800,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2598",
@@ -25812,7 +25812,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2599",
@@ -25924,7 +25924,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2611",
@@ -26020,7 +26020,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2622",
@@ -26136,7 +26136,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2634",
@@ -26200,7 +26200,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2641",
@@ -26228,7 +26228,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2644",
@@ -26248,7 +26248,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2646",
@@ -26316,7 +26316,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2653",
@@ -26328,7 +26328,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2654",
@@ -26348,7 +26348,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2656",
@@ -26532,7 +26532,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2675",
@@ -26684,7 +26684,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2691",
@@ -26896,7 +26896,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2713",
@@ -27104,7 +27104,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2734",
@@ -27156,7 +27156,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2739",
@@ -27224,7 +27224,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2745",
@@ -27500,7 +27500,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2774",
@@ -27604,7 +27604,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2786",
@@ -27752,7 +27752,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2801",
@@ -27780,7 +27780,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2804",
@@ -27888,7 +27888,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2815",
@@ -27912,7 +27912,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2817",
@@ -27972,7 +27972,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2824",
@@ -27984,7 +27984,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2825",
@@ -28064,7 +28064,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2833",
@@ -28096,7 +28096,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2836",
@@ -28120,7 +28120,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2838",
@@ -28152,7 +28152,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2841",
@@ -28164,7 +28164,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2842",
@@ -28324,7 +28324,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2858",
@@ -28436,7 +28436,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2869",
@@ -28476,7 +28476,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2873",
@@ -28600,7 +28600,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2886",
@@ -28764,7 +28764,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2904",
@@ -28860,7 +28860,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2914",
@@ -28964,7 +28964,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2925",
@@ -29020,7 +29020,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2931",
@@ -29040,7 +29040,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2933",
@@ -29240,7 +29240,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2954",
@@ -29392,7 +29392,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2970",
@@ -29484,7 +29484,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2979",
@@ -29508,7 +29508,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2981",
@@ -29520,7 +29520,7 @@
     {
       "deferred": {
         "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "intersect.surface_intersector_p3"
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen2982",
@@ -29697,10 +29697,9 @@
   "cases_total": 3046,
   "deferred_by_unit": {
     "curve.iso_curve": 10,
-    "intersect.surface_intersector_p3": 357,
     "surface.surface_p3": 775,
     "surface.surface_p6": 12,
-    "surface.surface_point_solve_p3": 176
+    "surface.surface_point_solve_p3": 533
   },
   "max_rel_err": 0.0,
   "pass": true,

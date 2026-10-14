@@ -14,7 +14,7 @@
 //! for `InvalidInput`, `-1` for one upstream cannot return); `Unported` defers the case.
 //!
 //! Deferred cases: every `LocalPointSolve` of an operation but `SM_SO_INTERSECT`/`MAXIMIZE`
-//! (`LocalPointSolve_1`, `intersect.surface_intersector_p3`), the Newton solve of
+//! (`LocalPointSolve_1`, `surface.surface_point_solve_p3`), the Newton solve of
 //! `LocalPointSolve_0` (`SmFindPSNormalENFO`), `IsSingularity` away from a singularity
 //! (`GetSingularities`, `surface.surface_p3`), the surface point solves of `sm_SpLocalSolve`,
 //! `DropPoint` where the local or global point solve is needed, the three-surface and cover

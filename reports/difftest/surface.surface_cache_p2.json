@@ -7638,8 +7638,7 @@
   "deferred_by_unit": {
     "intersect.curve_class_p4": 1,
     "surface.surface_cache_p1": 53,
-    "surface.surface_p3": 43,
-    "surface.surface_p9": 13
+    "surface.surface_p3": 43
   },
   "max_rel_err": 0.0,
   "pass": true,

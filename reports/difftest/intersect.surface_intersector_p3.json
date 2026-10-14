@@ -295,8 +295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0018",
@@ -363,8 +363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0024",
@@ -787,8 +787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0069",
@@ -879,8 +879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0077",
@@ -1015,8 +1015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0092",
@@ -1123,8 +1123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0103",
@@ -2243,8 +2243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0215",
@@ -2603,8 +2603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0252",
@@ -2723,8 +2723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0264",
@@ -3207,8 +3207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0312",
@@ -5607,8 +5607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0559",
@@ -5631,8 +5631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0561",
@@ -6291,8 +6291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0627",
@@ -6395,8 +6395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0638",
@@ -6659,8 +6659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0667",
@@ -7475,8 +7475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0751",
@@ -8287,8 +8287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0836",
@@ -8707,8 +8707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0879",
@@ -9963,8 +9963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1008",
@@ -10367,8 +10367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1049",
@@ -11139,8 +11139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1125",
@@ -11467,8 +11467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1159",
@@ -11555,8 +11555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1167",
@@ -12899,8 +12899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1306",
@@ -13579,8 +13579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1376",
@@ -13779,8 +13779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1397",
@@ -14099,8 +14099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1432",
@@ -14407,8 +14407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::GetSingularities",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1463",
@@ -14915,8 +14915,8 @@
     "blend.fillet_executive_p1": 13,
     "surface.surface_cache_p1": 64,
     "surface.surface_p11": 353,
-    "surface.surface_p3": 135,
-    "surface.surface_p5": 28,
+    "surface.surface_p3": 163,
+    "surface.surface_p6": 4,
     "surface.surface_p8": 79
   },
   "max_rel_err": 0.0,

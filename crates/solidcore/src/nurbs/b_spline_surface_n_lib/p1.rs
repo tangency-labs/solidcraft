@@ -196,7 +196,7 @@ fn surface_nurb<'a>(surface: &'a BSplineSurface, operation: &'static str) -> Res
 /// direction.
 fn is_singularity(srf: &BSplineSurface, uv: Point2) -> Result<(bool, SurfParamType)> {
     // the SmSurface body (surface.surface_p5), on a surface holding a copy
-    let surface = crate::surface::surface::Surface::from(srf.copy());
+    let surface = crate::surface::surface::Surface::from(srf.clone_exact());
     let s = surface.is_singularity(uv, crate::math::EFF_ZERO, false)?;
     Ok((s.singular, s.direction))
 }

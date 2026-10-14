@@ -1957,15 +1957,20 @@ pub fn object_dimension<O: ClassObject>(object: Option<O>) -> i32 {
 /// `SmSurface::LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, found, sol)`:
 /// the gap and UV point of the answer, if found.
 fn surface_local_point_solve(
-    _surface: &Surface,
-    _point: Point3,
-    _guess: Point2,
+    surface: &Surface,
+    point: Point3,
+    guess: Point2,
 ) -> Result<Option<(f64, Point2)>> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
-    ))
+    let domain = surface.natural_uv_domain();
+    let r = surface.local_point_solve::<()>(&domain, SolverOperation::Minimize, point, guess)?;
+    if r.found {
+        Ok(Some((
+            r.solution.start.solution_value,
+            Point2::new(r.solution.start.param(0)?, r.solution.start.param(1)?),
+        )))
+    } else {
+        Ok(None)
+    }
 }
 
 /// `SmSurface::ApproximateSize`: upstream ignores the status, leaving the size zero.

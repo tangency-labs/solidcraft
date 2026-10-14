@@ -2116,17 +2116,13 @@ fn surface_knot_count<S: SurfaceEvaluate>(surface: &S, v: bool) -> Result<usize>
 
 /// `SmSurface::DropPoint`: the surface parameters and distance of the drop, `None`
 /// when it failed.
-fn surface_drop_point<S>(
-    _surface: &S,
-    _point: Point3,
-    _domain: &Extent2d,
-    _guess: Option<Point2>,
+fn surface_drop_point<S: SurfaceEvaluate>(
+    surface: &S,
+    point: Point3,
+    domain: &Extent2d,
+    guess: Option<Point2>,
 ) -> Result<Option<(Point2, f64)>> {
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::Unported {
-        upstream: "SmSurface::DropPoint",
-        unit: "surface.surface_p5",
-    })
+    surface.drop_point_minimize(point, domain, guess)
 }
 
 // ---- file-static helpers --------------------------------------------------------------

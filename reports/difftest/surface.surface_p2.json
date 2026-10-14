@@ -7204,8 +7204,8 @@
   "cases_passed": 808,
   "cases_total": 869,
   "deferred_by_unit": {
-    "intersect.adv_surface_intersector": 1,
-    "surface.plane_p2": 11,
+    "intersect.surface_intersector_p5": 1,
+    "surface.cone_p2": 10,
     "surface.surface_p3": 36,
     "surface.surface_p4": 13,
     "topology.trimming_tools": 1

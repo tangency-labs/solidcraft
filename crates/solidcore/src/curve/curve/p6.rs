@@ -1787,8 +1787,9 @@ impl Curve {
                 ));
             }
 
-            // UNPORTED(surface.surface_p5): SmSurface::DropPoint (the SmCrvOnSurf branch; it
-            // also needs the dropped pOptSurfCrvOnSurf and pOptCrvOrientation arguments)
+            // NOT PORTED (this unit's own limit, see plan/findings.md, surface.surface_p5): the
+            // SmCrvOnSurf branch needs the dropped pOptSurfCrvOnSurf and pOptCrvOrientation
+            // arguments of SmSurface::DropPoint
 
             // for derived BSpline types: copy the Nurb curve as a plain BSplineCurve
             CurveKind::Hyperbola(h) => {

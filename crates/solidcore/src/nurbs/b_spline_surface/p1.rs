@@ -533,7 +533,7 @@ fn local_point_solve(
     guess: Point2,
 ) -> Result<(bool, Point2)> {
     // the SmSurface body (surface.surface_p5), on a surface holding a copy
-    let surface = crate::surface::surface::Surface::from(srf.clone());
+    let surface = crate::surface::surface::Surface::from(srf.clone_exact());
     let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
         domain,
         crate::geom::global_solver::SolverOperation::Intersect,
@@ -579,7 +579,7 @@ fn global_point_solve(
 /// `SmSurface::IsSingularity(uv, dir)`.
 fn is_singularity(srf: &BSplineSurface, uv: Point2) -> Result<bool> {
     // the SmSurface body (surface.surface_p5), on a surface holding a copy
-    let surface = crate::surface::surface::Surface::from(srf.copy());
+    let surface = crate::surface::surface::Surface::from(srf.clone_exact());
     Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular)
 }
 
@@ -716,6 +716,21 @@ impl BSplineSurface {
         });
         Self {
             nurb,
+            nurb_is_borrowed: false,
+            out_of_bounds_enabled: self.out_of_bounds_enabled,
+            knot_type: self.knot_type,
+            form: self.form,
+        }
+    }
+
+    /// A copy that keeps the NURB exactly as it is: [`BSplineSurface::copy`] fixes the
+    /// knot vectors up (`fixup_knot_vector`), which can move near-coincident knots.
+    /// Wrappers that stand in for upstream's solve "on the original object" (a
+    /// `Surface` holding the surface) use this one.
+    #[must_use]
+    pub fn clone_exact(&self) -> Self {
+        Self {
+            nurb: self.nurb.as_ref().map(copy_nurb_surface),
             nurb_is_borrowed: false,
             out_of_bounds_enabled: self.out_of_bounds_enabled,
             knot_type: self.knot_type,
