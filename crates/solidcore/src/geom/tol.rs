@@ -134,8 +134,9 @@ use crate::surface::volume::Volume;
 // UNPORTED(intersect.curve_class_p1): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of
 // SmCurveClassification / SmCurveInterval and SmTol::GetScaledZero(const
 // SmCurveInterval&) need the classification classes.
-// UNPORTED(intersect.point_class): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d /
-// GetXSectTol3d of SmPointClassification.
+// SmTol::GetSrcZoneTol3d / GetObjZoneTol3d / GetXSectTol3d of SmPointClassification
+// are intersect::point_class::PointClassification::src_zone_tol_3d / obj_zone_tol_3d /
+// xsect_tol_3d.
 // UNPORTED(query.poly): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of
 // SmLineSegClassification / SmPolyPointClassification / SmLineSegInterval.
 // UNPORTED(blend.fillet_solver_p1): SmTol::GetAngTolRad(const SmFilletSolver*);

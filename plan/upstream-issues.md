@@ -778,6 +778,15 @@ by area within each severity.
 - **Severity:** crash/UB.
 - **Rust port:** `Surface::point_based_surface_intersect` returns `InvalidInput` for those inputs.
 
+#### UB-79. `SmPointClassification` calls `SmObject` virtuals on an `SmPoint3d*`
+- **Location:** `SmPointClass.cpp:668` (`ComputePointParameters`: `SmTol::GetZoneTol3d(m_pObject)`), `:435` (`GetGap3d` with a surface, through `GetObjZoneTol3d`), `:493` (`IsConnectedTo`: `GetType`), `:917` (`MergeIntoObject`: `GetType`).
+- **What happens:** `SM_PC_POINT` classifications store an `SmPoint3d*` cast to `SmObject*` (`SetClassObject`), and these paths call virtual `SmObject` members on it. `SmPoint3d` has no `SmObject` vtable, so the call is undefined behaviour.
+- **Trigger:** `SetClassObject(SM_PC_POINT, (SmObject*)&point)` followed by `ComputePointParameters`, `GetGap3d(surface)`, `IsConnectedTo` or `MergeIntoObject`.
+- **How found:** read during porting.
+- **Confirmed:** no (the harness keeps these calls away from the C++).
+- **Severity:** crash/UB.
+- **Rust port:** Treats a point like any other non-topology object (system zone tolerance, not connected, not mergeable).
+
 ## Hang
 
 #### HANG-1. `SmExtent1d::PeriodicWrap` steps one period per iteration
@@ -1413,6 +1422,15 @@ by area within each severity.
 - **Confirmed:** yes (`intersect.surface_intersector_p1` difftest, `edge_span_angle`).
 - **Severity:** wrong result (unit mix-up).
 - **Rust port:** Faithful.
+
+#### WR-58. `SmPointClassification::GetGap3d` returns `SM_ERR` as a distance
+- **Location:** `SmPointClass.cpp:464`, `SmPointClassification::GetGap3d` (def. `:418`).
+- **What happens:** When the object point has no single drop point on the given surface (even at 100x the zone tolerance), the function, which returns a `double` gap, returns `SM_ERR` (1001.0), which callers read as a large gap.
+- **Trigger:** `GetGap3d(pSurface)` for an object point far from `pSurface`.
+- **How found:** read during porting.
+- **Confirmed:** no (the surface point solve is not ported yet, so these cases defer).
+- **Severity:** wrong result.
+- **Rust port:** Returns `SM_ERR` as the gap value too.
 
 ## Docs
 

@@ -1046,17 +1046,18 @@ fn face_zone_tol_3d<O>(_face: O) -> Result<f64> {
 /// `SmPointClassification`: its class and object.
 ///
 /// When wiring, keep upstream's flag arguments exactly: `(.., FALSE, TRUE, ..)`
-/// (`SmTrimSrfCache.cpp:91` and `:1089`).
+/// (`SmTrimSrfCache.cpp:91` and `:1089`). The classification is
+/// `intersect::point_class::PointClassification::new(src_zone_tol_3d)`; its
+/// `point_class()` and `object()` are the results.
 fn face_point_classify<O>(
     _face: O,
     _uv: Point2,
     _src_zone_tol_3d: f64,
 ) -> Result<(i32, Option<O>)> {
-    // UNPORTED(intersect.point_class): SmPointClassification::SmPointClassification
     // UNPORTED(query.face_p2): SmFace::PointClassify(uv, tol, FALSE, TRUE, sPC)
     Err(SolidError::unported(
-        "SmPointClassification::SmPointClassification",
-        "intersect.point_class",
+        "SmFace::PointClassify",
+        "query.face_p2",
     ))
 }
 
