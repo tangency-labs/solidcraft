@@ -18,6 +18,7 @@ pub mod surf_of_revolution;
 #[allow(clippy::module_inception)]
 pub mod surface;
 pub mod surface_cache;
+pub mod surface_point_solve;
 pub mod torus;
 pub mod trim_srf_cache;
 pub mod twist_volume;
