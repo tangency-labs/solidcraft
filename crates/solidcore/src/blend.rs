@@ -4,3 +4,5 @@
 //! `SmFilletCustomSolver`, `SmFilletCorner`, `SmFilletGeom`, `SmFilletIntersector`,
 //! `SmFilletRemoval`, `SmCurveFilletExecutive` in `source/SMLib`, and
 //! `SM_API/SmApiFillets`.
+
+pub mod fillet_custom_solver;

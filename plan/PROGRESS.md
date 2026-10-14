@@ -114,7 +114,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 ## In progress
 
 - [ ] 🔨 `curve.curve_p9` (1783 lines) — in progress: #13 @froglemonade2 (ready for review)
-- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #71 @0xlillith (draft)
+- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #71 @0xlillith (ready for review)
 - [ ] 🔨 `surface.surface_p4` (2270 lines) — in progress: #49 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.surface_p5` (2321 lines) — in progress: #50 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.srf_in_volume` (779 lines) — in progress: #53 @froglemonade2 (ready for review)
@@ -129,7 +129,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
 - [ ] 🔨 `blend.fillet_custom_solver` (1236 lines) — in progress: #78 @bherbruck (ready for review)
 - [ ] 🔨 `query.poly` (2119 lines) — in progress: #73 @bherbruck (ready for review)
-- [ ] 🔨 `query.tess` (838 lines) — in progress: #83 @bherbruck (draft)
+- [ ] 🔨 `query.tess` (838 lines) — in progress: #83 @bherbruck (ready for review)
 - [ ] 🔨 `boolean.api_brep` (410 lines) — in progress: #81 @bherbruck (ready for review)
 
 ## By module
@@ -265,7 +265,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `surface.surface_cache_p2` (1245 lines) — partial, 905 cases
 - [x] ✅ `surface.torus` (1180 lines) — green, 563 cases
 - [ ] 🟡 `surface.unbend_volume` (920 lines) — partial, 1874 cases
-- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #71 @0xlillith (draft)
+- [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #71 @0xlillith (ready for review)
 - [ ] 🟡 `surface.surf_of_revolution_p2` (1369 lines) — partial, 1167 cases
 - [ ] 🟡 `surface.surface_cache_p3` (1703 lines) — partial, 600 cases
 - [ ] 🟡 `surface.volume_p2` (1490 lines) — partial, 11220 cases
@@ -326,7 +326,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 - [ ] 🟡 `intersect.surface_tracer` (1900 lines) — partial, 427 cases
 - [ ] 🟡 `intersect.point_class` (909 lines) — partial, 2511 cases
-- [ ] 🟡 `intersect.curve_class_p1` (2087 lines) — partial, 2088 cases
+- [ ] 🟡 `intersect.curve_class_p1` (2087 lines) — partial, 2125 cases
 - [ ] ⏳ `intersect.surface_drop_lib_p1` (1478 lines) — waiting
 - [ ] 🟡 `intersect.surface_silhouette` (979 lines) — partial, 709 cases
 - [ ] 🔨 `intersect.curve_class_p7` (2248 lines) — in progress: #65 @bherbruck (ready for review)
@@ -367,7 +367,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `query.poly` (2119 lines) — in progress: #73 @bherbruck (ready for review)
 - [ ] ⏳ `query.face_p1` (465 lines) — waiting
 - [ ] ⏳ `query.face_p4` (1432 lines) — waiting
-- [ ] 🔨 `query.tess` (838 lines) — in progress: #83 @bherbruck (draft)
+- [ ] 🔨 `query.tess` (838 lines) — in progress: #83 @bherbruck (ready for review)
 - [ ] ⏳ `query.brep` (517 lines) — waiting
 - [ ] ⏳ `query.api_queries` (809 lines) — waiting
 

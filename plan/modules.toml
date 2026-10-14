@@ -2030,7 +2030,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "37 fns; largest: SmOffsetSurface::EvaluatePlainOrSimple, SmOffsetSurface::CalculateBoundingBox, sm_ExtendSurface, SmOffsetSurface::EvaluatePoint; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "37 fns; largest: SmOffsetSurface::EvaluatePlainOrSimple, SmOffsetSurface::CalculateBoundingBox, sm_ExtendSurface, SmOffsetSurface::EvaluatePoint; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in blend.fillet_custom_solver (PR #78): SmOffsetSurface data only (m_pSurface as an owned base + SurfaceId pointer identity, m_dOffsetDistance, m_bAllowExtension, GetBaseSurface, SetOffsetDistance, SetAllowExtension) -> solidcore::blend::fillet_custom_solver::OffsetSurface; its evaluations there are UNPORTED(surface.offset_surface) stubs to wire to the real SmOffsetSurface"
 
 [[unit]]
 id = "surface.surface_p11"
@@ -2545,10 +2545,10 @@ soft_depends_on = ["curve.curve_p1", "curve.curve_p2", "curve.curve_p4", "curve.
 est_lines = 1236
 layer = 41
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "8 fns; largest: SmEiffelTowerFS::LoadInitialValues, SmSecantConstantRadiusFS::LoadInitialValues, SmEiffelTowerCrossSectionFSG::CreateSurface, SmEiffelTowerFS::LoadJacobian; cycle back-edges (call into later units; stub or co-port): blend.fillet_solver_p1(8), blend.fillet_standard_solver_p2(2); unit-SCC #22 (220 units); only 3 of 1236 lines survive RTA (reached via virtual dispatch to classes no in-scope entry point constructs); low priority / likely deferrable; 317 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 448 cases (48 fixture, 400 generated), 359 pass, 89 deferred (surface.offset_surface 89), max_rel_err 0; --perturb SENSITIVE. CreateSurface (SmEiffelTowerCrossSectionFSG) is compared on 'Eiffel tower' sections over straight (ruled branch), concentric arc (surface of revolution branch) and free-form rails (skin with extrusion cross-boundary derivative surfaces), equal radii, vanishing/zero second arc, touching rails (point sections), mismatched point counts and knot vectors, different intervals on parallel 2-point line rails (the only different-interval inputs the FFI guard admits), tolerances 0 to above the rail gap, scales 1e-6 to 1e6; the shim's solver is an SmConstantRadiusFS (CreateSurface reads only its context and tolerance). LoadJacobian / LoadInitialValues of SmEiffelTowerFS and SmSecantConstantRadiusFS run in C++ on solvers built on an SmApiCreateBox edge use with their offset surfaces, orientations and radii replaced and edge uses cleared; the Rust side is deferred at the first offset surface evaluation (SmOffsetSurface::Evaluate / EvaluatePoint), except LoadInitialValues without rbDoSurf2Calcs (compared). Other stubs: UNPORTED(blend.fillet_standard_solver_p2) GuessPointOnPlaneSolve, UNPORTED(blend.fillet_standard_solver_p1) the SmConstantRadiusFS edge-use constructor, UNPORTED(surface.surface_p4) SmSurface::GlobalPointSolve, UNPORTED(surface.surface_p5) SmSurface::LocalPointSolve. Co-ports (see CO-PORTED notes of blend.fillet_solver_p1, blend.fillet_standard_solver_p1, surface.offset_surface). Plan notes: 8 fns; largest: SmEiffelTowerFS::LoadInitialValues, SmSecantConstantRadiusFS::LoadInitialValues, SmEiffelTowerCrossSectionFSG::CreateSurface, SmEiffelTowerFS::LoadJacobian; cycle back-edges (call into later units; stub or co-port): blend.fillet_solver_p1(8), blend.fillet_standard_solver_p2(2); unit-SCC #22 (220 units); only 3 of 1236 lines survive RTA (reached via virtual dispatch to classes no in-scope entry point constructs); low priority / likely deferrable; 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "query.edge"
@@ -2996,7 +2996,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "91 fns; largest: SmFilletSolver::SplitFilletGeomAtSideEdge, SmFilletSphereSolveENFO::Evaluate, sm_ComputeSupportEdge, SmRailUVCurveIntersectENFO::Evaluate; cycle back-edges (call into later units; stub or co-port): blend.fillet_standard_solver_p1(7), blend.fillet_geom_p5(5), blend.fillet_geom_p6(4), blend.fillet_geom_p2(3), blend.fillet_corner_p1(2), blend.fillet_executive_p1(2), blend.fillet_geom_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "91 fns; largest: SmFilletSolver::SplitFilletGeomAtSideEdge, SmFilletSphereSolveENFO::Evaluate, sm_ComputeSupportEdge, SmRailUVCurveIntersectENFO::Evaluate; cycle back-edges (call into later units; stub or co-port): blend.fillet_standard_solver_p1(7), blend.fillet_geom_p5(5), blend.fillet_geom_p6(4), blend.fillet_geom_p2(3), blend.fillet_corner_p1(2), blend.fillet_executive_p1(2), blend.fillet_geom_p3(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in blend.fillet_custom_solver (PR #78): SmFilletSolver members m_pEdgeuses, m_dThisApproxTol3d, m_dThisAngTolRad, m_dTangencyTolerance, m_pSurfaces, m_dOrientations, m_dSurfaceExtensionFactor, m_dConversionTol, GetSurface (m_pFGForSurfaces not modelled) -> solidcore::blend::fillet_custom_solver::ConstantRadiusAssistedFs (from_parts, surface)"
 
 [[unit]]
 id = "blend.hcr"
@@ -3122,7 +3122,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "51 fns; largest: SmCircularCrossSectionFSG::CreateSurfaceFromCurves, SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves, SmConstantDistanceFS::LoadJacobian, SmConstantDistanceFS::LoadInitialValues; cycle back-edges (call into later units; stub or co-port): blend.fillet_executive_p1(7); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "51 fns; largest: SmCircularCrossSectionFSG::CreateSurfaceFromCurves, SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves, SmConstantDistanceFS::LoadJacobian, SmConstantDistanceFS::LoadInitialValues; cycle back-edges (call into later units; stub or co-port): blend.fillet_executive_p1(7); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in blend.fillet_custom_solver (PR #78): SmConstantRadiusFS::m_dFilletRadii (and the SmConstantRadiusAssistedFS base) -> solidcore::blend::fillet_custom_solver::ConstantRadiusAssistedFs::fillet_radii; the edge-use constructor is a stub ConstantRadiusAssistedFs::from_edgeuse returning Unported (UNPORTED(blend.fillet_standard_solver_p1))"
 
 [[unit]]
 id = "boolean.topology_intersector_p1"
