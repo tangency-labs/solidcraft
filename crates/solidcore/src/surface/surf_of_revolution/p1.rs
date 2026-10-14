@@ -359,13 +359,21 @@ impl SurfOfRevolution {
     pub const TYPE: i64 = SURF_OF_REVOLUTION_TYPE;
 
     /// A copy whose B-spline base is kept exactly ([`BSplineSurface::clone_exact`]):
-    /// `Clone` goes through [`BSplineSurface::copy`], which fixes the knots up.
+    /// `Clone` goes through [`BSplineSurface::copy`], which fixes the knots up; the
+    /// generator's base is kept exactly too ([`BSplineCurve::clone_exact`]).
     #[must_use]
     pub fn clone_exact(&self) -> Self {
-        Self {
+        let mut out = Self {
             base: self.base.clone_exact(),
             ..self.clone()
+        };
+        // the generator drives `evaluate_step_at`: keep its knots as stored too
+        if let (Some(dst), Some(src)) = (out.gen_curve.as_mut(), self.gen_curve.as_ref()) {
+            if let (Some(d), Ok(s)) = (gen_base_mut(dst), gen_base(src)) {
+                *d = s.clone_exact();
+            }
         }
+        out
     }
 
     // ---- construction ---------------------------------------------------------------

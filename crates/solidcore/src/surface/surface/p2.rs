@@ -1571,6 +1571,26 @@ impl SurfaceEvaluate for BSplineSurface {
         Surface::from(self.clone_exact()).drop_point_minimize(point, domain, guess)
     }
 
+    fn local_curve_maximize(
+        &self,
+        curve: &Curve,
+        domain: &Extent2d,
+        interval: &Extent1d,
+        guess_uv: Point2,
+        guess_t: f64,
+    ) -> Result<Option<(f64, Point2)>> {
+        // SmBSplineSurface does not override SmSurface::LocalCurveSolve: run it on a
+        // `Surface` holding this B-spline surface.
+        SurfaceEvaluate::local_curve_maximize(
+            &Surface::from(self.clone()),
+            curve,
+            domain,
+            interval,
+            guess_uv,
+            guess_t,
+        )
+    }
+
     fn surface_approx_eq(&self, other: &Self) -> Result<bool> {
         // SmBSplineSurface::operator== (two B-splines: SmSurface::operator== holds)
         Ok(self.approx_eq(other))

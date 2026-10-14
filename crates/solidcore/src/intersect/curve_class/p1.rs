@@ -1962,7 +1962,12 @@ fn surface_local_point_solve(
     guess: Point2,
 ) -> Result<Option<(f64, Point2)>> {
     let domain = surface.natural_uv_domain();
-    let r = surface.local_point_solve::<()>(&domain, SolverOperation::Minimize, point, guess)?;
+    // upstream ignores the status and reads only `bFoundAnswer` (SmCurveClass.cpp:1020)
+    let Some(r) =
+        ignored(surface.local_point_solve::<()>(&domain, SolverOperation::Minimize, point, guess))?
+    else {
+        return Ok(None);
+    };
     if r.found {
         Ok(Some((
             r.solution.start.solution_value,

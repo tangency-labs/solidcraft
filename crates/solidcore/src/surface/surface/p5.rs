@@ -1024,6 +1024,7 @@ impl Surface {
         if !success {
             // Haven't found it yet. Call GlobalPointSolve.
             solutions = self.global_point_solve::<O>(
+                &Kernel::default(),
                 domain,
                 op,
                 pt_to_drop,
@@ -1230,6 +1231,7 @@ impl Surface {
         let nearest =
             |s: &Self, domain: &Extent2d, fallback_domain: &Extent2d| -> Result<Option<Point2>> {
                 let mut sols = ignored(s.global_point_solve::<O>(
+                    &kernel,
                     domain,
                     SolverOperation::Minimize,
                     xyz_guess1,
@@ -1241,6 +1243,7 @@ impl Surface {
                 if sols.is_empty() {
                     if let Some(g2) = opt_xyz_guess2 {
                         sols = ignored(s.global_point_solve::<O>(
+                            &kernel,
                             fallback_domain,
                             SolverOperation::Minimize,
                             g2,
@@ -1948,8 +1951,8 @@ fn surface_identical_solutions<O: SolutionObject>(
 
         // We're at a pole. Distinct only if they're both on a seam. When one is on a seam
         // prefer that. Else prefer the best solution.
-        let on_seam1 = surf.is_on_seam(uv1, None)?.on_seam;
-        let on_seam2 = surf.is_on_seam(uv2, None)?.on_seam;
+        let on_seam1 = surf.is_on_seam(&Kernel::default(), uv1, None)?.on_seam;
+        let on_seam2 = surf.is_on_seam(&Kernel::default(), uv2, None)?.on_seam;
         if on_seam1 && !on_seam2 {
             return Ok((SolutionPairType::Identical, Some(PreferredSolution::First)));
         }

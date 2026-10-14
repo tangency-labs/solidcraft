@@ -25444,7 +25444,6 @@
   "cases_passed": 2711,
   "cases_total": 3000,
   "deferred_by_unit": {
-    "surface.surface_p1": 117,
     "surface.surface_p8": 56,
     "surface.surface_point_solve_p3": 216
   },
