@@ -3342,7 +3342,7 @@ Notes for later agents:
 - **Lazy polar-box build not compared.** The shim's tree reader rejects patch/head nodes
   without polar-box vectors, so the lazy-build path of `AdvSurfaceIntersector::polar_box`
   (`cache.clone().polar_box(id)`) never runs against the C++. It only matters through
-  `BranchIsGaussSeparate`, which upstream `SolveBranch` never reaches (WR-61). Once
+  `BranchIsGaussSeparate`, which upstream `SolveBranch` never reaches (WR-70). Once
   `surface.surface_cache_p3` can build real trees, add a direct `OP_GAUSS` case on a real
   cache.
 - **`FindInteriorCurves` after `LocalSurfaceIntersect` not compared.** `IsPointOnCurve`,
