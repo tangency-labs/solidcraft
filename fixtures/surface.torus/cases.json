@@ -1,0 +1,1917 @@
+{
+ "cases": [
+  {
+   "name": "general_build",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "general_eval_u20_k1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 20.0,
+    "v": 40.0,
+    "k": 1
+   }
+  },
+  {
+   "name": "general_eval_u20_k2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 20.0,
+    "v": 40.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "general_eval_u20_k3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 20.0,
+    "v": 40.0,
+    "k": 3
+   }
+  },
+  {
+   "name": "general_to_nurbs_u20",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "to_nurbs",
+    "u": 20.0,
+    "v": 40.0
+   }
+  },
+  {
+   "name": "general_eval_u110_k1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 110.0,
+    "v": 40.0,
+    "k": 1
+   }
+  },
+  {
+   "name": "general_eval_u110_k2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 110.0,
+    "v": 40.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "general_eval_u110_k3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 110.0,
+    "v": 40.0,
+    "k": 3
+   }
+  },
+  {
+   "name": "general_to_nurbs_u110",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "to_nurbs",
+    "u": 110.0,
+    "v": 40.0
+   }
+  },
+  {
+   "name": "general_eval_u250_k1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 250.0,
+    "v": 40.0,
+    "k": 1
+   }
+  },
+  {
+   "name": "general_eval_u250_k2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 250.0,
+    "v": 40.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "general_eval_u250_k3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "eval_step",
+    "u": 250.0,
+    "v": 40.0,
+    "k": 3
+   }
+  },
+  {
+   "name": "general_to_nurbs_u250",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1356 (SmTorus::CreateCanonical(identity placement, 5, 1); sm_CheckSTEPDerivatives at (u, 40) for u = 20, 110, 250)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0
+    },
+    "op": "to_nurbs",
+    "u": 250.0,
+    "v": 40.0
+   }
+  },
+  {
+   "name": "analytic_build",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "analytic_eval_0_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 0.0,
+    "v": 0.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "analytic_point_0_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 0.0,
+    "v": 0.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "analytic_to_nurbs_0_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "to_nurbs",
+    "u": 0.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "analytic_eval_90_45",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 90.0,
+    "v": 45.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "analytic_point_90_45",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 90.0,
+    "v": 45.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "analytic_to_nurbs_90_45",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "to_nurbs",
+    "u": 90.0,
+    "v": 45.0
+   }
+  },
+  {
+   "name": "analytic_eval_180_180",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 180.0,
+    "v": 180.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "analytic_point_180_180",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 180.0,
+    "v": 180.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "analytic_to_nurbs_180_180",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "to_nurbs",
+    "u": 180.0,
+    "v": 180.0
+   }
+  },
+  {
+   "name": "analytic_eval_270_315",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 270.0,
+    "v": 315.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "analytic_point_270_315",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 270.0,
+    "v": 315.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "analytic_to_nurbs_270_315",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "to_nurbs",
+    "u": 270.0,
+    "v": 315.0
+   }
+  },
+  {
+   "name": "analytic_eval_360_360",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 360.0,
+    "v": 360.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "analytic_point_360_360",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 360.0,
+    "v": 360.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "analytic_to_nurbs_360_360",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "to_nurbs",
+    "u": 360.0,
+    "v": 360.0
+   }
+  },
+  {
+   "name": "analytic_eval_400_-20",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 400.0,
+    "v": -20.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "analytic_point_400_-20",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eval_step",
+    "u": 400.0,
+    "v": -20.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "analytic_to_nurbs_400_-20",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "to_nurbs",
+    "u": 400.0,
+    "v": -20.0
+   }
+  },
+  {
+   "name": "analytic_iso_p0_0.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.0
+   }
+  },
+  {
+   "name": "analytic_iso_p0_0.3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.3
+   }
+  },
+  {
+   "name": "analytic_iso_p0_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "analytic_iso_p0_1.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 1.0
+   }
+  },
+  {
+   "name": "analytic_iso_p1_0.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.0
+   }
+  },
+  {
+   "name": "analytic_iso_p1_0.3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.3
+   }
+  },
+  {
+   "name": "analytic_iso_p1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "analytic_iso_p1_1.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 1.0
+   }
+  },
+  {
+   "name": "analytic_offset_out",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "offset",
+    "dist": 0.1,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "analytic_offset_in_rebuild",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "offset",
+    "dist": -0.1,
+    "tol": 1e-06,
+    "rebuild": true
+   }
+  },
+  {
+   "name": "analytic_offset_collapse",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "offset",
+    "dist": -0.3,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "analytic_rebuild",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "analytic_copy",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "analytic_eq_self",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:5513 (torus at (2,2,0), radii 1 and 0.25, my_test_analytic_surface over [0,360]x[0,360])",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "eq",
+    "other": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    }
+   }
+  },
+  {
+   "name": "topo_build",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4398 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 3.0,
+     "minor": 1.0
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "topo_to_step_corner",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4398 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 3.0,
+     "minor": 1.0
+    },
+    "op": "to_step",
+    "u": 0.0,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "topo_rebuild",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4398 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 3.0,
+     "minor": 1.0
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "api_radii_0.0_1.0",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:633 (SmApiCreateTorus: placement (origin, X, Y), degenerate radii rejected by CreateCanonical)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -1.0,
+      2.0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 0.0,
+     "minor": 1.0
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "api_radii_2.0_0.0",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:633 (SmApiCreateTorus: placement (origin, X, Y), degenerate radii rejected by CreateCanonical)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -1.0,
+      2.0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 2.0,
+     "minor": 0.0
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "api_radii_-1.0_0.5",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:633 (SmApiCreateTorus: placement (origin, X, Y), degenerate radii rejected by CreateCanonical)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -1.0,
+      2.0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": -1.0,
+     "minor": 0.5
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "api_radii_1.0_1.0",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:633 (SmApiCreateTorus: placement (origin, X, Y), degenerate radii rejected by CreateCanonical)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -1.0,
+      2.0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.0
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "api_radii_1.0_1.5",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:633 (SmApiCreateTorus: placement (origin, X, Y), degenerate radii rejected by CreateCanonical)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -1.0,
+      2.0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 1.5
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "edge_swap_inside_build",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 4.0,
+     "minor": 1.5,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      30.0,
+      -90.0,
+      200.0,
+      120.0
+     ]
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "edge_swap_inside_rebuild",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 4.0,
+     "minor": 1.5,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      30.0,
+      -90.0,
+      200.0,
+      120.0
+     ]
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "edge_swap_inside_offset",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 4.0,
+     "minor": 1.5,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      30.0,
+      -90.0,
+      200.0,
+      120.0
+     ]
+    },
+    "op": "offset",
+    "dist": 0.5,
+    "tol": 1e-06,
+    "rebuild": true
+   }
+  },
+  {
+   "name": "edge_swap_inside_iso_dom",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 4.0,
+     "minor": 1.5,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      30.0,
+      -90.0,
+      200.0,
+      120.0
+     ]
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.4,
+    "dom": [
+     0.1,
+     0.1,
+     0.9,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "edge_given_circle_build",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 2.0,
+     "minor": 0.5,
+     "circle": {
+      "c": [
+       2.0,
+       0,
+       0
+      ],
+      "x": [
+       1.0,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 0.5
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "edge_given_circle_offset",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 2.0,
+     "minor": 0.5,
+     "circle": {
+      "c": [
+       2.0,
+       0,
+       0
+      ],
+      "x": [
+       1.0,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 0.5
+     }
+    },
+    "op": "offset",
+    "dist": 0.25,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "edge_transform_identity",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "transform",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1.0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_transform_nonuniform",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "transform",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1.0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1.0,
+     0
+    ],
+    "scale": [
+     1.0,
+     2.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "edge_transform_uniform",
+   "upstream_ref": "torus.rs edge cases: swapped and inside-out NURBs, partial domains, explicit generator",
+   "inputs": {
+    "torus": {
+     "origin": [
+      2.0,
+      2.0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 1.0,
+     "minor": 0.25
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     0,
+     0
+    ],
+    "x": [
+     1.0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1.0,
+     0
+    ],
+    "scale": [
+     2.0,
+     2.0,
+     2.0
+    ]
+   }
+  }
+ ]
+}

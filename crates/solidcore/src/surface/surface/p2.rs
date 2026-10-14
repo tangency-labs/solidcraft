@@ -170,6 +170,7 @@ use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::plane::Plane;
+use crate::surface::torus::Torus;
 use crate::topology::database_io::DatabaseReader;
 
 // ---- type codes ---------------------------------------------------------------------
@@ -912,8 +913,14 @@ impl Surface {
                 "SmSphere::ReadFromDB",
                 "surface.sphere",
             )),
-            // UNPORTED(surface.torus): SmTorus::ReadFromDB
-            TORUS_TYPE => Err(SolidError::unported("SmTorus::ReadFromDB", "surface.torus")),
+            // (SmTorus::ReadFromDB reads the torus record, then needs the unported
+            // SmSurfOfRevolution record; the torus is not a SurfaceKind yet)
+            TORUS_TYPE => Err(Torus::read_from_db(db, version).err().unwrap_or_else(|| {
+                SolidError::unported(
+                    "SmSurfOfRevolution::ReadFromDB",
+                    "surface.surf_of_revolution_p3",
+                )
+            })),
             CURVE_BOUNDED_SURFACE_TYPE => Ok(Self::from(CurveBoundedSurface::read_from_db(
                 k, db, version,
             )?)),
