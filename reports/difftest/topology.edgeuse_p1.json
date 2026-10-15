@@ -6870,8 +6870,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_0_0",
@@ -6882,8 +6882,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_0_1",
@@ -6893,33 +6893,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#421 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#422 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_2_0",
@@ -6930,8 +6922,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_2_1",
@@ -6941,28 +6933,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#425 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps0_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#426 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -7066,8 +7050,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_0_0",
@@ -7078,8 +7062,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_0_1",
@@ -7089,33 +7073,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#441 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#442 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_2_0",
@@ -7126,8 +7102,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_2_1",
@@ -7137,28 +7113,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#445 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps1_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#446 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -7262,8 +7230,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_0_0",
@@ -7274,8 +7242,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_0_1",
@@ -7285,33 +7253,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#461 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#462 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_2_0",
@@ -7322,8 +7282,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_2_1",
@@ -7333,28 +7293,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#465 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps2_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#466 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -7458,8 +7410,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_0_0",
@@ -7470,8 +7422,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_0_1",
@@ -7481,33 +7433,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#481 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#482 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_2_0",
@@ -7518,8 +7462,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_2_1",
@@ -7529,28 +7473,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#485 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_plane_gaps3_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#486 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -8030,8 +7966,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_0_0",
@@ -8042,8 +7978,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_0_1",
@@ -8053,33 +7989,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#548 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#549 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_2_0",
@@ -8090,8 +8018,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_2_1",
@@ -8101,28 +8029,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#552 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps0_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#553 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -8226,8 +8146,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_0_0",
@@ -8238,8 +8158,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_0_1",
@@ -8249,33 +8169,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#568 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#569 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_2_0",
@@ -8286,8 +8198,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_2_1",
@@ -8297,28 +8209,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#572 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps1_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#573 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -8422,8 +8326,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_0_0",
@@ -8434,8 +8338,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_0_1",
@@ -8445,33 +8349,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#588 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#589 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_2_0",
@@ -8482,8 +8378,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_2_1",
@@ -8493,28 +8389,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#592 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps2_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#593 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -8618,8 +8506,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_0_0",
@@ -8630,8 +8518,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_0_1",
@@ -8641,33 +8529,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#608 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#609 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_2_0",
@@ -8678,8 +8558,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_2_1",
@@ -8689,28 +8569,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#612 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_tilted_gaps3_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#613 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -9190,8 +9062,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_0_0",
@@ -9202,8 +9074,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_0_1",
@@ -9213,33 +9085,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#675 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#676 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_2_0",
@@ -9250,8 +9114,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_2_1",
@@ -9261,28 +9125,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#679 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps0_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#680 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -9386,8 +9242,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_0_0",
@@ -9398,8 +9254,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_0_1",
@@ -9409,33 +9265,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#695 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#696 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_2_0",
@@ -9446,8 +9294,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_2_1",
@@ -9457,28 +9305,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#699 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps1_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#700 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -9582,8 +9422,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_0_0",
@@ -9594,8 +9434,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_0_1",
@@ -9605,33 +9445,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#715 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#716 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_2_0",
@@ -9642,8 +9474,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_2_1",
@@ -9653,28 +9485,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#719 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps2_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#720 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -9778,8 +9602,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_0_0",
@@ -9790,8 +9614,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_0_1",
@@ -9801,33 +9625,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#735 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#736 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_2_0",
@@ -9838,8 +9654,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_2_1",
@@ -9849,28 +9665,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#739 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_gaps3_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#740 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -10350,8 +10158,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_0_0",
@@ -10362,8 +10170,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_0_1",
@@ -10373,33 +10181,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#802 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#803 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_2_0",
@@ -10410,8 +10210,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_2_1",
@@ -10421,28 +10221,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#806 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps0_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#807 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -10546,8 +10338,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_0_0",
@@ -10558,8 +10350,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_0_1",
@@ -10569,33 +10361,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#822 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#823 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_2_0",
@@ -10606,8 +10390,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_2_1",
@@ -10617,28 +10401,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#826 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps1_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#827 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -10742,8 +10518,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_0_0",
@@ -10754,8 +10530,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_0_1",
@@ -10765,33 +10541,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#842 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#843 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_2_0",
@@ -10802,8 +10570,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_2_1",
@@ -10813,28 +10581,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#846 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps2_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#847 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -10938,8 +10698,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_0_0",
@@ -10950,8 +10710,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_0_1",
@@ -10961,33 +10721,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#862 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#863 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_2_0",
@@ -10998,8 +10750,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_2_1",
@@ -11009,28 +10761,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#866 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_bss_tiny_gaps3_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#867 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -11510,8 +11254,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_0_0",
@@ -11522,8 +11266,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_0_1",
@@ -11533,33 +11277,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#929 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#930 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_2_0",
@@ -11570,8 +11306,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_2_1",
@@ -11581,28 +11317,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#933 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps0_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#934 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -11706,8 +11434,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_0_0",
@@ -11718,8 +11446,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_0_1",
@@ -11729,33 +11457,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#949 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#950 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_2_0",
@@ -11766,8 +11486,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_2_1",
@@ -11777,28 +11497,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#953 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps1_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#954 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -11902,8 +11614,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_0_0",
@@ -11914,8 +11626,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_0_1",
@@ -11925,33 +11637,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#969 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#970 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_2_0",
@@ -11962,8 +11666,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_2_1",
@@ -11973,28 +11677,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#973 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps2_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#974 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -12098,8 +11794,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_0_0",
@@ -12110,8 +11806,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_0_1",
@@ -12121,33 +11817,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#989 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#990 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_2_0",
@@ -12158,8 +11846,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_2_1",
@@ -12169,28 +11857,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#993 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face_pinched_huge_gaps3_3_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/constructed.json#994 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -13586,8 +13266,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "Mouse_gaps0",
@@ -13606,8 +13286,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "Mouse_gaps2",
@@ -13617,16 +13297,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#55 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14254,8 +13930,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_gaps0",
@@ -14274,8 +13950,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_gaps2",
@@ -14285,16 +13961,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#132 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14894,8 +14566,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_gaps0",
@@ -14914,8 +14586,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_gaps2",
@@ -14925,16 +14597,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#209 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -15534,8 +15202,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "cone_gaps0",
@@ -15554,8 +15222,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "cone_gaps2",
@@ -15565,16 +15233,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "cone_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#286 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16170,8 +15834,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "disk_gaps0",
@@ -16190,8 +15854,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "disk_gaps2",
@@ -16201,16 +15865,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#363 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16806,8 +16466,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_gaps0",
@@ -16826,8 +16486,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_gaps2",
@@ -16837,16 +16497,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#440 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -17442,8 +17098,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_gaps0",
@@ -17462,8 +17118,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_gaps2",
@@ -17473,16 +17129,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#517 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -18078,8 +17730,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_gaps0",
@@ -18098,8 +17750,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_gaps2",
@@ -18109,16 +17761,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#594 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -18718,8 +18366,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "sphere_gaps0",
@@ -18738,8 +18386,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "sphere_gaps2",
@@ -18749,16 +18397,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#671 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19354,8 +18998,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "surf_extrude_gaps0",
@@ -19374,8 +19018,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "surf_extrude_gaps2",
@@ -19385,16 +19029,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#748 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19990,8 +19630,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "surf_rev_gaps0",
@@ -20010,8 +19650,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "surf_rev_gaps2",
@@ -20021,16 +19661,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#825 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -20626,8 +20262,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_gaps0",
@@ -20646,8 +20282,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_gaps2",
@@ -20657,16 +20293,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#902 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -21266,8 +20898,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "torus_gaps0",
@@ -21286,8 +20918,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "torus_gaps2",
@@ -21297,16 +20929,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "torus_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#979 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -21906,8 +21534,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "toruswvy_gaps0",
@@ -21926,8 +21554,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "toruswvy_gaps2",
@@ -21937,16 +21565,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#1056 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -22546,8 +22170,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "vase_rev_gaps0",
@@ -22566,8 +22190,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCrvSrfGapFunction::SmCrvSrfGapFunction",
-        "unit": "heal.gap"
+        "symbol": "SmSurface::DropPoint",
+        "unit": "surface.surface_p5"
       },
       "max_rel_err": 0.0,
       "name": "vase_rev_gaps2",
@@ -22577,16 +22201,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev_gaps3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.edgeuse_p1/upstream_files.json#1133 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -22854,16 +22474,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdgeEdgeGap::SetEdgeEdgeGap",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "gen0011",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=15768382453627746339",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -22899,13 +22515,12 @@
     }
   ],
   "cases_both_errored": 28,
-  "cases_deferred": 273,
+  "cases_deferred": 177,
   "cases_failed": 0,
-  "cases_passed": 2449,
+  "cases_passed": 2545,
   "cases_total": 2722,
   "deferred_by_unit": {
-    "heal.gap": 206,
-    "surface.surface_p5": 28,
+    "surface.surface_p5": 138,
     "topology.edge": 32,
     "topology.edgeuse_p3": 7
   },

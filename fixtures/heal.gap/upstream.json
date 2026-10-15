@@ -1,0 +1,1664 @@
+{
+ "cases": [
+  {
+   "name": "crv_pt_circle_center",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4602",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "circle": {
+         "dim": 3,
+         "c": [
+          0,
+          3,
+          0
+         ],
+         "x": [
+          0,
+          1,
+          0
+         ],
+         "y": [
+          0,
+          0,
+          1
+         ],
+         "domain": [
+          0,
+          6.283185307179586
+         ],
+         "radius": 1.0
+        }
+       },
+       "ivl": [
+        0,
+        6.283185307179586
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0,
+       3,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "crv_crv_circle_ellipse",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4602",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "circle": {
+         "dim": 3,
+         "c": [
+          0,
+          3,
+          0
+         ],
+         "x": [
+          0,
+          1,
+          0
+         ],
+         "y": [
+          0,
+          0,
+          1
+         ],
+         "domain": [
+          0,
+          6.283185307179586
+         ],
+         "radius": 1.0
+        }
+       },
+       "ivl": [
+        0,
+        6.283185307179586
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "ellipse": {
+        "dim": 3,
+        "c": [
+         0,
+         -3,
+         0
+        ],
+        "x": [
+         0,
+         1,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "radii": [
+         1.5,
+         0.3
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crv_crv_ellipse_circle_stop",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4602",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "ellipse": {
+         "dim": 3,
+         "c": [
+          0,
+          -3,
+          0
+         ],
+         "x": [
+          0,
+          1,
+          0
+         ],
+         "y": [
+          0,
+          0,
+          1
+         ],
+         "domain": [
+          0,
+          6.283185307179586
+         ],
+         "radii": [
+          1.5,
+          0.3
+         ]
+        }
+       },
+       "ivl": [
+        0,
+        6.283185307179586
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "circle": {
+        "dim": 3,
+        "c": [
+         0,
+         3,
+         0
+        ],
+        "x": [
+         0,
+         1,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "radius": 1.0
+       }
+      }
+     },
+     "cnt_u": 12
+    },
+    "stop": true
+   }
+  },
+  {
+   "name": "crv_crv_circle_self_sample_set",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4602",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "circle": {
+         "dim": 3,
+         "c": [
+          0,
+          3,
+          0
+         ],
+         "x": [
+          0,
+          1,
+          0
+         ],
+         "y": [
+          0,
+          0,
+          1
+         ],
+         "domain": [
+          0,
+          6.283185307179586
+         ],
+         "radius": 1.0
+        }
+       },
+       "ivl": [
+        0,
+        6.283185307179586
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "circle": {
+        "dim": 3,
+        "c": [
+         0,
+         3,
+         0
+        ],
+        "x": [
+         0,
+         1,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "radius": 1.0
+       }
+      }
+     }
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "eval_circle_ellipse_guess",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4602",
+   "inputs": {
+    "op": "eval",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "circle": {
+         "dim": 3,
+         "c": [
+          0,
+          3,
+          0
+         ],
+         "x": [
+          0,
+          1,
+          0
+         ],
+         "y": [
+          0,
+          0,
+          1
+         ],
+         "domain": [
+          0,
+          6.283185307179586
+         ],
+         "radius": 1.0
+        }
+       },
+       "ivl": [
+        0,
+        6.283185307179586
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "ellipse": {
+        "dim": 3,
+        "c": [
+         0,
+         -3,
+         0
+        ],
+        "x": [
+         0,
+         1,
+         0
+        ],
+        "y": [
+         0,
+         0,
+         1
+        ],
+        "domain": [
+         0,
+         6.283185307179586
+        ],
+        "radii": [
+         1.5,
+         0.3
+        ]
+       }
+      }
+     }
+    },
+    "u": 1.0,
+    "gu": 2.0
+   }
+  },
+  {
+   "name": "crv_crv_line_join_io00",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 1e-07,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         4,
+         0,
+         0
+        ],
+        "v": [
+         -1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         2
+        ],
+        "scale": 3.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "crv_crv_line_join_io01",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 1e-07,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         4,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         2
+        ],
+        "scale": 3.0,
+        "inside_out": true
+       }
+      }
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "crv_crv_line_join_io10",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 1e-07,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": true
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         4,
+         0,
+         0
+        ],
+        "v": [
+         -1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         2
+        ],
+        "scale": 3.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "crv_crv_line_join_io11",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 1e-07,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": true
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         4,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         2
+        ],
+        "scale": 3.0,
+        "inside_out": true
+       }
+      }
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "topo_network_kind0_0.0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "network"
+    },
+    "kind": 0,
+    "sel0": 1,
+    "sel1": 2,
+    "f0": 0.0,
+    "f1": null
+   }
+  },
+  {
+   "name": "topo_network_kind0_1.0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "network"
+    },
+    "kind": 0,
+    "sel0": 1,
+    "sel1": 2,
+    "f0": 1.0,
+    "f1": null
+   }
+  },
+  {
+   "name": "topo_network_kind3_1.0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "network"
+    },
+    "kind": 3,
+    "sel0": 1,
+    "sel1": 2,
+    "f0": 1.0,
+    "f1": 0.0
+   }
+  },
+  {
+   "name": "topo_network_kind3_0.5",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "network"
+    },
+    "kind": 3,
+    "sel0": 1,
+    "sel1": 2,
+    "f0": 0.5,
+    "f1": 0.5
+   }
+  },
+  {
+   "name": "topo_rectangle_kind0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "kind": 0,
+    "sel0": 0,
+    "sel1": 1,
+    "f0": 0.25,
+    "f1": 0.75,
+    "uv": [
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "name": "topo_rectangle_kind1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "kind": 1,
+    "sel0": 1,
+    "sel1": 2,
+    "f0": 0.25,
+    "f1": 0.75,
+    "uv": [
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "name": "topo_rectangle_kind2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "kind": 2,
+    "sel0": 2,
+    "sel1": 3,
+    "f0": 0.25,
+    "f1": 0.75,
+    "uv": [
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "name": "topo_rectangle_kind3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "kind": 3,
+    "sel0": 3,
+    "sel1": 4,
+    "f0": 0.25,
+    "f1": 0.75,
+    "uv": [
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "name": "topo_rectangle_kind4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "kind": 4,
+    "sel0": 4,
+    "sel1": 5,
+    "f0": 0.25,
+    "f1": 0.75,
+    "uv": [
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "name": "topo_rectangle_kind5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "kind": 5,
+    "sel0": 5,
+    "sel1": 6,
+    "f0": 0.25,
+    "f1": 0.75,
+    "uv": [
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "name": "topo_fillet_box_kind0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "kind": 0,
+    "sel0": 3,
+    "sel1": 4,
+    "f0": 0.0,
+    "f1": 1.0,
+    "uv": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "topo_fillet_box_kind2",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "kind": 2,
+    "sel0": 3,
+    "sel1": 4,
+    "f0": 0.0,
+    "f1": 1.0,
+    "uv": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "topo_fillet_box_kind3",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "kind": 3,
+    "sel0": 3,
+    "sel1": 4,
+    "f0": 0.0,
+    "f1": 1.0,
+    "uv": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "topo_fillet_box_kind5",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "op": "topo",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "kind": 5,
+    "sel0": 3,
+    "sel1": 4,
+    "f0": 0.0,
+    "f1": 1.0,
+    "uv": [
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "sample_default_tol",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:943",
+   "inputs": {
+    "op": "sample",
+    "this": [
+     0,
+     0,
+     0
+    ],
+    "tu": 0.1,
+    "tv": 0,
+    "other": [
+     1e-05,
+     0,
+     0
+    ],
+    "ou": 0.5,
+    "ov": 0.2,
+    "drop": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "sample_undef_point",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:943",
+   "inputs": {
+    "op": "sample",
+    "this": [
+     1.23456e-61,
+     0,
+     0
+    ],
+    "tu": 0.1,
+    "tv": 0,
+    "other": [
+     1,
+     2,
+     3
+    ],
+    "ou": 0.5,
+    "ov": 0.2,
+    "drop": 3,
+    "tol": 2e-05
+   }
+  },
+  {
+   "name": "sample_2d_point",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:943",
+   "inputs": {
+    "op": "sample",
+    "this": [
+     0,
+     0,
+     1.7976931348623157e+308
+    ],
+    "tu": 0.1,
+    "tv": 0,
+    "other": [
+     1,
+     2,
+     3
+    ],
+    "ou": 0.5,
+    "ov": 0.2,
+    "drop": 2,
+    "tol": 2e-05
+   }
+  },
+  {
+   "name": "sample_out_of_tol",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:943",
+   "inputs": {
+    "op": "sample",
+    "this": [
+     1,
+     2,
+     3
+    ],
+    "tu": 0.1,
+    "tv": 0.3,
+    "other": [
+     4,
+     6,
+     3
+    ],
+    "ou": 0.5,
+    "ov": 0.2,
+    "drop": 1,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "sample_use_default_tol",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:943",
+   "inputs": {
+    "op": "sample",
+    "this": [
+     1,
+     2,
+     3
+    ],
+    "tu": 0.1,
+    "tv": 0.3,
+    "other": [
+     1,
+     2,
+     3.0001
+    ],
+    "ou": 0.5,
+    "ov": 0.2,
+    "drop": 1,
+    "tol": 9876543.21
+   }
+  },
+  {
+   "name": "add_unique_empty",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [],
+    "value": 0.5
+   }
+  },
+  {
+   "name": "add_unique_below",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     0,
+     1
+    ],
+    "value": -1
+   }
+  },
+  {
+   "name": "add_unique_above",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     0,
+     1
+    ],
+    "value": 2
+   }
+  },
+  {
+   "name": "add_unique_first_tol",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     0,
+     1
+    ],
+    "value": 1e-09
+   }
+  },
+  {
+   "name": "add_unique_last_tol",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     0,
+     1,
+     2
+    ],
+    "value": 1.999999999
+   }
+  },
+  {
+   "name": "add_unique_inside_equal",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "value": 2.000000005
+   }
+  },
+  {
+   "name": "add_unique_inside_new",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "value": 1.5
+   }
+  },
+  {
+   "name": "add_unique_unsorted",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     3,
+     1,
+     2
+    ],
+    "value": 2.5
+   }
+  },
+  {
+   "name": "add_unique_single",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1537",
+   "inputs": {
+    "op": "add_unique",
+    "a": [
+     1
+    ],
+    "value": 1
+   }
+  },
+  {
+   "name": "gap_array_append",
+   "upstream_ref": "source/SMLib/inc/SmGap.h:875",
+   "inputs": {
+    "op": "gap_array",
+    "a": [
+     0.5,
+     -2,
+     1
+    ],
+    "b": [
+     0.1,
+     0.1
+    ]
+   }
+  },
+  {
+   "name": "gap_array_empty",
+   "upstream_ref": "source/SMLib/inc/SmGap.h:875",
+   "inputs": {
+    "op": "gap_array",
+    "a": [],
+    "b": []
+   }
+  },
+  {
+   "name": "gap_array_ties",
+   "upstream_ref": "source/SMLib/inc/SmGap.h:875",
+   "inputs": {
+    "op": "gap_array",
+    "a": [
+     1,
+     1
+    ],
+    "b": [
+     1
+    ]
+   }
+  },
+  {
+   "name": "srf_pt_curve_bounded_v_stride",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1903",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "curve_bounded": {
+         "net": [
+          [
+           [
+            0,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0.5,
+            0.1,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          [
+           [
+            0.5,
+            0,
+            0.1,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.5,
+            0.5,
+            0.3,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.5,
+            1,
+            0.1,
+            -1.7976931348623157e+308
+           ]
+          ],
+          [
+           [
+            1,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0.5,
+            0.1,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ]
+          ]
+         ],
+         "p": 2,
+         "q": 2,
+         "u": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+         ],
+         "v": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+         ]
+        }
+       },
+       "dom": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.5,
+       1.0
+      ]
+     },
+     "cnt_u": 5
+    },
+    "set_cnt": [
+     5,
+     4
+    ]
+   }
+  },
+  {
+   "name": "srf_crv_bspline_v_counts",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1845",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "bspline": {
+         "net": [
+          [
+           [
+            0,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            0.5,
+            0.1,
+            -1.7976931348623157e+308
+           ],
+           [
+            0,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          [
+           [
+            0.5,
+            0,
+            0.1,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.5,
+            0.5,
+            0.3,
+            -1.7976931348623157e+308
+           ],
+           [
+            0.5,
+            1,
+            0.1,
+            -1.7976931348623157e+308
+           ]
+          ],
+          [
+           [
+            1,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            0.5,
+            0.1,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ]
+          ]
+         ],
+         "p": 2,
+         "q": 2,
+         "u": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+         ],
+         "v": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+         ]
+        }
+       },
+       "dom": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0.5,
+         0.2
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         -0.5,
+         1.5
+        ]
+       }
+      }
+     },
+     "cnt_u": 4
+    },
+    "set_cnt": [
+     4,
+     3
+    ]
+   }
+  },
+  {
+   "name": "crv_pt_bspline_sub_interval",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1845",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "bspline": {
+         "dim": 3,
+         "nurb": {
+          "cpts": [
+           [
+            0,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            2,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            3,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 2,
+          "u": [
+           0,
+           0,
+           0,
+           0.5,
+           1,
+           1,
+           1
+          ]
+         }
+        }
+       },
+       "ivl": [
+        0.5,
+        1.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.5,
+       2,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "crv_pt_bspline_degenerate_interval",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1766",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "bspline": {
+         "dim": 3,
+         "nurb": {
+          "cpts": [
+           [
+            0,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            1,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            2,
+            0,
+            0,
+            -1.7976931348623157e+308
+           ],
+           [
+            3,
+            1,
+            0,
+            -1.7976931348623157e+308
+           ]
+          ],
+          "p": 2,
+          "u": [
+           0,
+           0,
+           0,
+           0.5,
+           1,
+           1,
+           1
+          ]
+         }
+        }
+       },
+       "ivl": [
+        0.5,
+        0.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.5,
+       2,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "crv_pt_single_sample",
+   "upstream_ref": "source/SMLib/src/SmGap.cpp:1897",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "hermite": {
+         "dim": 3,
+         "p1": [
+          0,
+          0,
+          0
+         ],
+         "d1": [
+          1,
+          0,
+          0
+         ],
+         "p2": [
+          1,
+          1,
+          0
+         ],
+         "d2": [
+          0,
+          1,
+          0
+         ]
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0,
+       1,
+       0
+      ]
+     },
+     "cnt_u": 1
+    }
+   }
+  }
+ ]
+}

@@ -64,8 +64,8 @@
 //!   `SmLoopuse::GetOrientation` (`topology.loopuse`), `SmSurface::LocalPointSolve` /
 //!   `IsSingularity` (`surface.surface_p5`), `GlobalPointSolve` / `IsOnSeam`
 //!   (`surface.surface_p4`; a plane's overrides are ported), `GetSingularities`
-//!   (`surface.surface_p3`) and the gap evaluation of `SmVertexEdgeGap::Set` /
-//!   `SmVertexFaceGap::Set` (`heal.gap`) return [`SolidError::Unported`].
+//!   (`surface.surface_p3`) return [`SolidError::Unported`]. The gap evaluation of
+//!   `SmVertexEdgeGap::Set` / `SmVertexFaceGap::Set` is [`crate::heal::gap`].
 //!   `GlobalPointSolve` stands for the surface-cache sequence around it
 //!   (`smsurf_GetSurfaceCache`, the temporary `m_bHaveTSurfaceCache`,
 //!   `m_bProcessBoundaryCurves` and `m_bPointTestEnabled` changes).
@@ -495,16 +495,14 @@ fn vertexuses_of_face(
 
 /// `SmVertexEdgeGap::Set(vu, dEdgeT)`: records the vertex use and parameter and
 /// evaluates the gap (`CacheGap`) unless the parameter is `SM_UNDEF_DOUBLE`.
-fn set_vertex_edge_gap(_vu: VertexuseId, _edge_t: f64) -> Result<VertexEdgeGap> {
-    // UNPORTED(heal.gap): SmVertexEdgeGap::Set
-    Err(SolidError::unported("SmVertexEdgeGap::Set", "heal.gap"))
+fn set_vertex_edge_gap(b: &Brep, vu: VertexuseId, edge_t: f64) -> Result<VertexEdgeGap> {
+    VertexEdgeGap::with(b, Some(vu), edge_t)
 }
 
 /// `SmVertexFaceGap::Set(vu, &uv)`: records the vertex use and surface parameter and
 /// evaluates the gap (`CacheGap`).
-fn set_vertex_face_gap(_vu: VertexuseId, _uv: Point2) -> Result<VertexFaceGap> {
-    // UNPORTED(heal.gap): SmVertexFaceGap::Set
-    Err(SolidError::unported("SmVertexFaceGap::Set", "heal.gap"))
+fn set_vertex_face_gap(b: &Brep, vu: VertexuseId, uv: Point2) -> Result<VertexFaceGap> {
+    VertexFaceGap::with(b, Some(vu), Some(uv))
 }
 
 /// `CalcVertexEdgeGap`: computes the gap between the vertex and its edge use's curve
@@ -516,7 +514,7 @@ fn set_vertex_face_gap(_vu: VertexuseId, _uv: Point2) -> Result<VertexFaceGap> {
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an edge
-/// vertex use without vertex; [`SolidError::Unported`] for the gap evaluation.
+/// vertex use without vertex; those of [`VertexEdgeGap::set`].
 pub fn calc_vertex_edge_gap(
     b: &mut Brep,
     vu: VertexuseId,
@@ -569,10 +567,10 @@ pub fn calc_vertex_edge_gap(
     // set output - SmVertexEdgeGap::Set assigns m_pVertexuse and m_dEdgeT and computes
     // m_dGap3d
     if let Some(o) = out.as_mut() {
-        *o = set_vertex_edge_gap(vu, edge_t)?;
+        *o = set_vertex_edge_gap(b, vu, edge_t)?;
     }
     if cache {
-        let g = set_vertex_edge_gap(vu, edge_t)?;
+        let g = set_vertex_edge_gap(b, vu, edge_t)?;
         b.vertexuse_mut(vu)?.vertex_edge_gap = g;
         // keep equivalent vertexuses synchronized
         for &x in &siblings {
@@ -594,7 +592,7 @@ pub fn calc_vertex_edge_gap(
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null; the status of [`compute_uv_point`];
-/// [`SolidError::Unported`] for the gap evaluation.
+/// those of [`VertexFaceGap::set`].
 pub fn calc_vertex_face_gap(
     k: &Kernel,
     b: &mut Brep,
@@ -634,10 +632,10 @@ pub fn calc_vertex_face_gap(
     // set output - SmVertexFaceGap::Set assigns m_pVertexuse and m_sFaceUV and computes
     // m_dGap3d. Across a seam the UV jumps, so the other uses are not synchronized.
     if let Some(o) = out.as_mut() {
-        *o = set_vertex_face_gap(vu, uv)?;
+        *o = set_vertex_face_gap(b, vu, uv)?;
     }
     if cache {
-        let g = set_vertex_face_gap(vu, uv)?;
+        let g = set_vertex_face_gap(b, vu, uv)?;
         b.vertexuse_mut(vu)?.vertex_face_gap = g;
     }
 

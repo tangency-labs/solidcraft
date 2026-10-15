@@ -35,6 +35,7 @@ use solidcore::geom::local_solve_nd::EvalNFunctions;
 use solidcore::geom::matrix::Matrix;
 use solidcore::geom::solution_array::{ObjectKind, Solution};
 use solidcore::geom::vector3d::Vec3;
+use solidcore::kernel::Kernel;
 use solidcore::math::UNDEF_DOUBLE;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
@@ -1249,9 +1250,9 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let e = eid(*eu);
             let mut out = Vec::new();
             match which {
-                0 => out.push(flag(eu1::max_edge_face_gap(b, e, *f)?.is_some())),
+                0 => out.push(flag(eu1::max_edge_face_gap(&Kernel::default(), b, e, *f)?.is_some())),
                 1 => out.push(flag(eu1::edge_ccw_edge_gap(b, e, *f)?.is_some())),
-                2 => match eu1::calc_max_edge_face_gap(b, e, *f) {
+                2 => match eu1::calc_max_edge_face_gap(&Kernel::default(), b, e, *f) {
                     Ok(g) => out.extend([0.0, flag(*want_out && g.is_init())]),
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),

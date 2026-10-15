@@ -34,52 +34,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#5 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#6 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#7 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -262,52 +246,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#27 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#28 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#29 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#30 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -490,52 +458,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#50 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#51 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#52 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#53 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -718,52 +670,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#73 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#74 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#75 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#76 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -946,52 +882,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#96 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#97 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#98 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#99 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -1174,52 +1094,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#119 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#120 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#121 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#122 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -1402,52 +1306,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#142 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#143 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#144 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#145 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -1630,52 +1518,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#165 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#166 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#167 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#168 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -1858,52 +1730,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#188 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#189 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#190 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#191 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -2086,52 +1942,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#211 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#212 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#213 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#214 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -2314,52 +2154,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#234 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#235 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#236 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#237 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -2542,52 +2366,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#257 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#258 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#259 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#260 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -2770,52 +2578,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#280 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#281 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#282 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#283 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -2998,52 +2790,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#303 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#304 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#305 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#306 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3226,52 +3002,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#326 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#327 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#328 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#329 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3454,52 +3214,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#349 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#350 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#351 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#352 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3682,52 +3426,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#372 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#373 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#374 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#375 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -3910,52 +3638,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#395 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#396 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#397 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#398 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -4138,52 +3850,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#418 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#419 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#420 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#421 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -4366,52 +4062,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#441 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#442 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#443 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#444 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -4594,52 +4274,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#464 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#465 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#466 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#467 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -4822,52 +4486,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#487 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#488 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#489 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#490 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -5050,52 +4698,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#510 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#511 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#512 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#513 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -5278,52 +4910,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#533 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#534 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#535 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#536 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -5506,52 +5122,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#556 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#557 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#558 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#559 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5734,52 +5334,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#579 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#580 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#581 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#582 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -5962,52 +5546,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#602 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#603 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#604 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#605 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -6186,52 +5754,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#625 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#626 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#627 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#628 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -6410,52 +5962,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#648 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#649 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#650 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#651 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6610,52 +6146,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#671 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#672 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#673 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#674 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6810,52 +6330,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#694 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#695 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#696 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#697 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7010,52 +6514,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#717 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#718 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#719 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_tiny_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#720 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7210,52 +6698,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu0_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#740 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu0_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#741 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu0_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#742 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu0_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#743 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7410,52 +6882,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu1_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#763 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu1_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#764 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu1_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#765 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu1_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#766 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7610,52 +7066,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu2_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#786 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu2_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#787 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu2_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#788 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu2_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#789 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7810,52 +7250,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu3_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#809 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu3_init_gap0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#810 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu3_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#811 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "adv_wire_huge_sub_vu3_init_gap2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#812 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8066,52 +7490,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#11 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#12 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#13 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#14 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8146,40 +7554,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#19 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#20 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#21 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8462,28 +7858,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#57 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#58 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8526,40 +7914,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#64 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#65 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#66 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8834,52 +8210,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#101 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#102 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#103 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#104 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8914,40 +8274,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#109 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#110 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#111 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -9230,28 +8578,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#147 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#148 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9294,40 +8634,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#154 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#155 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu1_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#156 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -9602,52 +8930,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#191 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#192 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#193 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#194 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9682,40 +8994,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#199 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#200 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#201 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -9998,28 +9298,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#237 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#238 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10062,40 +9354,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#244 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#245 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu2_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#246 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10370,52 +9650,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#281 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#282 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#283 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#284 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10450,40 +9714,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#289 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#290 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#291 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10766,28 +10018,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#327 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#328 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10830,40 +10074,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#334 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#335 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu3_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#336 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -11138,52 +10370,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#371 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#372 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#373 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#374 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11218,40 +10434,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#379 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#380 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#381 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -11534,28 +10738,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#417 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#418 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11598,40 +10794,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#424 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#425 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu4_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#426 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -11906,52 +11090,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#461 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#462 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#463 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#464 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11986,40 +11154,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#469 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#470 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#471 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -12302,28 +11458,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#507 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#508 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12366,40 +11514,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#514 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#515 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#516 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -12674,52 +11810,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#551 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#552 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#553 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#554 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12754,40 +11874,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#559 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#560 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#561 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -13070,28 +12178,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#597 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#598 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13134,40 +12234,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#604 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#605 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu6_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#606 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -13442,52 +12530,36 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap0_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#641 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#642 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#643 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap0_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#644 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13522,40 +12594,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#649 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#650 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#651 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -13838,28 +12898,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_init_gap0_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#687 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#688 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13902,40 +12954,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_init_gap2_01",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#694 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_init_gap2_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#695 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "net_vu7_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#696 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -14154,16 +13194,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire0_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#724 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14174,16 +13210,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire0_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#726 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -14306,16 +13338,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire0_vu1_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#742 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14326,16 +13354,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire0_vu1_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#744 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -14458,16 +13482,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire1_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#760 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14478,16 +13498,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire1_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#762 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -14610,16 +13626,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire1_vu1_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#778 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14630,16 +13642,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "wire1_vu1_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#780 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -14762,16 +13770,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#796 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -14786,16 +13790,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#798 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -14950,16 +13950,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#814 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -14974,16 +13970,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#816 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -15138,16 +14130,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#832 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -15162,16 +14150,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#834 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -15326,16 +14310,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#850 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -15350,16 +14330,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#852 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -15514,16 +14490,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#868 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -15538,16 +14510,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#870 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -15702,16 +14670,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#886 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -15726,16 +14690,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#888 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -15890,16 +14850,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#904 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -15914,16 +14870,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#906 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -16078,16 +15030,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#922 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -16102,16 +15050,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#924 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -16266,16 +15210,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#940 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -16290,16 +15230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#942 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -16454,16 +15390,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#958 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -16478,16 +15410,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#960 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -17144,16 +16072,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#62 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -17168,16 +16092,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#64 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -17300,16 +16220,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#76 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -17324,16 +16240,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#78 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -17416,16 +16328,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#88 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -17440,16 +16348,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#90 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -17572,16 +16476,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#102 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -17596,16 +16496,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#104 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -17688,16 +16584,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuild_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#114 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -17744,16 +16636,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#120 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "deferred": {
@@ -17768,16 +16656,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#122 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "deferred": {
@@ -17900,16 +16784,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#134 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "deferred": {
@@ -17924,16 +16804,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#136 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "deferred": {
@@ -18016,16 +16892,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#146 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "deferred": {
@@ -18040,16 +16912,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#148 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "deferred": {
@@ -18172,16 +17040,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#160 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "deferred": {
@@ -18196,16 +17060,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#162 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "deferred": {
@@ -18288,16 +17148,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuild_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#172 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "deferred": {
@@ -18846,16 +17702,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#236 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -18870,16 +17722,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#238 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -19002,16 +17850,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#250 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -19026,16 +17870,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#252 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -19118,16 +17958,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#262 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -19142,16 +17978,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#264 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -19274,16 +18106,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#276 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -19298,16 +18126,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#278 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -19390,16 +18214,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuild_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#288 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -19446,16 +18266,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#294 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "deferred": {
@@ -19470,16 +18286,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#296 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "deferred": {
@@ -19602,16 +18414,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#308 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "deferred": {
@@ -19626,16 +18434,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#310 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "deferred": {
@@ -19718,16 +18522,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#320 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "deferred": {
@@ -19742,16 +18542,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#322 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "deferred": {
@@ -19874,16 +18670,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#334 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "deferred": {
@@ -19898,16 +18690,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#336 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "deferred": {
@@ -19990,16 +18778,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuild_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#346 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "deferred": {
@@ -20046,16 +18830,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#352 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -20070,16 +18850,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#354 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -20202,16 +18978,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#366 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -20226,16 +18998,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#368 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -20318,16 +19086,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#378 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -20342,16 +19106,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#380 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -20474,16 +19234,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#392 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -20498,16 +19254,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#394 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -20590,16 +19342,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuild_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#404 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "deferred": {
@@ -20646,16 +19394,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#410 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -20670,16 +19414,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#412 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -20802,16 +19542,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#424 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -20826,16 +19562,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#426 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -20918,16 +19650,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#436 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -20942,16 +19670,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#438 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -21074,16 +19798,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_init_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#450 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -21098,16 +19818,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_init_gap2_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#452 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "deferred": {
@@ -21190,16 +19906,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmVertexEdgeGap::Set",
-        "unit": "heal.gap"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuild_vu2_gap0_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#462 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "deferred": {
@@ -24866,12 +23578,11 @@
     }
   ],
   "cases_both_errored": 343,
-  "cases_deferred": 758,
+  "cases_deferred": 436,
   "cases_failed": 0,
-  "cases_passed": 1928,
+  "cases_passed": 2250,
   "cases_total": 2686,
   "deferred_by_unit": {
-    "heal.gap": 322,
     "surface.surface_p3": 90,
     "topology.edgeuse_p3": 346
   },

@@ -1027,6 +1027,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB (null dereference).
 - **Rust port:** returns `SM_ERR` when there is no first point; the shim probes the same volume call and reports `SM_ERR` instead of calling `STEPInversion`.
 
+#### UB-104. Gap records and gap functions dereference null or index before their arrays
+- **Location:** `source/SMLib/inc/SmGap.h:371` (`SmVertexEdgeGap::Set`), `source/SMLib/src/SmGap.cpp:134` (`SmGap::GetGapEndPoints`), `:1890`-`1895` and `:1773` (`SmGapFunction::BuildSampleSet`).
+- **What happens:** `SmVertexEdgeGap::Set` (and its constructor) caches the gap whenever the parameter is defined, also with a NULL vertex use; `GetGapEndPoints` then calls `GetCurve()` on the NULL edge (`SM_ASSERT_MSG` is compiled out). The same happens for an edge parameter whose edge has no curve, a face UV point whose face has no surface, and `SmVertexEdgeGap::GetEdge` of a vertex use without edge use. `BuildSampleSet` with a sample count of `0` writes `sSampleNormalizedVals[m_lSampleCntU-1]` (index `ULONG_MAX`), or for B-spline geometry computes `(0-1)/n` counts; a `v` count of `0` on a surface writes past the array and returns a pointer into an empty sample array.
+- **Trigger:** `SmVertexEdgeGap(NULL, 0.5)`; `SmSrfPtGapFunction(..., 0)` then `GetMaxGapSample`.
+- **How found:** read during porting (`heal.gap`).
+- **Confirmed:** no (the harness predicts and avoids the null dereferences, and keeps counts at least 1).
+- **Severity:** crash/UB (needs a bad argument from the calling code).
+- **Rust port:** `heal::gap` returns `InvalidInput`.
+
 ## Hang
 
 #### HANG-1. `SmExtent1d::PeriodicWrap` steps one period per iteration
@@ -1975,6 +1984,35 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes, by the C++ build (fixture `seam_neither` of `topology.face_p2`). Its only caller (`SmFace::ComputeLoopOrientation`) ignores the return value, so nothing observable depends on it today.
 - **Severity:** wrong result (latent).
 - **Rust port:** Reproduces it (`topology::face::p2::check_seam_crossing` returns `true`).
+
+### Healing
+
+#### WR-88. `BuildSampleSet` spaces the `v` samples of non-B-spline surfaces by array index
+- **Location:** `source/SMLib/src/SmGap.cpp:1903`-`1907`, `SmGapFunction::BuildSampleSet`.
+- **What happens:** The interior `v` samples are set to `jj / (m_lSampleCntV - 1)` where `jj` is the array index, which starts at `m_lSampleCntU + 1`, not the `v` sample number. The interior `v` parameters are therefore well outside `[0, 1]` (the sample domain is extrapolated).
+- **Trigger:** a surface gap function over a non-B-spline surface (for example an `SmCurveBoundedSurface`) with `SetSampleCnt(u, v)`, `v > 2`.
+- **How found:** read during porting; compared in fixture `srf_pt_curve_bounded_v_stride` (`fixtures/heal.gap/upstream.json`).
+- **Confirmed:** yes.
+- **Severity:** wrong result.
+- **Rust port:** Reproduces it (`heal::gap::GapFunction::build_sample_set`).
+
+#### WR-89. `BuildSampleSet` samples B-spline knot spans from the first knot, not the sample interval
+- **Location:** `source/SMLib/src/SmGap.cpp:1845`-`1859` (`u`), `:1867`-`1881` (`v`).
+- **What happens:** After finding the knot indices `lStartIndxU..lEndIndxU` of the sample interval, the span loop walks `sUniqueKnotsU[0..lIvlCntU]` instead of `sUniqueKnotsU[lStartIndxU..lEndIndxU]`, and the normalised values (relative to the whole knot range) are then mapped onto the sample interval with `m_sSampleIvlU.Evaluate`. A sample interval that is not the whole knot range is sampled at the wrong parameters (the loop also overwrites the last end sample set "to avoid numerical tolerances").
+- **Trigger:** `SmCrvSrfGapFunction` (or any gap function from B-spline geometry) over an edge interval smaller than the curve's knot range.
+- **How found:** read during porting; compared in fixture `crv_pt_bspline_sub_interval`.
+- **Confirmed:** yes.
+- **Severity:** wrong result.
+- **Rust port:** Reproduces it.
+
+#### WR-90. `SmGapArray::Append` does not update the longest-gap index
+- **Location:** `source/SMLib/inc/SmGap.h:882`.
+- **What happens:** `Append` adds the other array's gaps without comparing them with the current longest, so `GetMaxGap` / `GetMaxGapLength` can miss an appended longer gap (an empty array stays without a longest gap).
+- **Trigger:** `a.Add(len 1)`, `b.Add(len 2)`, `a.Append(b)`.
+- **How found:** read during porting; compared in fixture `gap_array_append`.
+- **Confirmed:** yes.
+- **Severity:** wrong result.
+- **Rust port:** Reproduces it (`heal::gap::GapArray::append`).
 
 ## Docs
 
