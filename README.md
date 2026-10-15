@@ -27,6 +27,8 @@ C++ to `1e-9` relative with identical topology, verified unit by unit.
 About a third ported and verified against the C++: the math, NURBS and curve layers,
 with surfaces and topology under way. **Checklist: [`plan/PROGRESS.md`](plan/PROGRESS.md)**
 (updated automatically). Notes and handoff: [`plan/STATUS.md`](plan/STATUS.md).
+The same data, browsable, is on the progress site built by
+[`site/build.py`](site/README.md) (`python3 site/build.py` -> `bin/site/`).
 Nothing is usable end to end yet (no primitives, booleans or fillets).
 
 ## Layout
@@ -38,6 +40,7 @@ Nothing is usable end to end yet (no primitives, booleans or fillets).
 | `crates/difftest`       | Runs Rust and C++ side by side on the same inputs           |
 | `harness/cpp`           | Builds the upstream C++ reference into `bin/cpp`; FFI shims  |
 | `plan/`                 | Unit list, port order, status, findings                      |
+| `site/`                  | Generator for the GitHub Pages progress site                 |
 | `upstream/`             | Local clone of usd-brep at `c9c5979` (gitignored)           |
 | `bin/`                  | All build output (gitignored)                                |
 

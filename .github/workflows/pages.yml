@@ -1,0 +1,72 @@
+name: Pages
+
+# Builds the progress site (site/build.py) from the repository and deploys it to GitHub
+# Pages. Requires Settings -> Pages -> Source = "GitHub Actions".
+#
+# Triggers:
+# - push to main: every merge (statuses, reports, upstream-issues.md, the site itself).
+# - workflow_run of "Progress checklist": that workflow commits plan/PROGRESS.md with
+#   "[skip ci]", which suppresses push events, so the claims it records would otherwise
+#   only appear on the next merge. It runs hourly and on PR events and usually pushes
+#   nothing, so the build is skipped unless main moved past the commit it started from.
+# - workflow_dispatch: manual rebuild.
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["Progress checklist"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0 # full history for the progress timeline
+      - name: Skip if the progress run pushed nothing
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$EVENT" = workflow_run ] && [ "$(git rev-parse HEAD)" = "$RUN_SHA" ]; then
+            echo "main unchanged since $RUN_SHA; nothing to rebuild"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build site
+        if: steps.gate.outputs.build == 'true'
+        run: python3 site/build.py --out _site
+      - if: steps.gate.outputs.build == 'true'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - if: steps.gate.outputs.build == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+    outputs:
+      build: ${{ steps.gate.outputs.build }}
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
