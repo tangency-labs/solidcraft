@@ -738,16 +738,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "csi_crossing_plane",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p9/cases.json#28 (upstream source/SMLib/src/SmSurface.cpp:13887 (one patch/one span intersection))",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -791,8 +787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "csi_domain_narrow_u",
@@ -811,8 +807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "csi_domain_narrow_v",
@@ -838,16 +834,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "csi_domain_narrow_off_line",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#9 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -858,52 +850,36 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "csi_domain_partial_overlap",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#11 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "csi_domain_superset",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#12 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "csi_scale_1e6",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#13 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "csi_scale_1e6_oblique",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_p9/guard-narrowing.json#14 (upstream source/SMLib/src/SmSurface.cpp:13887 (guard narrowing follow-up to PR #6))",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -6803,13 +6779,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 58,
+  "cases_deferred": 52,
   "cases_failed": 0,
-  "cases_passed": 763,
+  "cases_passed": 769,
   "cases_total": 821,
   "deferred_by_unit": {
     "intersect.curve_class_p4": 50,
-    "surface.surface_point_solve_p3": 8
+    "surface.surface_p2": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

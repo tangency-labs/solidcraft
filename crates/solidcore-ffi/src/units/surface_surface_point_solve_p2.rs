@@ -278,7 +278,7 @@ pub fn rev_info(wrap: bool, surf: &RevSurf) -> Result<(i32, Option<RevInfo>), Ff
 }
 
 /// `W 3 R`: the problem's surface block for a surface of revolution.
-fn rev_head(wrap: bool, surf: &RevSurf) -> Result<Vec<f64>, FfiError> {
+pub(crate) fn rev_head(wrap: bool, surf: &RevSurf) -> Result<Vec<f64>, FfiError> {
     let mut head = vec![f64::from(u8::from(wrap)), 3.0];
     rev::push_surf(&mut head, surf)?;
     Ok(head)

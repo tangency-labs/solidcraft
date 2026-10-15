@@ -195,12 +195,14 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, Su
 /// `LocalPointSolve(domain, SM_SO_NORMALIZE, point, guess, found, solution)`: the
 /// found flag and the solution's start parameters.
 fn surface_local_point_solve(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     point: Point3,
     guess: Point2,
 ) -> Result<(bool, Point2)> {
     let r = surface.local_point_solve::<NoObject>(
+        k,
         uv_domain,
         SolverOperation::Normalize,
         point,
@@ -854,7 +856,7 @@ impl<'s> SurfaceDropCurve<'s> {
 
         // Pass the Drop 3dPnt to Surface call along
         let (found_answer, mut solution) =
-            surface_local_point_solve(surface, &domain, curr_pnt, guess)?;
+            surface_local_point_solve(k, surface, &domain, curr_pnt, guess)?;
 
         // when Local DropPoint to Surface fails - try global DropPoint to Surface
         if !found_answer {
@@ -2219,10 +2221,10 @@ mod tests {
         let k = Kernel::default();
         assert!(!t.is_point_on_curve(&k, Vec3::ZERO, &[]).unwrap());
         assert!(!SurfaceTrace::test_point(&mut t, &k, &mut TracePoint::new()).unwrap());
+        // LocalPointSolve_1 is ported (surface.surface_point_solve_p3)
         assert!(t
             .drop_local_point_solve(&k, Vec2::ZERO, &mut TracePoint::new())
-            .unwrap_err()
-            .is_unported());
+            .is_ok());
         // no breaks yet: a null array upstream
         let id = t.base.new_point(TracePoint::zeroed());
         let mut out = TraceOutput::default();

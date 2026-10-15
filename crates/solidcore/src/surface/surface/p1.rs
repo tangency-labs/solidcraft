@@ -7,6 +7,8 @@
 //! few standalone helpers (`smsurf_EvaluateNormalSection`, `sm_CrossedSeamOrPole`, the
 //! tree node validity tests).
 //!
+//! Deviations: compound evaluation copies carry a depth counter capped at 64 by Surface.
+//!
 //! Upstream: `source/SMLib/src/SmSurface.cpp`, `source/SMLib/inc/SmSurface.h`,
 //! `source/SMLib/src/SmSTEPSurface.cpp`, `source/SMLib/inc/SmSTEPSurface.h`.
 //!
@@ -52,7 +54,8 @@
 //!   constructor's null pointer, where upstream would crash the methods return
 //!   [`SolidError::InvalidInput`] (or an uninitialised domain). `GetMemoryUsed` and
 //!   `WriteToDB` have no counterpart. Nested STEP surfaces read from a database are
-//!   bounded by the reader's nesting limit.
+//!   bounded by the reader's nesting limit. Temporary evaluation copies retain
+//!   exact nested geometry and share `Surface`'s 64-level owned-geometry bound.
 //! - **Caches.** Upstream keeps a surface's cache on the surface and reuses it until it
 //!   changes. [`make_surface_cache`] and [`make_trim_srf_cache`] build a fresh cache for
 //!   the caller (the build is deterministic); [`validate_surface_cache`] is the rest of
@@ -330,6 +333,19 @@ pub struct StepSurface {
 }
 
 impl StepSurface {
+    /// A bounded, exact evaluation copy; the nesting limit is checked by Surface.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        let surface = self
+            .surface
+            .as_deref()
+            .map(|s| s.clone_for_evaluation_depth(depth).map(Box::new))
+            .transpose()?;
+        Ok(Self {
+            surface,
+            owns_surface: self.owns_surface,
+        })
+    }
+
     /// `GetTypeString()`.
     pub const TYPE_STRING: &'static str = "SmSTEPSurface_TYPE";
     /// `GetClassString()`.
@@ -643,6 +659,7 @@ pub fn map_to_2d(tol_3d: f64, uv: Point2, surface: &Surface) -> Result<f64> {
 ///
 /// [`SolidError::Unported`] for a curve on surface, and from the evaluations and the drop.
 pub fn map_to_2d_on_curve(
+    k: &Kernel,
     tol_3d: f64,
     param: f64,
     trim_curve: &Curve,
@@ -675,6 +692,7 @@ pub fn map_to_2d_on_curve(
         // general 3 dim Curve: drop its point and tangent to the surface's UV space
         // (statuses ignored upstream: the UV stays undefined when the drop fails)
         let drop = ignored(surface.drop_point::<crate::surface::surface::p4::NoObject>(
+            k,
             p0,
             &surface.natural_uv_domain(),
             &crate::surface::surface::p5::DropPointOptions::default(),
@@ -931,6 +949,9 @@ impl Surface {
             (SurfaceKind::BSpline(a), SurfaceKind::BSpline(b)) => Ok(a.approx_eq(b)),
             // SmPlane::operator==: SmBSplineSurface::operator== first
             (SurfaceKind::Plane(a), SurfaceKind::Plane(b)) => Ok(a.approx_eq(b)),
+            (SurfaceKind::SurfOfRevolution(a), SurfaceKind::SurfOfRevolution(b)) => {
+                a.approx_eq(&Kernel::default(), b)
+            }
             (SurfaceKind::SrfInVolume(a), SurfaceKind::SrfInVolume(b)) => a.approx_eq(b),
             _ => Ok(false),
         }

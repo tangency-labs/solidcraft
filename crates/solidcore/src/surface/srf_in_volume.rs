@@ -2,6 +2,7 @@
 //! volume's parameter space or in-space to its final out-space (the generated
 //! surface `SmSrfInVolume`).
 //!
+//!
 //! Upstream: `source/SMLib/src/SmSrfInVolume.cpp`, `source/SMLib/inc/SmSrfInVolume.h`.
 //!
 //! | Rust                                           | Upstream                                          |
@@ -33,6 +34,7 @@
 //! | [`SrfInVolume::read_from_db`]                  | `ReadFromDB`                                      |
 //!
 //! Deviations:
+//! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
 //! - **Volumes.** The volume is a [`Volume`] (unit `surface.volume_p1`).
 //!   `InvEvaluatePoint`, `InvMapPoint` and `ReadFromDB` are wired to
 //!   `surface.volume_p2`. `SmVolume::Mirror` and
@@ -182,6 +184,16 @@ impl From<SrfInVolume> for Surface {
 }
 
 impl SrfInVolume {
+    /// An evaluation copy retaining exact basis data, with Surface's 64-level bound.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            surface: Box::new(self.surface.clone_for_evaluation_depth(depth)?),
+            in_param_space: self.in_param_space,
+            volume: self.volume.clone(),
+            owner_flag: self.owner_flag,
+        })
+    }
+
     /// `SmSrfInVolume_TYPE`.
     pub const TYPE: i64 = SRF_IN_VOLUME_TYPE;
 

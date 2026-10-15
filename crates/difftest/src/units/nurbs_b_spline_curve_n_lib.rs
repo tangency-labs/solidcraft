@@ -896,7 +896,7 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
         OpIn::InsOne { knot, times } => c.insert_one_knot(*knot, *times)?,
         OpIn::Through { knot, p, tan, pct } => {
             let mut k = *knot;
-            let modified = c.set_intersection_curve_through_point::<solidcore::nurbs::b_spline_surface::BSplineSurface>(
+            let modified = c.set_intersection_curve_through_point::<solidcore::nurbs::b_spline_surface::BSplineSurface>(&Kernel::default(),
                 &mut k,
                 v3(*p),
                 tan.map(v3),

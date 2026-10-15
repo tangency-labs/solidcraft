@@ -1336,6 +1336,7 @@ pub fn set_xsect_curve_through_point(
             .collect();
         let mut new_param = out.param;
         let r = bs.set_intersection_curve_through_point(
+            k,
             &mut new_param,
             out.point_3d,
             Some(xsect_tangent),
@@ -1447,7 +1448,7 @@ pub fn get_cci_surface_gaps<S: Copy>(
                 solution.start.param(1)?
             };
             let guess = ignored(uv_curve.evaluate_point(t_param))?.unwrap_or(Vec3::UNDEF);
-            surface_local_point_solve(surface, point, Point2::new(guess.x, guess.y))?
+            surface_local_point_solve(k, surface, point, Point2::new(guess.x, guess.y))?
         } else {
             // get classCurvePoint/surf dist without checking trim boundaries
             let _cache = surface_cache::<()>(k, surface, None)?;
@@ -1918,11 +1919,18 @@ pub fn xsect_tol_2d_or_3d_for_classify_pair(
         // Curve2d with m_cpSurface1
         let obj2_zone_tol_2d = zone_tol3d(
             k,
-            map_to_2d_on_curve(obj2_zone_tol_3d, obj2_src_curve_param, src_curve, surface_1)?,
+            map_to_2d_on_curve(
+                k,
+                obj2_zone_tol_3d,
+                obj2_src_curve_param,
+                src_curve,
+                surface_1,
+            )?,
         );
         let obj1_zone_tol_2d = zone_tol3d(
             k,
             map_to_2d_on_curve(
+                k,
                 src_curve_or_obj1_zone_tol_3d,
                 src_curve_or_obj1_param,
                 src_curve,
@@ -1957,14 +1965,20 @@ pub fn object_dimension<O: ClassObject>(object: Option<O>) -> i32 {
 /// `SmSurface::LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, found, sol)`:
 /// the gap and UV point of the answer, if found.
 fn surface_local_point_solve(
+    k: &Kernel,
     surface: &Surface,
     point: Point3,
     guess: Point2,
 ) -> Result<Option<(f64, Point2)>> {
     let domain = surface.natural_uv_domain();
     // (the status is ignored upstream, only bFoundAnswer is read)
-    let Some(r) =
-        ignored(surface.local_point_solve::<()>(&domain, SolverOperation::Minimize, point, guess))?
+    let Some(r) = ignored(surface.local_point_solve::<()>(
+        k,
+        &domain,
+        SolverOperation::Minimize,
+        point,
+        guess,
+    ))?
     else {
         return Ok(None);
     };

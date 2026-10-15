@@ -5,8 +5,9 @@
 //! `source/SMLib/inc/SmSurfaceDropCurve.h` (`SmSurfaceDropCurve`, `sm_TestPoint`, `sm_AddBreak`,
 //! `sm_IsGrazingIntersection`), compiled into the shim.
 //!
-//! [`run`] builds a surface (a real `SmBSplineSurface` or `SmPlane`), a curve (a real `SmLine`
-//! segment or `SmBSplineCurve`), an `SmSurfaceDropCurve` over a domain and a curve interval,
+//! [`run`] builds a surface (a real `SmBSplineSurface`, or an `SmPlane` with its NURB made), a
+//! curve (a real `SmLine` segment or `SmBSplineCurve`), an `SmSurfaceDropCurve` over a domain and
+//! a curve interval,
 //! sets `SetCurveIsOnSurface`, the optional tolerances, working interval, working domain, knot
 //! vector and breaks, runs the [`Op`]s in order and returns the record:
 //!

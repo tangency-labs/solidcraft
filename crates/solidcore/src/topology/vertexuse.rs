@@ -724,7 +724,7 @@ struct PointDrop {
 /// `pSurface->LocalPointSolve(domain, op, point, guess, bFoundAnswer, sSol)`: whether
 /// an answer was found and the solution.
 fn local_point_solve(
-    _k: &Kernel,
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     op: SolverOperation,
@@ -732,7 +732,7 @@ fn local_point_solve(
     guess: Point2,
 ) -> Result<(bool, PointDrop)> {
     let r = surface
-        .local_point_solve::<crate::surface::surface::p4::NoObject>(domain, op, point, guess)?;
+        .local_point_solve::<crate::surface::surface::p4::NoObject>(k, domain, op, point, guess)?;
     Ok((
         r.found,
         PointDrop {

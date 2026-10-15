@@ -1064,15 +1064,6 @@ pub fn is_point_on_normal(
 
 // ---- callees in units not ported yet -------------------------------------------------------
 
-/// `SmSurface::GlobalPointSolve_1`.
-fn global_point_solve_1<O: SolutionObject>() -> Result<SolutionArray<O>> {
-    // UNPORTED(surface.surface_point_solve_p3): SmSurface::GlobalPointSolve_1
-    Err(SolidError::unported(
-        "SmSurface::GlobalPointSolve_1",
-        "surface.surface_point_solve_p3",
-    ))
-}
-
 // ---- the unit's functions ------------------------------------------------------------------
 
 /// Whether `solved_point` is on the normal line of the surface at `uv`
@@ -1331,7 +1322,16 @@ impl Surface {
         let use_new =
             (op != SolverOperation::Maximize) || op == SolverOperation::Signed3dDirectedMaximize;
         if use_new {
-            global_point_solve_1()
+            self.global_point_solve_1(
+                k,
+                uv_domain,
+                op,
+                test_point,
+                src_zone_tol_3d,
+                opt_target_distance,
+                requested,
+                None,
+            )
         } else {
             self.global_point_solve_0(
                 uv_domain,

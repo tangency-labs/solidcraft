@@ -70,8 +70,7 @@
 //!   reads the missing-seam flags of the sector it returns.
 //! - **Unported callees.** `SmFace::Notify` (`topology.face_p3`, the `PRE_EDIT` /
 //!   `POST_EDIT` around `FlipLoopOrientation` of a loop on a face),
-//!   `SmEdgeuse::GetOrCreateUVTrimCurve` (`topology.edgeuse_p3`)
-//!   and `SmSurface::DropPoint` (`surface.surface_p5`) return
+//!   and `SmEdgeuse::GetOrCreateUVTrimCurve` (`topology.edgeuse_p3`) return
 //!   [`SolidError::Unported`]. `SmShell::GetRegion` is the co-port
 //!   [`eu1::shell_region`].
 //! - The `std::unordered_set` overloads of `GetEdges` / `GetVertices`,
@@ -1089,12 +1088,13 @@ fn get_or_create_uv_trim_curve(
 /// `surface.surface_p5`): the UV point it writes to its out-param, or `None` only when
 /// it leaves the out-param unwritten. Upstream ignores both the status and `bSuccess`
 /// here, so a point written by a failed drop must still be returned.
-fn drop_point(_k: &Kernel, _s: &Surface, _dom: &Extent2d, _p: Point3) -> Result<Option<Point2>> {
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::unported(
-        "SmSurface::DropPoint",
-        "surface.surface_p5",
-    ))
+///
+/// With no guess and no solution array, `DropPoint` writes `rResultUV` only when it
+/// ends with `rbSuccess` set (its failed `GlobalPointSolve` returns before any write).
+fn drop_point(k: &Kernel, s: &Surface, dom: &Extent2d, p: Point3) -> Result<Option<Point2>> {
+    let opts = crate::surface::surface::p5::DropPointOptions::default();
+    let r = ignored(s.drop_point::<crate::surface::surface::p4::NoObject>(k, p, dom, &opts))?;
+    Ok(r.filter(|d| d.success).map(|d| d.result_uv))
 }
 
 /// Ignores a status upstream ignores ([`SolidError::Unported`] still propagates).

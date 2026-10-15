@@ -172,6 +172,7 @@ impl SolutionObject for GenHandle {
 /// `SmSurface::LocalPointSolve(domain, operation, point, guess, ..)`: whether an answer
 /// was found and the solution.
 fn surface_local_point_solve<O: Copy>(
+    k: &Kernel,
     surface: &SurfOfRevolution,
     domain: &Extent2d,
     operation: SolverOperation,
@@ -180,7 +181,7 @@ fn surface_local_point_solve<O: Copy>(
 ) -> Result<(bool, Solution<O>)> {
     // the SmSurface body (surface.surface_p5), on a Surface holding a copy
     let surface = crate::surface::surface::Surface::from(surface.clone_exact());
-    let r = surface.local_point_solve::<O>(domain, operation, point, guess)?;
+    let r = surface.local_point_solve::<O>(k, domain, operation, point, guess)?;
     Ok((r.found, r.solution))
 }
 
@@ -445,6 +446,7 @@ impl SurfOfRevolution {
             let pnt = self.evaluate_step_point(k, step_uv)?;
             // (status ignored upstream: the solution is always used)
             let sol: Solution<()> = ignored(surface_local_point_solve(
+                k,
                 self,
                 &nat_domain,
                 SolverOperation::Minimize,
@@ -716,7 +718,7 @@ impl SurfOfRevolution {
                 let mut uv = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);
                 if !exact_conversion {
                     let (found, s) =
-                        surface_local_point_solve(self, uv_domain, operation, test_point, uv)?;
+                        surface_local_point_solve(k, self, uv_domain, operation, test_point, uv)?;
                     sol = s;
                     if found {
                         uv = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);

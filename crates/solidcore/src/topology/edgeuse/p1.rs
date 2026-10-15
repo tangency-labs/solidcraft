@@ -80,9 +80,8 @@
 //!   ([`SolidError::Unported`] still propagates), leaving the outputs of a failed
 //!   evaluation at their `SM_UNDEF_DOUBLE` defaults. `sm_AreSeamCurves`' unused
 //!   edge use argument is dropped.
-//! - **Unported callees.** `SmSurface::DropPoint` (`surface.surface_p5`) and
-//!   `SmEdgeuse::EvaluateBinormal` (`topology.edgeuse_p3`) return
-//!   [`SolidError::Unported`]. The gap computations are [`crate::heal::gap`];
+//! - **Unported callees.** `SmEdgeuse::EvaluateBinormal` (`topology.edgeuse_p3`)
+//!   returns [`SolidError::Unported`]. The gap computations are [`crate::heal::gap`];
 //!   `CalcMaxEdgeFaceGap`'s cross-section tolerance is the context one with no
 //!   context (`SmTol::GetXSectTol3d(NULL)`: the B-rep records carry no context).
 //! - **Co-ports.** The small accessors of other units this unit reaches are ported
@@ -1106,7 +1105,7 @@ fn edge_interval(b: &Brep, eu: EdgeuseId, what: &'static str) -> Result<Extent1d
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null; [`SolidError::Unported`] for the point drop
 /// (`SmSurface::DropPoint`, unit `surface.surface_p5`).
-pub fn start_point_uv_loop_gap(b: &Brep, eu: EdgeuseId) -> Result<f64> {
+pub fn start_point_uv_loop_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<f64> {
     // check state - only Loopuse Edgeuses have End_to_End gaps
     let r = b.edgeuse(eu)?;
     let Some(cw) = r.cw.filter(|_| matches!(r.owner, EdgeuseOwner::Loopuse(_))) else {
@@ -1157,8 +1156,12 @@ pub fn start_point_uv_loop_gap(b: &Brep, eu: EdgeuseId) -> Result<f64> {
             operation: SolverOperation::Minimize,
             ..Default::default()
         };
-        let start_drop =
-            crate::error::ignored(surface.drop_point::<NoObject>(start_3d, &domain, &start_opts))?;
+        let start_drop = crate::error::ignored(surface.drop_point::<NoObject>(
+            k,
+            start_3d,
+            &domain,
+            &start_opts,
+        ))?;
         // `sStart2d` stays default-constructed when the call fails
         let start_2d = start_drop.map_or(Point2::UNDEF, |d| d.result_uv);
         let cw_opts = DropPointOptions {
@@ -1167,7 +1170,7 @@ pub fn start_point_uv_loop_gap(b: &Brep, eu: EdgeuseId) -> Result<f64> {
             ..Default::default()
         };
         let cw_drop =
-            crate::error::ignored(surface.drop_point::<NoObject>(cw_end_3d, &domain, &cw_opts))?;
+            crate::error::ignored(surface.drop_point::<NoObject>(k, cw_end_3d, &domain, &cw_opts))?;
         // upstream's DropPoint sets rResultUV to the guess before anything can fail
         let cw_end_2d = cw_drop.map_or(start_2d, |d| d.result_uv);
         return Ok(start_2d.distance(cw_end_2d));
@@ -1912,15 +1915,17 @@ mod tests {
                 .uv_trim_curve = Some(uv_line(s, e));
         }
         let a0 = EdgeuseId::from_index(0);
-        assert!((start_point_uv_loop_gap(&b, a0).unwrap() - 0.25).abs() < 1e-15);
+        assert!(
+            (start_point_uv_loop_gap(&Kernel::default(), &b, a0).unwrap() - 0.25).abs() < 1e-15
+        );
         assert_eq!(
-            start_point_uv_loop_gap(&b, EdgeuseId::from_index(2)).unwrap(),
+            start_point_uv_loop_gap(&Kernel::default(), &b, EdgeuseId::from_index(2)).unwrap(),
             0.0
         );
         // without trim curves the end points are dropped onto the surface
         b.edgeuse_mut(a0).unwrap().uv_trim_curve = None;
         b.edge_mut(EdgeId::from_index(0)).unwrap().curve = None;
-        assert!(start_point_uv_loop_gap(&b, a0).is_err());
+        assert!(start_point_uv_loop_gap(&Kernel::default(), &b, a0).is_err());
     }
 
     #[test]
@@ -1946,7 +1951,7 @@ mod tests {
             calc_edge_ccw_edge_gap(&mut b, a0, true, false),
             Err(SolidError::InvalidInput { .. })
         ));
-        // with curves: the edge/edge gap and the edge/face gap
+        // With curves, both edge/edge and edge/face gaps are evaluated.
         for i in 0..4u32 {
             let e = EdgeId::from_index(i);
             let [v0, v1] = b.edge(e).unwrap().vertices;
@@ -1960,9 +1965,10 @@ mod tests {
             .unwrap();
         assert!(g.is_init() && g.gap_3d.abs() < 1e-12);
         assert_eq!(b.edgeuse(a0).unwrap().edge_ccw_edge_gap, g);
-        // the edge/face gap drops through the surface (`SmSurface::DropPoint`)
-        let fg = max_edge_face_gap(&k, &mut b, a0, true).unwrap().unwrap();
-        assert!(fg.gap_3d.abs() < 1e-12);
+        let face_gap = max_edge_face_gap(&k, &mut b, a0, true).unwrap().unwrap();
+        assert_eq!(face_gap.gap_3d, 0.0);
+        assert_eq!(face_gap.edgeuse, Some(a0));
+        assert!(is_max_edge_face_gap_init(&b, a0).unwrap());
         // a degenerate edge interval fails before the gap function
         b.edge_mut(EdgeId::from_index(0)).unwrap().interval = Extent1d::from_value(0.5);
         assert!(matches!(

@@ -643,7 +643,7 @@ fn run_op(
             let p = pt_of(si, *i)?;
             if classify_rejected(&p) {
                 o.push(ffi::REJECTED);
-            } else if let Some(d) = st(o, si.classify_boundary_start_point_intersection(&p))? {
+            } else if let Some(d) = st(o, si.classify_boundary_start_point_intersection(k, &p))? {
                 o.push(b(d));
             }
         }

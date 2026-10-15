@@ -775,7 +775,8 @@ impl Surface {
             // our domain with our original domain, and update our domain to it.
             let orig_domain = self.step_uv_domain();
             let update_domain = orig_domain.union(&new_domain);
-            self.adjust_step_uv_domain(k, &update_domain)?;
+            // (status ignored upstream)
+            ignored(self.adjust_step_uv_domain(k, &update_domain))?;
 
             // Have to do this after AdjustSTEPUVDomain call:
             self.remove_uv_trim_curves_of_owner()?;
@@ -962,7 +963,8 @@ impl Surface {
         let orig_domain = self.step_uv_domain();
         let update_domain = orig_domain.union(&new_domain);
 
-        self.adjust_step_uv_domain(k, &update_domain)?;
+        // (status ignored upstream)
+        ignored(self.adjust_step_uv_domain(k, &update_domain))?;
 
         // Have to do this after AdjustSTEPUVDomain call:
         self.remove_uv_trim_curves_of_owner()?;

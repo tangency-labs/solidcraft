@@ -585,7 +585,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::Lps { dom, sop, p, guess } => {
-            match st(s.local_point_solve::<Obj>(&dom_of(*dom), sop_of(*sop)?, v3(*p), p2(*guess)))? {
+            match st(s.local_point_solve::<Obj>(&k, &dom_of(*dom), sop_of(*sop)?, v3(*p), p2(*guess)))? {
                 Ok(r) => {
                     o.extend([0.0, b(r.found)]);
                     if r.found {
@@ -614,7 +614,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 tgt_seam_side: tgt.map(v3),
                 want_solutions: *want,
             };
-            match st(s.drop_point::<Obj>(v3(*p), &dom_of(*dom), &opts))? {
+            match st(s.drop_point::<Obj>(&k, v3(*p), &dom_of(*dom), &opts))? {
                 Ok(r) => {
                     o.extend([0.0, b(r.success), r.result_uv.x, r.result_uv.y, r.gap, b(r.is_multivalued)]);
                     o.push(if *want { r.solutions.len() as f64 } else { -1.0 });
@@ -682,7 +682,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let conts = |c: &[u8; 2]| -> Result<[ContinuityType; 2], HarnessError> {
                 Ok([cont_of(c[0])?, cont_of(c[1])?])
             };
-            match st(sp_local_solve::<Obj>(
+            match st(sp_local_solve::<Obj>(&k,
                 &s,
                 &dom_of(*dom),
                 conts(uc)?,
@@ -704,7 +704,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         }
         OpIn::MaxDist { dom, curve, ivl, n, needed } => {
             let c = curve_of(curve)?;
-            match st(c.surface_max_distance_between(
+            match st(c.surface_max_distance_between(&k,
                 &Extent1d::from_min_max(ivl[0], ivl[1]),
                 &s,
                 &dom_of(*dom),

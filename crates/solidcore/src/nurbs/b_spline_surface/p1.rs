@@ -527,14 +527,15 @@ fn surface_is_degenerate_curve(
 /// `SmSurface::LocalPointSolve(domain, SM_SO_INTERSECT, point, guess, ..)`: whether it
 /// succeeded and the solution's start parameters.
 fn local_point_solve(
-    srf: &BSplineSurface,
+    k: &Kernel,
+    surface: &crate::surface::surface::Surface,
     domain: &Extent2d,
     point: Point3,
     guess: Point2,
 ) -> Result<(bool, Point2)> {
-    // the SmSurface body (surface.surface_p5), on a surface holding a copy
-    let surface = crate::surface::surface::Surface::from(srf.clone_exact());
+    // Retain the original virtual evaluator (in particular SmPlane's override).
     let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
+        k,
         domain,
         SolverOperation::Intersect,
         point,
@@ -576,18 +577,13 @@ fn global_point_solve(
         .collect())
 }
 
-/// `SmSurface::IsSingularity(uv, dir)`, virtual: `SmPlane::IsSingularity` is an inline
-/// override returning FALSE (`SmPlane.h:369`), so a plane answers it here.
+/// `SmSurface::IsSingularity(uv, dir)`, preserving virtual plane dispatch.
 fn is_singularity(
     k: &Kernel,
     surface: &crate::surface::surface::Surface,
     _srf: &BSplineSurface,
     uv: Point2,
 ) -> Result<bool> {
-    if let crate::surface::surface::SurfaceKind::Plane(p) = surface.kind() {
-        return Ok(p.is_singularity().0);
-    }
-    // the SmSurface body (surface.surface_p5)
     Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
 }
 
@@ -1834,7 +1830,7 @@ impl BSplineSurface {
         // If a guess is given, try a local solve first.
         let mut local_succeeded = false;
         if let Some(guess) = uv_guess {
-            let (ok, sol) = local_point_solve(self, anal_domain, point_on_surf, guess)?;
+            let (ok, sol) = local_point_solve(k, surface, anal_domain, point_on_surf, guess)?;
             local_succeeded = ok;
             if local_succeeded {
                 solutions.push(sol);

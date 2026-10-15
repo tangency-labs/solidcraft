@@ -290,6 +290,16 @@ impl Plane {
         }
     }
 
+    /// A private solver copy without constructing or fixing the NURBS representation.
+    pub(crate) fn clone_exact(&self) -> Self {
+        Self {
+            base: self.base.clone_exact(),
+            position: self.position,
+            anal_uv_domain: self.anal_uv_domain,
+            uv_scale: self.uv_scale,
+        }
+    }
+
     /// A copy of every member as is (no NURB is made).
     fn member_copy(&self) -> Self {
         Self {
@@ -1923,7 +1933,8 @@ impl Plane {
         // Drop to this first because planes are easy.
         let uv1 = domain1.mid();
         let pt1 = other.evaluate_point(uv1)?;
-        let (success, _uv0, dist) = surface_drop_point(&Surface::from(self.clone()), pt1, domain0)?;
+        let (success, _uv0, dist) =
+            surface_drop_point(k, &Surface::from(self.clone()), pt1, domain0)?;
 
         // Also set output argument:
         if dist > res.max_distance {
@@ -1941,7 +1952,7 @@ impl Plane {
         // Repeat the other way around.
         let uv0 = domain0.mid();
         let pt0 = self.evaluate_point(uv0);
-        let (success, uv1, dist) = surface_drop_point(other, pt0, domain1)?;
+        let (success, uv1, dist) = surface_drop_point(k, other, pt0, domain1)?;
 
         // Also set output argument:
         if dist > res.max_distance {
@@ -2101,12 +2112,17 @@ fn create_natural_uv_trim_curves(
 
 /// `SmSurface::DropPoint(pt, domain, NULL, bSuccess, uv, dist, bIsMulti,
 /// SM_SO_NORMALIZE)`: success, uv and distance.
-fn surface_drop_point(s: &Surface, pt: Point3, domain: &Extent2d) -> Result<(bool, Point2, f64)> {
+fn surface_drop_point(
+    k: &Kernel,
+    s: &Surface,
+    pt: Point3,
+    domain: &Extent2d,
+) -> Result<(bool, Point2, f64)> {
     let opts = crate::surface::surface::p5::DropPointOptions {
         operation: SolverOperation::Normalize,
         ..Default::default()
     };
-    let r = s.drop_point::<crate::surface::surface::p4::NoObject>(pt, domain, &opts)?;
+    let r = s.drop_point::<crate::surface::surface::p4::NoObject>(k, pt, domain, &opts)?;
     Ok((r.success, r.result_uv, r.gap))
 }
 

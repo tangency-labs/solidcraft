@@ -161,7 +161,7 @@ pub fn surface_closest_point(
     surface: &Surface,
     point: Point3,
 ) -> Result<SurfaceClosestPoint> {
-    let drop = surface.drop_point_with_kernel::<NoObject>(
+    let drop = surface.drop_point::<NoObject>(
         k,
         point,
         &surface.natural_uv_domain(),

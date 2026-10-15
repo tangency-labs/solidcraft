@@ -59,9 +59,7 @@
 //!   `m_vUVCurvePV` (`[uv0, duv0, uv1, duv1]`); that array is passed.
 //! - **Unported callees.** `SmSurface::GlobalCurveIntersect` (`surface.surface_p8`),
 //!   `SmSurface::DropAndTrimCurve`'s trace (`intersect.surface_drop_curve`, through
-//!   [`Surface::drop_and_trim_curve`]) and
-//!   `SmSurface::IsSingularity` of a surface that is not a plane (`surface.surface_p5`)
-//!   return [`SolidError::Unported`], which always propagates (also where upstream
+//!   [`Surface::drop_and_trim_curve`]) return [`SolidError::Unported`], which always propagates (also where upstream
 //!   ignores the status).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps), the
 //!   `SM_ASSERT`s (no-ops in release builds) and the user pointers
@@ -610,7 +608,7 @@ impl SurfaceIntersector<'_> {
 
         // Set bIsDegenerate = TRUE: a degenerate point xsect curve (status ignored)
         let is_degenerate =
-            ignored(self.classify_boundary_start_point_intersection(&tsp))?.unwrap_or(false);
+            ignored(self.classify_boundary_start_point_intersection(k, &tsp))?.unwrap_or(false);
 
         // when a degenerate point not on an output curve yet: classify it at the end
         if is_degenerate && !self.is_point_on_curve(k, tsp.crv_pos(), &out.curves_3d, None)? {

@@ -211,7 +211,7 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx, Owned& own)
     return c;
 }
 
-// `0 o x y scale dom` SmPlane, `1 p q nu nv net(x y z w) u v` SmBSplineSurface, or
+// `0 o x y scale dom` SmPlane (with its NURB made), `1 p q nu nv net(x y z w) u v` SmBSplineSurface, or
 // `2 gen point[3] axis[3] swap` SmSurfOfRevolution::CreateCanonical with the generator a
 // line `0 a b` or a circle `1 c x y d0 d1 r` (see read_curve). NULL when CreateCanonical
 // fails.
@@ -225,7 +225,11 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx, Owned& own)
         SmVector3d y = rd.vec();
         SmVector2d s = rd.uv();
         SmExtent2d d = rd.dom4();
-        SmSurface* srf = new (ctx) SmPlane(o, x, y, s, d, &ctx);
+        SmPlane* srf = new (ctx) SmPlane(o, x, y, s, d, &ctx);
+        // Make the plane's NURB up front: const queries (GetNextPoint's evaluations) would
+        // make and keep it later, changing later point solves; the Rust plane never keeps a
+        // NURB made by a read-only query, so both sides start with it (plan/findings.md).
+        srf->GetOrCreateGwNurbPointer();
         own.surfaces.push_back(srf);
         return srf;
     }

@@ -1009,7 +1009,11 @@ impl SurfaceIntersector<'_> {
     ///
     /// `SM_ERR` after [`MAX_GAP_SAMPLES`] samples of one side;
     /// [`SolidError::Unported`] from `SmSurface::LocalPointSolve`.
-    pub fn classify_boundary_start_point_intersection(&self, point: &TsectPnt) -> Result<bool> {
+    pub fn classify_boundary_start_point_intersection(
+        &self,
+        k: &Kernel,
+        point: &TsectPnt,
+    ) -> Result<bool> {
         // TangentPoints are always degenerate
         if point.point_type == IntersectionPointType::TangentPoint {
             return Ok(true);
@@ -1100,6 +1104,7 @@ impl SurfaceIntersector<'_> {
                 }
                 let delta = if side == 0 { stride } else { -stride };
                 *degenerate = self.walk_gap_side(
+                    k,
                     point,
                     s,
                     bi_norm,
@@ -1163,6 +1168,7 @@ impl SurfaceIntersector<'_> {
     #[allow(clippy::too_many_arguments)]
     fn walk_gap_side(
         &self,
+        k: &Kernel,
         point: &TsectPnt,
         s: SrfIndex,
         bi_norm: Vec3,
@@ -1212,8 +1218,13 @@ impl SurfaceIntersector<'_> {
                 w.sample_dist = (point.srf_pos(SrfIndex::Second) - cp).length();
 
                 // the in-domain other surface point nearest to it
-                let found =
-                    surface_local_point_solve_normalize(self.surface(o), self.domain(o), cp, uv1)?;
+                let found = surface_local_point_solve_normalize(
+                    k,
+                    self.surface(o),
+                    self.domain(o),
+                    cp,
+                    uv1,
+                )?;
                 if let Some([du, dv]) = found {
                     uv_drop = Point2::new(du, dv);
                     // status ignored: the old values stay
@@ -1532,12 +1543,14 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, Su
 /// `crSurface.LocalPointSolve(domain, SM_SO_NORMALIZE, point, guess, found, sol)`:
 /// the solution's start parameters when found.
 fn surface_local_point_solve_normalize(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     point: Point3,
     guess: Point2,
 ) -> Result<Option<[f64; 2]>> {
     let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
+        k,
         domain,
         SolverOperation::Normalize,
         point,
@@ -1619,7 +1632,9 @@ mod tests {
         assert!((p.crv_deriv().length() - 1.0).abs() < 1e-15);
         assert!((p.crv_deriv().x.abs() - 1.0).abs() < 1e-15);
         assert!((p.tangent_plane_angle_rad - PI / 2.0).abs() < 1e-15);
-        assert!(!si.classify_boundary_start_point_intersection(&p).unwrap());
+        assert!(!si
+            .classify_boundary_start_point_intersection(&Kernel::default(), &p)
+            .unwrap());
     }
 
     #[test]
@@ -1640,7 +1655,9 @@ mod tests {
             )
             .is_err());
         p.point_type = IntersectionPointType::TangentPoint;
-        assert!(si.classify_boundary_start_point_intersection(&p).unwrap());
+        assert!(si
+            .classify_boundary_start_point_intersection(&Kernel::default(), &p)
+            .unwrap());
     }
 
     #[test]

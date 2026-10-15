@@ -2414,28 +2414,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.topology_solver_p2/static-shell-vertices.json#120 (upstream source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer))",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_0_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.topology_solver_p2/static-shell-vertices.json#121 (upstream source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer))",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -2486,28 +2478,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_5_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.topology_solver_p2/static-shell-vertices.json#126 (upstream source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer))",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve_1",
-        "unit": "surface.surface_point_solve_p3"
-      },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_5_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.topology_solver_p2/static-shell-vertices.json#127 (upstream source/SMLib/src/SmTopologySolver.cpp:944,1412,1803,1859 (real CreateFaceFromSurface fixtures; missing Rust solver callees explicitly defer))",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -19615,15 +19599,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 45,
+  "cases_deferred": 41,
   "cases_failed": 0,
-  "cases_passed": 2384,
+  "cases_passed": 2388,
   "cases_total": 2429,
   "deferred_by_unit": {
     "intersect.surface_silhouette": 8,
     "surface.surface_p11": 20,
     "surface.surface_p8": 6,
-    "surface.surface_point_solve_p3": 4,
     "topology.brep_p1": 4,
     "topology.edge": 3
   },

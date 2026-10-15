@@ -51,13 +51,11 @@
 //!   iso curve its `SmCircle`, so their own `IsDegenerate`, `GetKnots` and
 //!   `CalculateContinuities` overrides run.
 //! - **Debug-only work** (drawing, dumps, `SM_ASSERT`, `WARN`) is not ported.
-//! - **Unported callees** (return [`SolidError::Unported`]): `SmSurface::DropPoint`,
-//!   `LocalPointSolve`, `IsSingularity`, `sm_SpLocalSolve` and the base
-//!   `CreateIsoParametricCurve` (`surface.surface_p5`). `IsOnSeam`, `GlobalPointSolve`
-//!   and the `SmCSIntersectENFO` solve are the ported bodies of `surface.surface_p4`
-//!   (so `IsOnSeam` and the point solve take the kernel; [`SsGlobalSolver`] holds it).
-//!   The plane overrides of `IsSingularity` and `IsOnSeam` are
-//!   ported (a plane has neither).
+//! - **Back-edges.** Point drops, local solves, singularities, patch point solves and
+//!   generic iso curves call `surface.surface_p5`; seam tests, global point solves and
+//!   `SmCSIntersectENFO` call `surface.surface_p4`. Their missing downstream callees
+//!   propagate [`SolidError::Unported`]. Callers retain the kernel; [`SsGlobalSolver`]
+//!   holds it. Virtual plane overrides preserve its nonsingular, seam-free geometry.
 //! - **Bounds.** `GetSampleValues` grows its outputs as samples are computed instead
 //!   of sizing them from `m_lNumSamples` first (an input-declared count). No function
 //!   here recurses.
@@ -92,8 +90,7 @@ use crate::nurbs::knots::Side;
 
 use super::p1::CsIntersectEnfo;
 use super::p2::{DerivSurfDefinition, TangencyType};
-use super::p4::global_point_solve_starts;
-use super::p4::NoObject;
+use super::p4::{global_point_solve_starts, NoObject};
 use super::p5::DropPointOptions;
 use super::p7::SsGlobalSolver;
 use super::{Surface, SurfaceKind};
@@ -710,6 +707,7 @@ impl Surface {
             let st_pnt0 = vec_at(&st_pnt, 0)?;
             let mut st_pnt1 = vec_at(&st_pnt, 1)?;
             let (mut found_start, sol) = local_point_solve::<O>(
+                k,
                 self,
                 uv_domain,
                 SolverOperation::Minimize,
@@ -764,6 +762,7 @@ impl Surface {
             let en_pnt0 = vec_at(&en_pnt, 0)?;
             let mut en_pnt1 = vec_at(&en_pnt, 1)?;
             let (mut found_end, sol) = local_point_solve::<O>(
+                k,
                 self,
                 uv_domain,
                 SolverOperation::Minimize,
@@ -880,6 +879,7 @@ impl Surface {
     /// ignores every other status.
     pub fn classify_intersecting_range_solution<O: SolutionObject>(
         &self,
+        k: &Kernel,
         curve: &Curve,
         sol: &Solution<O>,
     ) -> Result<(bool, Option<RangeTangentPoint>)> {
@@ -969,6 +969,7 @@ impl Surface {
 
             // Find the surface point nearest the curve point (status ignored)
             let (found, solution) = ignored(local_point_solve::<O>(
+                k,
                 self,
                 &reg,
                 SolverOperation::Normalize,
@@ -1096,6 +1097,7 @@ impl DerivSurfDefinition<'_> {
     /// [`SolidError::Unported`]: `SmSurface::DropPoint` (`surface.surface_p5`).
     pub fn sample_values(
         &self,
+        k: &Kernel,
         surface: &Surface,
         boundary_curve: &Curve,
         boundary_interval: &Extent1d,
@@ -1169,7 +1171,7 @@ impl DerivSurfDefinition<'_> {
             // project CurvePoint to Surface
             let guess = (ii != 0).then_some(uv_guess);
             let (success, surface_uv0) =
-                drop_point(surface, crv_pos, &surface.natural_uv_domain(), guess)?;
+                drop_point(k, surface, crv_pos, &surface.natural_uv_domain(), guess)?;
             if !success {
                 return Err(SolidError::sm_err(OP_SAMPLE));
             }
@@ -1460,11 +1462,9 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
 ///
 /// `SM_ERR_INVALID_INPUT` for an operation other than minimize, maximize, normalize
 /// or signed directed minimize (an `SM_ASSERT` upstream); those of the evaluations
-/// and solves; [`SolidError::Unported`]: `sm_SpLocalSolve` and
-/// `SmSurface::LocalPointSolve` (`surface.surface_p5`), and the boundary
-/// iso curves of a surface that is not a B-spline (`SmIsoCurve` holds an
-/// `SmBSplineSurface` here: unit `curve.iso_curve`).
+/// and solves, including [`SolidError::Unported`] from their missing downstream callees.
 pub fn sc_local_solve<O: SolutionObject>(
+    k: &Kernel,
     nodes: &ScLocalSolveNodes<'_>,
     uv_domain: &Extent2d,
     u_conts: [ContinuityType; 2],
@@ -1524,6 +1524,7 @@ pub fn sc_local_solve<O: SolutionObject>(
 
             let pnt = curve.evaluate_point(t)?;
             let point_sols = sp_local_solve::<O>(
+                k,
                 nodes,
                 uv_domain,
                 u_conts,
@@ -1642,7 +1643,7 @@ pub fn sc_local_solve<O: SolutionObject>(
             // Drop point from center of curve to surface
             let curve_pnt = curve.evaluate_point(interval.evaluate(0.5))?;
             let (found, sol) =
-                local_point_solve::<O>(bss, uv_domain, S::Minimize, curve_pnt, uv_guesses[0])?;
+                local_point_solve::<O>(k, bss, uv_domain, S::Minimize, curve_pnt, uv_guesses[0])?;
 
             if found {
                 // Drop point back to curve & replace the first guesses
@@ -1678,8 +1679,14 @@ pub fn sc_local_solve<O: SolutionObject>(
                 // Drop point back to surface
                 t_guesses[0] = sol.start.param(0)?;
                 let curve_pnt = curve.evaluate_point(t_guesses[0])?;
-                let (found, sol) =
-                    local_point_solve::<O>(bss, uv_domain, S::Minimize, curve_pnt, uv_guesses[0])?;
+                let (found, sol) = local_point_solve::<O>(
+                    k,
+                    bss,
+                    uv_domain,
+                    S::Minimize,
+                    curve_pnt,
+                    uv_guesses[0],
+                )?;
                 if found {
                     uv_guesses[0] = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
                 }
@@ -1929,6 +1936,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
 /// `DropPoint(pt, domain, guess, bSuccess, uv, gap, bIsMulti)` (default
 /// `SM_SO_MINIMIZE`): success and the UV point.
 fn drop_point(
+    k: &Kernel,
     surface: &Surface,
     pt: Point3,
     domain: &Extent2d,
@@ -1938,20 +1946,21 @@ fn drop_point(
         guess_uv: guess,
         ..Default::default()
     };
-    let d = surface.drop_point::<NoObject>(pt, domain, &opts)?;
+    let d = surface.drop_point::<NoObject>(k, pt, domain, &opts)?;
     Ok((d.success, d.result_uv))
 }
 
 /// `LocalPointSolve(domain, op, point, guess, bFoundAnswer, sSolution)` (virtual; no
 /// ported kind overrides it): whether an answer was found and the solution.
 fn local_point_solve<O: SolutionObject>(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     op: SolverOperation,
     point: Point3,
     guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
-    let r = surface.local_point_solve::<O>(domain, op, point, guess)?;
+    let r = surface.local_point_solve::<O>(k, domain, op, point, guess)?;
     Ok((r.found, r.solution))
 }
 
@@ -1978,6 +1987,7 @@ fn global_point_solve_single(
 /// `sm_SpLocalSolve(pSurfaceNode, pBezPatch, domain, uConts, vConts, pnt, tol, op,
 /// TRUE, bProcessBoundaryCurves, sols)`.
 fn sp_local_solve<O: SolutionObject>(
+    k: &Kernel,
     nodes: &ScLocalSolveNodes<'_>,
     domain: &Extent2d,
     u_conts: [ContinuityType; 2],
@@ -1988,6 +1998,7 @@ fn sp_local_solve<O: SolutionObject>(
     process_boundary_curves: bool,
 ) -> Result<SolutionArray<O>> {
     crate::surface::surface::p5::sp_local_solve::<O>(
+        k,
         nodes.eval_surface,
         domain,
         u_conts,
@@ -2145,7 +2156,9 @@ mod tests {
         );
         let mut sol: Solution<Obj> = Solution::new();
         sol.solution_type = SolutionType::SingleValue;
-        let (degenerate, point) = s.classify_intersecting_range_solution(&c, &sol).unwrap();
+        let (degenerate, point) = s
+            .classify_intersecting_range_solution(&Kernel::default(), &c, &sol)
+            .unwrap();
         assert!(degenerate);
         assert!(point.is_none());
     }
@@ -2196,6 +2209,7 @@ mod tests {
         };
         let e = d
             .sample_values(
+                &Kernel::default(),
                 &s,
                 &c,
                 &c.natural_interval(),

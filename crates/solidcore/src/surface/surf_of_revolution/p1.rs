@@ -64,7 +64,10 @@
 //!   arguments upstream marks `NotUsed` (`CreateIsoParametricCurve`'s approximation
 //!   tolerance, `EvaluateSTEP`'s side flags, `IntersectWithPlane`'s UV domain and
 //!   angle tolerance) are dropped. `EvaluateSTEP` entries it does not write are `0`
-//!   (upstream leaves the caller's values).
+//!   (upstream leaves the caller's values). Unequal STEP derivative orders retain
+//!   release C++ behavior despite its equal-order assertion: unevaluated generator
+//!   derivatives keep `SmVector3d`'s default `UNDEF` values. Boundary iso curves
+//!   require the sweep-only (`hv = 0`) case, whose outputs are fully evaluated.
 //! - **Statuses.** Calls whose status upstream ignores keep upstream's values, except
 //!   that [`SolidError::Unported`] always propagates and a failure whose output
 //!   upstream would read uninitialised (a failed generator or surface evaluation, a
@@ -1217,6 +1220,7 @@ impl SurfOfRevolution {
             // Always set output (the status is ignored): LocalPointSolve leaves a default
             // solution when it fails.
             let (u, v) = match ignored(step_surface.local_point_solve::<()>(
+                k,
                 &domain,
                 crate::geom::global_solver::SolverOperation::Intersect,
                 point_3d,
@@ -1239,8 +1243,9 @@ impl SurfOfRevolution {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for orders above 3; `InvalidInput` for unequal orders (upstream asserts
-    /// and then indexes as if they were equal); those of the generator evaluation.
+    /// `SM_ERR` for orders above 3; those of the generator evaluation. Unequal
+    /// orders retain release C++ behavior (including default `UNDEF` generator
+    /// derivatives beyond the smaller requested order).
     pub fn evaluate_step(&self, k: &Kernel, uv: Point2, hu: usize, hv: usize) -> Result<Vec<Vec3>> {
         let _ = k;
         self.evaluate_step_at(uv, hu, hv)
@@ -1252,12 +1257,6 @@ impl SurfOfRevolution {
         // check input
         if hu > 3 || hv > 3 {
             return Err(SolidError::sm_err(OP_EVAL_STEP));
-        }
-        if hu != hv {
-            return Err(SolidError::invalid_input(
-                OP_EVAL_STEP,
-                "derivative orders must be equal",
-            ));
         }
 
         // locals
@@ -1921,7 +1920,13 @@ mod tests {
         let du = d.get(2).copied().unwrap();
         assert!((du - Vec3::new(0.0, 2.0 * PI / 180.0, 0.0)).length() < 1e-12);
         assert!(s.evaluate_step(&k(), Point2::new(0.0, 0.0), 4, 4).is_err());
-        assert!(s.evaluate_step(&k(), Point2::new(0.0, 0.0), 1, 2).is_err());
+        // Boundary iso curves request pure U derivatives, despite C++'s
+        // debug-only equal-order assertion. These are all defined in release.
+        let sweep = s.evaluate_step(&k(), Point2::new(0.0, 0.0), 3, 0).unwrap();
+        assert_eq!(sweep.len(), 4);
+        assert_eq!(sweep[1], du);
+        assert!((sweep[2] - Vec3::new(-2.0 * (PI / 180.0).powi(2), 0.0, 0.0)).length() < 1e-12);
+        assert!((sweep[3] - Vec3::new(0.0, -2.0 * (PI / 180.0).powi(3), 0.0)).length() < 1e-12);
     }
 
     #[test]

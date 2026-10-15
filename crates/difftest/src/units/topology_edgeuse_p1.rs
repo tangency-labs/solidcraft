@@ -1196,7 +1196,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 .int("status", 0)
                 .ints("list", list.into_iter().map(|x| i64::from(x.index())).collect::<Vec<_>>()))
         }
-        OpIn::UvLoopGap { eu } => Ok(Output::new().values("gap", vec![eu1::start_point_uv_loop_gap(b, eid(*eu))?])),
+        OpIn::UvLoopGap { eu } => Ok(Output::new().values("gap", vec![eu1::start_point_uv_loop_gap(&Kernel::default(), b, eid(*eu))?])),
         OpIn::SetUv {
             eu,
             kind,

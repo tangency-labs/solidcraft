@@ -334,13 +334,19 @@ fn rust_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
             y,
             scale,
             domain,
-        } => Ok(Surface::from(Plane::new(
-            v3(*o),
-            v3(*x),
-            v3(*y),
-            Vec2::new(scale[0], scale[1]),
-            &ext(*domain),
-        ))),
+        } => {
+            let mut p = Plane::new(
+                v3(*o),
+                v3(*x),
+                v3(*y),
+                Vec2::new(scale[0], scale[1]),
+                &ext(*domain),
+            );
+            // with its NURB, as the shim makes it (a read-only query of the Rust plane
+            // never keeps one; upstream's would, changing later point solves)
+            p.make_nurb().map_err(|e| harness(format!("plane NURB: {e}")))?;
+            Ok(Surface::from(p))
+        }
         SurfIn::Bspline(d) => {
             let net = d
                 .net

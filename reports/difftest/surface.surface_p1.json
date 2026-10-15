@@ -306,16 +306,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0031",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838048",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -1046,16 +1042,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0122",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838139",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -1574,16 +1566,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0187",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838204",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -2058,16 +2046,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0246",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838263",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2134,16 +2118,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0255",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838272",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3494,16 +3474,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0424",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838441",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3554,16 +3530,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0431",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838448",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4554,16 +4526,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0555",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838572",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4654,16 +4622,12 @@
       "values_compared": 71
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0567",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838584",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -5790,16 +5754,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0708",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838725",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -6118,16 +6078,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0748",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838765",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -6378,16 +6334,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0779",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548447535074838796",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -6551,12 +6503,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 25,
+  "cases_deferred": 13,
   "cases_failed": 0,
-  "cases_passed": 781,
+  "cases_passed": 793,
   "cases_total": 806,
   "deferred_by_unit": {
-    "curve.iso_curve": 25
+    "curve.iso_curve": 13
   },
   "max_rel_err": 0.0,
   "pass": true,

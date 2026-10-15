@@ -14,7 +14,7 @@
 //! are the op's curve/surfaces). A curve record is `ivl_min ivl_max` and the points at 0, 1/4,
 //! 1/2, 3/4 and 1 of the natural interval. Every output starts with the status (`0` =
 //! `SM_SUCCESS`, else the `SmStatus`; `-3` = a surface or curve the shim could not build);
-//! the rest:
+//! `sm_SCLocalSolve` calls the real shared p5 reference body. Remaining outputs:
 //!
 //! | [`Op`]     | upstream                                   | parameters after the surface | outputs |
 //! |------------|--------------------------------------------|------------------------------|---------|

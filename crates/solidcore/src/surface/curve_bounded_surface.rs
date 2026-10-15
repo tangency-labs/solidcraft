@@ -1,6 +1,7 @@
 //! Curve bounded (trimmed) surfaces: a basis surface with 3D and UV boundary curves,
 //! used for IGES I/O. Evaluation passes every call along to the basis surface.
 //!
+//!
 //! Upstream: `source/SMLib/src/SmCurveBoundedSurface.cpp`,
 //! `source/SMLib/inc/SmCurveBoundedSurface.h`.
 //!
@@ -26,6 +27,7 @@
 //! | [`CurveBoundedSurface::read_from_db`]                 | `ReadFromDB`                                   |
 //!
 //! Deviations:
+//! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
 //! - **Ownership.** The surface owns its basis surface and boundary curves, as
 //!   upstream (whose destructor deletes them): they are moved into
 //!   [`CurveBoundedSurface::new`] (a missing upstream array is an empty `Vec`), and the
@@ -112,6 +114,16 @@ impl From<CurveBoundedSurface> for Surface {
 }
 
 impl CurveBoundedSurface {
+    /// An evaluation copy retaining exact basis data, with Surface's 64-level bound.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            basis: Box::new(self.basis.clone_for_evaluation_depth(depth)?),
+            boundaries_3d: self.boundaries_3d.clone(),
+            boundaries_uv: self.boundaries_uv.clone(),
+            implicit_outer: self.implicit_outer,
+        })
+    }
+
     /// A surface owning `basis` and the boundary curves (the constructor; the curves
     /// are assumed valid).
     #[must_use]

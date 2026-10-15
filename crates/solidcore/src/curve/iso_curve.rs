@@ -6,7 +6,7 @@
 //! | Rust                                   | Upstream                                       |
 //! |----------------------------------------|------------------------------------------------|
 //! | [`IsoCurve`]                           | `SmIsoCurve`                                   |
-//! | [`IsoCurve::new`]                      | `SmIsoCurve(crSurface, eSurfParam, dIsoParameter, bFromLeft, bClampInput)` |
+//! | [`IsoCurve::new`], [`IsoCurve::from_surface`] | `SmIsoCurve(crSurface, eSurfParam, dIsoParameter, bFromLeft, bClampInput)` |
 //! | `Drop` (implicit)                      | `~SmIsoCurve`                                  |
 //! | [`IsoCurve::approx_eq`]                | `SmIsoCurve::operator==`                       |
 //! | [`IsoCurve::create_uv_iso_line`]       | `SmIsoCurve::CreateUVIsoLine`                  |
@@ -20,25 +20,15 @@
 //! | [`IsoCurve::is_kind_of`]               | `SmIsoCurve::IsKindOf`                         |
 //!
 //! Deviations:
-//! - **Surface.** `m_cpSurface` is a `const SmSurface*` that the curve usually does not
-//!   own. `SmSurface` and its dispatch (units `surface.surface_*`) are not ported; the
-//!   only ported surface class is [`BSplineSurface`], so the curve holds one, by value
-//!   (a copy of the caller's surface; `m_bOwnsSurface` and the destructor's `delete`
-//!   have no counterpart). The surface virtuals then resolve to the B-spline
-//!   overrides: `GetNaturalUVDomain` and `GetKnots` are ported
-//!   ([`BSplineSurface::natural_uv_domain`], [`BSplineSurface::knots`]),
-//!   `EvaluatePoint` to [`BSplineSurface::evaluate_point`] and `Evaluate` to
-//!   [`BSplineSurface::evaluate`] (whose `[nu + 1][nv + 1]` result is flattened, as
-//!   upstream writes it into the curve's array); `CalculateContinuities` passes the
-//!   call to `SmSurface::CalculateContinuities` (not overridden; unit
-//!   `surface.surface_p6`) with a default kernel, as its iso curves need no trim
-//!   domain (upstream uses the surface's context). `SmSurface::ReadFromDB`
-//!   ([`Surface::read_from_db`]) returns [`SolidError::Unported`] for the surface
-//!   types not ported yet. `CreateUVIsoLine` builds an `SmLine`
-//!   ([`crate::curve::line::Line`]).
+//! - **Surface.** The borrowed C++ surface is an owned, boxed [`Surface`] copy.
+//!   [`IsoCurve::new`] retains the B-spline constructor; [`IsoCurve::from_surface`]
+//!   also supports the other concrete surface kinds through the same virtual dispatch.
+//!   This extension is needed by `surface.surface_point_solve_p3` boundary solves.
+//!   The general constructor bounds owned geometry nesting to 64 levels before
+//!   any recursive surface dispatch; the B-spline constructor cannot nest.
 //! - **Equality.** `operator==` accepts identical surface pointers before comparing the
 //!   surfaces (`SmBSplineSurface::operator==`); the port always compares the surfaces
-//!   ([`BSplineSurface::approx_eq`], which is reflexive for NaN-free data).
+//!   ([`Surface::approx_eq`]; comparison failures propagate).
 //!   `SmCurve::operator==` (same type and dimension) always holds between two iso
 //!   curves (dimension 3).
 //! - **Flags.** `m_bFromLeft` is a `bool` (upstream `SmBoolean`, `UNSURE` only in the
@@ -70,7 +60,7 @@ use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
-use crate::surface::surface::p2::{Surface, SurfaceKind};
+use crate::surface::surface::p2::Surface;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_UV_ISO_LINE: &str = "curve::iso_curve::IsoCurve::create_uv_iso_line";
@@ -81,7 +71,7 @@ const OP_READ: &str = "curve::iso_curve::IsoCurve::read_from_db";
 #[derive(Debug, Clone)]
 pub struct IsoCurve {
     /// `m_cpSurface`.
-    surface: Box<BSplineSurface>,
+    surface: Box<Surface>,
     /// `m_eSurfParam`: constant `u` or `v`.
     surf_param: SurfParamType,
     /// `m_dIsoParameter`: the constant `u` or `v` value.
@@ -101,6 +91,44 @@ impl IsoCurve {
     #[must_use]
     pub fn new(
         surface: BSplineSurface,
+        surf_param: SurfParamType,
+        iso_parameter: f64,
+        from_left: bool,
+        clamp_input: bool,
+    ) -> Self {
+        Self::from_surface_inner(
+            Surface::from(surface),
+            surf_param,
+            iso_parameter,
+            from_left,
+            clamp_input,
+        )
+    }
+
+    /// The implicit iso curve of any concrete surface, preserving its evaluation dispatch.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when owned geometry nesting exceeds 64 levels.
+    pub fn from_surface(
+        surface: Surface,
+        surf_param: SurfParamType,
+        iso_parameter: f64,
+        from_left: bool,
+        clamp_input: bool,
+    ) -> Result<Self> {
+        surface.check_evaluation_copy_depth(0)?;
+        Ok(Self::from_surface_inner(
+            surface,
+            surf_param,
+            iso_parameter,
+            from_left,
+            clamp_input,
+        ))
+    }
+
+    fn from_surface_inner(
+        surface: Surface,
         surf_param: SurfParamType,
         iso_parameter: f64,
         from_left: bool,
@@ -137,7 +165,7 @@ impl IsoCurve {
 
     /// The base surface (`m_cpSurface`).
     #[must_use]
-    pub fn surface(&self) -> &BSplineSurface {
+    pub fn surface(&self) -> &Surface {
         &self.surface
     }
 
@@ -167,17 +195,16 @@ impl IsoCurve {
 
     /// `operator==`: equal surfaces, the same direction and flag, and iso parameters
     /// within `SM_IS_ZERO`.
-    #[must_use]
-    pub fn approx_eq(&self, other: &Self) -> bool {
+    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
-            return true;
+            return Ok(true);
         }
         // first check the base: same type and dimension (always for two iso curves)
-        self.surface.approx_eq(&other.surface)
+        Ok(self.surface.approx_eq(&other.surface)?
             && self.surf_param == other.surf_param
             && is_zero(self.iso_parameter - other.iso_parameter)
-            && self.from_left == other.from_left
+            && self.from_left == other.from_left)
     }
 
     /// The UV line of the `C_uv(s)` part of `S(C_uv(s))` (`CreateUVIsoLine`), a 2D
@@ -345,14 +372,14 @@ impl IsoCurve {
         let surface = surface_read_from_db(k, surface_type, db, version)?;
 
         // load obj
-        Ok(Self {
-            surface: Box::new(surface),
+        Self::from_surface(
+            surface,
             // a code outside the enum behaves as a non-`SM_SP_U` value everywhere here
-            surf_param: SurfParamType::from_code(surf_param).unwrap_or(SurfParamType::Unknown),
+            SurfParamType::from_code(surf_param).unwrap_or(SurfParamType::Unknown),
             iso_parameter,
-            from_left: from_left != 0,
-            // m_bOwnsSurface = TRUE
-        })
+            from_left != 0,
+            false,
+        )
     }
 
     /// `SmIsoCurve_TYPE` (`GetType`).
@@ -385,49 +412,23 @@ impl IsoCurve {
 /// `SmSurface::CalculateContinuities(eSurfParam, ..)` (not overridden by
 /// `SmBSplineSurface`).
 fn surface_calculate_continuities(
-    srf: &BSplineSurface,
+    srf: &Surface,
     surf_param: SurfParamType,
 ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
     // (its iso curves are made without a trim domain, which never reaches the kernel;
     // upstream uses the surface's context)
     let k = Kernel::default();
-    Surface::from(srf.copy()).calculate_continuities(&k, surf_param)
+    srf.calculate_continuities(&k, surf_param)
 }
 
-/// `SmSurface::ReadFromDB(type, db, .., version)`: the surface of the record (the
-/// only ported surface kind is the B-spline; the other types are unported in the
-/// reader).
+/// `SmSurface::ReadFromDB(type, db, .., version)`: the concrete surface of the record.
 fn surface_read_from_db(
     k: &Kernel,
     surface_type: i64,
     db: &mut DatabaseReader,
     version: u64,
-) -> Result<BSplineSurface> {
-    match Surface::read_from_db(k, surface_type, db, version)?.into_kind() {
-        SurfaceKind::BSpline(s) => Ok(s),
-        // DISPATCH GAP: the SmSurface virtuals (surface.surface_p1, ported; no UNPORTED
-        // marker: the ported SmIsoCurve holds an SmBSplineSurface here, not any Surface)
-        SurfaceKind::CurveBounded(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmCurveBoundedSurface",
-            "curve.iso_curve",
-        )),
-        SurfaceKind::Plane(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmPlane",
-            "curve.iso_curve",
-        )),
-        SurfaceKind::Step(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSTEPSurface",
-            "curve.iso_curve",
-        )),
-        SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSurfOfRevolution",
-            "curve.iso_curve",
-        )),
-        SurfaceKind::SrfInVolume(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSrfInVolume",
-            "curve.iso_curve",
-        )),
-    }
+) -> Result<Surface> {
+    Surface::read_from_db(k, surface_type, db, version)
 }
 
 /// `new SmLine(point, unit_vec, interval, scale, dim, context)`.
@@ -500,9 +501,9 @@ mod tests {
     fn equality_and_types() {
         let a = IsoCurve::new(patch(), SurfParamType::U, 1.0, false, true);
         let b = IsoCurve::new(patch(), SurfParamType::U, 1.0 + 1e-15, false, true);
-        assert!(a.approx_eq(&b));
+        assert!(a.approx_eq(&b).unwrap());
         let c = IsoCurve::new(patch(), SurfParamType::U, 1.0, true, true);
-        assert!(!a.approx_eq(&c));
+        assert!(!a.approx_eq(&c).unwrap());
         assert!(IsoCurve::is_kind_of(IsoCurve::TYPE));
         assert!(IsoCurve::is_kind_of(curve_base::TYPE));
         assert_eq!(a.type_string(), "SmIsoCurve_TYPE");

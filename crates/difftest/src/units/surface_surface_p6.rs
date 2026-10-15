@@ -14,13 +14,9 @@
 //! reports it as the `out` values. A Rust error maps to its `SmStatus` (`1007` for
 //! `InvalidInput`, `-1` for one upstream cannot return); `Unported` defers the case.
 //!
-//! Deferred cases (the callees of `surface.surface_p4`/`_p5`): every `GetSampleValues` that
-//! gets past its input checks (`DropPoint`), every `LocalCurveIntersect`
-//! (`SmCSIntersectENFO::Evaluate`), the `SimpleCoincidenceChecker` cases whose boxes meet
-//! (`GlobalPointSolve`), the range classifications (`LocalPointSolve`), the identical-solution
-//! tests that reach a non-plane singularity test, the iso curves of curve-bounded surfaces,
-//! and the `sm_SCLocalSolve` cases whose `sm_SpLocalSolve` reaches an unported point solve
-//! (`LocalPointSolve_1`); the shim runs a verbatim copy of `sm_SpLocalSolve`.
+//! The p4/p5 back-edges call the real implementations in both Rust and C++.
+//! Missing downstream callees (for example `surface_p3` singularity discovery and
+//! `surface_p8` global point solves) defer under their own unit identifiers.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -777,7 +773,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 start_at_boundary: *start,
                 want_higher: [*want2, *want3],
             };
-            match st(def.sample_values(&s, &bc, &ivl_of(*ivl), opts))? {
+            match st(def.sample_values(&k, &s, &bc, &ivl_of(*ivl), opts))? {
                 Ok(r) => {
                     o.extend([0.0, r.params.len() as f64]);
                     for (j, t) in r.params.iter().enumerate() {
@@ -858,7 +854,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 return Ok(vec![-3.0]);
             };
             let sol = solution_of(sol, [curve_obj(&c), surface_obj(0, &s)])?;
-            match st(s.classify_intersecting_range_solution(&c, &sol))? {
+            match st(s.classify_intersecting_range_solution(&k, &c, &sol))? {
                 Ok((degenerate, point)) => {
                     o.extend([0.0, b(degenerate)]);
                     match point {
@@ -931,7 +927,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 curve_box: cbox.map(box_of),
             };
             let vecs: Vec<Vec3> = vec.iter().map(|v| v3(*v)).collect();
-            let r = sc_local_solve::<Obj>(
+            let r = sc_local_solve::<Obj>(&k,
                 &nodes,
                 &dom_of(*dom),
                 [cont_of(uc[0])?, cont_of(uc[1])?],

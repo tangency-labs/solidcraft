@@ -39,20 +39,21 @@
 //! - **Owner.** `GetNextPoint`'s global solve nulls the surface's owner for the call
 //!   (`SmTemporaryChangeValue`); here it runs on a copy, which has no owner.
 //! - **Unused arguments** of `GetNextPoint` (`dUVTolX`, `dUVTolY`), `sm_FlushCrv`
-//!   (`crContext`, `crSurface`, `cr3dCurve`) and `sm_AddToCurve` (`crContext`,
-//!   `cr3dCurve`) are dropped. `rbFixBCChange` stays an in/out flag (only ever set,
+//!   (`crContext`, `crSurface`, `cr3dCurve`) and `sm_AddToCurve` (`cr3dCurve`) are
+//!   dropped. `rbFixBCChange` stays an in/out flag (only ever set,
 //!   and kept set when the curve then cannot be made); the curves go to a
 //!   `Vec<BSplineCurve>`.
-//! - **Unported callees.** `SmSurface::IsSingularity` and
-//!   `SmSurface::LocalPointSolve` (`surface.surface_p5`; a plane's `IsSingularity`
-//!   override is ported), `SmSurface::EvaluateGeometric` (`surface.surface_p3`) and the
-//!   offset surface evaluations (`surface.offset_surface`) return
-//!   [`SolidError::Unported`].
+//! - **Kernel.** `SmSurface::IsSingularity` and `SmSurface::LocalPointSolve` take the
+//!   caller's [`Kernel`]; `sm_AddToCurve` takes it (for `IsSingularity`) in place of
+//!   its unused `crContext`. `EvaluateGeometric`'s status is ignored, as upstream: a
+//!   failed evaluation leaves the principal curvatures at their initial `0.0`.
+//! - **Unported callees.** The offset surface evaluations (`surface.offset_surface`)
+//!   return [`SolidError::Unported`].
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
 //!   messages (`MSG` at 2000 control points).
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError, SM_ERR};
+use crate::error::{ignored, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{is_dog_leg, line_point_distance, vec_lin_comb_two_vectors};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -191,47 +192,36 @@ fn is_between(c: f64, a: f64, b: f64) -> bool {
 }
 
 /// `crSurface.IsSingularity(uv, eSingularDirection, dTol3d)` (virtual: the plane
-/// override, the base body otherwise).
-fn is_singularity(surface: &Surface, _uv: Point2, _tol: f64) -> Result<(bool, SurfParamType)> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p.is_singularity()),
-        SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-            Err(SolidError::unported(
-                "SmSurface::IsSingularity",
-                "surface.surface_p5",
-            ))
-        }
-    }
+/// override, the base body otherwise; `bPtTestOnly` defaults to `FALSE`).
+fn is_singularity(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    tol: f64,
+) -> Result<(bool, SurfParamType)> {
+    let r = surface.is_singularity(k, uv, tol, false)?;
+    Ok((r.singular, r.direction))
 }
 
 /// `crSurface.IsSingularity(uv, lSingularities, pPolePoints, eSingularDirection,
 /// dTol3d)` (virtual: the plane override, the base body otherwise).
 fn is_singularity_with_poles(
+    k: &Kernel,
     surface: &Surface,
-    _uv: Point2,
-    _singularities: u32,
-    _pole_points: &[Point3],
-    _tol: f64,
+    uv: Point2,
+    singularities: u32,
+    pole_points: &[Point3],
+    tol: f64,
 ) -> Result<(bool, SurfParamType)> {
-    match surface.kind() {
-        SurfaceKind::Plane(p) => Ok(p.is_singularity_with_poles()),
-        SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-            Err(SolidError::unported(
-                "SmSurface::IsSingularity",
-                "surface.surface_p5",
-            ))
-        }
-    }
+    let r = surface.is_singularity_with_poles(
+        k,
+        uv,
+        u64::from(singularities),
+        Some(pole_points),
+        tol,
+        false,
+    )?;
+    Ok((r.singular, r.direction))
 }
 
 /// `crSurface.IsOnSeam(uv, &dTol3d)` (virtual: the plane override, never on a seam;
@@ -246,31 +236,44 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Result<boo
 /// `crSurface.LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, bFound, sol)`:
 /// whether a solution was found and its UV point.
 fn local_point_solve(
-    _surface: &Surface,
-    _uv_domain: &Extent2d,
-    _point: Point3,
-    _guess: Point2,
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    point: Point3,
+    guess: Point2,
 ) -> Result<(bool, Point2)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
+    let r = surface.local_point_solve::<ObjectHandle>(
+        k,
+        uv_domain,
+        SolverOperation::Minimize,
+        point,
+        guess,
+    )?;
+    let s = &r.solution.start;
+    Ok((
+        r.found,
+        Point2::new(
+            s.parameters.first().copied().unwrap_or(0.0),
+            s.parameters.get(1).copied().unwrap_or(0.0),
+        ),
     ))
 }
 
 /// `SmSurface::EvaluateGeometric(uv, bFromLeftU, bFromLeftV, ..)`: the two principal
-/// curvatures.
+/// curvatures. Upstream ignores the status; the caller's locals start at `0.0`, so a
+/// failed evaluation gives `(0.0, 0.0)`.
 fn evaluate_principal_curvatures(
-    _surface: &Surface,
-    _uv: Point2,
-    _from_left_u: bool,
-    _from_left_v: bool,
+    surface: &Surface,
+    uv: Point2,
+    from_left_u: bool,
+    from_left_v: bool,
 ) -> Result<(f64, f64)> {
-    // UNPORTED(surface.surface_p3): SmSurface::EvaluateGeometric
-    Err(SolidError::unported(
-        "SmSurface::EvaluateGeometric",
-        "surface.surface_p3",
-    ))
+    Ok(
+        ignored(surface.evaluate_geometric(uv, side(from_left_u), side(from_left_v)))?
+            .map_or((0.0, 0.0), |g| {
+                (g.principle_curvature1, g.principle_curvature2)
+            }),
+    )
 }
 
 /// `crSurface.FindDegenParamForDirection(uv, dir, bDirFromPole, eDir, 0.0001)` with
@@ -329,7 +332,7 @@ impl DropPt {
         // the sole SrfTangent
         let mut singular_direction = SurfParamType::U;
         let on_pole = singularities != SS_NONE && {
-            let (is, dir) = is_singularity(surface, self.uv_pd[0], approx_tol_3d)?;
+            let (is, dir) = is_singularity(k, surface, self.uv_pd[0], approx_tol_3d)?;
             singular_direction = dir;
             is
         };
@@ -706,7 +709,7 @@ impl DropPt {
         // find SpanEnd[UV] by dropping SpanEnd[CrvPt] to Surface starting iter at
         // GuessSpanEnd[UV].
         let (found_answer, local_uv) =
-            local_point_solve(surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
+            local_point_solve(k, surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
 
         // MINIMIZE should always find some solution.
         if !found_answer {
@@ -765,13 +768,14 @@ impl DropPt {
             // When SpanEnd[UV] is on a pole - adjust it's singular param value [061001]
             let (singular, singular_direction) = match pole_points {
                 Some(poles) => is_singularity_with_poles(
+                    k,
                     surface,
                     end.uv_pd[0],
                     singularities,
                     poles,
                     approx_tol_3d,
                 )?,
-                None => is_singularity(surface, end.uv_pd[0], approx_tol_3d)?,
+                None => is_singularity(k, surface, end.uv_pd[0], approx_tol_3d)?,
             };
             if singular {
                 end.uv_pd[0] = find_degen_param(
@@ -911,6 +915,7 @@ pub fn flush_curve(
 /// those of [`flush_curve`]; [`SolidError::Unported`] for the singular direction of a
 /// non-planar pole.
 pub fn add_to_curve(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     start: &DropPt,
@@ -945,9 +950,9 @@ pub fn add_to_curve(
     if dog_leg {
         // fetch the singularity direction
         let (_, singular_direction) = if start_on_pole {
-            is_singularity(surface, p1, approx_tol_3d)?
+            is_singularity(k, surface, p1, approx_tol_3d)?
         } else {
-            is_singularity(surface, p4, approx_tol_3d)?
+            is_singularity(k, surface, p4, approx_tol_3d)?
         };
 
         // straighten out pole by moving Pt on Singularity in line with End of segment
@@ -1066,6 +1071,7 @@ mod tests {
         let c = pt(2.0, Point2::new(0.6, 0.6), Vec2::new(0.0, 0.5));
         let mut add = |p: &DropPt, q: &DropPt, poly: &mut Vec<Point3>, knots: &mut Vec<f64>| {
             add_to_curve(
+                &Kernel::default(),
                 &s,
                 &d,
                 p,

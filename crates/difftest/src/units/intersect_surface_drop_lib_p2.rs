@@ -432,13 +432,19 @@ fn rust_surface(k: &Kernel, s: &SurfIn) -> Result<Option<Surface>, HarnessError>
             y,
             scale,
             domain,
-        } => Some(Surface::from(Plane::new(
-            v3(*o),
-            v3(*x),
-            v3(*y),
-            Vec2::new(scale[0], scale[1]),
-            &ext(*domain),
-        ))),
+        } => {
+            let mut p = Plane::new(
+                v3(*o),
+                v3(*x),
+                v3(*y),
+                Vec2::new(scale[0], scale[1]),
+                &ext(*domain),
+            );
+            // with its NURB, as the shim makes it (a read-only query of the Rust plane
+            // never keeps one; upstream's would, changing later point solves)
+            p.make_nurb().map_err(|e| harness(format!("plane NURB: {e}")))?;
+            Some(Surface::from(p))
+        }
         SurfIn::Bspline { p, q, net, u, v } => {
             let net = net
                 .iter()
@@ -724,7 +730,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 };
                 let mut ch = false;
                 let r = add_to_curve(
-                    &s, &d, a, e, &mut poly, &mut knots, *tol, uv_tol[0], uv_tol[1], &mut curves,
+                    k, &s, &d, a, e, &mut poly, &mut knots, *tol, uv_tol[0], uv_tol[1], &mut curves,
                     &mut ch,
                 );
                 match st(r)? {

@@ -1613,9 +1613,20 @@ impl<'s> SurfPtSolveStepper<'s> {
     ///
     /// # Errors
     ///
-    /// Those of [`SurfaceEval::normal`].
+    /// Missing dependencies from [`SurfaceEval::normal`]. Ordinary evaluation
+    /// statuses are ignored, retaining the cached value as the C++ accessor does.
     pub fn normal(&mut self) -> Result<Vec3> {
-        self.srf_eval.normal()
+        match self.srf_eval.normal() {
+            Ok(normal) => Ok(normal),
+            Err(error) if error.is_unported() => Err(error),
+            Err(_) => Ok(self
+                .srf_eval
+                .values()
+                .get(2)
+                .and_then(|row| row.get(2))
+                .copied()
+                .unwrap_or(Vec3::UNDEF)),
+        }
     }
 
     /// The gap `S(u, v) - TestPt` (`Gap`).
@@ -2384,9 +2395,7 @@ mod tests {
             SolverOperation::Minimize,
         )
         .unwrap();
-        assert!(st
-            .drop_to_iso_curve(&k, SurfParamType::U, 0.2, 0.5)
-            .unwrap_err()
-            .is_unported());
+        // the curve-bounded iso curve (SmIsoCurve) is ported since surface.surface_p3 (#52)
+        assert!(st.drop_to_iso_curve(&k, SurfParamType::U, 0.2, 0.5).is_ok());
     }
 }

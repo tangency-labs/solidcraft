@@ -238,7 +238,8 @@ SmBSplineSurface* read_bspline_surface(Rd& rd, const SmContext& ctx)
     return new (ctx) SmBSplineSurface(sur, FALSE, &ctx);
 }
 
-// `0 bspline-surface` or `1 o x y scale[2] dom[4]` (SmPlane(o, x, y, scale, dom, ctx)).
+// `0 bspline-surface` or `1 o x y scale[2] dom[4]` (SmPlane(o, x, y, scale, dom, ctx), with its
+// NURB made).
 SmSurface* read_surface(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx(0, 1);
@@ -249,7 +250,12 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx)
     SmVector3d y = rd.vec();
     SmVector2d s = rd.uv();
     SmExtent2d d = rd.dom4();
-    return new (ctx) SmPlane(o, x, y, s, d, &ctx);
+    SmPlane* p = new (ctx) SmPlane(o, x, y, s, d, &ctx);
+    // Make the plane's NURB up front: const queries (ComputePointValues' evaluations) would
+    // make and keep it later, changing later point solves; the Rust plane never keeps a NURB
+    // made by a read-only query, so both sides start with it (plan/findings.md).
+    p->GetOrCreateGwNurbPointer();
+    return p;
 }
 
 // A curve: `0 a b` (SmLine::CreateLineSegment, dim 3) or `1 n p m cpts(x y z w) knots` (dim 3).

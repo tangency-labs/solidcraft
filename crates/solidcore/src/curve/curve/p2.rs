@@ -775,7 +775,7 @@ impl Curve {
             (CurveKind::Hyperbola(a), CurveKind::Hyperbola(b)) => Ok(a.approx_eq(b)),
             (CurveKind::Conic(a), CurveKind::Conic(b)) => Ok(a.approx_eq(b)),
             (CurveKind::Projected(a), CurveKind::Projected(b)) => a.approx_eq(b),
-            (CurveKind::Iso(a), CurveKind::Iso(b)) => Ok(a.approx_eq(b)),
+            (CurveKind::Iso(a), CurveKind::Iso(b)) => a.approx_eq(b),
             (CurveKind::Offset(a), CurveKind::Offset(b)) => a.approx_eq(b),
             (CurveKind::CrvInVolume(a), CurveKind::CrvInVolume(b)) => a.approx_eq(b),
             (CurveKind::CrvOnSurf(a), CurveKind::CrvOnSurf(b)) => a.approx_eq(b),
@@ -1589,6 +1589,7 @@ impl Curve {
     /// `SmSurface::DropPoint` and `LocalCurveSolve`.
     pub fn surface_max_distance_between<S: SurfaceEvaluate>(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         surface: &S,
         domain: &Extent2d,
@@ -1626,18 +1627,18 @@ impl Curve {
             let mut param = interval.evaluate(per);
 
             let crv_pt = ignored(self.evaluate_point(param))?.unwrap_or(Vec3::UNDEF);
-            let mut drop = surface_drop_point(surface, crv_pt, domain, guess_uv)?;
+            let mut drop = surface_drop_point(k, surface, crv_pt, domain, guess_uv)?;
 
             // If drop failed for first or last point, try moving a small distance from the end.
             if drop.is_none() && ii == 0 {
                 param = interval.evaluate(0.001);
                 let crv_pt = self.evaluate_point(param)?;
-                drop = surface_drop_point(surface, crv_pt, domain, guess_uv)?;
+                drop = surface_drop_point(k, surface, crv_pt, domain, guess_uv)?;
             }
             if drop.is_none() && ii + 1 == num_samples {
                 param = interval.evaluate(0.999);
                 let crv_pt = self.evaluate_point(param)?;
-                drop = surface_drop_point(surface, crv_pt, domain, guess_uv)?;
+                drop = surface_drop_point(k, surface, crv_pt, domain, guess_uv)?;
             }
 
             if let Some((uv, dist)) = drop {
@@ -2117,12 +2118,13 @@ fn surface_knot_count<S: SurfaceEvaluate>(surface: &S, v: bool) -> Result<usize>
 /// `SmSurface::DropPoint`: the surface parameters and distance of the drop, `None`
 /// when it failed.
 fn surface_drop_point<S: SurfaceEvaluate>(
+    k: &Kernel,
     surface: &S,
     point: Point3,
     domain: &Extent2d,
     guess: Option<Point2>,
 ) -> Result<Option<(Point2, f64)>> {
-    surface.drop_point_minimize(point, domain, guess)
+    surface.drop_point_minimize(k, point, domain, guess)
 }
 
 // ---- file-static helpers --------------------------------------------------------------
@@ -3774,7 +3776,7 @@ mod tests {
     }
 
     #[test]
-    fn split_and_unported_paths() {
+    fn split_and_surface_distance() {
         let k = Kernel::default();
         let mut b = cubic();
         let tail = b.create_by_split_curve(&k, 0.5).unwrap();
@@ -3790,13 +3792,20 @@ mod tests {
             Vec3::new(1.0, 1.0, 0.0),
         )
         .unwrap();
-        let s = b.surface_max_distance_between(
-            &Extent1d::from_min_max(0.0, 0.5),
-            &srf,
-            &Extent2d::new(),
-            0,
-            None,
+        let line = Curve::from(
+            Line::create_line_segment(3, Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 1.0), None)
+                .unwrap(),
         );
-        assert!(matches!(s, Err(SolidError::Unported { .. })));
+        let gap = line
+            .surface_max_distance_between(
+                &Kernel::default(),
+                &Extent1d::from_min_max(0.0, 1.0),
+                &srf,
+                &srf.natural_uv_domain(),
+                2,
+                None,
+            )
+            .unwrap();
+        assert_eq!(gap.max_distance, 1.0);
     }
 }

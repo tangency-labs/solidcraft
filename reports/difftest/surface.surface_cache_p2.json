@@ -210,16 +210,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "Surface_cbs_test_patch_flat",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_cache_p2/cases.json#26 (upstream prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -430,16 +426,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "offset_nurb_cbs_test_patch_flat",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_cache_p2/cases.json#53 (upstream prog_test smFilletTest.cpp:3769 (offset_nurb.sms))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -654,16 +646,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "DropCurveSurface_cbs_test_patch_flat",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/surface.surface_cache_p2/cases.json#80 (upstream pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family))",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -1110,16 +1098,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0030",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453017",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -1494,16 +1478,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0075",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453062",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -3854,16 +3834,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0362",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453349",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4178,16 +4154,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0402",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453389",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -4714,16 +4686,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-        "unit": "curve.iso_curve"
-      },
       "max_rel_err": 0.0,
       "name": "gen0467",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500106336313453454",
-      "values_compared": 0
+      "values_compared": 4
     },
     {
       "max_rel_err": 0.0,
@@ -7491,12 +7459,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 62,
+  "cases_deferred": 54,
   "cases_failed": 0,
-  "cases_passed": 843,
+  "cases_passed": 851,
   "cases_total": 905,
   "deferred_by_unit": {
-    "curve.iso_curve": 8,
     "intersect.curve_class_p4": 1,
     "surface.surface_cache_p1": 53
   },

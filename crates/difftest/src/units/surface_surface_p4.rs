@@ -479,7 +479,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         ]);
                     }
                 }
-                Err(c) => o.push(c),
+                Err(c) => o.extend([c, 0.0]),
             }
         }
         OpIn::StepInv { dom, p, tol, guess } => {

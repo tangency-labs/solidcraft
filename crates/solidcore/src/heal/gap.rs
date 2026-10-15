@@ -46,8 +46,6 @@
 //!   neighbourhoods (`SmCurveClassification`, `BuildLocalNeighborhood`,
 //!   `EvaluateNeighborhoodBoundaries`) are not part of this unit and are left out.
 //!   `SmBoolean` tri-states are enums / `Option<bool>`.
-//! - The surface drop of `SmCrvSrfGapFunction::Evaluate` and
-//!   `SmSrfSrfGapFunction::Evaluate` is [`Surface::drop_point`] (`SmSurface::DropPoint`).
 //! - Sample counts: a count of zero (upstream indexes before the array) and more than
 //!   [`MAX_SAMPLES`] samples (upstream allocates whatever the counts say) return
 //!   [`SolidError::InvalidInput`] from [`GapFunction::build_sample_set`]. No recursion.
@@ -69,8 +67,6 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOZ;
 use crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
-use crate::surface::surface::p4::NoObject;
-use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::vertexuse as vu1;
@@ -1717,20 +1713,22 @@ fn curve_drop(
 /// `pSurface->DropPoint(pt, domain, pOptGuess, bSuccess, uv, dist, bIsMulti)`: success,
 /// the drop parameters and distance; the status is ignored as upstream does.
 fn surface_drop(
-    _k: &Kernel,
+    k: &Kernel,
     surface: &Surface,
     point: Point3,
     domain: &Extent2d,
     guess: Option<Point2>,
 ) -> Result<(bool, Point2, f64)> {
-    let opts = DropPointOptions {
+    let opts = crate::surface::surface::p5::DropPointOptions {
         guess_uv: guess,
         ..Default::default()
     };
     // Upstream ignores the DropPoint status (no `SER`) and reads `bSuccess`/`dDist`
     // either way; on failure they keep their initial values (`FALSE`, the guess, `BIG_DOUBLE`).
     Ok(
-        match ignored(surface.drop_point::<NoObject>(point, domain, &opts))? {
+        match ignored(
+            surface.drop_point::<crate::surface::surface::p4::NoObject>(k, point, domain, &opts),
+        )? {
             Some(d) => (d.success, d.result_uv, d.gap),
             None => (false, guess.unwrap_or(Point2::UNDEF), BIG_DOUBLE),
         },
@@ -2411,9 +2409,8 @@ impl<'a> GapFunction<'a> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the surface drop (`SmSurface::DropPoint`, unit
-    /// `surface.surface_p5`) and those of the curve evaluations and drops (other
-    /// failures are ignored, as upstream).
+    /// Those of the geometry evaluations and drops. Unported calls propagate; other
+    /// failures are ignored, as upstream.
     pub fn evaluate(
         &self,
         k: &Kernel,

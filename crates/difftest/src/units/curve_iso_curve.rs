@@ -204,8 +204,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -322,7 +326,10 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             n,
             from_left,
             non_zero,
-        } => (Op::Evaluate, Params::Evaluate(*t, *n, *from_left, *non_zero)),
+        } => (
+            Op::Evaluate,
+            Params::Evaluate(*t, *n, *from_left, *non_zero),
+        ),
         OpIn::EvaluatePoint { t } => (Op::EvaluatePoint, Params::Value(*t)),
         OpIn::Continuities { tol } => (Op::Continuities, Params::Value(*tol)),
         OpIn::Eq { other } => (
@@ -358,7 +365,11 @@ fn to_surface(s: &SrfIn) -> Result<BSplineSurface, HarnessError> {
     let net = i
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     let sur = Surface::new(net, i.p, i.q, i.u.clone(), i.v.clone())
         .map_err(|e| harness(format!("surface: {e}")))?;
@@ -381,8 +392,12 @@ fn surf_param(code: i32) -> Result<SurfParamType, HarnessError> {
     })
 }
 
-fn make(srf: BSplineSurface, p: &Params0) -> Result<IsoCurve, HarnessError> {
-    Ok(IsoCurve::new(srf, surf_param(p.sp)?, p.iso, p.from_left, p.clamp))
+fn make(
+    srf: impl Into<solidcore::surface::surface::Surface>,
+    p: &Params0,
+) -> Result<IsoCurve, HarnessError> {
+    IsoCurve::from_surface(srf.into(), surf_param(p.sp)?, p.iso, p.from_left, p.clamp)
+        .map_err(|e| harness(e.to_string()))
 }
 
 fn build(c: &CurveIn) -> Result<IsoCurve, HarnessError> {
@@ -461,7 +476,13 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 FileType::Ascii
             },
         );
-        let c = Curve::read_from_db(&solidcore::kernel::Kernel::default(), ISO_CURVE_TYPE, &mut r, 3, *version)?;
+        let c = Curve::read_from_db(
+            &solidcore::kernel::Kernel::default(),
+            ISO_CURVE_TYPE,
+            &mut r,
+            3,
+            *version,
+        )?;
         o.push(0.0);
         state(o, &c)?;
         return Ok(());
@@ -607,7 +628,11 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
             (0..=m)
                 .map(|j| {
                     let [x, y, z] = if rng.chance(0.5) {
-                        [i as f64 + rng.uniform(-0.3, 0.3), j as f64, rng.uniform(-1.0, 1.0)]
+                        [
+                            i as f64 + rng.uniform(-0.3, 0.3),
+                            j as f64,
+                            rng.uniform(-1.0, 1.0),
+                        ]
                     } else {
                         rng.point3(-10.0, 10.0)
                     };
@@ -625,7 +650,10 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
 }
 
 fn ends(k: &[f64]) -> (f64, f64) {
-    (k.first().copied().unwrap_or(0.0), k.last().copied().unwrap_or(1.0))
+    (
+        k.first().copied().unwrap_or(0.0),
+        k.last().copied().unwrap_or(1.0),
+    )
 }
 
 /// A parameter in or around `knots`' range: interior, an end, an interior knot, or
@@ -692,7 +720,12 @@ fn gen_other(rng: &mut Rng, a: &CurveIn, s: Option<&InlineSrf>) -> OtherIn {
     match rng.below(10) {
         0 => return OtherIn::Itself,
         1 => {}
-        2 => p.iso += rng.choose(&[1e-16, 1e-15, 1e-14, 1e-13, 1e-12, 1e-10]).copied().unwrap_or(0.0),
+        2 => {
+            p.iso += rng
+                .choose(&[1e-16, 1e-15, 1e-14, 1e-13, 1e-12, 1e-10])
+                .copied()
+                .unwrap_or(0.0);
+        }
         3 => p.from_left = !p.from_left,
         4 => p.sp = gen_sp(rng),
         5 => p.clamp = !p.clamp,
@@ -701,7 +734,10 @@ fn gen_other(rng: &mut Rng, a: &CurveIn, s: Option<&InlineSrf>) -> OtherIn {
             let srf = match s {
                 Some(s) if rng.chance(0.4) => Some(s.clone()),
                 Some(s) if rng.chance(0.5) => {
-                    let eps = rng.choose(&[1e-16, 1e-13, 1e-10, 1e-3]).copied().unwrap_or(0.0);
+                    let eps = rng
+                        .choose(&[1e-16, 1e-13, 1e-10, 1e-3])
+                        .copied()
+                        .unwrap_or(0.0);
                     Some(perturb(rng, s, eps))
                 }
                 Some(_) if rng.chance(0.2) => None,
@@ -748,9 +784,19 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             op: gen_db(rng),
         };
     }
-    let s = if rng.chance(0.05) { None } else { Some(gen_srf(rng)) };
+    let s = if rng.chance(0.05) {
+        None
+    } else {
+        Some(gen_srf(rng))
+    };
     let curve = gen_curve(rng, s.as_ref());
-    let cross = s.as_ref().map(|s| if curve.params.sp == 0 { s.v.clone() } else { s.u.clone() });
+    let cross = s.as_ref().map(|s| {
+        if curve.params.sp == 0 {
+            s.v.clone()
+        } else {
+            s.u.clone()
+        }
+    });
     let op = match rng.below(20) {
         0..=3 => OpIn::State,
         4..=7 => OpIn::Knots {

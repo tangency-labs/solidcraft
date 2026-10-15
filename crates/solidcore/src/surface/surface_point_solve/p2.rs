@@ -966,7 +966,7 @@ impl SurfPtGlobalSolver<'_> {
     ) -> Result<SolutionArray<O>> {
         // We have to enable out-of-bounds evaluations.  Otherwise, the evaluators
         // will silently clamp, leading to wrong answers.
-        if let Some(oob_surface) = with_out_of_bounds_enabled(self.base.surface()) {
+        if let Some(oob_surface) = with_out_of_bounds_enabled(self.base.surface())? {
             let mut solver = self.with_surface(&oob_surface);
             let solutions = solver.solve_body(k, surface_obj);
             // (the closure is a property of the geometry: keep what was computed)
@@ -1028,7 +1028,16 @@ impl SurfPtGlobalSolver<'_> {
             } else {
                 self.base.test_point()
             };
-            match local_point_solve(surface, this_domain, op, pt_for_local, uv_guess, &sol) {
+            match local_point_solve(
+                k,
+                surface,
+                surface_obj,
+                this_domain,
+                op,
+                pt_for_local,
+                uv_guess,
+                &sol,
+            ) {
                 Ok((found, s)) => {
                     found_answer = found;
                     sol = s;
@@ -1079,14 +1088,28 @@ impl SurfPtGlobalSolver<'_> {
 
             if try_again {
                 let save_guess = uv_guess;
-                uv_guess = self.refine_guess_by_grid(uv_guess, best_idx_u, best_idx_v)?;
-                // (upstream's eStat is now RefineGuessByGrid's SM_SUCCESS, even when
-                // the guess did not move and the first local solve failed)
-                stat_ok = true;
+                match self.refine_guess_by_grid(uv_guess, best_idx_u, best_idx_v) {
+                    Ok(refined) => {
+                        uv_guess = refined;
+                        // eStat is now RefineGuessByGrid's status, even if the
+                        // guess did not move and the first local solve failed.
+                        stat_ok = true;
+                    }
+                    Err(error) if error.is_unported() => return Err(error),
+                    Err(_) => stat_ok = false,
+                }
 
-                if !uv_guess.closer_than(EFF_ZERO_SQRT, save_guess) {
-                    match local_point_solve(surface, this_domain, op, pt_for_local, uv_guess, &sol)
-                    {
+                if stat_ok && !uv_guess.closer_than(EFF_ZERO_SQRT, save_guess) {
+                    match local_point_solve(
+                        k,
+                        surface,
+                        surface_obj,
+                        this_domain,
+                        op,
+                        pt_for_local,
+                        uv_guess,
+                        &sol,
+                    ) {
                         Ok((found, s)) => {
                             found_answer = found;
                             sol = s;
@@ -1167,26 +1190,26 @@ fn set_first_object<O: SolutionObject>(sol: &mut Solution<O>, surface_obj: Optio
 /// A copy of `surface` with out-of-bounds evaluation enabled, when it is an
 /// `SmBSplineSurface` (B-spline, plane, surface of revolution) without it; `None`
 /// when nothing changes (`SmTemporaryChangeValue` on `GetOutOfBoundsEnabled()`).
-fn with_out_of_bounds_enabled(surface: &Surface) -> Option<Surface> {
+pub(super) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
     let enabled = match surface.kind() {
         SurfaceKind::BSpline(b) => b.is_out_of_bounds_enabled(),
         SurfaceKind::Plane(p) => p.base().is_out_of_bounds_enabled(),
         SurfaceKind::SurfOfRevolution(s) => s.base().is_out_of_bounds_enabled(),
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-            return None;
+            return Ok(None);
         }
     };
     if enabled {
-        return None;
+        return Ok(None);
     }
-    let mut copy = surface.clone();
+    let mut copy = surface.clone_for_evaluation()?;
     match copy.kind_mut() {
         SurfaceKind::BSpline(b) => *b.out_of_bounds_enabled_mut() = true,
         SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
         SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
     }
-    Some(copy)
+    Ok(Some(copy))
 }
 
 /// `pSurf->EvaluatePoint(uv, rPt)` with its status ignored: `prev` on failure.
@@ -1200,8 +1223,11 @@ fn eval_point(surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
 
 /// `m_pSrf->LocalPointSolve(domain, op, point, guess, bFoundAnswer, sSol)`: whether
 /// an answer was found and the solution.
+#[allow(clippy::too_many_arguments)] // upstream's arguments plus the surface's object
 fn local_point_solve<O: SolutionObject>(
+    k: &Kernel,
     surface: &Surface,
+    surface_obj: Option<O>,
     domain: &Extent2d,
     op: SolverOperation,
     point: Point3,
@@ -1210,8 +1236,14 @@ fn local_point_solve<O: SolutionObject>(
 ) -> Result<(bool, Solution<O>)> {
     // (upstream's LocalPointSolve overwrites the solution with its own, default when
     // nothing was found)
-    let r = surface.local_point_solve::<O>(domain, op, point, guess)?;
-    Ok((r.found, r.solution))
+    let r = surface.local_point_solve::<O>(k, domain, op, point, guess)?;
+    let mut solution = r.solution;
+    // LocalPointSolve_1 sets m_lNumObjects = 1 and m_apObjects[0] = this; the
+    // LocalPointSolve_0 path (MAXIMIZE) leaves both at their defaults.
+    if solution.num_objects > 0 {
+        set_first_object(&mut solution, surface_obj);
+    }
+    Ok((r.found, solution))
 }
 
 /// `m_pSrf->InvertPointNearSingularity(testPt, domain, uv, tightTol, eReason)`: the
@@ -2118,9 +2150,13 @@ mod tests {
         let sols = g.check_seams(&k, 1e-12, &sol, Some(Srf)).unwrap();
         assert_eq!(sols.len(), 1);
 
-        // the local solve is not ported yet
-        let err = g.solve(&k, Some(Srf)).unwrap_err();
-        assert!(err.is_unported());
+        let solved = g.solve(&k, Some(Srf)).unwrap();
+        assert_eq!(solved.len(), 1);
+        let solution = solved.get(0).unwrap();
+        assert_eq!(solution.start.parameters[0], 0.0);
+        assert_eq!(solution.start.parameters[1], 0.5);
+        assert_eq!(solution.start.solution_value, 0.0);
+        assert_eq!(solution.objects[0], Some(Srf));
     }
 
     #[test]

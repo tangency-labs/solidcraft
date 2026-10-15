@@ -494,12 +494,13 @@ fn nearby_intersection(
     Ok(c.found_guess.then_some((c.new_uv_guess, c.new_t_guess)))
 }
 fn surface_point_solve<O: Copy>(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     point: Point3,
     guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
-    let r = surface.local_point_solve::<O>(domain, SolverOperation::Minimize, point, guess)?;
+    let r = surface.local_point_solve::<O>(k, domain, SolverOperation::Minimize, point, guess)?;
     Ok((r.found, r.solution))
 }
 
@@ -920,6 +921,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     .evaluate_point(t)?;
                 if pseudo_box.distance_to_point(point) < EFF_ZERO {
                     let (found, mut solution) = surface_point_solve::<O>(
+                        self.kernel.ok_or(SolidError::null_pointer(OP))?,
                         parent_surface,
                         &natural_domain,
                         point,

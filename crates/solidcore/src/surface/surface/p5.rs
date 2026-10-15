@@ -15,7 +15,7 @@
 //! | [`Surface::create_iso_parametric_curve`], [`IsoParametricCurve`] | `CreateIsoParametricCurve` (virtual: `SmBSplineSurface`, `SmPlane`; the `SmSurface` body for the rest) |
 //! | [`Surface::local_point_solve`], [`PointSolve`]      | `LocalPointSolve`                             |
 //! | [`Surface::local_point_solve_0`], [`PointSolve0`]   | `LocalPointSolve_0`                           |
-//! | [`Surface::drop_point`], [`Surface::drop_point_with_kernel`], [`DropPointOptions`], [`DropPoint`] | `DropPoint`                          |
+//! | [`Surface::drop_point`], [`DropPointOptions`], [`DropPoint`] | `DropPoint`                          |
 //! | [`Surface::local_surface_surface_intersect_xyz`]    | `LocalSurfaceSurfaceIntersect` (from an image-space guess) |
 //! | [`Surface::cover_other_coincident_surface`], [`CoverOtherCoincident`] | `CoverOtherCoincidentSurface` |
 //! | [`sp_local_solve`]                                  | `sm_SpLocalSolve` (static)                    |
@@ -24,8 +24,6 @@
 //! | [`cs_identical_solutions`], [`csi_identical_solutions`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
 //!
 //! Deviations:
-//! - **Kernel.** `drop_point_with_kernel` passes the caller's kernel to fast and
-//!   global solves. The existing `drop_point` entry point retains its default kernel.
 //! - **Solver classes without a Rust struct.** `SmCSGlobalSolver` and
 //!   `SmCSIGlobalSolver` have no struct yet (their constructors belong to unit
 //!   `surface.surface_p1`), so their `IdenticalSolutions` are free functions over the
@@ -34,10 +32,8 @@
 //! - **File-static functions** take what their callers resolve: `sm_SpLocalSolve` gets
 //!   the surface `sm_GetSurfaceToEvaluate(node, patch surface)` returns (unit
 //!   `surface.surface_p1`) instead of the tree node and Bezier patch.
-//! - **Iso curves** (`SmIsoCurve`) hold a B-spline surface only: planes are queried
-//!   through their NURB, and the iso curve of a curve-bounded surface is
-//!   [`SolidError::Unported`] (`curve.iso_curve`, whose Deviations record the limit;
-//!   plan/findings.md has an entry).
+//! - **Iso curves** keep their original concrete surface through `Surface` dispatch
+//!   (`curve.iso_curve` extended by `surface.surface_point_solve_p3`, PR #106).
 //! - **`m_bUseNewPointSolvers`** has no field: its upstream default (`TRUE`) is used and
 //!   the only setter (`SetUseNewPointSolvers`) has no caller. `LocalPointSolve` therefore
 //!   runs `LocalPointSolve_0` only for [`SolverOperation::Maximize`].
@@ -47,8 +43,8 @@
 //!   `SM_SP_NEITHER`; the port does the same ([`Singularity::singular`]).
 //! - **Debug-only work** (drawing, dumps, assertions) is not ported.
 //! - **Kernel.** `IsSingularity` (through `GetSingularities`' approximation tolerance),
-//!   `EvaluateNormalAtSingularity` and `CoverOtherCoincidentSurface` take the
-//!   [`Kernel`]. The `IdenticalSolutions` overrides and the image-space
+//!   `EvaluateNormalAtSingularity`, `CoverOtherCoincidentSurface`, `LocalPointSolve` and
+//!   `DropPoint` take the caller's [`Kernel`]. The `IdenticalSolutions` overrides and the image-space
 //!   `LocalSurfaceSurfaceIntersect` have no kernel threaded to them yet and use
 //!   `Kernel::default()` (upstream's global tolerances at their defaults).
 //! - **`CoverOtherCoincidentSurface`** takes both surfaces `&mut`: the covering surface
@@ -90,7 +86,6 @@ use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
-const OP_LPS: &str = "surface::surface::p5::Surface::local_point_solve";
 const OP_LPS0: &str = "surface::surface::p5::Surface::local_point_solve_0";
 const OP_DROP: &str = "surface::surface::p5::Surface::drop_point";
 const OP_SP_LOCAL: &str = "surface::surface::p5::sp_local_solve";
@@ -448,38 +443,20 @@ pub struct IsoParametricCurve {
     pub uv_iso_curve: Option<Curve>,
 }
 
-/// An `SmIsoCurve` of `surface` (its B-spline form; see the module deviations).
+/// An `SmIsoCurve` of the original concrete surface.
 fn iso_curve_of(
     surface: &Surface,
     param: SurfParamType,
     iso: f64,
     from_left: bool,
 ) -> Result<IsoCurve> {
-    match surface.kind() {
-        SurfaceKind::BSpline(b) => Ok(IsoCurve::new(b.clone_exact(), param, iso, from_left, false)),
-        SurfaceKind::Plane(_) => {
-            // upstream's SmIsoCurve evaluates through SmPlane::Evaluate (analytic); the
-            // Rust SmIsoCurve holds the plane's NURB, whose rounding differs, so a solve
-            // over it would not be comparable (plan/findings.md, surface.surface_p5)
-            // UNPORTED(curve.iso_curve): SmIsoCurve over an SmPlane
-            Err(SolidError::unported(
-                "SmIsoCurve::SmIsoCurve(SmPlane)",
-                "curve.iso_curve",
-            ))
-        }
-        SurfaceKind::CurveBounded(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // `SmIsoCurve` holds an `SmBSplineSurface` only (see plan/findings.md,
-            // surface.surface_p5), so these kinds have no iso curve to build.
-            // UNPORTED(curve.iso_curve): SmIsoCurve::SmIsoCurve over a non-B-spline surface
-            Err(SolidError::unported(
-                "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
-                "curve.iso_curve",
-            ))
-        }
-    }
+    IsoCurve::from_surface(
+        surface.clone_for_evaluation()?,
+        param,
+        iso,
+        from_left,
+        false,
+    )
 }
 
 impl Surface {
@@ -540,11 +517,11 @@ impl Surface {
         }
 
         // define the isoParameter Curve as an object
-        let iso = iso_curve_of(self, param, iso_parameter, true);
+        let iso = iso_curve_of(self, param, iso_parameter, true)?;
 
         // when asked - build OptUVIsoCurve (status ignored)
         let uv_iso_curve = if want_uv_iso_curve {
-            ignored(iso.as_ref().map_err(Clone::clone)?.create_uv_iso_line())?
+            ignored(iso.create_uv_iso_line())?
         } else {
             None
         };
@@ -585,7 +562,6 @@ impl Surface {
 
         // Select a tolerance (SM_USE_OLDTOL)
         let mut approx_tol = approx_tol_3d;
-        let iso = iso?;
         if approx_tol == 0.0 {
             let iso_curve = Curve::from(iso.clone());
             let (length, _) =
@@ -813,9 +789,10 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the solvers; [`SolidError::Unported`] for `LocalPointSolve_1`.
+    /// Those of the selected local solver. The caller's kernel supplies tolerances.
     pub fn local_point_solve<O: Copy>(
         &self,
+        k: &Kernel,
         domain: &Extent2d,
         op: SolverOperation,
         test_point: Point3,
@@ -826,12 +803,13 @@ impl Surface {
             op != SolverOperation::Maximize || op == SolverOperation::Signed3dDirectedMaximize;
 
         if use_new {
-            // UNPORTED(surface.surface_point_solve_p3): SmSurface::LocalPointSolve_1
-            let _ = (domain, test_point, guess_uv, OP_LPS);
-            return Err(SolidError::unported(
-                "SmSurface::LocalPointSolve_1",
-                "surface.surface_point_solve_p3",
-            ));
+            let r = self.local_point_solve_1(k, domain, op, test_point, guess_uv, None)?;
+            let mut solution = r.solution;
+            solution.num_variables = 2;
+            return Ok(PointSolve {
+                found: r.found,
+                solution,
+            });
         }
 
         let r = self.local_point_solve_0(domain, op, test_point, guess_uv)?;
@@ -1001,17 +979,6 @@ impl Surface {
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn drop_point<O: SolutionObject>(
         &self,
-        pt_to_drop: Point3,
-        domain: &Extent2d,
-        opts: &DropPointOptions,
-    ) -> Result<DropPoint<O>> {
-        self.drop_point_with_kernel(&Kernel::default(), pt_to_drop, domain, opts)
-    }
-
-    /// [`Surface::drop_point`] using the caller's kernel for fast and global solves.
-    /// Errors and output semantics are identical to `drop_point`.
-    pub fn drop_point_with_kernel<O: SolutionObject>(
-        &self,
         k: &Kernel,
         pt_to_drop: Point3,
         domain: &Extent2d,
@@ -1067,7 +1034,7 @@ impl Surface {
         // Try LocalPointSolve if a guess was supplied.
         if !success {
             if let Some(g) = guess {
-                match ignored(self.local_point_solve::<O>(domain, op, pt_to_drop, g))? {
+                match ignored(self.local_point_solve::<O>(k, domain, op, pt_to_drop, g))? {
                     Some(r) => {
                         success = r.found;
                         sol = r.solution;
@@ -1626,6 +1593,7 @@ impl Surface {
 /// [`SolidError::Unported`] from the local point solve.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // upstream's list
 pub fn sp_local_solve<O: SolutionObject>(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     u_conts: [ContinuityType; 2],
@@ -1659,7 +1627,7 @@ pub fn sp_local_solve<O: SolutionObject>(
 
         // for every guess point (there is one)
         // Find NewtonRaphson solution for closest surf point to crPoint
-        if let Some(r) = ignored(surface.local_point_solve::<O>(uv_domain, op, point, guess))? {
+        if let Some(r) = ignored(surface.local_point_solve::<O>(k, uv_domain, op, point, guess))? {
             let mut found = r.found;
             let mut solution = r.solution;
 
@@ -2181,18 +2149,25 @@ mod tests {
     }
 
     #[test]
-    fn new_point_solvers_are_not_ported() {
+    fn new_point_solver_projects_to_the_plane() {
         let s = xy_plane();
         let dom = s.natural_uv_domain();
         let r = s.local_point_solve::<Obj>(
+            &Kernel::default(),
             &dom,
             SolverOperation::Minimize,
             Vec3::new(0.0, 0.0, 1.0),
             Point2::new(0.0, 0.0),
         );
-        assert!(r.unwrap_err().is_unported());
-        // a maximise solve runs LocalPointSolve_0 (the SmFindPSNormalENFO Newton solve)
+        let result = r.unwrap();
+        assert!(result.found);
+        assert_eq!(result.solution.solution_type, SolutionType::SingleValue);
+        assert_eq!(result.solution.start.parameters[0], 0.0);
+        assert_eq!(result.solution.start.parameters[1], 0.0);
+        assert_eq!(result.solution.start.solution_value, 1.0);
+        // a maximise solve runs LocalPointSolve_0, whose Newton solve is not ported
         let r = s.local_point_solve::<Obj>(
+            &Kernel::default(),
             &dom,
             SolverOperation::Maximize,
             Vec3::new(0.0, 0.0, 1.0),
@@ -2211,7 +2186,9 @@ mod tests {
             operation: SolverOperation::Normalize,
             ..DropPointOptions::default()
         };
-        let r = s.drop_point::<Obj>(p, &dom, &opts).unwrap();
+        let r = s
+            .drop_point::<Obj>(&Kernel::default(), p, &dom, &opts)
+            .unwrap();
         assert!(r.success);
         assert!((r.gap - 1.5).abs() < 1e-9);
         assert!((r.result_uv.x - c.x).abs() < 1e-9 && (r.result_uv.y - c.y).abs() < 1e-9);

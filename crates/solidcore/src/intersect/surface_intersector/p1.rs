@@ -888,7 +888,7 @@ impl<'s> SurfaceIntersector<'s> {
         let surface = self.surface(srf);
         let domain = *pick(&self.uv_domains, srf);
         let (mut found_answer, mut solution) =
-            surface_local_point_solve(surface, &domain, pnt, prev.uv_pos(srf))?;
+            surface_local_point_solve(k, surface, &domain, pnt, prev.uv_pos(srf))?;
         if !found_answer {
             let solutions =
                 surface_global_point_solve(k, surface, &domain, pnt, self.this_approx_tol_3d)?;
@@ -1352,16 +1352,18 @@ impl<'s> SurfaceIntersector<'s> {
                     let dom1 = srf1.natural_uv_domain();
                     let dom2 = srf2.natural_uv_domain();
 
-                    let (int_pt_uv1, int_pt_gap1) = surface_drop_point(srf1, point, &dom1, None)?;
-                    let (int_pt_uv2, int_pt_gap2) = surface_drop_point(srf2, point, &dom2, None)?;
+                    let (int_pt_uv1, int_pt_gap1) =
+                        surface_drop_point(k, srf1, point, &dom1, None)?;
+                    let (int_pt_uv2, int_pt_gap2) =
+                        surface_drop_point(k, srf2, point, &dom2, None)?;
 
                     // status ignored upstream: an uninitialised point on failure
                     let crv_pt = or_keep(curve.evaluate_point(crv_param), Vec3::UNDEF)?;
 
                     let (crv_pt_uv1, crv_pt_gap1) =
-                        surface_drop_point(srf1, crv_pt, &dom1, Some(int_pt_uv1))?;
+                        surface_drop_point(k, srf1, crv_pt, &dom1, Some(int_pt_uv1))?;
                     let (crv_pt_uv2, crv_pt_gap2) =
-                        surface_drop_point(srf2, crv_pt, &dom2, Some(int_pt_uv2))?;
+                        surface_drop_point(k, srf2, crv_pt, &dom2, Some(int_pt_uv2))?;
 
                     let mid_pt_uv1 = (int_pt_uv1 + crv_pt_uv1) / 2.0;
                     let mid_pt_uv2 = (int_pt_uv2 + crv_pt_uv2) / 2.0;
@@ -1776,12 +1778,14 @@ fn evaluate_normal_section(eval: &[[Vec3; 3]; 3], direction: Vec3) -> Result<f64
 /// `crSurface.LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, ..)`: found flag
 /// and the solution's start parameters.
 fn surface_local_point_solve(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     point: Point3,
     guess: Point2,
 ) -> Result<(bool, [f64; 2])> {
     let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
+        k,
         domain,
         SolverOperation::Minimize,
         point,
@@ -1819,6 +1823,7 @@ fn surface_global_point_solve(
 
 /// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.
 fn surface_drop_point(
+    k: &Kernel,
     surface: &Surface,
     point: Point3,
     domain: &Extent2d,
@@ -1828,7 +1833,7 @@ fn surface_drop_point(
         guess_uv: guess,
         ..Default::default()
     };
-    let r = surface.drop_point::<crate::surface::surface::p4::NoObject>(point, domain, &opts)?;
+    let r = surface.drop_point::<crate::surface::surface::p4::NoObject>(k, point, domain, &opts)?;
     Ok((r.result_uv, r.gap))
 }
 
