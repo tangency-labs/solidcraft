@@ -4,3 +4,5 @@
 //! Upstream: `SmIntegrator`, `SmGauss`, `SmEdgeProps`, `SmFaceProps`, `SmLoopProps`,
 //! `SmVertexProps`, `SmObjProps` in `source/SMLib`, and the area/volume queries of
 //! `SM_API/SmApiQueries`.
+
+pub mod integrator;

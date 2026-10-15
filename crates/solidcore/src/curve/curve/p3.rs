@@ -66,7 +66,7 @@
 //!   and the `Evaluate` members of `SmCCIntersectENFO` and `SmFindCCNormalENFO`) are
 //!   wired. `FindParameterAtArcLength` takes the kernel for `Length` (its curve cache
 //!   reads the kernel's tolerances); `Length` of curved spans reaches `SmIntegrator`
-//!   (unit `mass.integrator`, [`SolidError::Unported`]).
+//!   (the ported unit `mass.integrator`).
 
 use crate::curve::curve::p2::{
     proj_signed_angle, property_angle, unitize_tangent, Curve, CurveEvaluate, CurveKind,
@@ -439,8 +439,7 @@ impl Curve {
     /// `InvalidInput` for a start parameter more than `SM_EFF_ZERO` (relative) outside
     /// the knots, or below the first knot when stepping backwards (an out of bounds
     /// read upstream), or a curve without knots; those of the lengths and
-    /// evaluations of the Newton iteration ([`SolidError::Unported`] for `Length` of
-    /// curved spans, unit `mass.integrator`).
+    /// evaluations of the Newton iteration.
     pub fn find_parameter_at_arc_length(
         &self,
         k: &Kernel,

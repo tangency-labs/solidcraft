@@ -4548,16 +4548,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_plane_1_0.001_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#503 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4568,16 +4564,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_plane_1_1e-05_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#505 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4588,16 +4580,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_plane_8_0.001_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#507 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4608,16 +4596,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_plane_8_1e-05_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#509 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4628,16 +4612,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_plane_63_0.001_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#511 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -4648,16 +4628,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_plane_63_1e-05_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#513 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -4668,16 +4644,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_bss_1_0.001_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#515 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4688,16 +4660,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_bss_1_1e-05_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#517 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4708,16 +4676,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_bss_8_0.001_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#519 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4728,16 +4692,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_bss_8_1e-05_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#521 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4748,16 +4708,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_bss_63_0.001_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#523 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -4768,16 +4724,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "ode_area_bss_63_1e-05_sloped",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#525 (upstream tests/SM_API_test/src/TestSmBrep.cpp:270)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "deferred": {
@@ -11337,16 +11289,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00076",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -12349,8 +12297,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
+        "symbol": "SmOffsetSurface::EvaluateSimple",
+        "unit": "surface.offset_surface"
       },
       "max_rel_err": 0.0,
       "name": "extra00186",
@@ -13155,16 +13103,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00274",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "deferred": {
@@ -13482,16 +13426,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00309",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -13667,16 +13607,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00328",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "both_errored": true,
@@ -14101,8 +14037,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
+        "symbol": "SmOffsetSurface::EvaluateSimple",
+        "unit": "surface.offset_surface"
       },
       "max_rel_err": 0.0,
       "name": "extra00377",
@@ -14195,16 +14131,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "both_errored": true,
@@ -14241,8 +14173,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
+        "symbol": "SmOffsetSurface::EvaluateSimple",
+        "unit": "surface.offset_surface"
       },
       "max_rel_err": 0.0,
       "name": "extra00393",
@@ -14626,16 +14558,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "deferred": {
@@ -14680,16 +14608,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00442",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -15836,16 +15760,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00572",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -18060,16 +17980,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00818",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "both_errored": true,
@@ -18285,16 +18201,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00844",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
       "max_rel_err": 0.0,
@@ -18651,16 +18563,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00885",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "both_errored": true,
@@ -19342,16 +19250,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra00964",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -20102,16 +20006,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra01050",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -20243,8 +20143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
+        "symbol": "SmOffsetSurface::EvaluateSimple",
+        "unit": "surface.offset_surface"
       },
       "max_rel_err": 0.0,
       "name": "extra01066",
@@ -21161,16 +21061,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra01171",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -21763,16 +21659,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra01238",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "max_rel_err": 0.0,
@@ -22066,16 +21958,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra01272",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 31
     },
     {
       "both_errored": true,
@@ -23478,16 +23366,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmODEIntegrator::RungeKuttaODEIntegrate",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "extra01433",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "both_errored": true,
@@ -24077,16 +23961,15 @@
     }
   ],
   "cases_both_errored": 494,
-  "cases_deferred": 511,
+  "cases_deferred": 482,
   "cases_failed": 0,
-  "cases_passed": 2181,
+  "cases_passed": 2210,
   "cases_total": 2692,
   "deferred_by_unit": {
     "curve.crv_on_surf": 74,
     "intersect.curve_class_p4": 30,
-    "mass.integrator": 33,
     "query.face_p3": 47,
-    "surface.offset_surface": 108,
+    "surface.offset_surface": 112,
     "topology.edgeuse_p3": 156,
     "topology.face_p1": 63
   },

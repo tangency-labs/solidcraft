@@ -818,16 +818,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259089",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -918,16 +914,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259101",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1002,16 +994,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0048",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259111",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1334,16 +1322,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0089",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259152",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1530,16 +1514,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0113",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259176",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1590,16 +1570,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0120",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259183",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1618,16 +1594,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0123",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259186",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1654,16 +1626,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0127",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259190",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2066,16 +2034,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0178",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259241",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2678,16 +2642,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0254",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259317",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2978,16 +2938,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0291",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259354",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3134,16 +3090,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0310",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259373",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3226,16 +3178,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0321",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259384",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3390,16 +3338,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259404",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3554,16 +3498,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0361",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259424",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4646,16 +4586,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0497",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259560",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5138,16 +5074,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0558",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259621",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5542,16 +5474,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0608",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259671",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5698,16 +5626,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0627",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259690",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5750,16 +5674,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0633",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259696",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5986,16 +5906,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0662",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259725",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -7206,16 +7122,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0814",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259877",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -7378,16 +7290,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0835",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519259898",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8342,28 +8250,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0955",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260018",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen0956",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260019",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8750,16 +8650,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260068",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8978,16 +8874,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1033",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260096",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9270,16 +9162,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1069",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260132",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9330,16 +9218,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1076",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260139",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9358,16 +9242,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1079",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260142",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9874,16 +9754,12 @@
       "values_compared": 70
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1143",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260206",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10110,16 +9986,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1172",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260235",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10202,16 +10074,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1183",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260246",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10222,16 +10090,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1185",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260248",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10290,16 +10154,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1193",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260256",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10814,16 +10674,12 @@
       "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260321",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10922,16 +10778,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260334",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11198,16 +11050,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1305",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260368",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11330,16 +11178,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1321",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260384",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11422,16 +11266,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1332",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260395",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11986,16 +11826,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1402",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260465",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12998,16 +12834,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1528",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260591",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13098,16 +12930,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1540",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260603",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13870,16 +13698,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1636",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260699",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14226,16 +14050,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1680",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260743",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14366,16 +14186,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1697",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260760",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14802,16 +14618,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1751",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260814",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14894,16 +14706,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1762",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260825",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14922,16 +14730,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1765",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260828",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14974,16 +14778,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1771",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260834",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15530,16 +15330,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1840",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260903",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15726,16 +15522,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1864",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260927",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16186,28 +15978,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1921",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260984",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1922",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260985",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16266,16 +16050,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1930",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519260993",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16526,16 +16306,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1962",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261025",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16706,16 +16482,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1984",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261047",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16734,16 +16506,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen1987",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261050",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16978,28 +16746,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261080",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2018",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261081",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -17594,16 +17354,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2093",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261156",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -17726,16 +17482,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2109",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261172",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -17882,16 +17634,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2128",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261191",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -18246,16 +17994,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2173",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261236",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -18546,16 +18290,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2210",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261273",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -18638,16 +18378,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2221",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261284",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -19010,16 +18746,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2267",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261330",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -19374,16 +19106,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2312",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261375",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -19594,16 +19322,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2339",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261402",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -19822,16 +19546,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2367",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261430",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -20434,28 +20154,20 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2443",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261506",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2444",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261507",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -20522,16 +20234,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2453",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261516",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -20678,16 +20386,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2472",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261535",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -21658,16 +21362,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2594",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261657",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -21790,16 +21490,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2610",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261673",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -22762,16 +22458,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261794",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -22870,16 +22562,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2744",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261807",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -22930,16 +22618,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2751",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261814",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -23502,16 +23186,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2822",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261885",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -23634,16 +23314,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2838",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261901",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -24046,16 +23722,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2889",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519261952",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -24434,16 +24106,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2937",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519262000",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -24534,16 +24202,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2949",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519262012",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -24890,16 +24554,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmIntegrator::IntegrateIt",
-        "unit": "mass.integrator"
-      },
       "max_rel_err": 0.0,
       "name": "gen2993",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577097223519262056",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -24951,17 +24611,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 85,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2991,
+  "cases_passed": 3076,
   "cases_total": 3076,
-  "deferred_by_unit": {
-    "mass.integrator": 85
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "curve.curve_p3"
 }

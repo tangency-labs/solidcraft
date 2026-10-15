@@ -21,8 +21,7 @@
 //! `InvalidInput`, `-1` for a Rust error upstream cannot produce) and the rest as the
 //! `out` values.
 //!
-//! Deferred cases: `Length` of curves of degree above 1 (`SmIntegrator::IntegrateIt`,
-//! unit `mass.integrator`).
+//! Curved-span lengths use the ported `mass.integrator`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

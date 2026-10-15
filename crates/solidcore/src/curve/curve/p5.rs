@@ -63,8 +63,8 @@
 //!   function values are known (upstream interleaves the writes; only a too small
 //!   matrix, an upstream assert, could tell). Option vectors that upstream reads
 //!   without a `NULL` check are `InvalidInput` when missing.
-//! - **Length.** Spans of degree above 1 are integrated with `SmIntegrator` (unit
-//!   `mass.integrator`, not ported): [`SolidError::Unported`]. `Length` needs the
+//! - **Length.** Spans of degree above 1 use the ported `SmIntegrator` (unit
+//!   `mass.integrator`). `Length` needs the
 //!   kernel (the cache tessellation reads its tolerances).
 //! - **Out-params.** Flags with outputs are `Option`s (`IsLine`: point and vector;
 //!   `IsArc`: frame, radius, start and end angle; the guesses); `IsLinear`'s
@@ -1388,9 +1388,7 @@ impl Curve {
     /// # Errors
     ///
     /// Those of the length estimate and of the degree query;
-    /// [`SolidError::Unported`] from the tessellation and for the integration of
-    /// spans of degree above 1 (`SmIntegrator::IntegrateIt`, unit
-    /// `mass.integrator`).
+    /// [`SolidError::Unported`] from the tessellation or curve evaluator.
     pub fn length_base(
         &self,
         k: &Kernel,
@@ -1438,12 +1436,12 @@ impl Curve {
         let mut total_length = 0.0;
         let span_count = cache.span_count();
         // (dSpanAccuracy = dDesiredAccuracy / span count: the integration tolerance)
-        let _ = desired_accuracy;
+        let span_accuracy = desired_accuracy / span_count as f64;
 
         let bsp = cache.curve();
         for i in 0..span_count {
             let bez_elem = cache.span(i)?;
-            let (p1, p2, _seg_ivl) = bez_elem.aux.ends_on(bsp)?;
+            let (p1, p2, seg_ivl) = bez_elem.aux.ends_on(bsp)?;
 
             // Linear segment
             if bsp.degree()? == 1 {
@@ -1455,11 +1453,18 @@ impl Curve {
             // Greater than degree 1 if make it to here
             // Do an integration to get the length of the
             // first derivatives integrated over the entire curve.
-            // UNPORTED(mass.integrator): SmIntegrator::IntegrateIt
-            return Err(SolidError::Unported {
-                upstream: "SmIntegrator::IntegrateIt",
-                unit: "mass.integrator",
-            });
+            total_length += crate::mass::integrator::integrate(
+                seg_ivl.min(),
+                seg_ivl.max(),
+                crate::mass::integrator::IntegrationAlgorithm::Romberg,
+                span_accuracy,
+                |t| {
+                    let pv = bsp.evaluate(t, 1, true, false)?;
+                    pv.get(1)
+                        .map(|v| v.length())
+                        .ok_or_else(|| SolidError::sm_err("curve::length"))
+                },
+            )?;
         }
 
         Ok(total_length)
@@ -2233,12 +2238,9 @@ mod tests {
         let h = hermite([0.0; 3], [1.0, 1.0, 0.0], [1.0, 0.0, 0.0], [1.0, -1.0, 0.0]);
         let r = h.length(&k, &Extent1d::from_min_max(0.5, 0.5), 1e-8);
         assert_eq!(r.unwrap(), 0.0);
-        // curved spans need the integrator (unit mass.integrator)
         let c = arc(1.0, 0.0, 90.0);
-        assert!(matches!(
-            c.length(&k, &c.natural_interval(), 1e-8),
-            Err(SolidError::Unported { .. })
-        ));
+        let length = c.length(&k, &c.natural_interval(), 1e-8).unwrap();
+        assert!((length - core::f64::consts::FRAC_PI_2).abs() < 1e-8);
     }
 
     #[test]

@@ -2039,6 +2039,11 @@ knowing:
 
 ## curve.curve_p3 (`SmCurve`, part 3)
 
+After wiring `mass.integrator` (PR #119), all 3076 cases pass bit-identically with
+zero deferred: the 85 remaining curved-length / arc-length inversion cases now
+run. The unit is green.
+
+
 - **`SmCurve::FindParameterAtArcLength`** stepping backwards (`dArcLength < 0`) from a
   start parameter within `dParamTol` *below* the first knot leaves `ik = -1` and reads
   `sKnots[(ULONG)-1]` (out of bounds). The port returns `InvalidInput`; the ffi only
@@ -2472,9 +2477,10 @@ upstream-derived and edge-case fixtures: `TestSmCreateRectangle` / `TestSmCreate
 edges through clean-up, duplicate removal, `IsLine` / `IsLinear` / `IsArc` / `Length` /
 `IsDomainBoundary`, the `my_test_reversed_line_join` lines, closest-point inversions, Newton
 Jacobians; plus 3000 generated; a 20000-seed run is clean; `--perturb` detects every case).
-30 cases are deferred: `Length` of spans of degree above 1 (`SmIntegrator::IntegrateIt`, unit
-`mass.integrator`; 28) and gap closing that reaches `SmCurve::GetNaturalInterval` through a
-solution handle (an `UNPORTED(curve.curve_p2)` stub in `geom::solution_array`; 2).
+After wiring `mass.integrator`, 3095 of 3097 cases pass bit-identically. The 28
+curved-span `Length` cases now pass; two gap-closing cases still reach
+`SmCurve::GetNaturalInterval` through a solution handle (`UNPORTED(curve.curve_p2)`
+in `geom::solution_array`).
 Upstream behaviour worth knowing:
 
 - **`CrvsCleanup` crashes (SIGSEGV)** when the curve next to a removed tiny curve is closed:
@@ -2485,8 +2491,8 @@ Upstream behaviour worth knowing:
   returns `InvalidInput` for any other kind there and the ffi only sends B-splines.
 - **`Length` casts its cache curve to `SmBSplineCurve`** and integrates any curve the cache
   tessellates, Hermite curves included (the Rust cache tessellates them as upstream does),
-  so a Hermite `Length` is deferred like any curved span, not the end point distance the
-  comment promises.
+  so Hermite `Length` uses numerical integration, rather than the end point distance
+  the comment promises.
 - **`SmFindCCNormalENFO::Evaluate`** reads `m_cpOptVectors[0..1]` without a `NULL` check for
   `SM_SO_SIGNED_PIVOT_MINIMIZE` (the port returns `InvalidInput`), and the iteration count
   that triggers the curvature "step back" only counts evaluations with a Jacobian.
@@ -4551,6 +4557,55 @@ default 3,093-case set (which the gate and CI run) is clean, and the previous ge
   zero counts; the port returns `InvalidInput`).
 - `SmBrep::ReadFromFile` crashes on `SmallBox.smb` (UB-1), so topology fixtures use the
   `topology.vertexuse` file list.
+
+
+## mass.integrator (`SmIntegrator`, `SmODEIntegrator`, precise properties)
+
+1528 default cases: 1520 pass, zero fail, eight deferred; maximum relative error
+`4.979280456316938e-14`, without absolute floors. The C++ shim calls the actual
+scalar/ODE integrators, edge precise properties and public length query, and
+`SmFace::ComputePreciseProperties` on real rectangular/rotated plane faces,
+disks, annuli and curved quadratic B-spline patches. For the face integration,
+the actual input oriented trim curves, UV domain and bounding-box-derived area
+estimate are exported from C++ and imported into Rust;
+results and moments are computed separately. All 63 precise-property masks are
+covered in both orientations, following `sm_CheckPrecisePropertySelection` in
+`tests/SM_API_test/src/TestSmBrep.cpp:244`. Generated cases cover state-dependent
+ODEs, scalar polynomial/sinusoidal/exponential functions, reversed intervals,
+error scales, sub-intervals and small/large magnitudes. Values, adaptive steps,
+mutated scales and accepted/reduced step counts are compared.
+
+- **Review regression:** 155 additional cases cover full-circle trims and circular
+  holes, both orientations, accuracies from `1e-3` to `1e-8`, tight/zero accuracies
+  exercising numerical failures and retries, non-axis-aligned plane bounds, curved
+  B-spline surface properties, and nested `AreaIntegrand::evaluate` compared with
+  `SmSurface::Area` on rectangular sub-domains. Edge cases include exact rational
+  quarter circles, non-unit weights, cusps, constant curves, zero-length intervals,
+  multiple accuracies and `1e-9`/`1e9` scales. Before the fix, 16 circle-boundary
+  cases failed (maximum relative error `1.4907788505308581e-4`); all now pass.
+  `SmODEAreaIFEO::Evaluate` leaves its output untouched for a zero U tangent;
+  the adapter now seeds scratch from the particular integrator derivative array,
+  preserving zeroed stage buffers and the main loop's previous derivative separately.
+  No tolerance or absolute floor changed.
+- **Upstream behavior retained:** `RungeKuttaODEIntegrate` starts its accumulator
+  at zero regardless of `ystart`, except its early return (equal endpoints or
+  first step equal to `SM_EFF_ZERO` to scaled tolerance), which leaves it alone.
+  `IntegrateIt` ignores its algorithm selector and returns success with zero on
+  ODE/evaluator failure; see WR-94 in `plan/upstream-issues.md`.
+- **Safety:** zero-based component slices and closures replace one-based array
+  subclasses. Dimensions are bounded at 4096, the step budget at 1,000,000 and
+  rejected-step retries at 1024. Active integrations reject NaN controls and
+  non-finite evaluations; no input-driven recursion. Infinite accuracy/scale floors and unused non-finite
+  initial values agree with C++ in a direct harness test; equal endpoints return
+  before checking unused controls. Scalar failure masking never masks `Unported`.
+- **Deferred:** B-rep bounding boxes (`query.brep`, 3), face bounding boxes
+  (`query.face_p1`, 2), B-rep enumeration (`topology.brep_p1`, 2), and thick-face
+  offset evaluation (`surface.offset_surface`, 1). Oriented trim construction
+  still calls `UNPORTED(topology.face_p1)` in the topology-facing face entry;
+  callers with oriented boundaries can use `boundary_properties` directly.
+- **Back-edges:** all three `UNPORTED(mass.integrator)` sites are wired: curved
+  lengths in `curve.curve_p5`, area strips in `surface.surface_p1`, and the inner
+  precise-property integration in `topology.face_p2`.
 
 ## surface.surface_p3 back-edges into surface.surface_p5 (finishing PR #52, 2026-10-15)
 

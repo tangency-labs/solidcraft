@@ -72,8 +72,7 @@
 //!   inside a boolean function: a failing `Unitize` returns `TRUE`.
 //! - **Unported callees.** `CreateOffsetSurface` needs `SmOffsetSurface`
 //!   (`surface.offset_surface`), `CreateSilhouetteCurves` needs `SmSurfaceSilhouette`
-//!   (`intersect.surface_silhouette`), `SmAreaIFEO::Evaluate` needs `SmIntegrator`
-//!   (`mass.integrator`), `ApproximateSize` of kinds other than B-splines needs
+//!   (`intersect.surface_silhouette`), `ApproximateSize` of kinds other than B-splines needs
 //!   `SmIsoCurve` over any surface (the ported iso curve holds a B-spline), the zone
 //!   tolerance of a surface with a face needs `SmFace::GetTolerance`
 //!   (`topology.face_p2`): those calls return [`SolidError::Unported`]. Every tree build
@@ -2498,15 +2497,17 @@ impl AreaIntegrand<'_> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmIntegrator::IntegrateIt` (`mass.integrator`).
+    /// Those of the surface evaluator; scalar numerical failures yield zero upstream.
     pub fn evaluate(&self, t: f64) -> Result<f64> {
         // set up the strip integral of [deltaX, IntervalY]
-        let _eval = IsoCurveLengthIntegrand::new(self.surface, t);
-        // UNPORTED(mass.integrator): SmIntegrator::IntegrateIt
-        Err(SolidError::unported(
-            "SmIntegrator::IntegrateIt",
-            "mass.integrator",
-        ))
+        let eval = IsoCurveLengthIntegrand::new(self.surface, t);
+        crate::mass::integrator::integrate(
+            self.uv_domain.min().y,
+            self.uv_domain.max().y,
+            crate::mass::integrator::IntegrationAlgorithm::Romberg,
+            self.iso_curve_accuracy,
+            |v| eval.evaluate(v),
+        )
     }
 }
 

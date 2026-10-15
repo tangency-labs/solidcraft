@@ -1,6 +1,21 @@
 # solidcore status
 
-Last updated: 2026-10-15, PR #115 (`topology.brep_cache` partial). Per-unit state and evidence are in `plan/modules.toml` and `reports/difftest/`.
+Last updated: 2026-10-15, `mass.integrator` partial and `curve.curve_p3` green (PR #119); PR #115 (`topology.brep_cache` partial). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml` and evidence in `reports/difftest/`.
+
+
+## Integration update (2026-10-15, PR #119)
+
+The manifest now has 173 ported units: 97 green and 76 partial. `mass.integrator`
+has 1520 passing cases and eight explicit dependency deferrals out of 1528, with
+maximum relative error `4.979280456316938e-14` and no absolute floors. Review
+regressions cover circular holes, curved B-spline surfaces, rational edges and nested area strips; each Cash–Karp derivative array
+now retains its own values when a trim has zero U tangent. All three
+integration back-edges are wired. `curve.curve_p3` is green (3076/3076 bit-identical),
+and the 28 formerly deferred curved-length cases of `curve.curve_p5` now pass.
+Precise edge/face/B-rep properties and their API control flow use explicit calls
+for the remaining topology, bounding-box and offset dependencies. Detailed coverage
+and the scalar wrapper's failure-masking behavior are in `plan/findings.md`.
+
 
 ## Handoff (2026-10-13): from one local swarm to pull requests
 
