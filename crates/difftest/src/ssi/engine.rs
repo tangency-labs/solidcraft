@@ -351,10 +351,13 @@ fn rust_surface(spec: &SurfaceSpec) -> Result<Result<Surface, Deferred>, String>
             "surface.surface_p2",
             "SurfaceKind::Cone (SmCone dispatch through SmSurface)",
         ),
-        // UNPORTED(surface.sphere): SmSphere
-        SurfaceSpec::Sphere { .. } => {
-            deferred("surface.sphere", "SmSphere::GlobalSurfaceIntersect")
-        }
+        SurfaceSpec::Cone { .. } => deferred("surface.cone_p3", "SmCone::GlobalSurfaceIntersect"),
+        // SmSphere is ported (surface.sphere) but has no SurfaceKind variant (the
+        // "DISPATCH GAP" in its plan notes); the enum is surface.surface_p2's
+        SurfaceSpec::Sphere { .. } => deferred(
+            "surface.surface_p2",
+            "SurfaceKind::Sphere (SmSphere dispatch through SmSurface)",
+        ),
         // SmTorus is ported (surface.torus, green) but has no SurfaceKind variant (the
         // "DISPATCH GAP" in its plan notes); the enum is surface.surface_p2's
         SurfaceSpec::Torus { .. } => deferred(

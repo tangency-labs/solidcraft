@@ -14,6 +14,7 @@ pub mod cone;
 pub mod curve_bounded_surface;
 pub mod offset_surface;
 pub mod plane;
+pub mod sphere;
 pub mod srf_in_volume;
 pub mod surf_of_extrusion;
 pub mod surf_of_revolution;

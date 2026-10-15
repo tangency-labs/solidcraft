@@ -186,6 +186,7 @@ use crate::surface::cone::Cone;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::plane::Plane;
+use crate::surface::sphere::Sphere;
 use crate::surface::srf_in_volume::SrfInVolume;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
@@ -1383,11 +1384,17 @@ impl Surface {
                     "surface.cone_p1",
                 ))
             }
-            // UNPORTED(surface.sphere): SmSphere::ReadFromDB
-            SPHERE_TYPE => Err(SolidError::unported(
-                "SmSphere::ReadFromDB",
-                "surface.sphere",
-            )),
+            SPHERE_TYPE => {
+                // SmSphere::ReadFromDB reads the whole record.
+                let _sphere = Sphere::read_from_db(k, db, version)?;
+                // DISPATCH GAP: the sphere is not a SurfaceKind yet (no variant with its
+                // SmSurface overrides), so no Surface can hold it (no UNPORTED marker:
+                // the reader is ported; the error names the sphere's unit).
+                Err(SolidError::unported(
+                    "SmSphere::ReadFromDB",
+                    "surface.sphere",
+                ))
+            }
             TORUS_TYPE => {
                 // SmTorus::ReadFromDB reads the whole record.
                 let _torus = Torus::read_from_db(k, db, version)?;
@@ -4749,7 +4756,8 @@ mod tests {
     #[test]
     fn read_from_db_unported_types() {
         let mut db = DatabaseReader::default();
-        let e = Surface::read_from_db(&Kernel::default(), SPHERE_TYPE, &mut db, 1).unwrap_err();
+        let e =
+            Surface::read_from_db(&Kernel::default(), OFFSET_SURFACE_TYPE, &mut db, 1).unwrap_err();
         assert!(e.is_unported());
         // a plane is read (an empty stream fails without Unported)
         let e = Surface::read_from_db(&Kernel::default(), PLANE_TYPE, &mut db, 1).unwrap_err();
