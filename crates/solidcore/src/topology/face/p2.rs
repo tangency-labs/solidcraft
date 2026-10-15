@@ -334,7 +334,7 @@ fn vertex_edges(b: &Brep, v: VertexId) -> Result<Vec<EdgeId>> {
 /// `SmLoopuse::GetVertexuses` without filter (CO-PORTED from unit `topology.loopuse`):
 /// the vertex use of a vertex loop use, else the start vertex uses of its edge uses in
 /// CCW order.
-fn loopuse_vertexuses(b: &Brep, lu: LoopuseId) -> Result<Vec<Option<VertexuseId>>> {
+pub(crate) fn loopuse_vertexuses(b: &Brep, lu: LoopuseId) -> Result<Vec<Option<VertexuseId>>> {
     match b.loopuse(lu)?.start {
         LoopuseStart::Vertexuse(vu) => Ok(vec![vu]),
         _ => Ok(eu1::loopuse_edgeuses(b, lu)?

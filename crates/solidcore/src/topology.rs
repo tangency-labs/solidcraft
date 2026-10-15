@@ -44,6 +44,7 @@ pub mod face;
 pub mod proto_topology;
 #[allow(clippy::module_inception)]
 pub mod topology;
+pub mod topology_traverser;
 pub mod vertex;
 pub mod vertexuse;
 

@@ -2632,7 +2632,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "10 fns; largest: SmFace::HasSeamProblem, SmFace::FindVertexSector, SmFace::GlobalLineIntersect, SmFace::IsConnectedTo; cycle back-edges (call into later units; stub or co-port): heal.face_props(2), query.face_p2(2), query.face_p3(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
+notes = "CO-PORTED in topology.topology_traverser (PR #113): SmFace::GetEdges (default arguments) -> topology::topology_traverser::face_edges; 10 fns; largest: SmFace::HasSeamProblem, SmFace::FindVertexSector, SmFace::GlobalLineIntersect, SmFace::IsConnectedTo; cycle back-edges (call into later units; stub or co-port): heal.face_props(2), query.face_p2(2), query.face_p3(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
 
 [[unit]]
 id = "query.face_p2"
@@ -2674,7 +2674,7 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "10 fns; largest: SmFace::CreateUVTrimCurves, SmFace::ComputeLoopOrientation, SmFace::FaceIntersect, SmFace::IsDegenerate; cycle back-edges (call into later units; stub or co-port): query.face_p2(2), query.face_p1(1), topology.brep_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "CO-PORTED in topology.topology_traverser (PR #113): SmFace::HasLaminaEdge -> topology::topology_traverser::has_lamina_edge; 10 fns; largest: SmFace::CreateUVTrimCurves, SmFace::ComputeLoopOrientation, SmFace::FaceIntersect, SmFace::IsDegenerate; cycle back-edges (call into later units; stub or co-port): query.face_p2(2), query.face_p1(1), topology.brep_p1(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "topology.topology_traverser"
@@ -2685,10 +2685,10 @@ soft_depends_on = ["geom.context", "geom.extent2d", "geom.tol", "geom.vector3d",
 est_lines = 784
 layer = 43
 tests = ["prog_test:my_test_tsurf_cyl_creation_2d", "prog_test:my_test_tsurf_cyl_creation_3d", "prog_test:my_test_tsurf_cyl_creation_fast", "prog_test:my_test_tsurf_creation", "SM_API_test:TestSmCreatePlanarCircle", "SM_API_test:TestIntersectionOutputStatus"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "14 fns; largest: sm_ShellConnectivity, SmTopologyTraverser::IsInnerShell, sm_CollectFaces, SmTopologyTraverser::FaceuseTraversal; cycle back-edges (call into later units; stub or co-port): topology.face_p3(1); unit-SCC #22 (220 units); 200 upstream test entry points reach this unit"
+notes = "PARTIAL (PR #113): difftest 909 cases, 882 passed, 0 failed, 27 deferred: topology.face_p1(5), topology.face_p4(15), topology.shell(7); exact traversal order and all face/edge/vertex/faceuse/vertexuse marks compared, 0 absolute floors; wire recursion replaced by an explicit continuation stack in the same order (6000-edge regression). No existing UNPORTED(topology.topology_traverser) back-edges. 14 fns; largest: sm_ShellConnectivity, SmTopologyTraverser::IsInnerShell, sm_CollectFaces, SmTopologyTraverser::FaceuseTraversal; cycle back-edges (call into later units; stub or co-port): topology.face_p3(1); unit-SCC #22 (220 units); 200 upstream test entry points reach this unit"
 
 [[unit]]
 id = "query.face_p3"
