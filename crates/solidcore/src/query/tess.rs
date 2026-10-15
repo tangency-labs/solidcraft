@@ -610,7 +610,9 @@ impl TessSrfCache {
                         None => s.base().clone(),
                     }
                 }),
-                SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => None,
+                SurfaceKind::CurveBounded(_)
+                | SurfaceKind::Step(_)
+                | SurfaceKind::SrfInVolume(_) => None,
             };
             if let Some(bss) = bss {
                 self.build_tree_with_subdivision(k, &bss)?;

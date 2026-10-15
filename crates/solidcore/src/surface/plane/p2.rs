@@ -1384,7 +1384,10 @@ pub(crate) fn global_surface_intersect(
         }
         // (the cone, cylinder, sphere and extrusion special cases need surface kinds
         // that are not ported yet)
-        SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {}
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {}
     }
 
     // If we're here, then analytic intersection were not found - do general intersection

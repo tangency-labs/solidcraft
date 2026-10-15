@@ -8,8 +8,11 @@
 //! `SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`, or `1 O[3] N[3]`: `SmPlane(O, N)`), a
 //! volume block (`n` maps, each `kind [T[12]] has_orient [O[12]]` with kind `0` a plain
 //! `SmVolume`, `1` an `SmTransform(ctx, origin, X, Y, &Z)` from the twelve numbers `T`,
-//! `2` a default `SmTwistVolume`, `3` a default `SmUnbendVolume`; `O` becomes the orient
-//! map; maps are chained with `AddNextMap(map, 2)`, as unit `surface.volume_p1`), then
+//! `2` a default `SmTwistVolume`, `3` a default `SmUnbendVolume`, `4` a default
+//! `SmBendVolume`, `5` / `6` / `7` the component constructors of `SmTwistVolume`
+//! (`origin axis mid period min_dist`), `SmUnbendVolume` and `SmBendVolume` (`center axis
+//! mid neutral_dist singularity_tol`), their eleven numbers `C` following the kind; `O`
+//! becomes the orient map (not for the component kinds, which build their own); maps are chained with `AddNextMap(map, 2)`, as unit `surface.volume_p1`), then
 //! `in_param copy_flag owner_flag` (the constructor's arguments). Every output starts
 //! with the status (`0` = `SM_SUCCESS`, else the `SmStatus`); the rest:
 //!
@@ -35,18 +38,23 @@
 //! | `SetVolume`   | `SetVolume`                                | volume block `copy owns`      | state |
 //! | `Mirror`      | `CreateMirrorSurface`                      | `O X Y`                       | (status only) |
 //! | `Exact`       | `MakeExactBSplineIfPossible`               |                               | (status only) |
+//! | `WriteDb`     | `WriteToDB` (ASCII, 17 digits; a generator helper) | `version`            | the bytes |
+//! | `ReadDb`      | `SmSrfInVolume::ReadFromDB` (static, ASCII) | `version nb B[nb]` (no object block) | `made [state]` |
 //!
 //! `uv` is two numbers, `dom` `u0 v0 u1 v1`, `ul vl oh nz` flags. A state is
 //! `owner_flag in_param` the base surface (`type has_nurb [n m p q r s cpts knots]`)
-//! and the volume chain (`n` then per map `type [matrix(16) if a transform] has_orient
-//! [O(16)] has_inv [I(16)]`).
+//! and the volume chain (`n` then per map `type [matrix(16) if a transform | two members
+//! if a twist, unbend or bend volume] has_orient [O(16)] has_inv [I(16)]`).
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: finite
 //! values, well-formed clamped B-splines, planes with a non-zero normal, derivative
 //! orders up to 3 (upstream's fixed arrays), a plain `SmVolume` head map only where
 //! nothing copies the volume (its `Copy` fails and the copy would share it),
-//! `STEPInversion` and `Transform` only through transform maps, domains and split
-//! parameters inside the base B-spline's domain, and placements with independent axes.
+//! `STEPInversion` through any map kind (no domain box reaches the volume's
+//! inverse solves), domains and split
+//! parameters inside the base B-spline's domain, placements with independent axes, and
+//! database text that is a complete ASCII record without a plain `SmVolume` or a
+//! B-spline volume (reading a plain volume fills a null volume).
 
 use crate::{call_with_buffer, FfiError};
 
@@ -58,6 +66,8 @@ pub const MAX_INDEX: usize = 16;
 pub const MAX_DEGREE: usize = 5;
 /// Largest coordinate magnitude.
 pub const MAX_COORD: f64 = 1.0e6;
+/// Most bytes of a database stream.
+pub const MAX_DB_BYTES: usize = 1 << 18;
 /// Largest derivative order `Evaluate` accepts.
 pub const MAX_DERIV: usize = 3;
 
@@ -87,6 +97,10 @@ pub enum Op {
     SetVolume,
     Mirror,
     Exact,
+    /// `SmSrfInVolume::ReadFromDB` (static, ASCII).
+    ReadDb = 40,
+    /// `WriteToDB` of an object block (a generator helper).
+    WriteDb = 41,
 }
 
 impl Op {
@@ -130,8 +144,8 @@ struct Block {
     head_base: bool,
     /// Every map is an `SmTransform`.
     all_transforms: bool,
-    /// The last map is an `SmTransform`.
-    last_transform: bool,
+    /// Some map is a plain `SmVolume`.
+    any_base: bool,
     /// The constructor copies the volume.
     copies_volume: bool,
 }
@@ -302,39 +316,51 @@ fn surface(rd: &mut Reader<'_>) -> Result<Option<[f64; 4]>, FfiError> {
     Ok(Some([u0, v0, u1, v1]))
 }
 
-/// A volume block; returns (head is a plain volume, all maps transforms, last map
-/// transform).
+/// A volume block; returns (head is a plain volume, all maps transforms, some map is a
+/// plain volume).
 fn volume(rd: &mut Reader<'_>) -> Result<(bool, bool, bool), FfiError> {
     let n = rd.index(MAX_MAPS)?;
     if n == 0 {
         return Err(bad("volume without maps"));
     }
-    let (mut head_base, mut all_transforms, mut last_transform) = (false, true, false);
+    let (mut head_base, mut all_transforms, mut any_base) = (false, true, false);
     for i in 0..n {
-        let kind = rd.index(3)?;
+        let kind = rd.index(7)?;
         if kind == 1 {
             for _ in 0..4 {
                 rd.vec3()?;
             }
         }
+        let component = kind >= 5;
+        if component {
+            // origin / center, axis and mid direction (non-zero), then two numbers
+            rd.vec3()?;
+            rd.nonzero3()?;
+            rd.nonzero3()?;
+            rd.finite()?;
+            rd.finite()?;
+        }
         if i == 0 {
             head_base = kind == 0;
         }
         all_transforms &= kind == 1;
-        last_transform = kind == 1;
+        any_base |= kind == 0;
         if rd.flag()? {
+            if component {
+                return Err(bad("component volume with an orient map"));
+            }
             for _ in 0..4 {
                 rd.vec3()?;
             }
         }
     }
-    Ok((head_base, all_transforms, last_transform))
+    Ok((head_base, all_transforms, any_base))
 }
 
 /// An object block (see the module docs).
 fn object_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
     let domain = surface(rd)?;
-    let (head_base, all_transforms, last_transform) = volume(rd)?;
+    let (head_base, all_transforms, any_base) = volume(rd)?;
     rd.flag()?;
     let copy_flag = rd.index(3)?;
     rd.index(3)?;
@@ -346,7 +372,7 @@ fn object_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
         domain,
         head_base,
         all_transforms,
-        last_transform,
+        any_base,
         copies_volume,
     })
 }
@@ -398,9 +424,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
             rd.finite()?;
         }
         Op::StepInv => {
-            if !c.all_transforms {
-                return Err(bad("step inversion: only transform maps"));
-            }
+            // `InvEvaluatePoint` / `InvMapPoint` run with no domain box here, so none of
+            // `surface.volume_p2`'s undefined-box paths (`inv_eval_undefined`,
+            // `inv_eval_unbend`) can be reached: every map kind is allowed.
             for _ in 0..4 {
                 rd.finite()?;
             }
@@ -426,9 +452,6 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
             }
         }
         Op::Transform => {
-            if !c.last_transform {
-                return Err(bad("transform: the last map must be a transform"));
-            }
             rd.placement()?;
             rd.flag()?;
             rd.vec3()?;
@@ -464,6 +487,13 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
             rd.flag()?;
             rd.flag()?;
         }
+        Op::ReadDb => return Err(bad("not an object op")),
+        Op::WriteDb => {
+            if c.any_base {
+                return Err(bad("write: a plain volume cannot be read back"));
+            }
+            rd.index(1 << 20)?;
+        }
         Op::Mirror => {
             if !c.all_transforms || c.copies_volume {
                 return Err(bad("mirror: only transform maps"));
@@ -480,6 +510,26 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// Whether `bytes` holds a digit run (as `operator>>` would extract it) equal to
+/// `SmVolume_TYPE` (`22001`) or `SmBSplineVolume_TYPE` (`22004`).
+fn has_unreadable_volume_type(bytes: &[u8]) -> bool {
+    let mut value: u64 = 0;
+    let mut in_run = false;
+    for &c in bytes.iter().chain(core::iter::once(&b' ')) {
+        if c.is_ascii_digit() {
+            value = value.saturating_mul(10).saturating_add(u64::from(c - b'0'));
+            in_run = true;
+        } else {
+            if in_run && (value == 22001 || value == 22004) {
+                return true;
+            }
+            value = 0;
+            in_run = false;
+        }
+    }
+    false
+}
+
 /// Checks `input` for `op` (layouts in the module docs).
 ///
 /// # Errors
@@ -487,6 +537,21 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
 /// [`FfiError::InvalidArgument`] for input [`eval`] rejects.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader { input, at: 0 };
+    if op == Op::ReadDb {
+        rd.index(1 << 20)?;
+        let nb = rd.index(MAX_DB_BYTES)?;
+        let mut bytes = Vec::new();
+        for _ in 0..nb {
+            bytes.push(rd.index(255)? as u8);
+        }
+        if !bytes.ends_with(b"\n") {
+            return Err(bad("read: incomplete ASCII record"));
+        }
+        if has_unreadable_volume_type(&bytes) {
+            return Err(bad("read: the text names a plain or B-spline volume"));
+        }
+        return rd.done();
+    }
     let c = object_block(&mut rd)?;
     validate_op(op, &mut rd, &c)?;
     rd.done()

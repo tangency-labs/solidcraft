@@ -12,8 +12,10 @@
 
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
+#include <SmBendVolume.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
+#include <SmDatabaseIO.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmNurbsSrf.h>
@@ -29,6 +31,9 @@
 #include <SmVolume.h>
 #include <nurbs.h>
 
+#include <algorithm>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace
@@ -56,6 +61,8 @@ enum : int32_t
     OP_SET_VOLUME = 17,
     OP_MIRROR = 18,
     OP_EXACT = 19,
+    OP_READ_DB = 40,  // static: SmSrfInVolume::ReadFromDB
+    OP_WRITE_DB = 41, // generator helper: WriteToDB of the object
 };
 
 enum : int64_t
@@ -64,6 +71,10 @@ enum : int64_t
     K_TRANSFORM = 1,
     K_TWIST = 2,
     K_UNBEND = 3,
+    K_BEND = 4,
+    K_TWIST_C = 5,  // SmTwistVolume(ctx, origin, axis, mid, period, min)
+    K_UNBEND_C = 6, // SmUnbendVolume(ctx, center, axis, mid, neutral, tol)
+    K_BEND_C = 7,   // SmBendVolume(ctx, center, axis, mid, neutral, tol)
 };
 
 // Read access to the protected members of any SmSrfInVolume.
@@ -141,7 +152,9 @@ SmTransform* read_transform(Rd& rd, const SmContext& ctx)
     return new (ctx) SmTransform(&ctx, o, x, y, &z);
 }
 
-// `n` maps `kind [T(12)] has_orient [O(12)]`, chained in order with AddNextMap(m, 2).
+// `n` maps `kind [T(12) | C(11)] has_orient [O(12)]` (kinds 5-7 are the component constructors
+// with `C` = `p0 axis mid a b`, and never have an orient map here), chained in order with
+// AddNextMap(m, 2).
 SmVolume* read_volume(Rd& rd, const SmContext& ctx)
 {
     int64_t n = rd.idx();
@@ -155,6 +168,24 @@ SmVolume* read_volume(Rd& rd, const SmContext& ctx)
         case K_TRANSFORM: v = read_transform(rd, ctx); break;
         case K_TWIST: v = new (ctx) SmTwistVolume(&ctx); break;
         case K_UNBEND: v = new (ctx) SmUnbendVolume(&ctx); break;
+        case K_BEND: v = new (ctx) SmBendVolume(&ctx); break;
+        case K_TWIST_C:
+        case K_UNBEND_C:
+        case K_BEND_C:
+        {
+            SmPoint3d p0 = rd.vec();
+            SmVector3d axis = rd.vec();
+            SmVector3d mid = rd.vec();
+            double a = rd.num();
+            double b = rd.num();
+            if (kind == K_TWIST_C)
+                v = new (ctx) SmTwistVolume(ctx, p0, axis, mid, a, b);
+            else if (kind == K_UNBEND_C)
+                v = new (ctx) SmUnbendVolume(ctx, p0, axis, mid, a, b);
+            else
+                v = new (ctx) SmBendVolume(ctx, p0, axis, mid, a, b);
+            break;
+        }
         default: v = new (ctx) SmVolume(&ctx); break;
         }
         if (rd.flag())
@@ -167,7 +198,9 @@ SmVolume* read_volume(Rd& rd, const SmContext& ctx)
     return head;
 }
 
-// The chain: `n` then per map `type [T(16)] has_orient [O(16)] has_inv [I(16)]`.
+// The chain: `n` then per map `type [T(16) | m0 m1] has_orient [O(16)] has_inv [I(16)]` (the
+// members of a twist, unbend or bend map: period and minimum, or neutral distance and
+// singularity tolerance).
 void put_volume(std::vector<double>& o, const SmVolume* v)
 {
     int64_t n = 0;
@@ -179,6 +212,21 @@ void put_volume(std::vector<double>& o, const SmVolume* v)
         o.push_back((double)p->GetType());
         if (p->GetType() == SmTransform_TYPE)
             put_mat(o, *(const SmTransform*)p);
+        else if (p->GetType() == SmTwistVolume_TYPE)
+        {
+            o.push_back(((const SmTwistVolume*)p)->GetTwistPeriodDist());
+            o.push_back(((const SmTwistVolume*)p)->GetPeriodMinDist());
+        }
+        else if (p->GetType() == SmUnbendVolume_TYPE)
+        {
+            o.push_back(((const SmUnbendVolume*)p)->GetUnbendNeutralDist());
+            o.push_back(((const SmUnbendVolume*)p)->GetSingularityTol());
+        }
+        else if (p->GetType() == SmBendVolume_TYPE)
+        {
+            o.push_back(((const SmBendVolume*)p)->GetBendNeutralDist());
+            o.push_back(((const SmBendVolume*)p)->GetSingularityTol());
+        }
         o.push_back(p->GetOrientMap() ? 1.0 : 0.0);
         if (p->GetOrientMap())
             put_mat(o, *p->GetOrientMap());
@@ -371,7 +419,9 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         ULONG hv = (ULONG)rd.idx();
         SmBoolean ul = rd.bflag(), vl = rd.bflag(), oh = rd.bflag();
         SmBoolean nz = op == OP_EVAL ? rd.bflag() : FALSE;
-        std::vector<SmVector3d> d((hu + 1) * (hv + 1));
+        // SmSrfInVolume::Evaluate also writes Duv one slot past a (0, 0) request with
+        // bOnlyUpperHalf == FALSE (the caller's array must hold it): size the buffer for it
+        std::vector<SmVector3d> d(std::max<size_t>((hu + 1) * (hv + 1), 32));
         SmStatus s = op == OP_EVAL ? c->Evaluate(uv, hu, hv, ul, vl, oh, d.data(), nz)
                                    : c->EvaluateSimple(uv, hu, hv, ul, vl, oh, d.data());
         o.push_back(st(s));
@@ -429,6 +479,22 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         double tol = rd.num();
         SmPoint2d uv;
         SmLocationType loc = SM_LT_EXTERIOR;
+        {
+            // upstream UB (plan/upstream-issues.md): STEPInversion reads sParamPoints[0] of the
+            // volume's inverse even when it succeeded with no points (a null dereference).
+            // Probe the same volume call and report SM_ERR, as the Rust port does.
+            SmBoolean ok = FALSE;
+            SmTArray<SmPoint3d> pts;
+            SmTArray<double> gaps;
+            SmStatus vs = c->GetInParamSpace()
+                              ? c->GetVolume()->InvEvaluatePoint(p, NULL, ok, pts, gaps)
+                              : c->GetVolume()->InvMapPoint(p, NULL, ok, pts, gaps);
+            if (vs == SM_SUCCESS && ok == TRUE && pts.GetSize() == 0)
+            {
+                o.push_back(st(SM_ERR));
+                break;
+            }
+        }
         SmStatus s = c->STEPInversion(dom, p, tol, uv, loc, NULL);
         o.push_back(st(s));
         if (s == SM_SUCCESS)
@@ -592,6 +658,50 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         o.push_back(st(s));
         break;
     }
+    case OP_WRITE_DB:
+    {
+        // generator helper: the bytes upstream WriteToDB produces (ASCII with 17 digits)
+        ULONG version = (ULONG)rd.idx();
+        std::ostringstream oss;
+        oss.precision(17);
+        SmDatabaseIOStream db(SM_ASCII, &oss);
+        SmStatus s = c->WriteToDB(db, version);
+        o.push_back(st(s));
+        std::string bytes = oss.str();
+        for (char ch : bytes)
+            o.push_back((double)(unsigned char)ch);
+        break;
+    }
+    default: o.push_back((double)SC_ERR_ARG); break;
+    }
+}
+
+void static_op(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
+{
+    switch (op)
+    {
+    case OP_READ_DB:
+    {
+        ULONG version = (ULONG)rd.idx();
+        int64_t nb = rd.idx();
+        std::string bytes;
+        for (int64_t i = 0; i < nb; i++)
+            bytes.push_back((char)(unsigned char)rd.idx());
+        std::istringstream iss(bytes);
+        SmDatabaseIOStream db(SM_ASCII, &iss);
+        SmSurface* c = NULL;
+        SmStatus s = SmSrfInVolume::ReadFromDB(SmSrfInVolume_TYPE, db, ctx, c, version);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS && c != NULL)
+        {
+            o.push_back(1.0);
+            put_state(o, (SmSrfInVolume*)c);
+            delete c;
+        }
+        else
+            o.push_back(0.0);
+        break;
+    }
     default: o.push_back((double)SC_ERR_ARG); break;
     }
 }
@@ -606,6 +716,11 @@ SC_EXPORT int32_t sc_surface_srf_in_volume_eval(int32_t op, const double* in, in
     SmContext ctx;
     Rd rd{in, 0};
     std::vector<double> o;
+    if (op >= OP_READ_DB && op != OP_WRITE_DB)
+    {
+        static_op(op, rd, ctx, o);
+        return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    }
     Built b = read_siv(rd, ctx);
     siv_op(op, rd, ctx, b, o);
     free_siv(b);

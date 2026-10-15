@@ -136,7 +136,8 @@ fn evaluate_geometric_at(surface: &Surface, uv: Point2) -> Result<GeometricPrope
         SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p3): SmSurface::EvaluateGeometric
             Err(SolidError::unported(
                 "SmSurface::EvaluateGeometric",
@@ -160,7 +161,8 @@ fn evaluate_normal_section(
         SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p3): SmSurface::EvaluateNormalSection
             Err(SolidError::unported(
                 "SmSurface::EvaluateNormalSection",

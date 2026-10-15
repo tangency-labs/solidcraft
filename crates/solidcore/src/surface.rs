@@ -14,6 +14,7 @@ pub mod cone;
 pub mod curve_bounded_surface;
 pub mod plane;
 pub mod srf_in_volume;
+pub mod surf_of_extrusion;
 pub mod surf_of_revolution;
 #[allow(clippy::module_inception)]
 pub mod surface;

@@ -870,7 +870,19 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let bspline: Option<std::borrow::Cow<'_, BSplineSurface>> = match self.surface().kind() {
             SurfaceKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
             SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
-            SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => None,
+            // GetOrCreateGwNurbPointer: SmSurfOfRevolution::MakeNurb when it has none
+            SurfaceKind::SurfOfRevolution(s) => {
+                if s.base().gw_nurb().is_some() {
+                    Some(std::borrow::Cow::Borrowed(s.base()))
+                } else {
+                    let mut tmp = (**s).clone();
+                    tmp.make_nurb(k)?;
+                    Some(std::borrow::Cow::Owned(tmp.base().clone()))
+                }
+            }
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
+                None
+            }
         };
         let (u_count, v_count, beziers) = if let Some(b) = bspline {
             let nurb = b

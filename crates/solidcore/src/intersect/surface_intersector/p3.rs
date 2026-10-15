@@ -1315,7 +1315,8 @@ fn surface_is_singularity(surface: &Surface, _uv: Point2) -> Result<bool> {
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
             Err(SolidError::unported(
                 "SmSurface::IsSingularity",

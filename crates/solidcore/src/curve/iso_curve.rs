@@ -422,10 +422,9 @@ fn surface_read_from_db(
             "SmSurface virtuals of an SmSurfOfRevolution",
             "curve.iso_curve",
         )),
-        // UNPORTED(surface.surface_p1): SmSurface dispatch for an SmSrfInVolume
         SurfaceKind::SrfInVolume(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmSrfInVolume",
-            "surface.surface_p1",
+            "curve.iso_curve",
         )),
     }
 }

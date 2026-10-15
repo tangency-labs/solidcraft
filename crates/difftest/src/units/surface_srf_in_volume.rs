@@ -13,10 +13,19 @@
 //! `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust
 //! error upstream cannot produce) and the rest as `out`.
 //!
-//! Deferred cases: what reaches the unported volume functions (`InvEvaluatePoint`,
-//! `InvMapPoint`, `Mirror`, `MakeExactBSplineOutSurfaceFrom*Space`, `ReadFromDB`:
-//! `surface.volume_p2`), `SmSurface::operator==` (`surface.surface_p1`) and the plane's
-//! `Transform` / `TrimWithDomain` (`surface.plane_p2`). Every run has at least
+//! Deferred cases: `Mirror` and `MakeExactBSplineOutSurfaceFrom*Space` (in no unit in
+//! `units.json`: dispatch gaps), the plane's `Transform` / `TrimWithDomain`
+//! (`surface.plane_p2`) and the base surface's `STEPInversion`, which runs
+//! `SmSurface::GlobalPointSolve` (`surface.surface_p4`) once the volume inversion has
+//! succeeded. Volumes are chains of transform, plain, default and component
+//! twist / unbend / bend maps (the component constructors take a real axis, mid
+//! direction, period or neutral distance and tolerance). B-spline volumes are not
+//! built: they evaluate to `SM_ERR` on both sides (no `USE_VOLUMES` in the reference
+//! build). `STEPInversion` and `ReadFromDB` run through `surface.volume_p2`; a
+//! `ReadFromDB` case reads the text upstream's `WriteToDB` wrote for a generated object
+//! (no plain volume). Hand-built inline cases cover `Evaluate` of orders (0, 0) with
+//! `bOnlyUpperHalf == FALSE` and `Transform` on chains whose last map is not a
+//! transform. Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
 //! redrawn.
 
@@ -29,15 +38,18 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::transform::Transform;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
+use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
+use solidcore::surface::bend_volume::BendVolume;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::srf_in_volume::SrfInVolume;
 use solidcore::surface::surface::p2::{Surface, SurfaceKind};
 use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::unbend_volume::UnbendVolume;
 use solidcore::surface::volume::{Volume, VolumeKind};
+use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
 use solidcore::SolidError;
 use solidcore_ffi::units::surface_srf_in_volume::{self as ffi, Op};
 
@@ -46,7 +58,7 @@ use crate::runner::default_cases;
 use crate::units::surface_surface_cache_p1::{
     bss_of, gen_bss, gen_srf, gen_sub_dom, push_bss, srf, BssIn, InlineSrf, SrfIn,
 };
-use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
@@ -70,14 +82,30 @@ enum SurfIn {
 /// One map of a volume chain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MapIn {
-    /// `0` plain `SmVolume`, `1` `SmTransform`, `2` twist, `3` unbend.
+    /// `0` plain `SmVolume`, `1` `SmTransform`, `2` default twist, `3` default unbend,
+    /// `4` default bend, `5` / `6` / `7` the twist / unbend / bend component constructors.
     kind: u8,
+    /// The constructor arguments of kinds `5` to `7`: `[origin or center, axis, mid
+    /// direction]` and the two numbers (period and minimum, or neutral distance and
+    /// singularity tolerance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    comp: Option<CompIn>,
     /// The transform `[origin, X, Y, Z]` (kind `1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     t: Option<[[f64; 3]; 4]>,
     /// The orient transform `[origin, X, Y, Z]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     orient: Option<[[f64; 3]; 4]>,
+}
+
+/// The arguments of a component constructor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CompIn {
+    p: [f64; 3],
+    axis: [f64; 3],
+    mid: [f64; 3],
+    a: f64,
+    b: f64,
 }
 
 type Vol = Vec<MapIn>;
@@ -177,6 +205,12 @@ enum OpIn {
         y: [f64; 3],
     },
     Exact,
+    /// `SmSrfInVolume::ReadFromDB` of the text upstream's `WriteToDB` wrote for `siv`
+    /// (the object is only the text's source: neither side builds it).
+    ReadDb {
+        version: u64,
+        bytes: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +248,14 @@ fn vol_block(v: &mut Vec<f64>, vol: &Vol) {
         if m.kind == 1 {
             for r in m.t.unwrap_or_default() {
                 v.extend_from_slice(&r);
+            }
+        }
+        if m.kind >= 5 {
+            if let Some(c) = &m.comp {
+                v.extend_from_slice(&c.p);
+                v.extend_from_slice(&c.axis);
+                v.extend_from_slice(&c.mid);
+                v.extend([c.a, c.b]);
             }
         }
         match &m.orient {
@@ -257,12 +299,18 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::SetVolume { .. } => Op::SetVolume,
         OpIn::Mirror { .. } => Op::Mirror,
         OpIn::Exact => Op::Exact,
+        OpIn::ReadDb { .. } => Op::ReadDb,
     }
 }
 
 fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let op = op_of(&i.op);
     let mut v = Vec::new();
+    if let OpIn::ReadDb { version, bytes } = &i.op {
+        v.extend([*version as f64, bytes.len() as f64]);
+        v.extend(bytes.iter().map(|&x| f64::from(x)));
+        return Ok((op, v));
+    }
     siv_block(&mut v, &i.siv)?;
     match &i.op {
         OpIn::Info { uv, types } => {
@@ -308,7 +356,7 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             v.push(*tol);
         }
         OpIn::Reverse { v_dir } => v.push(b(*v_dir)),
-        OpIn::SwapUv | OpIn::Copy | OpIn::MakeOwner | OpIn::Exact => {}
+        OpIn::SwapUv | OpIn::Copy | OpIn::MakeOwner | OpIn::Exact | OpIn::ReadDb { .. } => {}
         OpIn::Trim { dom } => v.extend_from_slice(dom),
         OpIn::Transform {
             origin,
@@ -390,6 +438,26 @@ fn build_volume(v: &Vol) -> Result<Volume, HarnessError> {
             )),
             2 => VolumeKind::Twist(TwistVolume::new()),
             3 => VolumeKind::Unbend(UnbendVolume::new()),
+            4 => VolumeKind::Bend(BendVolume::new()),
+            5..=7 => {
+                // the component constructors build the volume with its own orient map
+                let c = m
+                    .comp
+                    .as_ref()
+                    .ok_or_else(|| harness("component map without comp"))?;
+                let (p, axis, mid) = (v3(c.p), v3(c.axis), v3(c.mid));
+                let mut vol = match m.kind {
+                    5 => TwistVolume::create(p, axis, mid, c.a, c.b),
+                    6 => UnbendVolume::create(p, axis, mid, c.a, c.b),
+                    _ => BendVolume::create(p, axis, mid, c.a, c.b),
+                };
+                if let Some(n) = next.take() {
+                    vol.add_next_map(n, 2)
+                        .map_err(|e| harness(format!("chain: {e}")))?;
+                }
+                next = Some(vol);
+                continue;
+            }
             k => return Err(harness(format!("bad map kind {k}"))),
         };
         next = Some(Volume::with_maps(kind, m.orient.map(transform_of), next));
@@ -476,8 +544,12 @@ fn put_volume(o: &mut Vec<f64>, v: &Volume) {
     o.push(maps.len() as f64);
     for m in maps {
         o.push(m.type_code() as f64);
-        if let VolumeKind::Transform(t) = m.kind() {
-            put_mat(o, t);
+        match m.kind() {
+            VolumeKind::Transform(t) => put_mat(o, t),
+            VolumeKind::Twist(t) => o.extend([t.twist_period_dist(), t.period_min_dist()]),
+            VolumeKind::Unbend(u) => o.extend([u.unbend_neutral_dist(), u.singularity_tol()]),
+            VolumeKind::Bend(bd) => o.extend([bd.bend_neutral_dist(), bd.singularity_tol()]),
+            _ => {}
         }
         match m.orient_map() {
             Some(t) => {
@@ -596,6 +668,24 @@ fn put_derivs(o: &mut Vec<f64>, d: &[Vec<Vec3>], hu: usize, hv: usize, upper: bo
 #[allow(clippy::too_many_lines)]
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o: Vec<f64> = Vec::new();
+    let k = Kernel::default();
+    if let OpIn::ReadDb { version, bytes } = &i.op {
+        let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(bytes.clone()));
+        match SrfInVolume::read_from_db(&k, &mut db, *version) {
+            Ok(c) => {
+                o.extend([0.0, 1.0]);
+                put_state(&mut o, &c);
+            }
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Ok(d);
+                }
+                // status, not made
+                o.extend([status(&e), 0.0]);
+            }
+        }
+        return Ok(to_output(&o));
+    }
     let mut s = Surface::from(build(&i.siv)?);
     match &i.op {
         OpIn::Info { uv, types } => {
@@ -612,8 +702,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             put_dom(&mut o, &step);
             put_dom(&mut o, &max);
             o.extend([b(c.owns_surface()), b(c.owns_volume())]);
-            let a = s.convert_uv_from_step_to_nurbs(pt(*uv));
-            let e = s.convert_uv_from_nurbs_to_step(pt(*uv));
+            let a = tri!(o, s.convert_uv_from_step_to_nurbs(&k, pt(*uv)));
+            let e = tri!(o, s.convert_uv_from_nurbs_to_step(&k, pt(*uv)));
             o.extend([0.0, a.x, a.y, 0.0, e.x, e.y]);
             for &t in types {
                 o.push(b(tri!(o, s.is_kind_of(t))));
@@ -674,22 +764,22 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.extend(m.iter().map(|&x| x as f64));
         }
         OpIn::StepInv { dom, p, tol } => {
-            let (uv, loc) = tri!(o, s.step_inversion(&dom_of(*dom), v3(*p), *tol, None));
+            let (uv, loc) = tri!(o, s.step_inversion(&k, &dom_of(*dom), v3(*p), *tol, None));
             o.extend([0.0, uv.x, uv.y, f64::from(loc as i32)]);
         }
         OpIn::Reverse { v_dir } => {
-            let r = s.reverse(param(*v_dir));
+            let r = s.reverse(&k, param(*v_dir));
             st!(o, r);
             put_state(&mut o, siv_of(&s)?);
         }
         OpIn::SwapUv => {
-            let r = s.swap_uv();
+            let r = s.swap_uv(&k);
             st!(o, r);
             put_state(&mut o, siv_of(&s)?);
         }
         OpIn::Trim { dom } => {
             let mut d = dom_of(*dom);
-            let r = s.trim_with_domain(&mut d);
+            let r = s.trim_with_domain(&k, &mut d);
             st!(o, r);
             put_dom(&mut o, &d);
             put_state(&mut o, siv_of(&s)?);
@@ -701,7 +791,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             scale,
         } => {
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
-            let r = s.transform(&ax, scale.map(v3));
+            let r = s.transform(&k, &ax, scale.map(v3));
             st!(o, r);
             put_state(&mut o, siv_of(&s)?);
         }
@@ -769,6 +859,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             tri!(o, siv_of(&s)?.make_exact_b_spline_if_possible());
             o.push(0.0);
         }
+        OpIn::ReadDb { .. } => return Err(harness("static op")),
     }
     Ok(to_output(&o))
 }
@@ -829,21 +920,67 @@ fn gen_transform(rng: &mut Rng) -> [[f64; 3]; 4] {
     }
 }
 
+/// The arguments of a component constructor: a real axis, a mid direction (sometimes
+/// not perpendicular to the axis, which upstream repairs), a period or neutral distance
+/// of useful size and a small tolerance.
+fn gen_comp(rng: &mut Rng, kind: u8) -> CompIn {
+    let axis = if rng.chance(0.4) {
+        [0.0, 0.0, 1.0]
+    } else {
+        let a = coord(rng, 1.0);
+        if a.iter().map(|c| c * c).sum::<f64>() < 1e-2 {
+            [0.0, 1.0, 0.0]
+        } else {
+            a
+        }
+    };
+    let mid = if rng.chance(0.4) {
+        [1.0, 0.0, 0.0]
+    } else {
+        let m = coord(rng, 1.0);
+        if m.iter().map(|c| c * c).sum::<f64>() < 1e-2 {
+            [1.0, 0.0, 0.0]
+        } else {
+            m
+        }
+    };
+    let (a, b) = if kind == 5 {
+        // twist period and minimum period distance
+        (rng.uniform(0.5, 8.0), rng.uniform(1e-6, 0.3))
+    } else {
+        // neutral distance and singularity tolerance
+        (rng.uniform(0.2, 6.0), rng.uniform(1e-6, 0.3))
+    };
+    CompIn {
+        p: coord(rng, 3.0),
+        axis,
+        mid,
+        a,
+        b,
+    }
+}
+
 fn gen_vol(rng: &mut Rng) -> Vol {
     let n = 1 + rng.below(3) as usize;
     (0..n)
         .map(|_| {
-            let roll = rng.below(40);
-            let kind = match roll {
-                0..=33 => 1,
-                34 | 35 => 0,
-                36 | 37 => 2,
-                _ => 3,
+            let kind = match rng.below(60) {
+                0..=27 => 1,
+                28 | 29 => 0,
+                30 => 2,
+                31 => 3,
+                32 => 4,
+                33..=40 => 5,
+                41..=48 => 6,
+                _ => 7,
             };
+            let component = kind >= 5;
             MapIn {
                 kind,
+                comp: component.then(|| gen_comp(rng, kind)),
                 t: (kind == 1).then(|| gen_transform(rng)),
-                orient: rng.chance(0.4).then(|| gen_transform(rng)),
+                // a component constructor builds its own orient map
+                orient: (!component && rng.chance(0.4)).then(|| gen_transform(rng)),
             }
         })
         .collect()
@@ -880,7 +1017,8 @@ fn gen_orders(rng: &mut Rng) -> (usize, usize, bool) {
             let n = rng.below(4) as usize;
             (n, n, true)
         }
-        12..=14 => (1, 1, false),
+        12 => (0, 0, false),
+        13..=14 => (1, 1, false),
         15..=17 => {
             let n = 1 + rng.below(3) as usize;
             if rng.chance(0.5) {
@@ -903,7 +1041,32 @@ fn gen_placement(rng: &mut Rng) -> ([f64; 3], [f64; 3], [f64; 3]) {
     }
 }
 
+/// A database record upstream's `WriteToDB` wrote for a random object (no plain volume:
+/// reading one fills a null volume).
+fn gen_read_db(rng: &mut Rng) -> Option<Inputs> {
+    let (siv, _) = gen_siv(rng);
+    let version = *rng.choose(&[30u64, 33, 40])?;
+    let mut v = Vec::new();
+    siv_block(&mut v, &siv).ok()?;
+    v.push(version as f64);
+    let out = ffi::eval(Op::WriteDb, &v).ok()?;
+    let (&status, bytes) = out.split_first()?;
+    if status != 0.0 {
+        return None;
+    }
+    let bytes: Vec<u8> = bytes.iter().map(|&x| x as u8).collect();
+    Some(Inputs {
+        siv,
+        op: OpIn::ReadDb { version, bytes },
+    })
+}
+
 fn gen_case(rng: &mut Rng) -> Inputs {
+    if rng.chance(0.04) {
+        if let Some(i) = gen_read_db(rng) {
+            return i;
+        }
+    }
     let (siv, dom) = gen_siv(rng);
     let uv = gen_uv(rng, dom);
     let op = match rng.below(100) {
@@ -1020,6 +1183,112 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     Inputs { siv, op }
 }
 
+/// Hand-built cases for what the generator reaches only by chance: `Evaluate` of a
+/// point (orders 0, 0) with `bOnlyUpperHalf == FALSE`, which upstream completes with
+/// the second-derivative branch, and `Transform` on a chain whose last map is not an
+/// `SmTransform` (upstream appends a copied transform).
+fn inline_cases() -> Result<Vec<Case>, HarnessError> {
+    let plane = SurfIn::Plane {
+        o: [0.0, 0.0, 0.0],
+        n: [0.0, 0.0, 1.0],
+    };
+    let comp = |kind: u8, a: f64| MapIn {
+        kind,
+        comp: Some(CompIn {
+            p: [0.5, -0.25, 0.0],
+            axis: [0.0, 0.0, 1.0],
+            mid: [1.0, 0.0, 0.0],
+            a,
+            b: 1e-3,
+        }),
+        t: None,
+        orient: None,
+    };
+    let transform = MapIn {
+        kind: 1,
+        comp: None,
+        t: Some([
+            [1.0, 2.0, 3.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]),
+        orient: None,
+    };
+    let chains: Vec<(&str, Vol)> = vec![
+        ("twist", vec![comp(5, 4.0)]),
+        ("bend", vec![comp(7, 2.0)]),
+        ("unbend", vec![comp(6, 3.0)]),
+        ("twist_transform", vec![comp(5, 4.0), transform.clone()]),
+        ("transform_bend", vec![transform.clone(), comp(7, 2.0)]),
+        (
+            "bend_twist_unbend",
+            vec![comp(7, 2.0), comp(5, 4.0), comp(6, 3.0)],
+        ),
+    ];
+    let place = || OpIn::Transform {
+        origin: [1.0, -2.0, 0.5],
+        x: [0.0, 1.0, 0.0],
+        y: [-1.0, 0.0, 0.0],
+        scale: Some([2.0, 2.0, 2.0]),
+    };
+    let mut out = Vec::new();
+    for (name, vol) in chains {
+        for in_param in [false, true] {
+            let siv = SivIn {
+                surface: plane.clone(),
+                volume: vol.clone(),
+                in_param,
+                copy: 0,
+                owner: 3,
+            };
+            let ops = [
+                (
+                    "eval00_all",
+                    OpIn::Eval {
+                        uv: [0.3, 0.7],
+                        hu: 0,
+                        hv: 0,
+                        ul: true,
+                        vl: true,
+                        oh: false,
+                        nz: false,
+                    },
+                ),
+                (
+                    "eval00_all_nz",
+                    OpIn::Eval {
+                        uv: [0.3, 0.7],
+                        hu: 0,
+                        hv: 0,
+                        ul: false,
+                        vl: true,
+                        oh: false,
+                        nz: true,
+                    },
+                ),
+                ("transform", place()),
+            ];
+            for (op_name, op) in ops {
+                let inputs = Inputs {
+                    siv: siv.clone(),
+                    op,
+                };
+                let (o, input) = cpp_input(&inputs)?;
+                ffi::validate(o, &input).map_err(|e| harness(format!("inline case: {e}")))?;
+                out.push(Case {
+                    unit: "surface.srf_in_volume".to_string(),
+                    name: format!("inline_{name}_{}_{op_name}", if in_param { "param" } else { "in" }),
+                    source: CaseSource::Inline,
+                    inputs: serde_json::to_value(inputs)
+                        .map_err(|e| harness(format!("inline case: {e}")))?,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "surface.srf_in_volume"
@@ -1043,7 +1312,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        cases.extend(inline_cases()?);
+        Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

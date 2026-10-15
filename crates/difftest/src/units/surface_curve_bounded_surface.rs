@@ -778,7 +778,11 @@ fn st<T>(r: solidcore::Result<T>) -> solidcore::Result<f64> {
 fn the_cbs(s: &Surface) -> solidcore::Result<&CurveBoundedSurface> {
     match s.kind() {
         SurfaceKind::CurveBounded(c) => Ok(c),
-        SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SrfInVolume(_) => {
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::Plane(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             Err(SolidError::sm_err("difftest: not a curve bounded surface"))
         }
     }

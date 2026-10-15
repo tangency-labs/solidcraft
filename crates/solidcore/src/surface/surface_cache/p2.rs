@@ -542,8 +542,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // node's subdomain.
         let cache_surface = self.surface().clone();
         let surface_to_test: Option<&Surface> = match cache_surface.kind() {
-            SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) => None,
-            SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => Some(&cache_surface),
+            SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SurfOfRevolution(_) => {
+                None
+            }
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
+                Some(&cache_surface)
+            }
         };
 
         let mut subdivide = false;
@@ -918,7 +922,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 let patch = match surface.kind() {
                     SurfaceKind::BSpline(b) => b.copy_sub_patch(&node_uv),
                     SurfaceKind::Plane(p) => p.base().copy_sub_patch(&node_uv),
-                    SurfaceKind::CurveBounded(_) | SurfaceKind::SrfInVolume(_) => {
+                    SurfaceKind::SurfOfRevolution(s) => s.base().copy_sub_patch(&node_uv),
+                    SurfaceKind::CurveBounded(_)
+                    | SurfaceKind::Step(_)
+                    | SurfaceKind::SrfInVolume(_) => {
                         return Err(invalid(OP_BLOCK, "node surface is not a B-spline"))
                     }
                 };

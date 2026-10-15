@@ -1106,7 +1106,9 @@ fn out_of_bounds(surface: &Surface) -> Cow<'_, Surface> {
             *s.base_mut().out_of_bounds_enabled_mut() = true;
             Cow::Owned(Surface::from(s))
         }
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => Cow::Borrowed(surface),
+        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
+            Cow::Borrowed(surface)
+        }
     }
 }
 

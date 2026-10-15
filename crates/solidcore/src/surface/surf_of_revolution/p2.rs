@@ -615,7 +615,10 @@ impl SurfOfRevolution {
                 out = found;
             }
             // (IntersectWithSphere / IntersectWithCone once those kinds exist)
-            SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {}
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::SrfInVolume(_) => {}
         }
 
         // If we're here, then analytic intersections were not found
@@ -679,7 +682,8 @@ impl SurfOfRevolution {
             }
             SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_) => return Ok(None),
+            | SurfaceKind::Step(_)
+            | SurfaceKind::SrfInVolume(_) => return Ok(None),
         };
         Self::is_nurb_surface_surf_of_revolution_base(k, tgt, tolerance_scale)
     }

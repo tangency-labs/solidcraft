@@ -809,7 +809,8 @@ fn is_singularity(surface: &Surface, _uv: Point2, _tol: f64) -> Result<(bool, Su
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
             Err(SolidError::unported(
                 "SmSurface::IsSingularity",
@@ -827,7 +828,8 @@ fn is_on_seam(surface: &Surface, _uv: Point2) -> Result<(bool, SurfParamType)> {
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_) => {
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p4): SmSurface::IsOnSeam
             Err(SolidError::unported(
                 "SmSurface::IsOnSeam",

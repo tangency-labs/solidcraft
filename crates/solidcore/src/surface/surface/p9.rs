@@ -52,7 +52,7 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
-        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
             // UNPORTED(surface.surface_p5): SmSurface::CreateIsoParametricCurve
             Err(SolidError::unported(
                 "SmSurface::CreateIsoParametricCurve",
