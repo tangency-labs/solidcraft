@@ -2825,10 +2825,10 @@ soft_depends_on = ["geom.extent2d", "geom.object", "intersect.curve_class_p2", "
 est_lines = 1410
 layer = 46
 tests = ["prog_test:my_test_trimming_tools", "SM_API_test:TestSmTrimSurfaceWith3dCurves", "prog_test:my_test_closed_sphere_properties", "prog_test:my_test_squeeze_edge_tracks_removal", "prog_test:my_test_missing_poles_refreshes_all_faces", "SM_API_test:TestSmHealBrep"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "25 fns; largest: SmFaceProps::SetProps_Stage3, SmFaceProps::SetProps_Stage2, SmLoopProps::SetProps, SmFaceProps::ReSet; unit-SCC #22 (220 units); 100 upstream test entry points reach this unit"
+notes = "PARTIAL: difftest 1508 cases (8 fixture + 1500 generated: SetProps/Gaps/Stage2/Stage3 scripts on a one-face plane B-rep with seeded state, ReSet, HasProps, HasProblems, IsPoint3dOnPole, loop tree build + FindItem), 1497 pass bit-identical (max_rel_err 0), 0 failed, 11 deferred (query.face_p4 11: SmFace::ClassifyLoops in SetProps_Stage3); --perturb 1497/1497 detected. Wired: topology.loopuse (PR #102), SmSurface::GetSingularities (surface.surface_p3), SmFace::GetVertices (query.face_p2 co-port). Remaining UNPORTED stubs: topology.face_p4 HasSeamProblem, query.face_p4 ClassifyLoops, intersect.curve_class_p2 CurveClassification::ReSet (dead branch). No UNPORTED(heal.face_props) stubs existed on main. FaceProps<O> is generic over a LoopObject handle; the loop tree is an arena (Looptree). CO-PORTED in heal.face_props (PR #122): SmMixedLinkType, SmTriedLinkType, SmHealerOpType (SmHealProbArray.h) -> heal::face_props::{MixedLinkType, TriedLinkType, HealerOpType} (owner heal.heal_data_p2 extends); SmContainmentType (SmTypes.h) -> heal::face_props::ContainmentType. 25 fns; largest: SmFaceProps::SetProps_Stage3, SmFaceProps::SetProps_Stage2, SmLoopProps::SetProps, SmFaceProps::ReSet; unit-SCC #22 (220 units); 100 upstream test entry points reach this unit"
 
 [[unit]]
 id = "topology.brep_cache"

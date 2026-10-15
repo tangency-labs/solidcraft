@@ -1,0 +1,411 @@
+{
+ "cases": [
+  {
+   "name": "gaps",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      2,
+      26,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage2",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage3",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      6,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage2_early_op",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      2,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage3_early_op",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      6,
+      6,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reset_has_problems",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      2,
+      26,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      2,
+      1,
+      0,
+      0
+     ],
+     [
+      3,
+      7,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      5,
+      3,
+      0,
+      2,
+      0
+     ],
+     [
+      5,
+      4,
+      3,
+      0.5,
+      0
+     ],
+     [
+      5,
+      1,
+      0,
+      0.001,
+      0
+     ],
+     [
+      4,
+      0.5,
+      0.25,
+      -0.5,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tree",
+   "upstream_ref": "source/SMLib/src/SmLoopProps.cpp:FindItem",
+   "inputs": {
+    "kind": "tree",
+    "items": [
+     [
+      0,
+      -2
+     ],
+     [
+      1,
+      -2
+     ],
+     [
+      2,
+      -2
+     ],
+     [
+      3,
+      25
+     ],
+     [
+      4,
+      -1
+     ]
+    ],
+    "links": [
+     [
+      1,
+      0,
+      1
+     ],
+     [
+      0,
+      0,
+      2
+     ],
+     [
+      0,
+      0,
+      3
+     ],
+     [
+      0,
+      3,
+      4
+     ]
+    ],
+    "finds": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      2
+     ],
+     [
+      0,
+      3
+     ],
+     [
+      0,
+      25
+     ],
+     [
+      0,
+      4
+     ],
+     [
+      0,
+      9
+     ],
+     [
+      3,
+      -1
+     ]
+    ]
+   }
+  }
+ ]
+}
