@@ -354,7 +354,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             }
             OpIn::SeamsUv { uv } => {
                 let mut g = global()?;
-                let r = g.check_guess_for_seams(p2(*uv))?;
+                let r = g.check_guess_for_seams(&Kernel::default(), p2(*uv))?;
                 o.push(0.0);
                 push2(&mut o, r);
             }

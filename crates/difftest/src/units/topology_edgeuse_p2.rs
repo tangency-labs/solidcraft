@@ -400,7 +400,7 @@ fn run_rust_op(
             step_off,
             tol_deg,
             ..
-        } => eu2::is_convex_radial_sector(b, eu, *n, *step_off, *tol_deg).map(|r| vec![flag(r)]),
+        } => eu2::is_convex_radial_sector(&Kernel::default(), b, eu, *n, *step_off, *tol_deg).map(|r| vec![flag(r)]),
         OpIn::StepOff {
             frac,
             dist,
@@ -419,7 +419,7 @@ fn run_rust_op(
                 Ok(None) => Ok(*frac),
                 Err(e) => Err(e),
             };
-            t.and_then(|t| eu2::evaluate_binormal_step_off(b, eu, t, *dist, &opts))
+            t.and_then(|t| eu2::evaluate_binormal_step_off(&Kernel::default(), b, eu, t, *dist, &opts))
                 .map(|r| {
                     let mut v = vec![0.0];
                     v.extend([r.point.x, r.point.y, r.point.z]);

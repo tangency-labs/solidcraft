@@ -450,7 +450,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::Refine { uv } => {
                 let mut g = global()?;
                 let mut uv = p2(*uv);
-                match g.refine_guess(&mut uv) {
+                match g.refine_guess(&Kernel::default(), &mut uv) {
                     Ok(()) => o.push(0.0),
                     Err(e) => o = err_record(&e)?,
                 }

@@ -135,7 +135,7 @@ use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
 use crate::error::{ignored, Result, SolidError, SM_ERR};
 use crate::geom::assert_array::labels::CURVE_CLASSIFICATION_TYPE;
 use crate::geom::extent1d::Extent1d;
-use crate::geom::global_solver::SolverOperation;
+use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tol::{
@@ -1451,8 +1451,8 @@ pub fn get_cci_surface_gaps<S: Copy>(
         } else {
             // get classCurvePoint/surf dist without checking trim boundaries
             let _cache = surface_cache::<()>(k, surface, None)?;
-            let _size = surface_approximate_size(surface)?;
-            match surface_global_point_solve(surface, point)? {
+            let size = surface_approximate_size(surface)?;
+            match surface_global_point_solve(k, surface, size, point)? {
                 Some(s) => Some(s),
                 None => return Ok(out),
             }
@@ -1977,14 +1977,42 @@ fn surface_approximate_size(surface: &Surface) -> Result<Vec2> {
     }
 }
 
-/// `SmSurface::GlobalPointSolve(domain, SM_SO_MINIMIZE, point, tol, &maxDrop,
-/// SM_SR_SINGLE, sols)`: the gap and UV point of the first solution, if any.
-fn surface_global_point_solve(_surface: &Surface, _point: Point3) -> Result<Option<(f64, Point2)>> {
-    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::GlobalPointSolve",
-        "surface.surface_p4",
-    ))
+/// `SmSurface::GlobalPointSolve(domain, SM_SO_MINIMIZE, point, 0.001 * |size|, &maxDrop,
+/// SM_SR_SINGLE, sols)` over the natural domain (`maxDrop` is `1.0`): the gap and UV
+/// point of the first solution, if any. The status is ignored (`SmCurveClass.cpp:1045`
+/// checks only the solution count), so a failed solve is an empty result. Upstream's
+/// temporary switch-off of the surface cache's point test (`m_bPointTestEnabled`,
+/// `:1040`) is moot here: the solver builds no cache for a surface that owns no face,
+/// and a face-owned one is `Unported` in the solver (`UNPORTED(query.face_p2)`; the
+/// switch must be added with it).
+fn surface_global_point_solve(
+    k: &Kernel,
+    surface: &Surface,
+    size: Vec2,
+    point: Point3,
+) -> Result<Option<(f64, Point2)>> {
+    let tol = 0.001 * size.length();
+    let solutions = ignored(
+        surface.global_point_solve::<crate::surface::surface::p4::NoObject>(
+            k,
+            &surface.natural_uv_domain(),
+            SolverOperation::Minimize,
+            point,
+            tol,
+            Some(1.0),
+            SolutionRequested::Single,
+        ),
+    )?
+    .unwrap_or_default();
+    Ok(solutions.as_slice().first().map(|s| {
+        (
+            s.start.solution_value,
+            Point2::new(
+                s.start.parameters.first().copied().unwrap_or(0.0),
+                s.start.parameters.get(1).copied().unwrap_or(0.0),
+            ),
+        )
+    }))
 }
 
 #[cfg(test)]

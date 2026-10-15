@@ -452,10 +452,10 @@ impl SurfPtGlobalSolver<'_> {
     ///
     /// Those of the surface derivatives (upstream's `SER`), the objective function
     /// and the seam checks.
-    pub fn refine_guess(&mut self, uv_guess: &mut Point2) -> Result<()> {
+    pub fn refine_guess(&mut self, k: &Kernel, uv_guess: &mut Point2) -> Result<()> {
         // Note: don't use a Newton step here, we're presumably not close enough.
         // Try a couple of plane steps.
-        *uv_guess = self.seams_status_ignored(*uv_guess)?; // Since we do this on subsequent guesses...
+        *uv_guess = self.seams_status_ignored(k, *uv_guess)?; // Since we do this on subsequent guesses...
 
         let mut this_uv = *uv_guess;
         let mut next_uv = *uv_guess;
@@ -581,7 +581,7 @@ impl SurfPtGlobalSolver<'_> {
 
             next_uv = domain.clamp_point(next_uv);
 
-            next_uv = self.seams_status_ignored(next_uv)?;
+            next_uv = self.seams_status_ignored(k, next_uv)?;
         }
 
         // We didn't return with success during the loop.
@@ -597,8 +597,8 @@ impl SurfPtGlobalSolver<'_> {
     }
 
     /// `CheckGuessForSeams(rUVGuess)` with its status ignored: the input on failure.
-    fn seams_status_ignored(&mut self, uv: Point2) -> Result<Point2> {
-        match self.check_guess_for_seams(uv) {
+    fn seams_status_ignored(&mut self, k: &Kernel, uv: Point2) -> Result<Point2> {
+        match self.check_guess_for_seams(k, uv) {
             Ok(u) => Ok(u),
             Err(e) if e.is_unported() => Err(e),
             Err(_) => Ok(uv),
@@ -1013,14 +1013,14 @@ impl SurfPtGlobalSolver<'_> {
 
             // Refine the guess (status ignored, as upstream).
             let mut uv_guess = rough.uv;
-            if let Err(e) = self.refine_guess(&mut uv_guess) {
+            if let Err(e) = self.refine_guess(k, &mut uv_guess) {
                 if e.is_unported() {
                     return Err(e);
                 }
             }
 
             // We have to check here for seams: start on the proper side.
-            uv_guess = self.seams_status_ignored(uv_guess)?;
+            uv_guess = self.seams_status_ignored(k, uv_guess)?;
 
             // Do the local solve.
             let pt_for_local = if op == SolverOperation::Signed3dDirectedMaximize {
@@ -2085,9 +2085,9 @@ mod tests {
             SolverOperation::Minimize,
             Point3::new(0.3, 0.6, 1.0),
         );
-        // the seam test of a B-spline is not ported yet
+        // an interior point is not on a seam: the guess is refined in place
         let mut uv = Point2::new(0.5, 0.5);
-        assert!(g.refine_guess(&mut uv).unwrap_err().is_unported());
+        g.refine_guess(&k, &mut uv).unwrap();
 
         let mut best = BIG_DOUBLE;
         let mut guess = Point2::new(0.0, 0.0);

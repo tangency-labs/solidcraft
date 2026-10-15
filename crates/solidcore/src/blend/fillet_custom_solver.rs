@@ -57,8 +57,7 @@
 //!   [`SolidError::InvalidInput`]. `rIntervals` must have room for the two new
 //!   intervals, as upstream's fixed-size `SmExtentNd`.
 //! - **Unported callees.** `SmConstantRadiusAssistedFS::GuessPointOnPlaneSolve`
-//!   (`blend.fillet_standard_solver_p2`), `SmSurface::GlobalPointSolve`
-//!   (`surface.surface_p4`), `SmSurface::LocalPointSolve` (`surface.surface_p5`) and
+//!   (`blend.fillet_standard_solver_p2`), `SmSurface::LocalPointSolve` (`surface.surface_p5`) and
 //!   the offset surface evaluations (`surface.surface_p5`, `surface.offset_surface`)
 //!   return [`SolidError::Unported`].
 
@@ -225,16 +224,25 @@ fn offset_local_point_solve(
 /// `GlobalPointSolve(domain, SM_SO_MINIMIZE, point, SM_EFF_ZERO_SQ, NULL, SM_SR_SINGLE,
 /// ..)` of a base surface: the UV points of the solutions.
 fn surface_global_point_solve(
-    _s: &Surface,
-    _domain: &Extent2d,
-    _point: Point3,
-    _tol: f64,
+    k: &Kernel,
+    s: &Surface,
+    domain: &Extent2d,
+    point: Point3,
+    tol: f64,
 ) -> Result<Vec<Point2>> {
-    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-    Err(SolidError::Unported {
-        upstream: "SmSurface::GlobalPointSolve",
-        unit: "surface.surface_p4",
-    })
+    let starts = crate::surface::surface::p4::global_point_solve_starts(
+        k,
+        s,
+        domain,
+        SolverOperation::Minimize,
+        point,
+        tol,
+        SolutionRequested::Single,
+    )?;
+    starts
+        .iter()
+        .map(|e| Ok(Point2::new(e.param(0)?, e.param(1)?)))
+        .collect()
 }
 
 // ---- co-ported solver data ------------------------------------------------------------
@@ -607,7 +615,8 @@ fn initial_setup(
         uv2 = guess2;
         fillet_edge = Some((curve, t));
     } else {
-        let sols = surface_global_point_solve(base2, &base2.natural_uv_domain(), pnt, EFF_ZERO_SQ)?;
+        let sols =
+            surface_global_point_solve(k, base2, &base2.natural_uv_domain(), pnt, EFF_ZERO_SQ)?;
         if sols.len() != 1 {
             return Err(SolidError::sm_err(op));
         }

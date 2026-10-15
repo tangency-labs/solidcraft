@@ -13,9 +13,7 @@
 //! * [`Op::Combine`]: a B-spline curve, hand-built curve tree nodes (`SmTreeNode` with an
 //!   `SmBezierAux1d` of the given interval), a hand-built surface cache tree, the solutions
 //!   (objects: the curve and the surface) and the verbatim
-//!   `sm_GlobalCurveIntersectCombineSolutions`. Record: `status [n sol*n]`, or the single
-//!   value [`CLASSIFY_REACHED`] when the run reached the stand-in of the unported
-//!   `sm_ClassifyCurveSurfaceXSectPoint`.
+//!   `sm_GlobalCurveIntersectCombineSolutions`. Record: `status [n sol*n]`.
 //!
 //! Statuses are `0` (`SM_SUCCESS`) or the `SmStatus`. A solution is `type nvars nobjs
 //! start_value start[3] end_value end[3] node0 node1 obj0 obj1`: nodes are indices into the
@@ -75,9 +73,6 @@ pub const MAX_CONTINUITY: u8 = 13;
 pub const MAX_NODE_CLASS: u8 = 3;
 /// Largest `SmSolutionType` code (`SM_ST_UNKNOWN`).
 pub const MAX_SOLUTION_TYPE: u8 = 4;
-/// The status reported when the combination reached the stand-in of
-/// `sm_ClassifyCurveSurfaceXSectPoint`.
-pub const CLASSIFY_REACHED: f64 = -999.0;
 
 /// A clamped B-spline surface: `SmBSplineSurface(gw_SURFACE*, FALSE, ctx)`.
 #[derive(Debug, Clone, PartialEq)]

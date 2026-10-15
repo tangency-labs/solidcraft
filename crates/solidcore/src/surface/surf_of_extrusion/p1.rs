@@ -1152,7 +1152,7 @@ impl SurfOfExtrusion {
             // map 3dPoint to NurbUV parameter
             let (nurbs_param, location) =
                 self.base
-                    .step_inversion(&nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
+                    .step_inversion(k, &nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
 
             // convert NurbUV point to StepUV point
             let uv = self.convert_uv_from_nurbs_to_step(k, nurbs_param)?;

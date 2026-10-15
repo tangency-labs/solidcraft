@@ -290,7 +290,7 @@ impl SurfOfRevolution {
 
             let (nurbs_parameter, location) =
                 self.base
-                    .step_inversion(&nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
+                    .step_inversion(k, &nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
             let step = self.convert_uv_from_nurbs_to_step(k, nurbs_parameter)?;
             return Ok(StepInversionOutputs {
                 uv: step,

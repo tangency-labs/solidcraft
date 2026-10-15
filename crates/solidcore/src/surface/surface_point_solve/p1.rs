@@ -57,8 +57,7 @@
 //!   `SmSurfaceEval` accessor reads the values it holds; [`SolidError::Unported`]
 //!   still propagates. A failing `CalculateBoundingBox` of the directed-maximise
 //!   constructor leaves the box in its initial (inside-out) state, as upstream.
-//! - **Unported callees.** `SmSurface::IsOnSeam` (`surface.surface_p4`) for every
-//!   kind but planes, `SmSurfaceEval::Normal` (`surface.surface_p4`) and the base
+//! - **Unported callees.** The base
 //!   `SmSurface::CreateIsoParametricCurve` (`surface.surface_p5`, the iso curve of a
 //!   curve-bounded or STEP surface) return [`SolidError::Unported`].
 //! - **`DropToIsoCurve`** passes its guess parameter by pointer and its output
@@ -933,11 +932,10 @@ impl<'s> SurfPtGlobalSolver<'s> {
     ///
     /// # Errors
     ///
-    /// Those of the seam and closure tests; [`SolidError::Unported`]:
-    /// `SmSurface::IsOnSeam` (`surface.surface_p4`) for every kind but planes.
-    pub fn check_guess_for_seams(&mut self, uv_guess: Point2) -> Result<Point2> {
+    /// Those of the seam and closure tests and of [`Surface::is_on_seam`].
+    pub fn check_guess_for_seams(&mut self, k: &Kernel, uv_guess: Point2) -> Result<Point2> {
         let mut uv = uv_guess;
-        if !is_on_seam(self.base.surface, uv)? {
+        if !is_on_seam(k, self.base.surface, uv)? {
             return Ok(uv);
         }
 
@@ -1276,22 +1274,16 @@ fn set_interval(d: &mut Extent2d, dir: SurfParamType, ivl: &Extent1d) {
     }
 }
 
-/// `pSurf->IsOnSeam(crUV)` (virtual, default arguments): a plane has no seam; the base
-/// body is unported.
-fn is_on_seam(surface: &Surface, _uv: Point2) -> Result<bool> {
+/// `pSurf->IsOnSeam(crUV)` (virtual, default arguments): a plane has no seam
+/// (`SmPlane::IsOnSeam` override); the other kinds run the base body.
+fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_on_seam().0),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p4): SmSurface::IsOnSeam
-            Err(SolidError::unported(
-                "SmSurface::IsOnSeam",
-                "surface.surface_p4",
-            ))
-        }
+        | SurfaceKind::SrfInVolume(_) => Ok(surface.is_on_seam(k, uv, None)?.on_seam),
     }
 }
 
@@ -1622,13 +1614,9 @@ impl<'s> SurfPtSolveStepper<'s> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurfaceEval::Normal` (`surface.surface_p4`).
+    /// Those of [`SurfaceEval::normal`].
     pub fn normal(&mut self) -> Result<Vec3> {
-        // UNPORTED(surface.surface_p4): SmSurfaceEval::Normal
-        Err(SolidError::unported(
-            "SmSurfaceEval::Normal",
-            "surface.surface_p4",
-        ))
+        self.srf_eval.normal()
     }
 
     /// The gap `S(u, v) - TestPt` (`Gap`).
@@ -2330,7 +2318,7 @@ mod tests {
         assert_eq!(v.g_val, 0.0);
         assert_eq!(v.sum_check, 0.25);
         assert!((st.gap_length().unwrap() - (0.0625_f64 + 4.0).sqrt()).abs() < 1e-15);
-        assert!(st.normal().is_err());
+        assert!(st.normal().is_ok());
 
         // the copy is not evaluated, the assignment copies the evaluation
         let c = SurfPtSolveStepper::copy_of(&st);

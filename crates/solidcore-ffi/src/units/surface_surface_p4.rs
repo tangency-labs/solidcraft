@@ -27,6 +27,7 @@
 //! | `SsiNormalize`  | `SmSSINormalizeENFO::Evaluate`              | `surface N[3] d pts[4]`                          | per point `st [found F[4] J[16]]` |
 //! | `SsNormalize`   | `SmSSNormalizeENFO::Evaluate`               | `surface sop vecs pts[4 or 5]`                   | per point `st [found F J]` |
 //! | `Classify`      | `sm_ClassifyCurveSurfaceXSectPoint`         | `dom curve a b u v t`                            | `found u v t type` |
+//! | `StepInv`       | `SmBSplineSurface::STEPInversion` (planes)  | `dom P[3] tol has guess[2]`                      | `st [u v loc]` |
 //!
 //! The equation sets are verbatim copies of the file-local upstream classes; the
 //! stateful `CsIntersect` keeps one object across its points. [`eval`] accepts only
@@ -63,6 +64,7 @@ pub enum Op {
     SsiNormalize,
     SsNormalize,
     Classify,
+    StepInv,
 }
 
 impl Op {
@@ -220,6 +222,16 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             let mut bounds = uv_bounds(dom);
             bounds.extend(uv_bounds(d2));
             points(&mut rd, if directed { 5 } else { 4 }, &bounds)?;
+        }
+        Op::StepInv => {
+            if dom.is_some() {
+                return Err(bad("this op needs a plane"));
+            }
+            domain_in(&mut rd, dom)?;
+            rd.vec3()?;
+            rd.positive("tolerance")?;
+            rd.flag()?;
+            uv(&mut rd, dom)?;
         }
         Op::Classify => {
             domain_in(&mut rd, dom)?;

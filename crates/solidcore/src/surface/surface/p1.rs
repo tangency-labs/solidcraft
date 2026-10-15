@@ -2725,6 +2725,7 @@ impl<'t, 's, O: SolutionObject> SsGlobalSolver<'t, 's, O> {
         surfaces: [Option<&'s Surface>; 2],
         uv_domain1: Extent2d,
         uv_domain2: Extent2d,
+        kernel: &'s Kernel,
     ) -> Self {
         Self {
             base: GlobalSolver::with_trees(surface_tree1, surface_tree2, 4),
@@ -2732,14 +2733,15 @@ impl<'t, 's, O: SolutionObject> SsGlobalSolver<'t, 's, O> {
             surface2: surfaces[1],
             uv_domain1,
             uv_domain2,
+            kernel,
         }
     }
 }
 
 // ---- evaluator constructors -------------------------------------------------------------
 
-/// Curve/surface intersection equations (`SmCSIntersectENFO`); `Evaluate` belongs to
-/// unit `surface.surface_p4`.
+/// Curve/surface intersection equations (`SmCSIntersectENFO`); `Evaluate` is in unit
+/// `surface.surface_p4` (`EvalNFunctions`).
 #[derive(Debug, Clone, Copy)]
 pub struct CsIntersectEnfo<'a> {
     /// `m_crCurve`.

@@ -1462,7 +1462,8 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             let uv_domain = objects.face_uv_domain(face)?;
             let face_tol = objects.face_tolerance(face)?;
             let solutions = surface_global_point_solve(
-                face_surface,
+                ts.kernel,
+                objects.surface(face_surface)?,
                 &uv_domain,
                 op,
                 self.point,
@@ -1794,19 +1795,24 @@ fn surface_global_line_intersect<O>(
 
 /// `pFace->GetSurface()->GlobalPointSolve(uv_domain, op, point, tol,
 /// pdBestAnswer, SM_SR_ALL, solutions)`.
-fn surface_global_point_solve<O>(
-    _surface: O,
-    _uv_domain: &Extent2d,
-    _op: SolverOperation,
-    _point: Point3,
-    _tol: f64,
-    _best_answer: Option<f64>,
+fn surface_global_point_solve<O: SolutionObject>(
+    kernel: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    op: SolverOperation,
+    point: Point3,
+    tol: f64,
+    best_answer: Option<f64>,
 ) -> Result<SolutionArray<O>> {
-    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::GlobalPointSolve",
-        "surface.surface_p4",
-    ))
+    surface.global_point_solve::<O>(
+        kernel,
+        uv_domain,
+        op,
+        point,
+        tol,
+        best_answer,
+        SolutionRequested::All,
+    )
 }
 
 /// The arguments of `SmCurve::GlobalCurveSolve` after the two curves and their

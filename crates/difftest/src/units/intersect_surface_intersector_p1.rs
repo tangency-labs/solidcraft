@@ -867,7 +867,7 @@ fn run_op(
             };
             st(
                 o,
-                si.step_back_from_singularity(dir, srf(*s), *current, id(*prev), id(*curr), *step),
+                si.step_back_from_singularity(&Kernel::default(), dir, srf(*s), *current, id(*prev), id(*curr), *step),
             )?;
         }
     }

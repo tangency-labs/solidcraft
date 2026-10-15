@@ -2158,6 +2158,7 @@ enum : int32_t
     OP_SSI_NORMALIZE = 11,
     OP_SS_NORMALIZE = 12,
     OP_CLASSIFY = 13,
+    OP_STEP_INV = 14,
 };
 
 struct Rd
@@ -2512,6 +2513,25 @@ void run(int32_t op, Rd& rd, std::vector<double>& o)
             o.push_back(sols[i].m_vStart.m_dSolutionValue);
             o.push_back(sols[i].m_vStart[0]);
             o.push_back(sols[i].m_vStart[1]);
+        }
+        break;
+    }
+    case OP_STEP_INV:
+    {
+        SmExtent2d d = rd.dom();
+        SmPoint3d p = rd.vec();
+        double tol = rd.num();
+        bool has_guess = rd.flag();
+        SmPoint2d guess = rd.uv();
+        SmPoint2d uv;
+        SmLocationType loc = SM_LT_EXTERIOR;
+        SmStatus r = s->STEPInversion(d, p, tol, uv, loc, has_guess ? &guess : NULL);
+        o.push_back(st(r));
+        if (r == SM_SUCCESS)
+        {
+            o.push_back(uv.x);
+            o.push_back(uv.y);
+            o.push_back((double)loc);
         }
         break;
     }

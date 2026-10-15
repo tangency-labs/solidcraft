@@ -1000,7 +1000,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
                 Some(j) => Some(pt_of(si, *j)?),
                 None => None,
             };
-            let r = si.compute_point_values([p2(uvs[0]), p2(uvs[1])], &mut p, prev_p.as_ref(), *step);
+            let r = si.compute_point_values(&Kernel::default(), [p2(uvs[0]), p2(uvs[1])], &mut p, prev_p.as_ref(), *step);
             st(o, r)?;
             put_point(o, &p);
             set_pt(si, *i, p)?;

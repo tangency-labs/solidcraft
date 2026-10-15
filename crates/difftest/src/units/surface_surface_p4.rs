@@ -14,9 +14,12 @@
 //! runner reports it as the `out` values. A Rust error maps to its `SmStatus` (`1007` for
 //! `InvalidInput`, `-1` for one upstream cannot return); `Unported` defers the case.
 //!
-//! Deferred cases: `IsOnSeam` (`SmSurface::IsOnBoundary`, `SmTol::MapTo2d`), the global point
-//! solve of non-planar surfaces (`GlobalPointSolve_1`, the surface cache), and a drop point
-//! found on a plane that needs the tolerance test of `IsInDomain`.
+//! `StepInv` runs only on planes (`SmBSplineSurface::STEPInversion` dispatching to the
+//! plane's virtual `IsSingularity` / `IsClosed`); a guess defers it (`LocalPointSolve`).
+//!
+//! Deferred cases: the global point solve of face-owned surfaces (`SmFace::PointClassify`)
+//! and what needs the unported `surface.surface_p5` (`LocalPointSolve`, the base
+//! `IsSingularity`), e.g. a drop point or a guessed inversion.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,10 +35,13 @@ use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::NOW;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p2::SurfaceEval;
+use solidcore::surface::surface::p1::{
+    evaluate_normal_section, CsIntersectEnfo, CsNormalizeEnfo, SspIntersectEnfo, SsiNormalizeEnfo,
+    SsNormalizeEnfo,
+};
 use solidcore::surface::surface::p4::{
-    classify_curve_surface_xsect_point, evaluate_normal_section, is_point_on_normal,
-    pass_sp_convergence_test, CsIntersect, CsNormalize, NoObject, NormalTestReason, SspIntersect,
-    SsiNormalize, SsNormalize,
+    classify_curve_surface_xsect_point, is_point_on_normal, pass_sp_convergence_test, NoObject,
+    NormalTestReason,
 };
 use solidcore::surface::surface::Surface;
 use solidcore_ffi::units::surface_surface_p4::{self as ffi, Op};
@@ -112,6 +118,14 @@ enum OpIn {
         ivl: [f64; 2],
         uv: [f64; 2],
         t: f64,
+    },
+    /// `STEPInversion` of a plane (the B-spline base's, with the plane's virtual
+    /// `IsSingularity` / `IsClosed`).
+    StepInv {
+        dom: [f64; 4],
+        p: [f64; 3],
+        tol: f64,
+        guess: Option<[f64; 2]>,
     },
 }
 
@@ -228,6 +242,13 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             v.push(*t);
             Op::Classify
         }
+        OpIn::StepInv { dom, p, tol, guess } => {
+            v.extend_from_slice(dom);
+            v.extend_from_slice(p);
+            v.extend([*tol, b(guess.is_some())]);
+            v.extend_from_slice(&guess.unwrap_or([0.0, 0.0]));
+            Op::StepInv
+        }
     };
     Ok((op, v))
 }
@@ -331,6 +352,11 @@ fn vecs3(v: &[[f64; 3]]) -> Vec<Vec3> {
     v.iter().map(|&x| v3(x)).collect()
 }
 
+/// `m_cpOptVectors`: NULL when there are no vectors.
+fn opt_vecs(v: &[Vec3]) -> Option<&[Vec3]> {
+    (!v.is_empty()).then_some(v)
+}
+
 fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let s = surface_of(&i.surface)?;
     let mut o = Vec::new();
@@ -347,10 +373,10 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         }
         OpIn::SectionFn { uv, dir } => match eval_matrix(&s, *uv)? {
             Ok(mut pvv) => match stat(evaluate_normal_section(&mut pvv, v3(*dir)))? {
-                Ok(sec) => {
+                Ok((tangent, curvature)) => {
                     o.push(0.0);
-                    pv(&mut o, sec.tangent);
-                    o.push(sec.curvature);
+                    pv(&mut o, tangent);
+                    o.push(curvature);
                 }
                 Err(c) => o.push(c),
             },
@@ -422,7 +448,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Err(c) => o.push(c),
             }
         }
-        OpIn::IsOnSeam { uv, tol } => match stat(s.is_on_seam(p2(*uv), *tol))? {
+        OpIn::IsOnSeam { uv, tol } => match stat(s.is_on_seam(&Kernel::new(&KernelOptions::default()), p2(*uv), *tol))? {
             Ok(info) => {
                 o.extend([0.0, b(info.on_seam), f64::from(info.seam_dir as i32)]);
                 o.push(info.cross_seam_uvs.len() as f64);
@@ -433,7 +459,9 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             Err(c) => o.push(c),
         },
         OpIn::Gps { dom, sop, p, tol, target, req } => {
+            let k = Kernel::new(&KernelOptions::default());
             match stat(s.global_point_solve::<NoObject>(
+                &k,
                 &dom_of(*dom),
                 sop_of(*sop)?,
                 v3(*p),
@@ -454,32 +482,39 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Err(c) => o.push(c),
             }
         }
+        OpIn::StepInv { dom, p, tol, guess } => {
+            let k = Kernel::new(&KernelOptions::default());
+            match stat(s.step_inversion(&k, &dom_of(*dom), v3(*p), *tol, guess.map(p2)))? {
+                Ok((uv, loc)) => o.extend([0.0, uv.x, uv.y, f64::from(loc as i32)]),
+                Err(c) => o.push(c),
+            }
+        }
         OpIn::CsIntersect { curve, pts } => {
             let c = curve_of(curve)?;
-            run_enfo(&mut CsIntersect::new(&c, &s), 3, pts, &mut o)?;
+            run_enfo(&mut CsIntersectEnfo::new(&c, &s, 0.0), 3, pts, &mut o)?;
         }
         OpIn::CsNormalize { curve, sop, vecs, pts } => {
             let c = curve_of(curve)?;
             let op = sop_of(*sop)?;
             let dim = if op == SolverOperation::Signed3dDirectedMinimize { 4 } else { 3 };
             let vs = vecs3(vecs);
-            run_enfo(&mut CsNormalize::new(&c, &s, op, &vs), dim, pts, &mut o)?;
+            run_enfo(&mut CsNormalizeEnfo::new(&c, &s, op, 0.0, opt_vecs(&vs), 0.0), dim, pts, &mut o)?;
         }
         OpIn::SspIntersect { other, steepest, plane, pts } => {
             let s2 = surface_of(other)?;
             let pl = plane.map(|(po, pn)| Plane::from_normal(v3(po), v3(pn)));
-            run_enfo(&mut SspIntersect::new(&s, &s2, *steepest, pl.as_ref()), 4, pts, &mut o)?;
+            run_enfo(&mut SspIntersectEnfo::new(&s, &s2, *steepest, pl.as_ref(), 0.0), 4, pts, &mut o)?;
         }
         OpIn::SsiNormalize { other, n, d, pts } => {
             let s2 = surface_of(other)?;
-            run_enfo(&mut SsiNormalize::new(&s, &s2, v3(*n), *d), 4, pts, &mut o)?;
+            run_enfo(&mut SsiNormalizeEnfo::new(&s, &s2, 0.0, v3(*n), *d), 4, pts, &mut o)?;
         }
         OpIn::SsNormalize { other, sop, vecs, pts } => {
             let s2 = surface_of(other)?;
             let op = sop_of(*sop)?;
             let dim = if op == SolverOperation::Signed3dDirectedMinimize { 5 } else { 4 };
             let vs = vecs3(vecs);
-            run_enfo(&mut SsNormalize::new(&s, &s2, op, &vs), dim, pts, &mut o)?;
+            run_enfo(&mut SsNormalizeEnfo::new(&s, &s2, op, opt_vecs(&vs), 0.0), dim, pts, &mut o)?;
         }
         OpIn::Classify { dom, curve, ivl, uv, t } => {
             let c = curve_of(curve)?;
@@ -562,10 +597,10 @@ fn gen_tangent_curve(rng: &mut Rng, srf: &SrfIn, uv: [f64; 2]) -> Option<(CrvIn,
         }
     }
     pvv[2][2] = n;
-    let sec = evaluate_normal_section(&mut pvv, t).ok()?;
+    let (_, sec_curvature) = evaluate_normal_section(&mut pvv, t).ok()?;
     let len = *rng.choose(&[0.05, 0.3, 1.0]).unwrap_or(&0.3);
     let delta = *rng.choose(&[0.0, 1e-3, -1e-3, 0.5, -0.5, 3.0, -2.0, -1.0]).unwrap_or(&0.0);
-    let k = if rng.chance(0.2) { 0.0 } else { sec.curvature * (1.0 + delta) };
+    let k = if rng.chance(0.2) { 0.0 } else { sec_curvature * (1.0 + delta) };
     // curvature of the bezier is 2|a|/L^2 along sign(a) N
     let amp = k * len * len / 2.0;
     // tilt the curve out of the tangent plane by a small angle: its osculating circle then
@@ -743,8 +778,28 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
         }
         37..=39 => {
             let same = rng.chance(0.25);
-            let other = if same { s.clone() } else { gen_surface(rng) };
-            let pts = gen_pts4(rng, s, &other, same);
+            // two different planes through a common point reach the small-gap branch,
+            // which evaluates the second normal on the other surface
+            let crossing = match s {
+                SrfIn::Plane { o, .. } if !same && rng.chance(0.3) => {
+                    let mut n = gen_unit_vec(rng);
+                    if rng.chance(0.5) {
+                        n = [0.0, 1.0, 0.0];
+                    }
+                    Some(SrfIn::Plane { o: *o, n })
+                }
+                _ => None,
+            };
+            let other = match &crossing {
+                Some(p) => p.clone(),
+                None if same => s.clone(),
+                None => gen_surface(rng),
+            };
+            let pts = if crossing.is_some() {
+                vec![vec![0.0; 4]]
+            } else {
+                gen_pts4(rng, s, &other, same)
+            };
             OpIn::SsiNormalize { other, n: gen_unit_vec(rng), d: rng.uniform(-2.0, 2.0), pts }
         }
         40..=42 => {
@@ -799,6 +854,27 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         if let OpIn::Gps { sop, .. } = &mut op {
             *sop = *rng.choose(&[0u8, 3, 3, 3]).unwrap_or(&3);
         }
+        return Inputs { surface, op };
+    }
+    // STEPInversion is only comparable on planes (the B-spline path needs the local solve)
+    if rng.chance(0.06) {
+        let surface = gen_plane(rng);
+        let dom = gen_solve_dom(rng, &surface);
+        let uv = [rng.uniform(dom[0], dom[2]), rng.uniform(dom[1], dom[3])];
+        let on = surface_of(&surface)
+            .ok()
+            .and_then(|srf| srf.evaluate_point(p2(uv)).ok())
+            .map(|q| [q.x, q.y, q.z]);
+        let p = match on {
+            Some(q) if rng.chance(0.8) => q,
+            _ => gen_point_near(rng, &surface),
+        };
+        let op = OpIn::StepInv {
+            dom,
+            p,
+            tol: *rng.choose(&[1e-9, 1e-6, 1e-3]).unwrap_or(&1e-6),
+            guess: rng.chance(0.15).then(|| [rng.uniform(dom[0], dom[2]), rng.uniform(dom[1], dom[3])]),
+        };
         return Inputs { surface, op };
     }
     let surface = gen_surface(rng);

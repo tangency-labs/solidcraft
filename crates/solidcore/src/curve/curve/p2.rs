@@ -1668,7 +1668,7 @@ impl Curve {
         if do_precise && max_dist > scaled_zero {
             // Find the gap maximum near the largest sampled gap point.
             if let Some((param, uv)) =
-                surface_local_curve_solve(surface, domain, interval, max_uv, max_param)?
+                surface.local_curve_maximize(self, domain, interval, max_uv, max_param)?
             {
                 let crv_pt = self.evaluate_point(param)?;
                 let srf_pt = surface.evaluate_point(uv)?;
@@ -2126,24 +2126,6 @@ fn surface_drop_point<S>(
     Err(SolidError::Unported {
         upstream: "SmSurface::DropPoint",
         unit: "surface.surface_p5",
-    })
-}
-
-/// `SmSurface::LocalCurveSolve(.., SM_SO_MAXIMIZE, SM_EFF_ZERO_SQRT, ..)`: the
-/// curve parameter and surface parameters of the found gap maximum, if any.
-fn surface_local_curve_solve<S>(
-    _surface: &S,
-    _domain: &Extent2d,
-    _interval: &Extent1d,
-    _guess_uv: Point2,
-    _guess_t: f64,
-) -> Result<Option<(f64, Point2)>> {
-    // SmSurface::LocalCurveSolve is surface::surface::p7::Surface::local_curve_solve; its
-    // evaluator is not ported yet.
-    // UNPORTED(surface.surface_p4): SmCSNormalizeENFO::Evaluate (via SmSurface::LocalCurveSolve)
-    Err(SolidError::Unported {
-        upstream: "SmCSNormalizeENFO::Evaluate",
-        unit: "surface.surface_p4",
     })
 }
 

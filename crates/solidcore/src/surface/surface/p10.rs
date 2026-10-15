@@ -45,6 +45,7 @@
 
 use super::p1::{is_node_valid, is_point_valid, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
+use super::p4;
 use super::p9::implicit_iso;
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::Curve;
@@ -130,20 +131,20 @@ struct XsectPointClass {
     point_type: TsectCurveType,
 }
 
-/// `sm_ClassifyCurveSurfaceXSectPoint`.
+/// `sm_ClassifyCurveSurfaceXSectPoint` (`surface::surface::p4`).
 fn classify_curve_surface_xsect_point(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _uv: Point2,
-    _t: f64,
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    uv: Point2,
+    t: f64,
 ) -> Result<XsectPointClass> {
-    // UNPORTED(surface.surface_p4): sm_ClassifyCurveSurfaceXSectPoint
-    Err(SolidError::unported(
-        "sm_ClassifyCurveSurfaceXSectPoint",
-        "surface.surface_p4",
-    ))
+    let c = p4::classify_curve_surface_xsect_point(surface, domain, curve, interval, uv, t)?;
+    Ok(XsectPointClass {
+        guess: c.found_guess.then_some((c.new_uv_guess, c.new_t_guess)),
+        point_type: c.point_type,
+    })
 }
 
 /// `SmSurface::LocalPointSolve` (`rbFoundAnswer`, `rSolution`).

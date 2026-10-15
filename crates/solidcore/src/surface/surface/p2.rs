@@ -752,17 +752,16 @@ impl Surface {
     ) -> Result<(Point2, LocationType)> {
         match &self.kind {
             SurfaceKind::BSpline(s) => {
-                s.step_inversion(anal_domain, point_on_surf, tol_3d, uv_guess)
+                s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
             }
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_step_inversion(),
             SurfaceKind::SrfInVolume(s) => s.step_inversion(k, anal_domain, point_on_surf, tol_3d),
             // SmBSplineSurface::STEPInversion solves on the plane through the virtual
             // point solvers
-            // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-            SurfaceKind::Plane(_) => Err(SolidError::unported(
-                "SmSurface::GlobalPointSolve",
-                "surface.surface_p4",
-            )),
+            SurfaceKind::Plane(s) => {
+                s.base()
+                    .step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
+            }
             SurfaceKind::SurfOfRevolution(s) => {
                 s.step_inversion(k, anal_domain, point_on_surf, tol_3d, uv_guess)
             }
@@ -1406,6 +1405,21 @@ pub trait SurfaceEvaluate {
     fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         super::p7::base_evaluate_normal(self, uv, u_side, v_side)
     }
+
+    /// `LocalCurveSolve(.., SM_SO_MAXIMIZE, SM_EFF_ZERO_SQRT, ..)`: the curve parameter
+    /// and surface parameters of the gap maximum near the guesses, if any.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::local_curve_solve`].
+    fn local_curve_maximize(
+        &self,
+        curve: &Curve,
+        domain: &Extent2d,
+        interval: &Extent1d,
+        guess_uv: Point2,
+        guess_t: f64,
+    ) -> Result<Option<(f64, Point2)>>;
 }
 
 impl SurfaceEvaluate for Surface {
@@ -1446,9 +1460,51 @@ impl SurfaceEvaluate for Surface {
     fn evaluate_normal(&self, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         Self::evaluate_normal(self, uv, u_side, v_side)
     }
+
+    fn local_curve_maximize(
+        &self,
+        curve: &Curve,
+        domain: &Extent2d,
+        interval: &Extent1d,
+        guess_uv: Point2,
+        guess_t: f64,
+    ) -> Result<Option<(f64, Point2)>> {
+        Ok(self
+            .local_curve_solve(
+                domain,
+                curve,
+                interval,
+                SolverOperation::Maximize,
+                EFF_ZERO_SQRT,
+                &[],
+                guess_uv,
+                guess_t,
+            )?
+            .map(|s| (s.t, s.uv)))
+    }
 }
 
 impl SurfaceEvaluate for BSplineSurface {
+    fn local_curve_maximize(
+        &self,
+        curve: &Curve,
+        domain: &Extent2d,
+        interval: &Extent1d,
+        guess_uv: Point2,
+        guess_t: f64,
+    ) -> Result<Option<(f64, Point2)>> {
+        // SmBSplineSurface does not override SmSurface::LocalCurveSolve: run it on a
+        // `Surface` holding this B-spline surface.
+        SurfaceEvaluate::local_curve_maximize(
+            &Surface::from(self.clone()),
+            curve,
+            domain,
+            interval,
+            guess_uv,
+            guess_t,
+        )
+    }
+
     fn surface_approx_eq(&self, other: &Self) -> Result<bool> {
         // SmBSplineSurface::operator== (two B-splines: SmSurface::operator== holds)
         Ok(self.approx_eq(other))

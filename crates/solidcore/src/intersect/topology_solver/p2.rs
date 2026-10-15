@@ -53,6 +53,7 @@ use crate::geom::tree::{AuxDataType, Tree};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec2};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
+use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::Surface;
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
 
@@ -223,21 +224,43 @@ fn classified_curve_intervals<O>(
 }
 
 fn untrimmed_range_endpoints<O>(
-    _kernel: &Kernel,
-    _surface: &Surface,
+    kernel: &Kernel,
+    surface: &Surface,
     _surface_handle: O,
-    _face_domain: &Extent2d,
-    _start: Point3,
-    _end: Point3,
-    _tol: f64,
+    face_domain: &Extent2d,
+    start: Point3,
+    end: Point3,
+    tol: f64,
 ) -> Result<Option<(Vec2, Vec2)>> {
-    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-    // Its eventual shared-cache adapter must suppress point testing on the SAME
-    // cache around BOTH endpoint solves. An independent cache copy is insufficient.
-    Err(SolidError::unported(
-        "SmSurface::GlobalPointSolve",
-        "surface.surface_p4",
-    ))
+    // Upstream switches the surface cache's point test off around both solves. The
+    // solver here keeps every solution of a surface that owns no face, and a face-owned
+    // surface is Unported (query.face_p2) inside `Surface::global_point_solve`.
+    let first = global_point_solve_starts(
+        kernel,
+        surface,
+        face_domain,
+        SolverOperation::Intersect,
+        start,
+        tol,
+        SolutionRequested::All,
+    )?;
+    let Some(s) = first.first() else {
+        return Ok(None); // error - something is wrong here - quit
+    };
+    let uv_start = Vec2::new(s.param(0)?, s.param(1)?);
+    let second = global_point_solve_starts(
+        kernel,
+        surface,
+        face_domain,
+        SolverOperation::Intersect,
+        end,
+        tol,
+        SolutionRequested::All,
+    )?;
+    let Some(e) = second.first() else {
+        return Ok(None);
+    };
+    Ok(Some((uv_start, Vec2::new(e.param(0)?, e.param(1)?))))
 }
 
 impl<'a, O: SolutionObject> LocalSolver<'a, O> {

@@ -891,6 +891,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 surface2: Some(&s2),
                 uv_domain1: s.natural_uv_domain(),
                 uv_domain2: s2.natural_uv_domain(),
+                kernel: &k,
             };
             match st(solver.solutions_identical(&a, &bb))? {
                 Ok((t, pref)) => {

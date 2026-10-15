@@ -65,7 +65,7 @@ use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd};
 use crate::geom::object::{NotifyOperation, ObjectRef};
-use crate::geom::solution_array::Solution;
+use crate::geom::solution_array::SolutionEnd;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -130,28 +130,26 @@ fn create_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<(f64, Cur
     ))
 }
 
-/// `SmSurface::GlobalPointSolve` (unit `surface.surface_p4`).
+/// `SmSurface::GlobalPointSolve` (unit `surface.surface_p4`): the start of every
+/// solution.
 fn surface_global_point_solve(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &crate::geom::extent2d::Extent2d,
     op: SolverOperation,
     test_point: Point3,
     distance_tolerance: f64,
     requested: SolutionRequested,
-) -> Result<Vec<Solution<()>>> {
-    let _ = (
+) -> Result<Vec<SolutionEnd>> {
+    crate::surface::surface::p4::global_point_solve_starts(
+        k,
         surface,
         uv_domain,
         op,
         test_point,
         distance_tolerance,
         requested,
-    );
-    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::GlobalPointSolve",
-        "surface.surface_p4",
-    ))
+    )
 }
 
 /// `SmEdge::SetTolerance` (unit `topology.edge`).
@@ -295,8 +293,9 @@ impl Default for StepOffOptions {
 /// face's UV domain; [`SolidError::null_pointer`] without face or surface;
 /// [`SolidError::InvalidInput`] without face use; the evaluators' errors;
 /// [`SolidError::Unported`] for `EvaluateBinormal` (`topology.edgeuse_p3`) and the
-/// global point solve (`surface.surface_p4`).
+/// global point solve (`surface.surface_p4`, wired).
 pub fn evaluate_binormal_step_off(
+    k: &Kernel,
     b: &Brep,
     eu: EdgeuseId,
     parameter: f64,
@@ -343,6 +342,7 @@ pub fn evaluate_binormal_step_off(
         // it returning success with a boundary point with large deviation from the
         // normal [B579]
         let solutions = surface_global_point_solve(
+            k,
             surface,
             &uv_domain,
             SolverOperation::Normalize,
@@ -354,7 +354,7 @@ pub fn evaluate_binormal_step_off(
             // stepoffdistance stepped off face UVDomain
             return Err(SolidError::sm_err(OP));
         };
-        uv_guess = Point2::new(first.start.param(0)?, first.start.param(1)?);
+        uv_guess = Point2::new(first.param(0)?, first.param(1)?);
 
         // still stepping off face UVDomain
         if !uv_domain.contains_point(uv_guess, 0.0) {
@@ -432,6 +432,7 @@ pub fn evaluate_binormal_step_off(
 /// [`evaluate_binormal_step_off`] (its other errors make the result `true`, as
 /// upstream's `SER`).
 pub fn is_convex_radial_sector(
+    k: &Kernel,
     b: &Brep,
     eu: EdgeuseId,
     num_samples: u64,
@@ -462,7 +463,8 @@ pub fn is_convex_radial_sector(
         let t = (i as f64 + 1.0) / (num_samples as f64 + 1.0);
 
         // SER in an SmBoolean function: a failing status is returned as TRUE
-        let r = match evaluate_binormal_step_off(b, eu, ivl.evaluate(t), step_off_dist, &options) {
+        let r = match evaluate_binormal_step_off(k, b, eu, ivl.evaluate(t), step_off_dist, &options)
+        {
             Ok(r) => r,
             Err(e) if ser_as_true(&e) => return Ok(true),
             Err(e) => return Err(e),
@@ -470,6 +472,7 @@ pub fn is_convex_radial_sector(
         let radial_eu =
             radial_eu.ok_or_else(|| null("IsConvexRadialSector: edge use without radial"))?;
         let r2 = match evaluate_binormal_step_off(
+            k,
             b,
             radial_eu,
             ivl.evaluate(t),
@@ -818,21 +821,28 @@ mod tests {
     #[test]
     fn convex_with_no_samples_is_true() {
         let (b, eu) = lone_edgeuse();
-        assert!(is_convex_radial_sector(&b, eu, 0, true, 0.0).unwrap());
+        assert!(is_convex_radial_sector(&Kernel::default(), &b, eu, 0, true, 0.0).unwrap());
     }
 
     #[test]
     fn convex_samples_defer_to_evaluate_binormal() {
         let (b, eu) = lone_edgeuse();
-        let e = is_convex_radial_sector(&b, eu, 3, false, 2.0).unwrap_err();
+        let e = is_convex_radial_sector(&Kernel::default(), &b, eu, 3, false, 2.0).unwrap_err();
         assert!(e.is_unported());
     }
 
     #[test]
     fn step_off_defers_to_evaluate_binormal() {
         let (b, eu) = lone_edgeuse();
-        let e =
-            evaluate_binormal_step_off(&b, eu, 0.5, 0.1, &StepOffOptions::default()).unwrap_err();
+        let e = evaluate_binormal_step_off(
+            &Kernel::default(),
+            &b,
+            eu,
+            0.5,
+            0.1,
+            &StepOffOptions::default(),
+        )
+        .unwrap_err();
         assert!(e.is_unported());
     }
 

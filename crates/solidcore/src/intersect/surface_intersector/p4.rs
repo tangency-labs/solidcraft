@@ -222,12 +222,13 @@ impl SurfaceIntersector<'_> {
     /// angle only when set); `Ok(false)` when the call failed (`Unported` propagates).
     fn trace_step(
         &mut self,
+        k: &Kernel,
         prev: TsectId,
         step_size: f64,
         next: TsectId,
         step: &mut Step,
     ) -> Result<bool> {
-        match self.compute_next_point(prev, step_size, next) {
+        match self.compute_next_point(k, prev, step_size, next) {
             Ok(n) => {
                 step.found_good_point = n.found_good_point;
                 if let Some(d) = n.deviation_found {
@@ -259,8 +260,8 @@ impl SurfaceIntersector<'_> {
     }
 
     /// `TestPoint(next, bDone)`: `done` keeps its value when upstream leaves it.
-    fn trace_test(&mut self, next: TsectId, done: &mut bool) -> Result<()> {
-        if let Some(d) = self.test_point(next)? {
+    fn trace_test(&mut self, k: &Kernel, next: TsectId, done: &mut bool) -> Result<()> {
+        if let Some(d) = self.test_point(k, next)? {
             *done = d;
         }
         Ok(())
@@ -386,7 +387,7 @@ impl SurfaceIntersector<'_> {
             let next = self.alloc_point(fresh);
 
             // 4d. the next point for the current step size
-            if !self.trace_step(tsp, step_size, next, &mut st)? {
+            if !self.trace_step(k, tsp, step_size, next, &mut st)? {
                 // an error return indicates that it can never succeed
                 break;
             }
@@ -415,7 +416,7 @@ impl SurfaceIntersector<'_> {
                     break;
                 }
                 decreased_step_size = true;
-                if !self.trace_step(tsp, step_size, next, &mut st)? {
+                if !self.trace_step(k, tsp, step_size, next, &mut st)? {
                     st.found_good_point = false;
                     break;
                 }
@@ -431,7 +432,7 @@ impl SurfaceIntersector<'_> {
 
             // snap the good point to a through, start or end point it passed
             let mut last_curve_param = self.point(next)?.curve_parameter;
-            self.trace_test(next, &mut done)?;
+            self.trace_test(k, next, &mut done)?;
             if done || self.point(next)?.curve_parameter != last_curve_param {
                 self.add_point_to_curve(next)?;
                 if done {
@@ -455,7 +456,7 @@ impl SurfaceIntersector<'_> {
                         return Err(too_many(OP_TRACE));
                     }
                     step_size *= 1.5;
-                    if !self.trace_step(tsp, step_size, next, &mut st)? {
+                    if !self.trace_step(k, tsp, step_size, next, &mut st)? {
                         st.found_good_point = false;
                         break;
                     }
@@ -476,7 +477,7 @@ impl SurfaceIntersector<'_> {
                     last_curve_param = param;
 
                     // passed a through or end point, or a singularity
-                    self.trace_test(next, &mut done)?;
+                    self.trace_test(k, next, &mut done)?;
                     if done || self.point(next)?.curve_parameter != last_curve_param {
                         if done {
                             // an end condition: done tracing
@@ -490,7 +491,7 @@ impl SurfaceIntersector<'_> {
                 // the last increase gave a bad point: step back to the last good one
                 if !st.found_good_point {
                     step_size /= 1.5;
-                    let n = self.compute_next_point(tsp, step_size, next)?;
+                    let n = self.compute_next_point(k, tsp, step_size, next)?;
                     st.found_good_point = n.found_good_point;
                     if let Some(d) = n.deviation_found {
                         st.deviation = d;
@@ -557,7 +558,7 @@ impl SurfaceIntersector<'_> {
 
             // snap to a through or end point passed, then add the point
             if !done {
-                self.trace_test(next, &mut done)?;
+                self.trace_test(k, next, &mut done)?;
                 self.point_mut(next)?.deviation = st.deviation;
                 self.add_point_to_curve(next)?;
             }
@@ -697,7 +698,7 @@ impl SurfaceIntersector<'_> {
 
             // a start point: no previous point
             let mut sp = self.point(start)?.clone();
-            let r = self.compute_point_values(uvs, &mut sp, None, None);
+            let r = self.compute_point_values(k, uvs, &mut sp, None, None);
             *self.point_mut(start)? = sp;
             if ignored(r)?.is_none() {
                 continue;
@@ -819,7 +820,7 @@ impl SurfaceIntersector<'_> {
                 prev_tsp = temp_end_tsp.as_ref();
             }
 
-            let r = self.compute_point_values(uvs, &mut tsp, prev_tsp, None);
+            let r = self.compute_point_values(k, uvs, &mut tsp, prev_tsp, None);
             *self.point_mut(pid)? = tsp.clone();
             match r {
                 Ok(()) => {}

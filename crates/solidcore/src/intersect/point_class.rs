@@ -554,6 +554,7 @@ impl<O: ClassObject> PointClassification<O> {
 
         // find SurfaceDropPt for ObjPt
         let mut solutions = ignored(surface_global_point_solve(
+            k,
             surface,
             &uv_domain,
             obj_pt_3d,
@@ -565,6 +566,7 @@ impl<O: ClassObject> PointClassification<O> {
         if solutions.len() != 1 {
             // find point/face->surface intersection point to 100 * face->Tolerance
             solutions = ignored(surface_global_point_solve(
+                k,
                 surface,
                 &uv_domain,
                 obj_pt_3d,
@@ -1010,12 +1012,13 @@ impl<O: ClassObject> PointClassification<O> {
         else if let Some((surface, uv_domain)) = obj_surface {
             // find point/face->surface intersection point to face->Tolerance
             let mut solutions =
-                surface_global_point_solve(surface, &uv_domain, point, self.src_zone_tol_3d)?;
+                surface_global_point_solve(k, surface, &uv_domain, point, self.src_zone_tol_3d)?;
 
             // when a distinct solution was not found
             if solutions.len() != 1 {
                 // find point/face->surface intersection point to 100 * face->Tolerance
                 solutions = surface_global_point_solve(
+                    k,
                     surface,
                     &uv_domain,
                     point,
@@ -1462,12 +1465,14 @@ fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
 /// `SmSurface::GlobalPointSolve(domain, SM_SO_INTERSECT, point, tol, NULL,
 /// SM_SR_SINGLE, solutions)`: the start ends of the solutions.
 fn surface_global_point_solve(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     point: Point3,
     zone_tol_3d: f64,
 ) -> Result<Vec<SolutionEnd>> {
     global_point_solve_starts(
+        k,
         surface,
         uv_domain,
         SolverOperation::Intersect,

@@ -11,10 +11,8 @@
 //
 // sm_GlobalCurveIntersectCombineSolutions is file-static, so it is a VERBATIM copy of upstream
 // SmSurface.cpp (commit c9c5979, lines 15517-16945) inside the namespace sc_srf_p10. The static
-// sm_ClassifyCurveSurfaceXSectPoint it calls (unit surface.surface_p4, not ported) is replaced by
-// a stand-in that records the call and leaves its outputs as upstream initialises them; a run
-// that reached it reports SC_P10_CLASSIFY_REACHED instead of its status, and the Rust port
-// defers every such case (it returns Unported at that call).
+// sm_ClassifyCurveSurfaceXSectPoint it calls (and its helper sm_ConvertToParameterDelta) is
+// copied verbatim from upstream as well (lines 13053-13773, as in the surface_p4 shim).
 //
 // One entry point, sc_surface_surface_p10_run(in, n_in, out, cap, out_len). The program layout
 // is documented in crates/solidcore-ffi/src/units/surface_surface_p10.rs, which validates every
@@ -30,7 +28,11 @@
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmExtent3d.h>
+#include <SmGeomUtility.h>
 #include <SmGlobalSolver.h>
+#include <SmLine.h>
+#include <SmLocalSolveNd.h>
+#include <SmMatrix.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
 #include <SmPlane.h>
@@ -38,7 +40,9 @@
 #include <SmPseudoBox.h>
 #include <SmSolutionArray.h>
 #include <SmSurface.h>
+#include <SmSurfTypes.h>
 #include <SmSurfaceCache.h>
+#include <SmTol.h>
 #include <SmTArray.h>
 #include <SmTree.h>
 #include <SmVector2d.h>
@@ -47,10 +51,6 @@
 
 #include <stdexcept>
 #include <vector>
-
-// Reported (as the status) when the combination reached the sm_ClassifyCurveSurfaceXSectPoint
-// stand-in.
-#define SC_P10_CLASSIFY_REACHED (-999)
 
 // ---- SmSurface.cpp lines 17885-17932: SmLSIGlobalSolver (declaration) -------------------------
 class SmLSIGlobalSolver : public SmGlobalSolver
@@ -87,20 +87,718 @@ public:
 
 namespace sc_srf_p10
 {
-static bool g_classify_reached = false;
-
-// Stand-in for the file-static sm_ClassifyCurveSurfaceXSectPoint (unit surface.surface_p4).
-static SmStatus sm_ClassifyCurveSurfaceXSectPoint
-  (const SmSurface  &, const SmExtent2d &, const SmCurve &, const SmExtent1d &,
-   const SmPoint2d  &, double, SmBoolean & rbFoundGuess, SmPoint2d &, double &,
-   SmTsectCurveType &)
-{
-  g_classify_reached = true;
-  rbFoundGuess = FALSE;
-  return SM_ERR;
-}
-
 // clang-format off
+
+// ---- verbatim: SmSurface.cpp lines 13053-13063: sm_ConvertToParameterDelta
+static double sm_ConvertToParameterDelta
+  (const SmVector3d & crTangentVector,
+   const SmVector3d & crDeltaVector)
+{
+    double dTanLen = crTangentVector.Length();
+    if (dTanLen < SM_EFF_ZERO) return 0.0;
+    SmVector3d sUnitTan = crTangentVector / dTanLen;
+    double dDot = sUnitTan.Dot(crDeltaVector);
+    return dDot/dTanLen;
+
+} // end sm_ConvertToParameterDelta
+
+// ---- verbatim: SmSurface.cpp lines 13080-13773: sm_ClassifyCurveSurfaceXSectPoint
+static SmStatus sm_ClassifyCurveSurfaceXSectPoint
+  (const SmSurface  & crSurface,             // in : Target Surface
+   const SmExtent2d & crUVDomain,            // in : Target Surface Domain
+   const SmCurve    & crCurve,               // in : Target Curve
+   const SmExtent1d & crInterval,            // in : Target Curve Domain
+   const SmPoint2d  & crCurrentUV,           // in : Current Surface Solution Point
+   double             dCurrentT,             // in : Current Curve Solution Point
+   SmBoolean        & rbFoundGuess,          // out: TRUE = Found a nearby intersection guess point
+                                             //         will be set to FALSE when rePointType != SM_TC_NEAR_TANGENT
+                                             //         or when 2nd guessPoint falls outside of input domains.
+   SmPoint2d        & rNewUVGuess,           // out: Surface GuessPoint
+   double           & rdNewTGuess,           // out: Curve GuessPoint
+   SmTsectCurveType & rePointType)           // out: oneof: SM_TC_TOUCHING - degenerate curve marks a point on the surface
+                                             //             SM_TC_CROSSING - curve crosses surface at a single point
+                                             //             SM_TC_TANGENT - one intersection point
+                                             //             SM_TC_COINCIDENT - curve likely to be coincident near tgt point
+                                             //             SM_TC_NEAR_TANGENT - when rbFoundGuess is set to true, curve
+                                             //                 is likely to have a 2nd nearby intersection point
+{
+  // init output
+  rbFoundGuess = FALSE ;
+  rePointType  = SM_TC_CROSSING ;
+
+  // Get SurfacePoint Evaluation and SurfaceNormal
+  SmVector3d sPVV[3][3];  // out: matrix of evaluations values
+                          //      organized: [D    Du    Duu  ]
+                          //                 [Dv   Duv   0    ]
+                          //                 [Dvv  0     0    ]
+  SER(crSurface.Evaluate(crCurrentUV, 2, 2, TRUE, TRUE, TRUE, &sPVV[0][0], FALSE)); // exact Tangent values ?may need to change?
+
+  // get surface Normal
+  SmVector3d sSurfaceNormal = sPVV[1][0] * sPVV[0][1];
+  if (sSurfaceNormal.LengthSquared() < SM_EFF_ZERO_SQ)
+       { SER(crSurface.EvaluateNormal(crCurrentUV, TRUE, TRUE, sSurfaceNormal));
+       }
+  else { SER(sSurfaceNormal.Unitize());
+       }
+  sPVV[2][2] = sSurfaceNormal; // Must be here for smsurf_EvaluateGeometric().
+
+  // Get the geometric properties of the curve at the current intersection
+  SmVector3d sCurveGeomVec[4] ; // out: a[0] = position
+                                //      a[1] = 1st derivative,   Mag = Speed,   direction = tangent vector
+                                //      a[2] = Curvature Vector, Mag = K,       direction = normal vector
+                                //      a[3] = Torsion Vector,   Mag = Torsion, direction = binormal vector
+                                // note: Osculating circle center: center = pos + RadOfCurv * NormalVector
+                                //       center = a[0] + a[2]/a[2].LengthSquared(), when a[2].LengthSquared() is not zero.
+  if(SM_ERR == crCurve.EvaluateGeometric(dCurrentT, 2, TRUE, sCurveGeomVec))
+    { // no extra guesses or possible coincidence signalled for degenerate curves
+      rePointType = SM_TC_TOUCHING ;
+      return(SM_SUCCESS) ;
+    }
+
+#ifdef SM_DEBUG_CODE
+SmBoolean bDebugMe = FALSE ;
+  if(bDebugMe)
+    {
+      SmBrep *pBrep = crSurface.GetFace() ? ((SmFace *)crSurface.GetFace())->GetBrep() : NULL ;
+      if(pBrep == NULL) pBrep = crCurve.GetOwner() ? ((SmEdge *)crCurve.GetEdge())->GetBrep() : NULL ;
+
+      smgfx_Erase() ;
+      smgfx_SetLook(1,2, 0,0,1) ; if(pBrep) pBrep->Draw(TRUE) ; sm_GraphicsLoop() ;
+      smgfx_SetLook(1,2, 0,1,1) ; crSurface.DrawUV() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(2,3, 0,1,0) ; crCurve.Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(4,5, 1,0,0) ; sPVV[0][0].Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(5,6, 1,0,1) ; sCurveGeomVec[0].Draw() ; sm_GraphicsLoop() ;
+      sm_GraphicsLoop() ;
+    }
+#endif // SM_DEBUG_CODE
+
+  // no work - curve is not within 20 degrees of tangency to surface
+  if (!sSurfaceNormal.IsPerpendicularTo(sCurveGeomVec[1],20.0))
+    { rePointType  = SM_TC_CROSSING ;
+      return SM_SUCCESS;
+    }
+
+  // Evaluate Surface Position and NormalSection in direction of CurveTangent.
+  // This should give us two circles or a line and a circle to intersect.
+  SmPoint3d  sSurfacePoint = sPVV[0][0] ;
+  SmVector3d sSurfaceSectionTangent;
+  double     dSurfaceSectionCurvature;
+
+  // Surface differential locals
+  double     dGaussianCurvature ;        // out: GaussianCurvature = K1*K2 (principal curvatures)
+  double     dNormalCurvature ;          // out: MeanCurvature = 1/2(K1 + K2)
+  double     dPrincipleCurvature1 ;      // out: 1st principal curvature value ; K1
+  double     dPrincipleCurvature2 ;      // out: 2nd principal curvature value ; K2
+  SmVector3d sEFGOfFirstFundForm ;       // out: 1st fundamental form ; [E ; F ; G]
+  SmVector3d sLMNOfSecondFundForm ;      // out: 2nd fundamental form ; [L ; M ; N]
+  SmVector3d PrincipleCurvatureVector1 ; // out: 3d vector tangent to surface in 1st principal direction
+  SmVector3d PrincipleCurvatureVector2 ; // out: 3d vector tangent to surface in 2nd principal direction
+
+  SER(crSurface.EvaluatePoint(crCurrentUV, sSurfacePoint));
+  SER(smsurf_EvaluateNormalSection(sPVV, sCurveGeomVec[1],
+                                   sSurfaceSectionTangent,
+                                   dSurfaceSectionCurvature));
+  SER(smsurf_EvaluateGeometric(sPVV, dGaussianCurvature,
+                                     dNormalCurvature,
+                                     dPrincipleCurvature1,
+                                     dPrincipleCurvature2,
+                                     sEFGOfFirstFundForm,
+                                     sLMNOfSecondFundForm,
+                                     PrincipleCurvatureVector1,
+                                     PrincipleCurvatureVector2)) ;
+  SmLocalSurfaceType eSurfaceType =   (   smos_Fabs(dNormalCurvature)    < SM_EFF_ZERO_SQRT
+                                       && smos_Fabs(dPrincipleCurvature1) < SM_EFF_ZERO_SQRT
+                                       && smos_Fabs(dPrincipleCurvature2) < SM_EFF_ZERO_SQRT) ? SM_LS_PLANAR
+                                    : (dGaussianCurvature >  SM_EFF_ZERO_SQRT) ? SM_LS_ELLIPTICAL
+                                    : (dGaussianCurvature < -SM_EFF_ZERO_SQRT) ? SM_LS_HYPERBOLIC
+                                    : SM_LS_CYLINDRICAL ;
+
+  // Get Curve Curvature, Normal vector, and Binormal vectors
+  SmVector3d sCurveNormal    = sCurveGeomVec[2];
+  double     dCurveCurvature = sCurveNormal.Length();
+  if (smos_Fabs(dCurveCurvature) > SM_EFF_ZERO_SQRT)
+    {
+      sCurveNormal /= dCurveCurvature ;
+    }
+  else // curve is close to being a straight line - let CurveNormal = sSurfaceNormal
+    {
+      sCurveNormal = sSurfaceNormal ;
+    }
+  SmVector3d sCurveBinormal = sCurveGeomVec[1] * sCurveNormal ;
+
+  // degenerate curve check
+  if (sCurveBinormal.LengthSquared() < SM_EFF_ZERO_SQ)
+    {
+      rePointType  = SM_TC_TOUCHING ;
+      return SM_SUCCESS ;
+    }
+  SER(sCurveBinormal.Unitize()) ;
+
+  // get the cosine of the angle between the surfaceSectionNormal plane and
+  // the plane of the curve's osculating circle (needed for Meusnier's Theorem)
+  double dAngRad ;
+  sCurveBinormal.AngleBetween(sSurfaceNormal, dAngRad) ;
+  double dCosPhi = smos_Fabs(smos_Cosine(dAngRad - SM_PI/2.0)) ;
+
+  // characterize the curve shape as a circle or a line
+  SmBoolean bCurveLine = FALSE ;
+  double dCurveRadius = 0.0;
+  SmPoint3d sCurveCenter, sCurvePoint ;
+  SmVector3d sCurveCircleNormal, sCurveVec ;
+  if(smos_Fabs(dCurveCurvature) > SM_EFF_ZERO_SQRT)
+    {
+      // let Curve = curve osculating circle
+      bCurveLine         = FALSE ;
+      dCurveRadius       = smos_Fabs(1.0/dCurveCurvature);
+      sCurveCenter       = sCurveGeomVec[0] + sCurveNormal * dCurveRadius;
+      sCurveCircleNormal = sCurveBinormal ;
+    }
+  else // curve is a line
+    {
+      bCurveLine         = TRUE ;
+    }
+
+  // always load CurvePoint and CurveVec because when circle is large
+  // the curve is treated as a line
+  sCurvePoint = sCurveGeomVec[0] ;
+  sCurveVec   = sCurveGeomVec[1] ;
+
+  // characterize the surface section curve or
+  // the surface dupin indicatrix shape (when curve plane is tangent to surface) as
+  // an osculating circle in the CurvePlane, a line, or two lines
+  SmBoolean bSurfaceLine = FALSE, bSurfaceTwoLines = FALSE ;
+  double    dSurfaceRadius = 0.0;
+  SmPoint3d sSurfaceCenter ;
+  SmVector3d sSurfaceCircleNormal, sSurfaceVec, sSurfaceVec2 ;
+
+  // if the curve plane is tangent to the surface plane
+  if(smos_Fabs(dCosPhi) < SM_EFF_ZERO_RAD)
+    {
+      // It is either coincident, tangent or tangent and needs to be intersected
+      // with the asymptopes of the dupin's indicatrix curves.
+      switch(eSurfaceType)
+        {
+          case SM_LS_PLANAR :      rePointType = SM_TC_COINCIDENT ;
+                                   return(SM_SUCCESS) ;
+
+          case SM_LS_ELLIPTICAL :  rePointType = SM_TC_TANGENT ;
+                                   return(SM_SUCCESS) ;
+
+          case SM_LS_HYPERBOLIC :  { rePointType      = SM_TC_TANGENT ;
+                                     bSurfaceLine     = TRUE ;
+                                     bSurfaceTwoLines = TRUE ;
+
+                                     // Let us compute the vectors by evaluating the hyperbola
+                                     // K1*x^2 + K2*y^2 = 1 at a large X value and computing the
+                                     // Y.  This should give us a vector in terms of the principle
+                                     // curvature vectors which defines the asymptotic directions of the
+                                     // hyperbola.
+                                     double dY   = 10000.0;
+                                     double dTmp = (1-dPrincipleCurvature1*dY*dY) / dPrincipleCurvature2;
+                                     if (dTmp < 0.0) dTmp = 0.0;  // should be caught as elliptical or cylindrical cases, but just in case. . .
+                                     double dX = smos_Sqrt( dTmp );
+                                     //double dSize = smos_Sqrt(dY*dY + dX*dX) ;
+
+                                     sSurfaceVec  = dY * PrincipleCurvatureVector1 + dX * PrincipleCurvatureVector2;
+                                     sSurfaceVec2 = dY * PrincipleCurvatureVector1 - dX * PrincipleCurvatureVector2;
+                                     sSurfaceVec.Unitize() ;
+                                     sSurfaceVec2.Unitize() ;
+                                   }
+                                   break ;
+
+          case SM_LS_CYLINDRICAL : rePointType      = SM_TC_TANGENT ;
+                                   bSurfaceLine     = TRUE ;
+                                   bSurfaceTwoLines = FALSE ;
+                                   sSurfaceVec  =   smos_Fabs(dPrincipleCurvature1) < SM_EFF_ZERO_SQRT
+                                                  ? PrincipleCurvatureVector1
+                                                  : PrincipleCurvatureVector2 ;
+                                   break ;
+
+        } // end switch on eSurfaceType
+    } // end curvePlane is tangent to surface branch
+
+  // else curvePlane is not tangent to surface and when the surfaceSection is flat
+  else if (smos_Fabs(dSurfaceSectionCurvature) < SM_EFF_ZERO_SQRT)
+    {
+      bSurfaceLine     = TRUE ;
+      bSurfaceTwoLines = FALSE ;
+      sSurfaceVec      = sSurfaceSectionTangent ;
+    }
+  else // curvePlane is not tangent to surface and surfaceSection is curved
+    {
+      bSurfaceLine     = FALSE ;
+      bSurfaceTwoLines = FALSE ;
+      sSurfaceVec      = sSurfaceSectionTangent ;
+
+      // get surface osculating circle in the curve's plane
+      //   remember to use Meusnier's theorem to pick correct SurfaceCircleRadius
+      dSurfaceRadius = smos_Fabs(1.0 / dSurfaceSectionCurvature) * dCosPhi ;
+
+      // rotate the surface normal into the curve's plane about the tangent
+      // vector - do this by projecting the surface normal onto the curve plane
+      // and unitizing.
+      SmVector3d sSurfaceCircleCenterVec = (sCurveBinormal * (smos_Sgn(dSurfaceSectionCurvature) * sSurfaceNormal)) * sCurveBinormal ;
+      sSurfaceCircleCenterVec.Unitize() ;
+
+      // sCircle1Center = lies in direction of the sSurfaceCircleCenterVec not the sSurfaceNormal
+      sSurfaceCenter       = sSurfacePoint + sSurfaceCircleCenterVec * dSurfaceRadius ;
+      sSurfaceCircleNormal = sCurveBinormal;
+    } // end get surface osculating circle branch
+
+#ifdef SM_DEBUG_CODE
+  if(bDebugMe)
+    {
+      SmBrep *pBrep = crSurface.GetFace() ? ((SmFace *)crSurface.GetFace())->GetBrep() : NULL ;
+      if(pBrep == NULL) pBrep = crCurve.GetOwner() ? ((SmEdge *)crCurve.GetEdge())->GetBrep() : NULL ;
+
+      smgfx_Erase() ;
+      smgfx_SetLook(1,2, 0,0,1) ; if(pBrep) pBrep->Draw(TRUE) ; sm_GraphicsLoop() ;
+      smgfx_SetLook(1,2, 0,1,1) ; crSurface.DrawUV() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(2,3, 0,1,0) ; crCurve.Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(4,5, 1,0,0) ; sPVV[0][0].Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(5,6, 1,0,1) ; sCurveGeomVec[0].Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(2,3, 1,.5,0); if(bSurfaceLine) { (3.0 * sSurfaceVec).Draw(&sSurfacePoint) ; sm_GraphicsLoop() ;
+                                                    (-3.0 * sSurfaceVec).Draw(&sSurfacePoint) ; sm_GraphicsLoop() ;
+                                                    if(bSurfaceTwoLines)
+                                                       { (3.0 * sSurfaceVec2).Draw(&sSurfacePoint) ; sm_GraphicsLoop() ;
+                                                         (-3.0 * sSurfaceVec2).Draw(&sSurfacePoint) ; sm_GraphicsLoop() ; } }
+                                  else { SMGFX_DRAWLIST(NULL, 
+                                                        smgfx_DrawCircularArc(sSurfaceCenter, 
+                                                                              (sSurfacePoint-sSurfaceCenter),
+                                                                              (sSurfacePoint-sSurfaceCenter)*sSurfaceCircleNormal,
+                                                                              dSurfaceRadius, 
+                                                                              -90.0, 90.0, 
+                                                                              dSurfaceRadius/100,
+                                                                              NULL)) ; sm_GraphicsLoop() ; }
+      smgfx_SetLook(3,4, .5,1,0); if(bCurveLine) { (3.0 * sCurveVec).Draw(&sCurvePoint) ; sm_GraphicsLoop() ;
+                                                  (-3.0 * sCurveVec).Draw(&sCurvePoint) ; sm_GraphicsLoop() ; }
+                                  else{ SMGFX_DRAWLIST(NULL, 
+                                                       smgfx_DrawCircularArc(sCurveCenter, 
+                                                                             (sCurvePoint-sCurveCenter),
+                                                                             (sCurvePoint-sCurveCenter)*sCurveCircleNormal,
+                                                                             dCurveRadius, 
+                                                                             -90.0, 90.0, 
+                                                                             dCurveRadius/100,
+                                                                             NULL)) ; sm_GraphicsLoop() ; }
+      sm_GraphicsLoop() ;
+    }
+#endif // SM_DEBUG_CODE
+
+  // We need a tolerance for line and circle intersections.
+  // They're purely geometric, but could well have tolerance issues.
+  // Look to topology first, otherwise use heuristics.
+
+  double dCurveTol   = SM_EFF_ZERO_SQRT; // default values, if nothing else to use.
+  double dSurfaceTol = SM_EFF_ZERO_SQRT;
+
+  SmEdge *pCurveOwner = SM_CAST_PTR( SmEdge, crCurve.GetOwner() );
+  if ( pCurveOwner != NULL )
+    { dCurveTol = pCurveOwner->GetTolerance(); }
+  else if ( !bCurveLine )
+    { dCurveTol = dCurveRadius / 1000; }
+
+  SmFace *pSurfaceOwner  = SM_CAST_PTR( SmFace, crSurface.GetOwner() );
+  if ( pSurfaceOwner != NULL )
+    { dSurfaceTol = pSurfaceOwner->GetTolerance(); }
+  else if ( !bSurfaceLine )
+    { dSurfaceTol = dSurfaceRadius / 1000; }
+
+  double d3DTol = dCurveTol + dSurfaceTol;
+
+
+  // when both curve and surface shapes are lines
+  if(bCurveLine && bSurfaceLine)
+    {
+      // classify the point as crossing or coincident
+      rePointType =  (   (   bSurfaceTwoLines && sCurveVec.IsParallelTo(sSurfaceVec2, 2.0))
+                      || (   bSurfaceLine     && sCurveVec.IsParallelTo(sSurfaceVec, 2.0)))
+                    ? SM_TC_COINCIDENT
+                    : SM_TC_CROSSING ;
+      // all done
+      return(SM_SUCCESS) ;
+    }
+
+   // when both shapes are curved - see if one should be treated as a line
+   if(!bCurveLine && !bSurfaceLine)
+     {
+       // when osculating circle radii vastly differ - treat one shape as a line
+       // (Note, 2.0 is not enough. [B30])
+       if     (dCurveRadius   > 1000.0 * dSurfaceRadius) { bCurveLine   = TRUE ; }
+       else if(dSurfaceRadius > 1000.0 * dCurveRadius)   { bSurfaceLine = TRUE ; }
+     }
+
+   // look for second intersections
+   SmVector3d sFoundVector ;
+
+   // when curve is linear or close enough
+   if(bCurveLine)
+     {
+       // intersect CurveLine with SurfaceOsculating Circle
+       ULONG lNumTsect;
+       double adTsectLineParam[2];
+
+       // intersect line with circle
+       SER(smgu_LineCoPlanarCircleIntersect(sCurvePoint, sCurveVec,
+                                            sSurfaceCenter, sSurfaceCircleNormal,
+                                            dSurfaceRadius, d3DTol,
+                                            lNumTsect,    adTsectLineParam));
+
+       // If only have one or zero intersections we are done without
+       // picking up extra guess or finding coincidence
+       switch(lNumTsect)
+         {
+           // If no intersection, it's probably a tolerance thing,
+           // and probably tangent.  (Was CROSSING in that case.)
+           // But leave the warning in, it should be checked.
+           case 0: { rePointType = SM_TC_TANGENT ; WARN(_T("Unexpected Branch")) ; return SM_SUCCESS; }
+           case 1: { rePointType = SM_TC_TANGENT ; return SM_SUCCESS; }
+           case 2: { rePointType = SM_TC_NEAR_TANGENT ; break ; }
+         }
+
+       // Find the other intersection -- i.e. the one we don't have
+       double dLineT =   (smos_Fabs(adTsectLineParam[1]) > smos_Fabs(adTsectLineParam[0]))
+                       ? adTsectLineParam[1]
+                       : adTsectLineParam[0];
+       SmPoint3d sOtherTsect = sCurvePoint + dLineT * sCurveVec;
+       sFoundVector          = dLineT * sCurveVec ;
+     } // end Curve is line branch
+
+   // when surface is linear
+   if(bSurfaceLine)
+     {
+       // intersect SurfaceLine with CurveOsculating Circle
+       ULONG lNumTsect, lNumTsect2 = 0;
+       double adTsectLineParam[2], adTsectLineParam2[2];
+       SmVector3d sFoundVector2 ;
+       SmTsectCurveType eLocalPointType = SM_TC_UNKNOWN, eLocalPointType2 = SM_TC_UNKNOWN ;
+
+       // intersect line with circle
+       SER(smgu_LineCoPlanarCircleIntersect(sSurfacePoint, sSurfaceVec,
+                                            sCurveCenter, sCurveCircleNormal,
+                                            dCurveRadius, d3DTol,
+                                            lNumTsect,    adTsectLineParam));
+       // use number of intersections to classify the point against SurfaceVec
+       switch(lNumTsect)
+         {
+           // If no intersection, it's probably a tolerance thing,
+           // and probably tangent.  (Was CROSSING in that case.)
+           // But leave the warning in, it should be checked.
+           case 0: { eLocalPointType = SM_TC_TANGENT ; WARN(_T("Unexpected Branch")) ; break ; }
+           case 1: { eLocalPointType = SM_TC_TANGENT ; break ; }
+           case 2: { eLocalPointType = SM_TC_NEAR_TANGENT ;
+                     // Find the other intersection -- i.e. the one we don't have
+                     double dLineT =   (smos_Fabs(adTsectLineParam[1]) > smos_Fabs(adTsectLineParam[0]))
+                                     ? adTsectLineParam[1]
+                                     : adTsectLineParam[0];
+                     SmPoint3d sOtherTsect = sSurfacePoint + dLineT * sSurfaceVec;
+                     sFoundVector          = dLineT * sSurfaceVec ;
+                   }
+                   break ;
+         } // end switch on number of line/circle intersection points
+
+       // when surface is represented by two lines
+       if(bSurfaceTwoLines)
+         {
+           // intersect SurfaceLine2 with CurveOsculating Circle
+           SER(smgu_LineCoPlanarCircleIntersect(sSurfacePoint, sSurfaceVec2,
+                                                sCurveCenter, sCurveCircleNormal,
+                                                dCurveRadius, d3DTol,
+                                                lNumTsect2,    adTsectLineParam2));
+
+           // use number of intersections to classify the point against SurfaceVec2
+           switch(lNumTsect2)
+             {
+               // If no intersection, it's probably a tolerance thing,
+               // and probably tangent.  (Was CROSSING in that case.)
+               // But leave the warning in, it should be checked.
+               case 0: { eLocalPointType2 = SM_TC_TANGENT ; WARN(_T("Unexpected Branch")) ; break ; }
+               case 1: { eLocalPointType2 = SM_TC_TANGENT ; break ; }
+               case 2: { eLocalPointType2 = SM_TC_NEAR_TANGENT ;
+                         // Find the other intersection -- i.e. the one we don't have
+                         double dLineT =   (smos_Fabs(adTsectLineParam2[1]) > smos_Fabs(adTsectLineParam2[0]))
+                                         ? adTsectLineParam2[1]
+                                         : adTsectLineParam2[0];
+                         SmPoint3d sOtherTsect = sSurfacePoint + dLineT * sSurfaceVec;
+                         sFoundVector2         = dLineT * sSurfaceVec ;
+                       }
+                       break ;
+             } // end switch on number of line/circle intersection points
+         } // end need to intersect with SurfaceVec2 check
+
+       // When there are no near-tangent cases - classify the intersection and exit
+       if(eLocalPointType != SM_TC_NEAR_TANGENT && eLocalPointType2 != SM_TC_NEAR_TANGENT)
+         {
+           rePointType = (!bSurfaceTwoLines) ? eLocalPointType : SM_TC_TANGENT ;
+           return(SM_SUCCESS) ;
+         }
+
+       // arrive here when we have a near-tangent case
+       rePointType = SM_TC_NEAR_TANGENT ;
+
+       // when there are two near-tangent cases
+       if(eLocalPointType == SM_TC_NEAR_TANGENT && eLocalPointType2 == SM_TC_NEAR_TANGENT)
+         {
+           // pick the closest 2nd intersection point (maybe we should use both)
+           if(sFoundVector2.LengthSquared() < sFoundVector.LengthSquared())
+             { sFoundVector = sFoundVector2 ; }
+         }
+       // when only the second intersection was a near tangent case
+       else if(eLocalPointType2 == SM_TC_NEAR_TANGENT)
+         {
+           sFoundVector = sFoundVector2 ;
+         }
+       // else first intersection is a tangent case and sFoundVector is already set
+     } // end when surface is linear branch
+
+   // when curve and surface are both curved
+   if(!bCurveLine && !bSurfaceLine)
+     {
+       // intersect osculating curve and surface circles
+       ULONG lNumTsect;
+       SmPoint3d sTsectPoints[2];
+
+       // Do BiggerCircle/SmallerCircle intersection
+       if (dCurveRadius > dSurfaceRadius)
+         {
+           SER(smgu_CircleCoPlanarCircleIntersect(sCurveCircleNormal,
+               sCurveCenter,dCurveRadius,sSurfaceCenter,dSurfaceRadius,
+               d3DTol,
+               lNumTsect,sTsectPoints));
+         }
+       else
+         {
+           SER(smgu_CircleCoPlanarCircleIntersect(sSurfaceCircleNormal,
+               sSurfaceCenter,dSurfaceRadius,sCurveCenter,dCurveRadius,
+               d3DTol,
+               lNumTsect,sTsectPoints));
+         }
+
+       // If only have one or zero intersections we are done without
+       // picking up extra guess
+       switch(lNumTsect)
+         {
+           // If no intersection, it's probably a tolerance thing,
+           // and probably tangent.  (Was CROSSING in that case.)
+           // But leave the warning in, it should be checked.
+           case 0: { rePointType = SM_TC_TANGENT ; WARN(_T("Unexpected Branch")) ; return SM_SUCCESS; }
+           case 1: { rePointType = SM_TC_TANGENT ;      return SM_SUCCESS; }
+           case 2: { rePointType = SM_TC_NEAR_TANGENT ; break ; }
+           case 3: { rePointType = SM_TC_COINCIDENT ;   return SM_SUCCESS; }
+         }
+
+       // else save new intersection guess point
+       sFoundVector = sTsectPoints[0] - sSurfacePoint ;
+       sFoundVector =   (sFoundVector.Length() < sTsectPoints[1].DistanceBetween(sSurfacePoint))
+                      ? (sTsectPoints[1] - sSurfacePoint)
+                      : (sTsectPoints[0] - sSurfacePoint) ;
+
+     } // end curve and surface are both curved branch
+
+// {          // let Circle1 = surface osculating circle in the curve's plane
+//            //   remember to use Meusnier's theorem to pick correct circle1Radius
+//            dCircle1Radius = smos_Fabs(1.0 / dSurfaceSectionCurvature) * dCosPhi ;
+//            // SER(sSurfaceNormal.Unitize());  // all ready unitized
+//            // SER(sCurveNormal.Unitize());    // all ready unitized
+//
+//            // rotate the surface normal into the curve's plane about the tangent
+//            // vector - do this by projecting the surface normal onto the curve plane
+//            // and unitizing.
+//            SmVector3d sSurfaceCircleNormal = (sCurveBinormal * sSurfaceNormal) * sCurveBinormal ;
+//            sSurfaceCircleNormal.Unitize() ;
+//
+//            // sCircle1Center = lies in direction of the sSurfaceCircleNormal not the sSurfaceNormal
+//            sCircle1Center = sSurfacePoint + sSurfaceCircleNormal * dCircle1Radius ;
+//            sCircle1Normal = sCurveBinormal;
+//
+//            // when Curve Curvature is or is close enough to being a line
+//            if (   smos_Fabs(dCurveCurvature)     < SM_EFF_ZERO_SQRT
+//                || smos_Fabs(1.0/dCurveCurvature) > 2.0 * dCircle1Radius)
+//              {
+//                sLinePoint = sCurveGeomVec[0];
+//                sLineVec   = sCurveGeomVec[1];
+//                SER(sLineVec.Unitize());
+//                bLineCircleIntersection = TRUE;
+//              }
+//            else // curve and surface curvatures are close enough to take into consideration
+//              {
+//                // let Circle2 = curve osculating circle
+//                dCircle2Radius = smos_Fabs(1.0/dCurveCurvature);
+//
+//                // when surface is flat compared to the curve
+//                if (dCircle1Radius > 2.0 * dCircle2Radius)
+//                  {
+//                    // let circle1 = curve osculating circle
+//                    dCircle1Radius = smos_Fabs(1.0/dCurveCurvature);
+//                    sCircle1Center = sCurveGeomVec[0] + sCurveNormal * dCircle1Radius;
+//                    sCircle2Normal = sCurveBinormal;
+//
+//                    // let line = surface tangent line
+//                    sLinePoint = sSurfacePoint;
+//                    sLineVec   = sSurfaceSectionTangent;
+//                    SER(sLineVec.Unitize());
+//                    bLineCircleIntersection = TRUE;
+//                  }
+//                else // curve and surface curvature are nearly equal branch
+//                  {
+//                    // let circle2 = curve osculating circle
+//                    sCircle2Center = sCurveGeomVec[0] + sCurveNormal * dCircle2Radius;
+//                    sCircle2Normal = sCurveBinormal;
+//                  } // end nearly equal curve and surface curvatures branch
+//              } // end curve ans surface curvatures are close to one another
+//          } // end surface curvature in curve direction check
+//
+//        SmBoolean  bLineCircleIntersection = FALSE, bTwoLineIntersection = FALSE ;
+//
+//        double     dCircle1Radius, dCircle2Radius;
+//        SmPoint3d  sLinePoint,          sCircle1Center, sCircle2Center;
+//        SmVector3d sLineVec, sLineVec2, sCircle1Normal, sCircle2Normal;
+//        SmVector3d sFoundVector;
+//
+//        // If the surface section curvature is zero then use a line instead of a circle for the surface.
+//        // Also if the radius of one circle is greater then twice the
+//        //   other use a line for the one with the larger radius.
+//
+//
+//        // when test = circle/line intersection
+//        if (bLineCircleIntersection)
+//          {
+//            ULONG lNumTsect;
+//            double adTsectLineParam[2];
+//
+//            // intersect line with circle
+//            SER(smgu_LineCoPlanarCircleIntersect(sLinePoint, sLineVec,
+//                                                 sCircle1Center, sCircle1Normal,
+//                                                 dCircle1Radius, SM_EFF_ZERO,
+//                                                 lNumTsect,    adTsectLineParam));
+//
+//            // If only have one or zero intersections we are done without
+//            // picking up extra guess or finding coincidence
+//            switch(lNumTsect)
+//              {
+//                case 0: rePointType = SM_TC_CROSSING ; WARN(_T("Unexpected Branch")) ; return SM_SUCCESS;
+//                case 1: rePointType = SM_TC_TANGENT ;      return SM_SUCCESS;
+//                case 2: rePointType = SM_TC_NEAR_TANGENT ; break ;
+//              }
+//
+//            // Find the other intersection -- i.e. the one we don't have
+//            double dLineT = adTsectLineParam[0];
+//            if (smos_Fabs(adTsectLineParam[1]) > smos_Fabs(adTsectLineParam[0]))
+//              {
+//                dLineT = adTsectLineParam[1];
+//              }
+//            SmPoint3d sOtherTsect = sLinePoint + dLineT * sLineVec;
+//            sFoundVector = dLineT * sLineVec;
+//          }
+//        else // test = circle/circle interesection
+//          {
+//            ULONG lNumTsect;
+//            SmPoint3d sTsectPoints[2];
+//
+//            // Do BiggerCircle/SmallerCircle intersection
+//            if (dCircle1Radius > dCircle2Radius)
+//              {
+//                SER(smgu_CircleCoPlanarCircleIntersect(sCircle1Normal,
+//                    sCircle1Center,dCircle1Radius,sCircle2Center,dCircle2Radius,
+//                    SM_EFF_ZERO,
+//                    lNumTsect,sTsectPoints));
+//              }
+//            else
+//              {
+//                SER(smgu_CircleCoPlanarCircleIntersect(sCircle2Normal,
+//                    sCircle2Center,dCircle2Radius,sCircle1Center,dCircle1Radius,
+//                    SM_EFF_ZERO,
+//                    lNumTsect,sTsectPoints));
+//              }
+//
+//            // If only have one or zero intersections we are done without
+//            // picking up extra guess
+//            switch(lNumTsect)
+//              {
+//                case 0: rePointType = SM_TC_CROSSING ; WARN(_T("Unexpected Branch")) ; return SM_SUCCESS;
+//                case 1: rePointType = SM_TC_TANGENT ;      return SM_SUCCESS;
+//                case 2: rePointType = SM_TC_NEAR_TANGENT ; break ;
+//                case 3: rePointType = SM_TC_COINCIDENT ;   return SM_SUCCESS;
+//              }
+//
+//            // else save new intersection guess point
+//            sFoundVector = sTsectPoints[0] - sSurfacePoint;
+//            if (sFoundVector.Length() < sTsectPoints[1].DistanceBetween(sSurfacePoint))
+//              {
+//                sFoundVector = sTsectPoints[1] - sSurfacePoint;
+//              }
+//          } // end test = circle/circle intersection
+
+  // Use the found vector to compute an approximate step in the
+  // curve and surface parameters.
+  SmVector3d sDU = sPVV[1][0] ;
+  SmVector3d sDV = sPVV[0][1] ;
+
+  rbFoundGuess  = TRUE;
+  // old style: rdNewTGuess   = dCurrentT     + sm_ConvertToParameterDelta(sCurveGeomVec[1],sFoundVector);
+  // new style: account for circlular arc distance in curves.
+  //    gwc: the two approaches were about the same so didn't bother to make a change to the surface guess.
+  rdNewTGuess   = dCurrentT     + smos_Sgn(sCurveGeomVec[1].Dot(sFoundVector))
+                                  * (  bCurveLine ? sFoundVector.Length()
+                                                  : 2.0 * dCurveRadius * smos_ArcSine(sFoundVector.Length()/2.0/dCurveRadius))
+                                  / sCurveGeomVec[1].Length();
+  // Use the combined 2d shift, instead of two 1-d shifts. [B30]
+  SmPoint2d sDeltaUV;
+  SmStatus eStat = smgu_VecLinCombTwoVectors( sDU, sDV, sFoundVector, sDeltaUV );
+  if ( eStat == SM_SUCCESS )
+    {
+      rNewUVGuess = crCurrentUV + sDeltaUV;
+    }
+  else
+    {
+      // Well, ok, if the 2d shift fails, then try two 1-d shifts.
+      // Presumably one will succeed and one will fail, but the one that fails
+      // is on a degenerate surface derivative, so its magnitude doesn't mean much anyway.
+      rNewUVGuess.x = crCurrentUV.x + sm_ConvertToParameterDelta(sDU,sFoundVector);
+      rNewUVGuess.y = crCurrentUV.y + sm_ConvertToParameterDelta(sDV,sFoundVector);
+    }
+
+  // skip guesses outside of both given domains - keep guesses in at least one domain
+  if (   !crInterval.ContainsValue(rdNewTGuess)
+      && !crUVDomain.ContainsPoint2d(rNewUVGuess))
+    {
+      // If the guess is outside of the domain we'll be able to pick it up using
+      // another method.
+      rbFoundGuess = FALSE;
+      return SM_SUCCESS;
+    }
+
+  // set output
+  rdNewTGuess = crInterval.ClampValue(rdNewTGuess);
+  rNewUVGuess = crUVDomain.ClampPoint2d(rNewUVGuess);
+
+#ifdef SM_DEBUG_CODE
+  if(bDebugMe)
+    {
+      SmBrep *pBrep = crSurface.GetFace() ? ((SmFace *)crSurface.GetFace())->GetBrep() : NULL ;
+      if(pBrep == NULL) pBrep = crCurve.GetOwner() ? ((SmEdge *)crCurve.GetEdge())->GetBrep() : NULL ;
+      SmVector3d sNewCurvePt, sNewSurfacePt ;
+      crCurve.EvaluatePoint(rdNewTGuess, sNewCurvePt) ;
+      crSurface.EvaluatePoint(rNewUVGuess, sNewSurfacePt) ;
+
+      smgfx_Erase() ;
+      smgfx_SetLook(1,2, 0,0,1) ; if(pBrep) pBrep->Draw(TRUE) ; sm_GraphicsLoop() ;
+      smgfx_SetLook(1,2, 0,1,1) ; crSurface.DrawUV() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(2,3, 0,1,0) ; crCurve.Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(4,5, 1,0,0) ; sPVV[0][0].Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(1,5, 1,.5,0); sPVV[0][0].DrawPointToPoint(sPVV[0][0]+sFoundVector) ; sm_GraphicsLoop() ;
+      smgfx_SetLook(5,6, 1,0,1) ; sCurveGeomVec[0].Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(7,8, 0,0,1) ; sNewCurvePt.Draw() ; sm_GraphicsLoop() ;
+      smgfx_SetLook(7,8, 0,.5,1); sNewSurfacePt.Draw() ; sm_GraphicsLoop() ;
+      sm_GraphicsLoop() ;
+    }
+#endif // SM_DEBUG_CODE
+
+  // all done
+  return SM_SUCCESS;  // Found a guess - loaded it now we are done
+
+} // end sm_ClassifyCurveSurfaceXSectPoint
+
+
 // ---- verbatim: SmSurface.cpp lines 15517-16945: sm_GlobalCurveIntersectCombineSolutions
 /*******************************************************************//**
 PURPOSE: Combine set of Surface/Curve solutions into unique
@@ -1888,19 +2586,13 @@ void run_combine(Rd& rd, const SmContext& ctx, SmSurface* srf, std::vector<doubl
             s.m_apNodes[1] = n1 < 0 ? NULL : snodes[(size_t)n1];
             sols.Add(s);
         }
-        sc_srf_p10::g_classify_reached = false;
         SmStatus r = sc_srf_p10::sm_GlobalCurveIntersectCombineSolutions(*srf, dom, *crv, ivl, tol, sols);
-        if (sc_srf_p10::g_classify_reached)
-            o.push_back((double)SC_P10_CLASSIFY_REACHED);
-        else
+        o.push_back(st(r));
+        if (r == SM_SUCCESS)
         {
-            o.push_back(st(r));
-            if (r == SM_SUCCESS)
-            {
-                o.push_back((double)sols.GetSize());
-                for (ULONG i = 0; i < sols.GetSize(); i++)
-                    put_sol(o, sols[i], cnodes, snodes, crv, srf);
-            }
+            o.push_back((double)sols.GetSize());
+            for (ULONG i = 0; i < sols.GetSize(); i++)
+                put_sol(o, sols[i], cnodes, snodes, crv, srf);
         }
     }
     delete cache;

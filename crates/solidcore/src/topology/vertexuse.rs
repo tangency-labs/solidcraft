@@ -747,20 +747,31 @@ fn local_point_solve(
 /// boundary curve processing on and, when `point_test` is false, point testing off
 /// (all restored afterwards); `NER` of a missing surface cache.
 fn global_point_solve(
-    _k: &Kernel,
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _op: SolverOperation,
-    _point: Point3,
-    _tol: f64,
-    _request: SolutionRequested,
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    op: SolverOperation,
+    point: Point3,
+    tol: f64,
+    request: SolutionRequested,
     _point_test: bool,
 ) -> Result<Vec<PointDrop>> {
-    // UNPORTED(surface.surface_p4): SmSurface::GlobalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::GlobalPointSolve",
-        "surface.surface_p4",
-    ))
+    // The Rust surface solver builds no surface cache, so the cache flags upstream
+    // switches around the call (point testing, boundary curves, `m_bHaveTSurfaceCache`)
+    // have nothing to act on; a face-owned surface is Unported (query.face_p2) inside.
+    let solutions = surface.global_point_solve::<crate::surface::surface::p4::NoObject>(
+        k, domain, op, point, tol, None, request,
+    )?;
+    solutions
+        .as_slice()
+        .iter()
+        .map(|s| {
+            Ok(PointDrop {
+                uv: Point2::new(s.start.param(0)?, s.start.param(1)?),
+                value: s.start.solution_value,
+            })
+        })
+        .collect()
 }
 
 /// `pSurface->IsSingularity(uv, eDir, dTol3d)` (virtual: the plane override, the base
@@ -784,7 +795,7 @@ fn is_singularity(surface: &Surface, _uv: Point2, _tol: f64) -> Result<(bool, Su
 
 /// `pSurface->IsOnSeam(uv, NULL, &eSeamDir, ...)` (virtual: the plane override, the
 /// base body otherwise).
-fn is_on_seam(surface: &Surface, _uv: Point2) -> Result<(bool, SurfParamType)> {
+fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_on_seam()),
         SurfaceKind::BSpline(_)
@@ -792,11 +803,8 @@ fn is_on_seam(surface: &Surface, _uv: Point2) -> Result<(bool, SurfParamType)> {
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p4): SmSurface::IsOnSeam
-            Err(SolidError::unported(
-                "SmSurface::IsOnSeam",
-                "surface.surface_p4",
-            ))
+            let info = surface.is_on_seam(k, uv, None)?;
+            Ok((info.on_seam, info.seam_dir))
         }
     }
 }
@@ -1407,7 +1415,7 @@ pub fn compute_uv_sector(
 
             // Is BegVertexUV on a Surface->Seam
             let surface = face_surface(b, f)?;
-            let (on_seam, seam_dir) = is_on_seam(surface, io.beg_edge_uv_point)?;
+            let (on_seam, seam_dir) = is_on_seam(k, surface, io.beg_edge_uv_point)?;
             let seam_u = seam_dir == SurfParamType::U || seam_dir == SurfParamType::Both;
             let seam_v = seam_dir == SurfParamType::V || seam_dir == SurfParamType::Both;
             io.vertex_on_closed_u = on_seam && seam_u;

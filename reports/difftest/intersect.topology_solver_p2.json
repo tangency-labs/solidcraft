@@ -2415,8 +2415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmSurface::GlobalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_0_0",
@@ -2427,8 +2427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmSurface::GlobalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_0_1",
@@ -2439,8 +2439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_3_0",
@@ -2451,8 +2451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_3_1",
@@ -2463,8 +2463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmSPGlobalSolver::LocalSolve",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_4_0",
@@ -2475,8 +2475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmSPGlobalSolver::LocalSolve",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_4_1",
@@ -2487,8 +2487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmSurface::GlobalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_5_0",
@@ -2499,8 +2499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GlobalPointSolve",
-        "unit": "surface.surface_p4"
+        "symbol": "SmSurface::GlobalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_5_1",
@@ -19622,9 +19622,9 @@
   "deferred_by_unit": {
     "intersect.surface_silhouette": 8,
     "surface.surface_p11": 20,
-    "surface.surface_p4": 8,
-    "surface.surface_p8": 4,
-    "topology.brep_p1": 2,
+    "surface.surface_p8": 6,
+    "surface.surface_point_solve_p3": 4,
+    "topology.brep_p1": 4,
     "topology.edge": 3
   },
   "max_rel_err": 0.0,

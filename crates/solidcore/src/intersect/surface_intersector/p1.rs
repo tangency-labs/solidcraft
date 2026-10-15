@@ -101,7 +101,6 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::TsectCurveType;
-use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::Surface;
 
 const OP_POINT: &str = "intersect::surface_intersector::p1::SurfaceIntersector::point";
@@ -829,6 +828,7 @@ impl<'s> SurfaceIntersector<'s> {
     /// parameter found there in that point.
     pub fn step_back_from_singularity(
         &mut self,
+        k: &Kernel,
         sing_dir: SurfParamType,
         srf: SrfIndex,
         step_off_current: bool,
@@ -839,6 +839,7 @@ impl<'s> SurfaceIntersector<'s> {
         let mut prev = self.point(previous)?.clone();
         let mut curr = self.point(current)?.clone();
         let r = self.step_back_from_singularity_points(
+            k,
             sing_dir,
             srf,
             step_off_current,
@@ -861,6 +862,7 @@ impl<'s> SurfaceIntersector<'s> {
     /// (upstream takes the points by reference).
     pub(crate) fn step_back_from_singularity_points(
         &self,
+        k: &Kernel,
         sing_dir: SurfParamType,
         srf: SrfIndex,
         step_off_current: bool,
@@ -892,7 +894,7 @@ impl<'s> SurfaceIntersector<'s> {
             surface_local_point_solve(surface, &domain, pnt, prev.uv_pos(srf))?;
         if !found_answer {
             let solutions =
-                surface_global_point_solve(surface, &domain, pnt, self.this_approx_tol_3d)?;
+                surface_global_point_solve(k, surface, &domain, pnt, self.this_approx_tol_3d)?;
             if let Some(first) = solutions.first() {
                 solution = *first;
                 found_answer = true;
@@ -1790,27 +1792,25 @@ fn surface_local_point_solve(
 /// `crSurface.GlobalPointSolve(domain, SM_SO_MINIMIZE, point, tol, NULL, SM_SR_ALL,
 /// ..)`: the solutions' start parameters.
 fn surface_global_point_solve(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     point: Point3,
     tol: f64,
 ) -> Result<Vec<[f64; 2]>> {
-    Ok(global_point_solve_starts(
+    let starts = crate::surface::surface::p4::global_point_solve_starts(
+        k,
         surface,
         domain,
         SolverOperation::Minimize,
         point,
         tol,
         SolutionRequested::All,
-    )?
-    .iter()
-    .map(|s| {
-        [
-            s.parameters.first().copied().unwrap_or(0.0),
-            s.parameters.get(1).copied().unwrap_or(0.0),
-        ]
-    })
-    .collect())
+    )?;
+    starts
+        .iter()
+        .map(|s| Ok([s.param(0)?, s.param(1)?]))
+        .collect()
 }
 
 /// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.
