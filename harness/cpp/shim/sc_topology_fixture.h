@@ -199,6 +199,7 @@ struct LuPeek : SmLoopuse
     static SmLoopuse* SmLoopuse::*mate() { return &LuPeek::m_pLUMate; }
     static SM_TYPE SmLoopuse::*type() { return &LuPeek::m_tLoopuseType; }
     static SmTopology* SmLoopuse::*start() { return &LuPeek::m_pEUorVU; }
+    static SmOrientType SmLoopuse::*orient() { return &LuPeek::m_eOrientation; }
 };
 struct VuPeek : SmVertexuse
 {
@@ -602,6 +603,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         o.push_back((double)ty);
         SmTopology* start = p->*LuPeek::start();
         o.push_back((double)(ty == SmEdgeuse_TYPE ? g.find(6, start) : ty == SmVertexuse_TYPE ? g.find(8, start) : -1));
+        o.push_back((double)(p->*LuPeek::orient()));
     }
     for (SmLoop* p : g.loops)
         o.push_back((double)g.find(4, p->GetLoopuse()));

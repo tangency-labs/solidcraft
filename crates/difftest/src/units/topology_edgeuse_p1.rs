@@ -790,11 +790,13 @@ pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), Harne
             VERTEXUSE_TYPE => LoopuseStart::Vertexuse(opt(start, VertexuseId::from_index)?),
             _ => LoopuseStart::Unknown,
         };
+        let orientation = orient_of(rd.idx()?)?;
         loopuses.push(Loopuse {
             faceuse,
             loop_,
             mate,
             start,
+            orientation,
         });
     }
     let mut loop_lus = Vec::new();

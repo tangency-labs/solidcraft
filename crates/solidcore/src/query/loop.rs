@@ -12,7 +12,7 @@
 //! | [`FaceLoop`], [`LoopEdgeuse`] | the `SmLoop` / `SmLoopuse` / `SmEdgeuse` / `SmEdge` / `SmFace` data it reads (see Deviations) |
 //! | [`uv_corner_boundaries`]     | `SmLoop::GetUVCornerBoundaries` (CO-PORTED from `topology.loopuse`) |
 //! | [`UvCornerBoundaries`]       | its return value and out-params                |
-//! | `calc_quad_num` (private)    | `sm_CalcQuadNum` (file static, CO-PORTED from `topology.loopuse`) |
+//! | `calc_quad_num` (private)    | `sm_CalcQuadNum` (file static, unit `topology.loopuse`) |
 //!
 //! Deviations:
 //! - **Topology view.** The arena topology ([`crate::topology`]) does not bind
@@ -215,20 +215,10 @@ pub fn uv_corner_boundaries(
     Ok(out)
 }
 
-/// `sm_CalcQuadNum`: the quadrant of `test` in a frame centred on `origin`
-/// (`1 | 0` above, `2 | 3` below).
+/// `sm_CalcQuadNum` (unit `topology.loopuse`): the quadrant of `test` in a frame
+/// centred on `origin` (`1 | 0` above, `2 | 3` below).
 fn calc_quad_num(origin: Point3, test: Point3) -> i32 {
-    if test.x >= origin.x {
-        if test.y < origin.y {
-            3
-        } else {
-            0
-        }
-    } else if test.y >= origin.y {
-        1
-    } else {
-        2
-    }
+    crate::topology::loopuse::calc_quad_num(origin, test) as i32
 }
 
 /// `SmSurface::GetSingularities`: the sides of the natural domain that are poles.
