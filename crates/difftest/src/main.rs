@@ -7,6 +7,7 @@
 //! cargo run -p difftest --features cpp -- --list
 //! cargo run -p difftest --features cpp -- --status-of <id>   # prints green|partial|fail
 //! options: --seeds N (default 16)  --filter <substr>  --perturb  --report-dir <dir>  --no-report
+//! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
 //! ```
 //! Exit status: 0 no failures (deferred cases are not failures), 1 any failure,
 //! 2 usage / harness setup error.
@@ -18,7 +19,11 @@ use difftest::case::repo_root;
 use difftest::{plan, registry, report, run_unit, CaseContext, RunOptions, UnitStatus};
 
 const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] \
-[--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]";
+[--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report]
+       difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]";
+
+/// Default child processes of `--ssi-corpus`.
+const DEFAULT_SSI_JOBS: usize = 2;
 
 /// Default number of generated cases per unit.
 const DEFAULT_SEEDS: usize = 16;
@@ -37,6 +42,10 @@ struct Args {
     perturb: bool,
     report_dir: Option<PathBuf>,
     no_report: bool,
+    ssi_corpus: bool,
+    tol: Option<String>,
+    jobs: Option<usize>,
+    glob: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -58,7 +67,16 @@ fn parse_args() -> Result<Args, String> {
             "--perturb" => a.perturb = true,
             "--report-dir" => a.report_dir = Some(PathBuf::from(val("--report-dir")?)),
             "--no-report" => a.no_report = true,
+            "--ssi-corpus" => a.ssi_corpus = true,
+            "--tol" => a.tol = Some(val("--tol")?),
+            "--jobs" | "-j" => {
+                let v = val("--jobs")?;
+                a.jobs = Some(v.parse().map_err(|_| format!("bad --jobs `{v}`"))?);
+            }
             "-h" | "--help" => return Err(String::new()),
+            other if a.ssi_corpus && !other.starts_with('-') && a.glob.is_none() => {
+                a.glob = Some(other.to_string());
+            }
             other => return Err(format!("unknown argument `{other}`")),
         }
     }
@@ -66,6 +84,17 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
+    // Child of `--ssi-corpus`: one engine on one case (see `difftest::ssi::run_child`).
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.first().map(String::as_str) == Some("--ssi-case") {
+        #[cfg(feature = "cpp")]
+        return difftest::ssi::run_child(raw.get(1..).unwrap_or(&[]));
+        #[cfg(not(feature = "cpp"))]
+        {
+            eprintln!("difftest: --ssi-case needs feature `cpp`");
+            return ExitCode::from(2);
+        }
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -88,6 +117,24 @@ fn main() -> ExitCode {
             "difftest: built without the C++ kernel; run with \
              `cargo run -p difftest --features cpp -- ...`"
         );
+        return ExitCode::from(2);
+    }
+
+    if args.ssi_corpus {
+        let opts = difftest::ssi::CorpusOptions {
+            tol: args
+                .tol
+                .clone()
+                .unwrap_or_else(|| difftest::ssi::DEFAULT_TOL.to_string()),
+            glob: args.glob.clone(),
+            jobs: args.jobs.unwrap_or(DEFAULT_SSI_JOBS).max(1),
+            report_dir: args.report_dir.clone(),
+            no_report: args.no_report,
+        };
+        return difftest::ssi::run_corpus(&root, &opts);
+    }
+    if args.tol.is_some() || args.jobs.is_some() {
+        eprintln!("difftest: --tol and --jobs only apply to --ssi-corpus");
         return ExitCode::from(2);
     }
 

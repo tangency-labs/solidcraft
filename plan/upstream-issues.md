@@ -1796,6 +1796,69 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** wrong result.
 - **Rust port:** returns `Err(SM_ERR)` from `test_for_iso_circles`; the difftest shim records the C++ return value as is.
 
+#### WR-74. `GlobalSurfaceIntersect` misses isolated tangential contact points
+- **Location:** `SmSurface::GlobalSurfaceIntersect` (`SmSurface.cpp`) and what it dispatches to: `SmAdvSurfaceIntersector` / `SmSurfaceIntersector::DoIntersection` (`SmSurfaceIntersector.cpp`) for B-spline pairs, and the `SmSurfOfRevolution` override (inherited by `SmTorus`) for the torus/sphere pair. Cause not traced.
+- **What happens:** Two surfaces that touch at single points (normals parallel there, no curve) come back with no output, or with only some of the points. Called with `SmApproxTol3d(1e-6)`, edges on, natural domains.
+- **Trigger (ssi-corpus cases):** `c3_sphere_torus_outer`, `c3n_four_points` (0 of 4 points), `c3n_parab_apex`, `c3n_parab_parab_apex`, `y23_t6_ex4_tangential_point`: no output at all. `y23_fig1g_three_points`: one `TOUCHING` point, about 1.9 away from two of the three true points. `y23_t2_ex6_loop_and_point`: the crossing loop is found, the isolated point (0.41 away) is not. Verdict `INCOMPLETE` for all 7.
+- **How found:** ssi-corpus, exact ground truth (jyviko's corpus, commit `b04c8a6`, run with difftest `--ssi-corpus`; same verdicts as the corpus' own `score.py`).
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (missed intersection).
+- **Rust port:** not reached yet (the general path needs `intersect.surface_intersector_p5`, the torus and sphere are not surface kinds yet); `--ssi-corpus` shows whether the port reproduces it.
+
+#### WR-75. `GlobalSurfaceIntersect` misses tangential intersection curves or reduces them to points
+- **Location:** `SmSurface::GlobalSurfaceIntersect` -> `SmAdvSurfaceIntersector` / `SmSurfaceIntersector::DoIntersection` (`SmSurfaceIntersector.cpp`). Cause not traced.
+- **What happens:** Where two surfaces are tangent along a curve, the curve is not traced. Either nothing comes back, or a few `TOUCHING` points or a short piece of the curve.
+- **Trigger (ssi-corpus cases):** `c2n_quartic_circle` (a closed tangent circle; no output). `y23_fig1f_high_order_contact` (two `TOUCHING` points; the branch is 1% covered). `y23_t2_ex1_tangent_line` (points and short pieces; 2% covered). `y23_t2_ex2_tangential_curve` (23% covered). Verdict `INCOMPLETE` for all 4.
+- **How found:** ssi-corpus, exact ground truth.
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (missed intersection).
+- **Rust port:** not reached yet (`intersect.surface_intersector_p5`).
+
+#### WR-76. `GlobalSurfaceIntersect` returns tangent curves twice
+- **Location:** `SmSurface::GlobalSurfaceIntersect` -> `SmAdvSurfaceIntersector` / `SmSurfaceIntersector::DoIntersection`. Cause not traced; the duplicates suggest tracing from both ends of a tangent branch without merging.
+- **What happens:** A tangent branch comes back as two (or more) curves lying on top of each other, sometimes also about 3.4e-5 off the surfaces (approximation tolerance 1e-6). An open tangent line overlaid by its own copy also reads as a closed curve.
+- **Trigger (ssi-corpus cases):** `c2n_cylN_on_planeN` (a NURBS cylinder lying on a NURBS plane: two `TANGENT` curves, 100% overlap), `y23_t6_ex1_tangent_line` (100% overlap, up to 3.44e-5 from the surfaces), `y23_t2_ex4_tangential_curve_saddle` (58% overlap, up to 3.40e-5 off): verdict `WRONG TOPOLOGY`. `y23_t6_ex6_four_boundary_curves`: several `CROSSING` curves are copies of one another and branch 1 is only 88% covered: verdict `INCOMPLETE`.
+- **How found:** ssi-corpus, exact ground truth.
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (duplicated topology).
+- **Rust port:** not reached yet (`intersect.surface_intersector_p5`).
+
+#### WR-77. `GlobalSurfaceIntersect` runs curves through singular points instead of splitting them there
+- **Location:** `SmSurface::GlobalSurfaceIntersect` and its dispatch: the `SmCone` override (cylinder/cylinder), the `SmSphere` override (sphere/cylinder), `SmAdvSurfaceIntersector` / `SmSurfaceIntersector::DoIntersection` (B-spline and torus pairs). Cause not traced.
+- **What happens:** Where intersection branches cross (a singular point of the intersection, with the surfaces tangent there), the output curves pass through the crossing instead of ending at it, so no curve end lies at the singular point and the branch structure is wrong.
+- **Trigger (ssi-corpus cases):** `c4_steinmetz` (two equal cylinders; 1 of 2 crossings not split), `c4_viviani_figure8` and `c4n_viviani_nurbs` (Viviani's curve; the double point not split), `y23_fig1a_two_loops_cross`, `y23_t6_ex3_two_crossing_curves`, `y23_t3_ex4_torus_ellipsoid`: verdict `WRONG TOPOLOGY`. In `y23_t2_ex3_loop_two_curves` (8% of a branch covered) and `y23_fig1d_two_quads` (one branch 1% covered) the crossings are also not split, next to missed branches: verdict `INCOMPLETE`. 8 cases.
+- **How found:** ssi-corpus, exact ground truth.
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (wrong topology).
+- **Rust port:** not reached yet (`surface.cone_p3`, `surface.sphere`, `intersect.surface_intersector_p5`).
+
+#### WR-78. Surfaces within the approximation tolerance of each other come back as coincident regions
+- **Location:** `SmSurface::GlobalSurfaceIntersect` (plane against a NURBS plane through the general path; the `SmSphere` override for two spheres). Cause not traced.
+- **What happens:** Two planes at an angle of 1e-6 to 1e-8 rad, and two planes or spheres 1e-7 apart, are reported as coincident: four `COINCIDENT` region boundary curves along the domain edges. The crossing line of the tilted planes is missed (half of it covered by chance), and the parallel pairs, which do not intersect at all, get a spurious region. Run at `SmApproxTol3d(1e-6)`: the surfaces stay within that tolerance of each other, so this may be the intended tolerance semantics. It is listed because the exact answer differs.
+- **Trigger (ssi-corpus cases):** `c7_angle_planes_1e-6`, `c7_angle_planes_1e-7`, `c7_angle_planes_1e-8` (verdict `INCOMPLETE`). `c7_offset_planes_1e-7`, `c7_offset_spheres_1e-7` (verdict `WRONG TOPOLOGY`). The same pairs at 1e-3 to 1e-5 pass.
+- **How found:** ssi-corpus, exact ground truth.
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (near-degenerate input).
+- **Rust port:** not reached yet (`intersect.surface_intersector_p5`, `surface.sphere`).
+
+#### WR-79. Small closed intersection loops are missed or collapsed to one point
+- **Location:** `SmSurface::GlobalSurfaceIntersect`: the `SmPlane` override (plane/sphere) and `SmAdvSurfaceIntersector` / `SmSurfaceIntersector::DoIntersection` (NURBS paraboloid/plane). Cause not traced.
+- **What happens:** A closed loop of radius 1e-4 to 1e-7 is either not found or comes back as one `TOUCHING` point at its centre. This happens even when the radius (1e-4, 1e-5) is far above the approximation tolerance (1e-6).
+- **Trigger (ssi-corpus cases):** `c7_tiny_loop_sphere_1e-4`, `_1e-5`, `_1e-6`, `_1e-7` (a sphere dipping just into a plane, a loop of diameter 2e-4 down to 2e-7: one `TOUCHING` point at the loop's centre, as far from the loop as its radius). `c7_tiny_loop_parab_1e-4`, `_1e-5`, `_1e-6`, `_1e-7` (a NURBS paraboloid cut by the plane `z = 1e-8` and the like, just above its apex: no output). Verdict `INCOMPLETE` for all 8.
+- **How found:** ssi-corpus, exact ground truth.
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (missed intersection).
+- **Rust port:** not reached yet (`surface.sphere`, `intersect.surface_intersector_p5`).
+
+#### WR-80. `GlobalSurfaceIntersect` fails with `SM_ERR_NULL_POINTER` on two B-spline pairs
+- **Location:** `SmSurface::GlobalSurfaceIntersect` -> `SmAdvSurfaceIntersector` / `SmSurfaceIntersector::DoIntersection`. The NULL that triggers the status was not traced.
+- **What happens:** The call returns `SM_ERR_NULL_POINTER` (1006) with no curves, although the surfaces are valid and the intersection exists: two NURBS sheets in 4th-order contact along a parabola, and two tube-like arms crossing in an X (two loops with two singular points).
+- **Trigger (ssi-corpus cases):** `c2n_quartic_contact_parabola`, `y23_t2_ex5_two_loops`. Verdict `ERROR`.
+- **How found:** ssi-corpus, exact ground truth.
+- **Confirmed:** yes, by the C++ build.
+- **Severity:** wrong result (failure on valid input).
+- **Rust port:** not reached yet (`intersect.surface_intersector_p5`).
+
 ## Docs
 
 #### DOC-1. `NL_LEFT` / `NL_RIGHT` documentation is swapped

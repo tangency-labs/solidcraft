@@ -255,7 +255,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#31",
-      "values_compared": 165
+      "values_compared": 171
     },
     {
       "max_rel_err": 0.0,
@@ -511,7 +511,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#63",
-      "values_compared": 181
+      "values_compared": 169
     },
     {
       "max_rel_err": 0.0,
@@ -879,7 +879,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#109",
-      "values_compared": 167
+      "values_compared": 161
     },
     {
       "max_rel_err": 0.0,
@@ -1239,7 +1239,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#154",
-      "values_compared": 173
+      "values_compared": 167
     },
     {
       "max_rel_err": 0.0,
@@ -1447,7 +1447,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#180",
-      "values_compared": 171
+      "values_compared": 183
     },
     {
       "max_rel_err": 0.0,
@@ -1599,7 +1599,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#199",
-      "values_compared": 169
+      "values_compared": 163
     },
     {
       "max_rel_err": 0.0,
@@ -2287,7 +2287,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/intersect.adv_surface_intersector/review_adversarial_singular.json#285",
-      "values_compared": 171
+      "values_compared": 165
     },
     {
       "max_rel_err": 0.0,

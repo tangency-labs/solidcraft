@@ -55,6 +55,16 @@
 //!   the NURBs; the difftest therefore runs those two only while both sides agree
 //!   (before such a method, or once the NURB is made in place), and the shim copies a
 //!   plane without NURB from its analytic data (`plan/findings.md`).
+//!   [`Plane::natural_uv_domain`] is one of those read-only queries: upstream
+//!   `SmBSplineSurface::GetNaturalUVDomain` makes and keeps the NURB, the port makes it
+//!   on a copy and caches nothing. That also changes `IntersectWithPlane`
+//!   (`SmPlane.cpp:2183`, `surface::plane::p2`): for parallel planes it returns "no
+//!   intersection, done" when either plane has no NURB, and only otherwise tests for
+//!   coincidence and hands coincident planes to the general intersector. So after
+//!   `GetNaturalUVDomain` upstream and `natural_uv_domain` here, the same coincident
+//!   planes take different branches (found by difftest `--ssi-corpus`,
+//!   `c6_planes_identical` / `c6_planes_overlap`; follow-up in `plan/modules.toml`:
+//!   model the cache).
 //! - **Arguments.** Out-params become return values; `SmContext` arguments and the
 //!   arguments upstream marks `NotUsed` (`DropPointFast`'s pointing vector and
 //!   solution request, `Evaluate`'s sides and zero-tangent flags,

@@ -159,7 +159,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/geom.local_solve_nd/cases.json#19 (upstream source/SMLib/src/SmLocalSolveNd.cpp:449)",
-      "values_compared": 16
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,

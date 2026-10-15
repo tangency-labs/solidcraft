@@ -1191,7 +1191,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_curve_n_lib/cases.json#148 (upstream upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve))",
-      "values_compared": 6960
+      "values_compared": 7004
     },
     {
       "max_rel_err": 0.0,

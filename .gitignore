@@ -12,3 +12,6 @@ target/
 .idea/
 .vscode/
 .cpp/
+
+# Third-party test corpora (scripts/fetch-ssi-corpus.sh); never committed
+/corpus

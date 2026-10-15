@@ -31,6 +31,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--filter S` | only cases whose name contains `S` |
 | `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
+| `--ssi-corpus [--tol T] [--jobs N] [glob]` | score both engines against the SSI corpus (see [below](#--ssi-corpus-exact-ground-truth-ssi-corpus)); not a gate |
 
 Exit status: `0` no failures (deferred cases are not failures), `1` any
 failure, `2` usage or setup error. Output: one summary line per unit,
@@ -253,6 +254,76 @@ git add harness/cpp/shim/foo_bar.cpp crates/solidcore-ffi/src/units/foo_bar.rs \
 Commit the report produced with the default `--seeds` (it is deterministic, so
 diffs in it are meaningful). Then set `status` to what
 `--status-of foo.bar` prints (`green` or `partial`; never on `fail`).
+
+## `--ssi-corpus`: exact ground-truth SSI corpus
+
+A correctness report, separate from the gate: it never changes a unit's status, and
+CI's gating `difftest` job does not run it. It grades **both** engines' surface/surface
+intersection against [jyviko's SSI corpus](https://github.com/jyviko/ssi-corpus) (commit
+`b04c8a6`, MIT OR Apache-2.0; issue #17): 119 cases (plane, quadrics, torus, B-spline and
+NURBS pairs, 25 of them from Yang, Jia & Yan, ACM TOG 42(6) 211, 2023), each with the dense
+exact intersection and the expected topology.
+
+```sh
+scripts/fetch-ssi-corpus.sh               # clones the corpus into corpus/ssi/ (gitignored, idempotent, full-SHA pin)
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus             # all cases, tol 1e-6
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus 'c3_*'      # case ids matching a glob (`*`, `?`)
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus --tol default --jobs 4
+```
+
+Without `corpus/ssi/` it prints how to fetch it and exits `0`. The corpus is data only:
+the mode reads `cases/data/*.json` and never runs anything from `corpus/`. The fetch script
+pins the full commit SHA and checks the checkout's origin and `HEAD` against it. Exit `2` only for harness
+errors (unreadable case, report not writable); verdicts never fail the run.
+
+* **Engines.** Each case runs in a child process per engine (`difftest --ssi-case <case>
+  <tol> <cpp|rust> <out.json>`), so a C++ segfault or a 300 s timeout is a `CRASH`
+  verdict, as with the corpus' runner. `--jobs N` (default 2) children run at once.
+  * `cpp`: shim `harness/cpp/shim/ssi_corpus.cpp` mirrors the corpus'
+    `runner/ssi_runner.cpp` in its `gsi` mode: real `SmPlane`, `SmCylinder`, `SmCone`
+    (`CreateCanonical`), `SmSphere`, `SmTorus`, and `SmBSplineSurface` over an NLib net
+    filled directly; `SmApiGetOrCreateContext()`; natural UV domains; edges on;
+    `SmApproxTol3d(tol)` (or `NULL` for `default`); `SmSurface::GlobalSurfaceIntersect`.
+  * `rust`: the same surfaces with solidcore's types and `Surface::global_surface_intersect`.
+    A surface kind that is not a `SurfaceKind` yet (cylinder, cone, sphere, torus) or any
+    `SolidError::Unported` makes the case `DEFERRED`, never a faked result.
+  * Both sample every 3D and UV curve at 4001 uniform parameters of its natural interval
+    and evaluate each surface at its UV samples, and write the runner's JSON
+    (`{xyz, uv1, uv2, s1_at_uv, s2_at_uv, type}` per curve) to
+    `bin/ssi-corpus/raw/<engine>_<tol>/<id>.json`.
+* **Scorer** (`src/ssi/score.rs`, `polyset.rs`, `geom.rs`): a port of the corpus'
+  `scoring/score.py` and the distance helpers of `ssi_geom.py` (not the truth
+  generators). Accuracy tolerance `10 * tol`. Verdicts, most severe first: `CRASH`,
+  `ERROR` (non-success status), `INCOMPLETE` (an expected branch, isolated point or
+  region boundary not covered within `cov_tol`), `WRONG TOPOLOGY` (spurious output,
+  wrong component count or free ends, duplicated curves, a curve crossing a singular
+  point instead of ending there), `INACCURATE` (output farther than the accuracy
+  tolerance from an exact surface), `PASS`.
+* **Parity.** Where both engines answered, their outputs are compared with the gate's
+  rule (status, curve count, types, every sample within `1e-9` relative); mismatches are
+  listed per case. A faithful port should also score the same verdicts as the C++.
+* **Output.** One line per case (`cpp` verdict, `rust` verdict, parity, the C++ flags),
+  then
+
+  ```
+  SSI-CORPUS cpp: PASS=… INACCURATE=… WRONG_TOPOLOGY=… INCOMPLETE=… ERROR=… CRASH=… (cases=119)
+  SSI-CORPUS rust: PASS=… DEFERRED=… (cases=119)
+  SSI-CORPUS parity: compared=… identical=… mismatched=… same_verdict=…
+  ```
+
+  and `reports/ssi-corpus.json` (`reports/ssi-corpus_<tol>_<glob>.json` for other
+  tolerances or a glob): per case both grades with their flags, distances and topology
+  signatures, the deferral reason and the parity result. No timings, so it is
+  deterministic.
+* **Cross-check with the corpus' own scorer.** `scripts/ssi-corpus-runner.sh` is an
+  `SSI_RUNNER` for `score.py` (Python 3, numpy):
+
+  ```sh
+  SSI_SC_RAW=$PWD/bin/ssi-corpus/raw/cpp_1e-6 SSI_RUNNER=$PWD/scripts/ssi-corpus-runner.sh \
+    SSI_ENGINE=solidcore-cpp python3 -I corpus/ssi/scoring/score.py gsi 1e-6
+  ```
+
+  grades the same raw files (without `SSI_SC_RAW` it reruns the shim per case).
 
 ## Notes
 

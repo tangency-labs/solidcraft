@@ -17,6 +17,7 @@ pub mod plan;
 pub mod report;
 pub mod rng;
 pub mod runner;
+pub mod ssi;
 
 pub use case::{Case, CaseContext, CaseSource};
 pub use compare::{compare, AbsFloor, CaseDiff, Mismatch, REL_TOL};

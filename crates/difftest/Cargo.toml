@@ -16,7 +16,8 @@ cpp = ["solidcore-ffi/cpp"]
 solidcore = { path = "../solidcore" }
 solidcore-ffi = { path = "../solidcore-ffi" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: parse decimals exactly (correctly rounded, as C strtod), not to within 1 ULP
+serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "0.8"
 
 [lints]

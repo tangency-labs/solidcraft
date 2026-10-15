@@ -679,7 +679,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/nlib.srf_adv_p4/cases.json#84 (upstream tests/prog_test (upstream curve fixture curve0.smc))",
-      "values_compared": 1
+      "values_compared": 28
     },
     {
       "max_rel_err": 0.0,
@@ -687,7 +687,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/nlib.srf_adv_p4/cases.json#85 (upstream tests/prog_test (upstream curve fixture curve0.smc))",
-      "values_compared": 1
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -783,7 +783,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/nlib.srf_adv_p4/cases.json#97 (upstream tests/prog_test (upstream curve fixture curve0.smc))",
-      "values_compared": 1
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -791,7 +791,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/nlib.srf_adv_p4/cases.json#98 (upstream tests/prog_test (upstream curve fixture curve0.smc))",
-      "values_compared": 1
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,

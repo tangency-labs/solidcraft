@@ -33,7 +33,10 @@
 //!   `topology.face_p2`).
 //! - **NURB.** `IntersectWithPlane`'s parallel case tests whether both planes hold a
 //!   NURB (`m_pNurb`), as upstream; the boxes are computed on a NURB made on a copy
-//!   when the plane has none (upstream makes it in place, a `const_cast`).
+//!   when the plane has none (upstream makes it in place, a `const_cast`). Because the
+//!   port's read-only queries (e.g. `natural_uv_domain`) never cache the NURB, a plane
+//!   upstream would already hold one can reach this test without it (see the
+//!   `surface::plane::p1` deviations).
 //! - **Statuses.** Where upstream ignores a status and would go on with stale or
 //!   uninitialised values (curve evaluations and copies in `TrimCurveToPlaneDomain`,
 //!   the test-point evaluation of `IsNurbSurfacePlane`), the port propagates the error.

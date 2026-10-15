@@ -1,0 +1,3407 @@
+{
+  "acc_tol": 9.999999999999999e-6,
+  "approx_tol": "1e-6",
+  "cases": [
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 5.43554634394358e-7,
+        "hausdorff_truth_to_out": 4.136198514565463e-7,
+        "max_dist_3d": 8.881784197001252e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_cone_plane_ellipse",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCone::GlobalSurfaceIntersect",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cone", "plane"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.195471666174356e-6,
+        "hausdorff_truth_to_out": 1.4734832489307591e-6,
+        "max_dist_3d": 7.056568980257083e-7,
+        "max_dist_uv": 8.665260181617285e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_cone_plane_hyperbola",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCone::GlobalSurfaceIntersect",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cone", "plane"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.187366638047003e-7,
+        "hausdorff_truth_to_out": 1.2858711061682403e-6,
+        "max_dist_3d": 7.540947578599244e-7,
+        "max_dist_uv": 6.452715584082114e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_cyl_cyl_two_loops",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "cylinder"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.441219446001443e-7,
+        "hausdorff_truth_to_out": 3.6270116764793424e-7,
+        "max_dist_3d": 3.3306690738754696e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_plane_cyl_ellipse",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.61786950792535e-8,
+        "hausdorff_truth_to_out": 9.095958626926499e-8,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_plane_halfcyl_arc",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 5.33995114286633e-7,
+        "hausdorff_truth_to_out": 5.907440960631309e-7,
+        "max_dist_3d": 4.440892098500626e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_plane_sphere_circle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "sphere"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.131154848125374e-7,
+        "hausdorff_truth_to_out": 6.536142481956682e-7,
+        "max_dist_3d": 3.6454279428443925e-7,
+        "max_dist_uv": 6.597380129980124e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_sphere_cyl_two_loops",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "cylinder"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.1919042259089813e-6,
+        "hausdorff_truth_to_out": 1.318570835471098e-6,
+        "max_dist_3d": 1.3322676295501878e-15,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1_torus_plane_nested",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "plane"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.10244577629479e-6,
+        "hausdorff_truth_to_out": 1.41127421885267e-6,
+        "max_dist_3d": 9.974628394360252e-7,
+        "max_dist_uv": 9.974628247810813e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1n_cylN_plane_ellipse",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 2.975549821801827e-7,
+        "hausdorff_truth_to_out": 4.4328320399186087e-7,
+        "max_dist_3d": 1.3042130991569975e-7,
+        "max_dist_uv": 2.6084262052650925e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1n_parab_parab_circle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.100077065251581e-8,
+        "hausdorff_truth_to_out": 2.266493867858942e-7,
+        "max_dist_3d": 1.3042131016395325e-7,
+        "max_dist_uv": 2.916308804445933e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1n_parab_plane_circle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 5.789860472797365e-7,
+        "hausdorff_truth_to_out": 6.169827002438477e-7,
+        "max_dist_3d": 4.867184295255563e-7,
+        "max_dist_uv": 8.536039293183251e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1n_saddle_plane_hyperbola",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.131154846797903e-7,
+        "hausdorff_truth_to_out": 6.53614247762487e-7,
+        "max_dist_3d": 3.6454279406239465e-7,
+        "max_dist_uv": 6.59738013220057e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1n_sphereN_cylN_two_loops",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "1 transversal",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.939323922845833e-7,
+        "hausdorff_truth_to_out": 4.000379202897985e-7,
+        "max_dist_3d": 3.42045063828067e-7,
+        "max_dist_uv": 3.42045063828067e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c1n_torusN_planeN_nested",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 2.220446049250313e-16,
+        "hausdorff_truth_to_out": 4.965068306494546e-16,
+        "max_dist_3d": 4.440892098500626e-16,
+        "max_dist_uv": 5.551115123125783e-16,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2_cones_tangent_ruling",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCone::GlobalSurfaceIntersect",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cone", "cone"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2_cyl_cyl_external",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "cylinder"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2_cyl_on_plane",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.675562912360382e-7,
+        "hausdorff_truth_to_out": 8.754806643704731e-7,
+        "max_dist_3d": 7.964608840227427e-7,
+        "max_dist_uv": 6.050715484207103e-14,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2_sphere_in_cyl",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "cylinder"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 4.938643648746257e-7,
+        "hausdorff_truth_to_out": 4.951364192771947e-7,
+        "max_dist_3d": 4.944495233250024e-7,
+        "max_dist_uv": 6.661338147750939e-16,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2_sphere_in_torus",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "torus"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["output curves 0 and 1 overlap (100% of one lies on the other)", "topology ['curve(free_ends=0)'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 1.2499507329512903e-14,
+        "hausdorff_truth_to_out": 1.24995073295129e-14,
+        "max_dist_3d": 1.5498313656673036e-28,
+        "max_dist_uv": 3.420306657997752e-28,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT", "TANGENT"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "c2n_cylN_on_planeN",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.3552527156068808e-20,
+        "hausdorff_truth_to_out": 1.3552527156068808e-20,
+        "max_dist_3d": 1.836709923159826e-40,
+        "max_dist_uv": 2.220446049250313e-16,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2n_parabcyl_plane",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c2n_quartic_circle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["ERROR status SM_ERR_NULL_POINTER", "branch 0 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1006,
+        "status_name": "SM_ERR_NULL_POINTER",
+        "types": [],
+        "verdict": "ERROR"
+      },
+      "id": "c2n_quartic_contact_parabola",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "2 tangent curve",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.67561810153339e-7,
+        "hausdorff_truth_to_out": 8.754861303711644e-7,
+        "max_dist_3d": 7.964608839117204e-7,
+        "max_dist_uv": 6.050715484207103e-14,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "c2n_sphereN_in_cyl",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "cylinder"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "PASS"
+      },
+      "id": "c3_sphere_on_plane",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "plane"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": ["isolated point 0 not found (nearest output inf)", "topology [], expected ['point']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c3_sphere_torus_outer",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "sphere"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "PASS"
+      },
+      "id": "c3_spheres_external",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "sphere"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "PASS"
+      },
+      "id": "c3_spheres_internal",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "sphere"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point", "point", "point", "point"],
+        "flags": ["isolated point 0 not found (nearest output inf)", "isolated point 1 not found (nearest output inf)", "isolated point 2 not found (nearest output inf)", "isolated point 3 not found (nearest output inf)", "topology [], expected ['point', 'point', 'point', 'point']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c3n_four_points",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": ["isolated point 0 not found (nearest output inf)", "topology [], expected ['point']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c3n_parab_apex",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "3 isolated point",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": ["isolated point 0 not found (nearest output inf)", "topology [], expected ['point']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c3n_parab_parab_apex",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "4 singular",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.1401849173675503e-16,
+        "hausdorff_truth_to_out": 3.1401849173675503e-16,
+        "max_dist_3d": 1.1102230246251565e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c4_cone_apex_plane",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCone::GlobalSurfaceIntersect",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cone", "plane"]
+    },
+    {
+      "class": "4 singular",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["singular point 1 not identified (no curve end/point within 1.0e-03; nearest 1.73e+00)"],
+        "hausdorff_out_to_truth": 8.003521570613705e-7,
+        "hausdorff_truth_to_out": 1.282963327523242e-6,
+        "max_dist_3d": 7.736384517453843e-7,
+        "max_dist_uv": 4.704406866284927e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "c4_steinmetz",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "cylinder"]
+    },
+    {
+      "class": "4 singular",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["singular point 0 not identified (no curve end/point within 1.0e-03; nearest 2.00e+00)"],
+        "hausdorff_out_to_truth": 3.1488503257056116e-6,
+        "hausdorff_truth_to_out": 3.1091351880308025e-6,
+        "max_dist_3d": 9.816759278802323e-7,
+        "max_dist_uv": 8.638921151771228e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "c4_viviani_figure8",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "cylinder"]
+    },
+    {
+      "class": "4 singular",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.00015667558777609247,
+        "hausdorff_truth_to_out": 0.0001569818424251071,
+        "max_dist_3d": 8.145018396955414e-7,
+        "max_dist_uv": 9.71529898086132e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c4n_cusp",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "4 singular",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=4)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.3877813456852092e-17,
+        "hausdorff_truth_to_out": 1.7453762855801054e-6,
+        "max_dist_3d": 1.0684955466965433e-18,
+        "max_dist_uv": 4.996003610813204e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=4)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c4n_saddle_tangent_plane",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "4 singular",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["singular point 0 not identified (no curve end/point within 1.0e-03; nearest 2.00e+00)"],
+        "hausdorff_out_to_truth": 3.0320479811369947e-6,
+        "hausdorff_truth_to_out": 2.9907805737621157e-6,
+        "max_dist_3d": 9.816759278802323e-7,
+        "max_dist_uv": 8.638921169534797e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "c4n_viviani_nurbs",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.2412670766236366e-16,
+        "hausdorff_truth_to_out": 4.710277376051325e-16,
+        "max_dist_3d": 5.551115123125783e-17,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c5_corner_to_corner",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
+      "rust": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.2412670766236366e-16,
+        "hausdorff_truth_to_out": 4.710277376051325e-16,
+        "max_dist_3d": 5.551115123125783e-17,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "surfaces": ["plane", "plane"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.860761315262648e-32,
+        "hausdorff_truth_to_out": 4.440892098500626e-16,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c5_curve_on_edge",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
+      "rust": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.860761315262648e-32,
+        "hausdorff_truth_to_out": 4.440892098500626e-16,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "surfaces": ["plane", "plane"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.083022229630116e-7,
+        "hausdorff_truth_to_out": 3.4106626278903175e-7,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c5_cyl_end_circle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "plane"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 6.123233995736767e-17,
+        "hausdorff_truth_to_out": 6.123233995736767e-17,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c5_cyl_quilt_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "cylinder"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.083022229630116e-7,
+        "hausdorff_truth_to_out": 3.4106626278903175e-7,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c5_hemisphere_equator",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "plane"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 4.930380657631324e-32,
+        "hausdorff_truth_to_out": 2.220446049250313e-16,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c5_shared_border_L",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
+      "rust": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 4.930380657631324e-32,
+        "hausdorff_truth_to_out": 2.220446049250313e-16,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "surfaces": ["plane", "plane"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c5n_curve_on_edge",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "5 boundary",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 6.123233995736767e-17,
+        "hausdorff_truth_to_out": 6.123233995736767e-17,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c5n_cylN_quilt_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.08424717913947e-7,
+        "hausdorff_truth_to_out": 2.143703162466649e-8,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 1.1102230246251565e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6_cyl_overlap",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "cylinder"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6_planes_identical",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "plane"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6_planes_overlap",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "plane"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.0842512149787315e-7,
+        "hausdorff_truth_to_out": 2.0183241098839898e-8,
+        "max_dist_3d": 4.440892098500626e-16,
+        "max_dist_uv": 4.440892098500626e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6_spheres_overlap",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "sphere"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.08424717913947e-7,
+        "hausdorff_truth_to_out": 2.1437031544696387e-8,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 3.3306690738754696e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6n_cyl_vs_nurbscyl",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "nurbs"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 4.440892098500626e-16,
+        "hausdorff_truth_to_out": 4.440892098500626e-16,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6n_plane_vs_nurbsplane",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "6 coincident",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.084247179203203e-7,
+        "hausdorff_truth_to_out": 2.1437031467685128e-8,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 3.3306690738754696e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
+      },
+      "id": "c6n_sphere_vs_nurbssphere",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.02000000333333372,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 4.336808689942018e-19,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_angle_planes_1e-3",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.2000000003333333,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 4.0657581468206416e-20,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_angle_planes_1e-4",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.5,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 5.082197683525802e-21,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_angle_planes_1e-5",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.5,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 0 covered 50% (max gap 1.00e+00)", "output curve 0 off the true intersection by up to 1.00e+00 (100% of it)", "output curve 1 off the true intersection by up to 1.00e+00 (50% of it)", "output curve 2 off the true intersection by up to 1.00e+00 (100% of it)", "output curve 3 off the true intersection by up to 1.00e+00 (50% of it)", "topology ['curve(free_ends=0)'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 1.0000001249999921,
+        "hausdorff_truth_to_out": 1.0,
+        "max_dist_3d": 9.999999999998335e-7,
+        "max_dist_uv": 9.999999999998337e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_angle_planes_1e-6",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.5,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 0 covered 50% (max gap 1.00e+00)", "output curve 0 off the true intersection by up to 1.00e+00 (100% of it)", "output curve 1 off the true intersection by up to 1.00e+00 (50% of it)", "output curve 2 off the true intersection by up to 1.00e+00 (100% of it)", "output curve 3 off the true intersection by up to 1.00e+00 (50% of it)", "topology ['curve(free_ends=0)'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 1.0000001249999921,
+        "hausdorff_truth_to_out": 1.0,
+        "max_dist_3d": 9.999999999999982e-8,
+        "max_dist_uv": 9.999999999999984e-8,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_angle_planes_1e-7",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.5,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 0 covered 50% (max gap 1.00e+00)", "output curve 0 off the true intersection by up to 1.00e+00 (50% of it)", "output curve 1 off the true intersection by up to 1.00e+00 (100% of it)", "output curve 2 off the true intersection by up to 1.00e+00 (50% of it)", "output curve 3 off the true intersection by up to 1.00e+00 (100% of it)", "topology ['curve(free_ends=0)'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 1.0000001249999921,
+        "hausdorff_truth_to_out": 1.0,
+        "max_dist_3d": 1e-8,
+        "max_dist_uv": 1.0000000000000002e-8,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_angle_planes_1e-8",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": [],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "PASS"
+      },
+      "id": "c7_offset_planes_1e-3",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": [],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "PASS"
+      },
+      "id": "c7_offset_planes_1e-5",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": [],
+        "flags": ["output curve 0 off the true intersection by up to inf (100% of it)", "output curve 1 off the true intersection by up to inf (100% of it)", "output curve 2 off the true intersection by up to inf (100% of it)", "output curve 3 off the true intersection by up to inf (100% of it)", "topology ['curve(free_ends=0)'], expected []"],
+        "hausdorff_out_to_truth": "inf",
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 1e-7,
+        "max_dist_uv": 1.0000000000000004e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "c7_offset_planes_1e-7",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "nurbs"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": [],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "PASS"
+      },
+      "id": "c7_offset_spheres_1e-3",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "sphere"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": [],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "PASS"
+      },
+      "id": "c7_offset_spheres_1e-5",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "sphere"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": [],
+        "flags": ["output curve 0 off the true intersection by up to inf (100% of it)", "output curve 1 off the true intersection by up to inf (100% of it)", "output curve 2 off the true intersection by up to inf (100% of it)", "output curve 3 off the true intersection by up to inf (100% of it)", "topology ['curve(free_ends=0)'], expected []"],
+        "hausdorff_out_to_truth": "inf",
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 1.0000000039145363e-7,
+        "max_dist_uv": 1.0000000050247593e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "c7_offset_spheres_1e-7",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "sphere"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.02000000333333372,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.1133455268819148e-14,
+        "hausdorff_truth_to_out": 1.1133455268819148e-14,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_sunk_cyl_1e-3",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.2000000003333333,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.2499999950052465e-13,
+        "hausdorff_truth_to_out": 1.2499999950052465e-13,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_sunk_cyl_1e-4",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.5,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.2500004015810612e-16,
+        "hausdorff_truth_to_out": 1.2500004015810612e-16,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_sunk_cyl_1e-5",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.5,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.249373597200093e-19,
+        "hausdorff_truth_to_out": 1.249373597200093e-19,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c7_sunk_cyl_1e-6",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "cylinder"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.00002,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_parab_1e-4",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 2.0000000000000003e-6,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_parab_1e-5",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 2e-7,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_parab_1e-6",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 2e-8,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_parab_1e-7",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 0.000020000000136269896,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap 1.00e-04)", "output point 0 off the true intersection by 1.00e-04", "topology ['point'], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.00010000000068134946,
+        "hausdorff_truth_to_out": 0.00010000000068134949,
+        "max_dist_3d": 5.000000080634948e-9,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_sphere_1e-4",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "sphere"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 2.0000000827153693e-6,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap 1.00e-05)", "output point 0 off the true intersection by 1.00e-05", "topology ['point'], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 0.000010000000413576844,
+        "hausdorff_truth_to_out": 0.000010000000413576848,
+        "max_dist_3d": 5.000000413701855e-11,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_sphere_1e-5",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "sphere"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 2.0000888986063507e-7,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap 1.00e-06)", "output point 0 off the true intersection by 1.00e-06", "topology ['point'], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 1.000044449303175e-6,
+        "hausdorff_truth_to_out": 1.0000444493031755e-6,
+        "max_dist_3d": 5.000444502911705e-13,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_sphere_1e-6",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "sphere"]
+    },
+    {
+      "class": "7 near-degenerate",
+      "cpp": {
+        "cov_tol": 1.9992005623875145e-8,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 0 covered 0% (max gap 1.00e-07)", "output point 0 off the true intersection by 1.00e-07", "topology ['point'], expected ['curve(free_ends=0)']"],
+        "hausdorff_out_to_truth": 9.99600281193757e-8,
+        "hausdorff_truth_to_out": 9.996002811937573e-8,
+        "max_dist_3d": 4.9960036108132044e-15,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "c7_tiny_loop_sphere_1e-7",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["plane", "sphere"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 6.280369834735101e-16,
+        "hausdorff_truth_to_out": 4.440892098500626e-16,
+        "max_dist_3d": 4.440892098500626e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_cone_plane_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCone::GlobalSurfaceIntersect",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cone", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_cyl_plane_seam_line",
+      "rust": {
+        "deferred": {
+          "symbol": "SmCylinder (SmCone::GlobalSurfaceIntersect)",
+          "unit": "surface.cone_p3"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["cylinder", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.087458201135374e-7,
+        "hausdorff_truth_to_out": 9.831830301390318e-7,
+        "max_dist_3d": 9.394760920877765e-7,
+        "max_dist_uv": 6.741459460668509e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_sphere_cyl_through_poles",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "cylinder"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.083022229630116e-7,
+        "hausdorff_truth_to_out": 3.4106626278903175e-7,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_sphere_plane_poles",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.083022229630116e-7,
+        "hausdorff_truth_to_out": 3.4106626278903175e-7,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_sphere_plane_poles_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.343858234384517e-7,
+        "hausdorff_truth_to_out": 1.4866733727166728e-7,
+        "max_dist_3d": 3.3306690738754696e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_sphere_polar_cap",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["sphere", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.0830222302330796e-7,
+        "hausdorff_truth_to_out": 3.410662630416068e-7,
+        "max_dist_3d": 7.771561172376096e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_torus_axis_plane_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.2332088918520464e-6,
+        "hausdorff_truth_to_out": 1.364265051156127e-6,
+        "max_dist_3d": 8.881784197001252e-16,
+        "max_dist_uv": 0.0,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8_torus_equator_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 2.974071491568169e-14,
+        "hausdorff_truth_to_out": 2.974071491568169e-14,
+        "max_dist_3d": 2.7755575615628914e-14,
+        "max_dist_uv": 5.5067062021407764e-14,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8n_cylN_seam_line",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.933725189831509e-7,
+        "hausdorff_truth_to_out": 1.9453355113470635e-7,
+        "max_dist_3d": 6.058857271451501e-8,
+        "max_dist_uv": 6.05885724924704e-8,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8n_sphereN_polar_cap",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 7.667658068846912e-7,
+        "hausdorff_truth_to_out": 7.684496080243325e-7,
+        "max_dist_3d": 7.678892898210776e-7,
+        "max_dist_uv": 7.6788928848881e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8n_sphereN_poles",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "8 periodic/seam/pole",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.2332088918520464e-6,
+        "hausdorff_truth_to_out": 1.364265051156127e-6,
+        "max_dist_3d": 4.806871909401877e-7,
+        "max_dist_uv": 4.80687204262864e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c8n_torusN_equator_seam",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "9 high degree/rational",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.6807125603250386e-7,
+        "hausdorff_truth_to_out": 4.346370394694833e-7,
+        "max_dist_3d": 2.4268304347638904e-7,
+        "max_dist_uv": 5.864650240994251e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c9n_deg6_circle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "9 high degree/rational",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.4561885974456204e-7,
+        "hausdorff_truth_to_out": 1.490059907351793e-7,
+        "max_dist_3d": 1.3042131011430253e-7,
+        "max_dist_uv": 2.608426199307009e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c9n_elevated_paraboloids",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "9 high degree/rational",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 5.353107237561187e-7,
+        "hausdorff_truth_to_out": 5.449707445705102e-7,
+        "max_dist_3d": 5.236447162548785e-7,
+        "max_dist_uv": 8.182598594252966e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c9n_many_spans_plane_sphere",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "sphere"]
+    },
+    {
+      "class": "9 high degree/rational",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 5.701983000550271e-7,
+        "hausdorff_truth_to_out": 6.011639294403469e-7,
+        "max_dist_3d": 5.540420963123793e-7,
+        "max_dist_uv": 5.54042096201357e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c9n_rational_deg5_cyl_arc",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "9 high degree/rational",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 7.435877219527868e-7,
+        "hausdorff_truth_to_out": 7.438232344954477e-7,
+        "max_dist_3d": 6.443458877569697e-7,
+        "max_dist_uv": 6.443458868687912e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c9n_rational_deg5_sphere_arc",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "plane"]
+    },
+    {
+      "class": "9 high degree/rational",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.818051739868779e-7,
+        "hausdorff_truth_to_out": 8.839201062962814e-7,
+        "max_dist_3d": 8.341441821713147e-7,
+        "max_dist_uv": 5.329070518200751e-15,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "c9n_refined_torus_sphere",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSphere::GlobalSurfaceIntersect",
+          "unit": "surface.sphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "sphere"]
+    },
+    {
+      "class": "Y23 published parameters",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)", "curve(free_ends=4)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.955694298971566e-6,
+        "hausdorff_truth_to_out": 1.642765589512302e-6,
+        "max_dist_3d": 8.923732377286281e-7,
+        "max_dist_uv": 6.248849126076271e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)", "curve(free_ends=4)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_appendix_ex2",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["singular point 0 not identified (no curve end/point within 1.0e-03; nearest 3.75e-01)", "singular point 1 not identified (no curve end/point within 1.0e-03; nearest 3.68e-01)"],
+        "hausdorff_out_to_truth": 0.000016560225299273602,
+        "hausdorff_truth_to_out": 0.00001647116220830514,
+        "max_dist_3d": 8.973660407274245e-7,
+        "max_dist_uv": 5.961244562004257e-7,
+        "n_curves": 3,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "y23_fig1a_two_loops_cross",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)", "curve(free_ends=2)", "point"],
+        "flags": [],
+        "hausdorff_out_to_truth": 1.3365171309219593e-6,
+        "hausdorff_truth_to_out": 1.1704274650088524e-6,
+        "max_dist_3d": 7.774651942132397e-7,
+        "max_dist_uv": 7.605410293763342e-7,
+        "n_curves": 3,
+        "n_out_points": 1,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_fig1b_two_arcs_and_point",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 4.062756439132185e-7,
+        "hausdorff_truth_to_out": 4.0592748156469014e-7,
+        "max_dist_3d": 4.010216602478509e-7,
+        "max_dist_uv": 5.7602786419047813e-8,
+        "n_curves": 3,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_fig1c_boundary_triangle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["branch 6 covered 1% (max gap 6.77e-01)", "singular point 2 not identified (no curve end/point within 1.0e-02; nearest 1.70e+00)", "singular point 3 not identified (no curve end/point within 1.0e-02; nearest 1.40e+00)"],
+        "hausdorff_out_to_truth": 1.9814283786920813e-13,
+        "hausdorff_truth_to_out": 0.6768137592902594,
+        "max_dist_3d": 9.957734082501634e-13,
+        "max_dist_uv": 1.0737165644117845e-12,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "CROSSING", "COINCIDENT", "CROSSING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_fig1d_two_quads",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.00001190281374993514,
+        "hausdorff_truth_to_out": 0.000011717000465402586,
+        "max_dist_3d": 9.409165705465128e-7,
+        "max_dist_uv": 5.253238152258533e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_fig1e_loops_touching",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 0 covered 1% (max gap 1.25e+00)", "topology ['point', 'point'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 4.2457719144536936e-8,
+        "hausdorff_truth_to_out": 1.2500000000000007,
+        "max_dist_3d": 6.992509024314611e-16,
+        "max_dist_uv": 1.2413114153938207e-15,
+        "n_curves": 2,
+        "n_out_points": 2,
+        "output_topology": ["point", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING", "TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_fig1f_high_order_contact",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point", "point", "point"],
+        "flags": ["isolated point 0 not found (nearest output 1.98e+00)", "isolated point 1 not found (nearest output 1.94e+00)", "topology ['point'], expected ['point', 'point', 'point']"],
+        "hausdorff_out_to_truth": 1.13464793116691e-13,
+        "hausdorff_truth_to_out": 1.9826499999998866,
+        "max_dist_3d": 1.1324274851176597e-13,
+        "max_dist_uv": 5.359337991467453e-16,
+        "n_curves": 1,
+        "n_out_points": 1,
+        "output_topology": ["point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_fig1g_three_points",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 0 covered 2% (max gap 6.04e-01)", "topology ['point', 'point'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 0.00891267552215975,
+        "hausdorff_truth_to_out": 0.6041108357072902,
+        "max_dist_3d": 7.756011408306106e-8,
+        "max_dist_uv": 1.5512019620532666e-7,
+        "n_curves": 11,
+        "n_out_points": 11,
+        "output_topology": ["point", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING", "TOUCHING", "CROSSING", "TOUCHING", "TOUCHING", "TOUCHING", "TOUCHING", "TANGENT"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_t2_ex1_tangent_line",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 0 covered 23% (max gap 4.43e-01)", "topology ['curve(free_ends=2)', 'point'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 0.00028830254371907323,
+        "hausdorff_truth_to_out": 0.4433709906526252,
+        "max_dist_3d": 2.7520053674774127e-7,
+        "max_dist_uv": 2.0282580450611162e-11,
+        "n_curves": 2,
+        "n_out_points": 1,
+        "output_topology": ["curve(free_ends=2)", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING", "TANGENT"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_t2_ex2_tangential_curve",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=4)"],
+        "flags": ["branch 0 covered 8% (max gap 1.67e-01)", "topology ['curve(free_ends=2)', 'curve(free_ends=2)'], expected ['curve(free_ends=4)']", "singular point 0 not identified (no curve end/point within 5.0e-03; nearest 5.73e-01)", "singular point 1 not identified (no curve end/point within 5.0e-03; nearest 5.29e-01)", "singular point 2 not identified (no curve end/point within 5.0e-03; nearest 5.49e-01)", "singular point 3 not identified (no curve end/point within 5.0e-03; nearest 5.72e-01)"],
+        "hausdorff_out_to_truth": 8.27078863589971e-6,
+        "hausdorff_truth_to_out": 0.1670827204787283,
+        "max_dist_3d": 8.436363352391737e-7,
+        "max_dist_uv": 6.1833269392688e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)", "curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_t2_ex3_loop_two_curves",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["output curves 0 and 1 overlap (58% of one lies on the other)", "3D output up to 3.40e-05 from a surface (acc_tol 1e-05)", "surface at output UV up to 3.40e-05 from the other surface"],
+        "hausdorff_out_to_truth": 0.002385165655997872,
+        "hausdorff_truth_to_out": 0.0024076615616598304,
+        "max_dist_3d": 0.00003402075066221262,
+        "max_dist_uv": 0.00003402061374730712,
+        "n_curves": 4,
+        "n_out_points": 2,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT", "TANGENT", "TANGENT", "TANGENT"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "y23_t2_ex4_tangential_curve_saddle",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["ERROR status SM_ERR_NULL_POINTER", "branch 0 covered 0% (max gap inf)", "branch 1 covered 0% (max gap inf)", "topology [], expected ['curve(free_ends=0)']", "singular point 0 not identified (no curve end/point within 5.0e-03; nearest inf)", "singular point 1 not identified (no curve end/point within 5.0e-03; nearest inf)"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1006,
+        "status_name": "SM_ERR_NULL_POINTER",
+        "types": [],
+        "verdict": "ERROR"
+      },
+      "id": "y23_t2_ex5_two_loops",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)", "point"],
+        "flags": ["isolated point 0 not found (nearest output 4.13e-01)", "topology ['curve(free_ends=0)'], expected ['curve(free_ends=0)', 'point']"],
+        "hausdorff_out_to_truth": 4.977874687541536e-6,
+        "hausdorff_truth_to_out": 0.412607229914483,
+        "max_dist_3d": 7.687946954946609e-7,
+        "max_dist_uv": 6.049528904531632e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_t2_ex6_loop_and_point",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 published parameters",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)", "point", "point"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.00037015489771984397,
+        "hausdorff_truth_to_out": 0.000013829688039535813,
+        "max_dist_3d": 4.79893770277684e-7,
+        "max_dist_uv": 8.057912112002796e-7,
+        "n_curves": 4,
+        "n_out_points": 2,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)", "point", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING", "TOUCHING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_t3_ex1_torus_ellipsoid",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "nurbs"]
+    },
+    {
+      "class": "Y23 published parameters",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.000014330889209402394,
+        "hausdorff_truth_to_out": 8.233308264344724e-6,
+        "max_dist_3d": 9.600381540017024e-7,
+        "max_dist_uv": 9.89419278063508e-7,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_t3_ex2_torus_ellipsoid",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "nurbs"]
+    },
+    {
+      "class": "Y23 published parameters",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.179812118518108e-6,
+        "hausdorff_truth_to_out": 9.724943494704683e-7,
+        "max_dist_3d": 8.684412560189259e-7,
+        "max_dist_uv": 6.339606964825613e-7,
+        "n_curves": 8,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "TANGENT", "TANGENT", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_t3_ex3_torus_ellipsoid",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "nurbs"]
+    },
+    {
+      "class": "Y23 published parameters",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)", "point"],
+        "flags": ["singular point 0 not identified (no curve end/point within 5.0e-03; nearest 2.83e+00)"],
+        "hausdorff_out_to_truth": 0.000019040455698019478,
+        "hausdorff_truth_to_out": 4.5328712814594025e-6,
+        "max_dist_3d": 3.9599291984110974e-7,
+        "max_dist_uv": 3.4021204247361614e-7,
+        "n_curves": 3,
+        "n_out_points": 1,
+        "output_topology": ["curve(free_ends=0)", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TOUCHING", "CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "y23_t3_ex4_torus_ellipsoid",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "nurbs"]
+    },
+    {
+      "class": "Y23 published parameters",
+      "cpp": {
+        "cov_tol": 0.005,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.00001238853038761681,
+        "hausdorff_truth_to_out": 1.2009878103601953e-6,
+        "max_dist_3d": 9.756411390079042e-7,
+        "max_dist_uv": 3.9207224345242113e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT", "TANGENT", "TANGENT", "TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "y23_t3_ex5_torus_ellipsoid",
+      "rust": {
+        "deferred": {
+          "symbol": "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
+          "unit": "surface.surface_p2"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["torus", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["output curves 0 and 1 overlap (100% of one lies on the other)", "topology ['curve(free_ends=0)'], expected ['curve(free_ends=2)']", "3D output up to 3.43e-05 from a surface (acc_tol 1e-05)", "surface at output UV up to 3.43e-05 from the other surface"],
+        "hausdorff_out_to_truth": 0.0001777674991151409,
+        "hausdorff_truth_to_out": 0.00003211031082684316,
+        "max_dist_3d": 0.000034337130368361173,
+        "max_dist_uv": 0.000034337130368232214,
+        "n_curves": 4,
+        "n_out_points": 2,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT", "TANGENT", "TANGENT", "TANGENT"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "y23_t6_ex1_tangent_line",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.077076856781459e-7,
+        "hausdorff_truth_to_out": 9.091783348154381e-7,
+        "max_dist_3d": 7.706377226042132e-7,
+        "max_dist_uv": 3.173017404379845e-13,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
+      },
+      "id": "y23_t6_ex2_tangential_arc",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=4)"],
+        "flags": ["singular point 0 not identified (no curve end/point within 1.0e-03; nearest 8.70e-01)"],
+        "hausdorff_out_to_truth": 3.246717924510294e-7,
+        "hausdorff_truth_to_out": 3.192391400045208e-7,
+        "max_dist_3d": 3.1828627717427207e-7,
+        "max_dist_uv": 6.625581150387916e-8,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=4)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
+      },
+      "id": "y23_t6_ex3_two_crossing_curves",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": ["isolated point 0 not found (nearest output inf)", "topology [], expected ['point']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_t6_ex4_tangential_point",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 6.620737537031165e-16,
+        "hausdorff_truth_to_out": 6.620737537031165e-16,
+        "max_dist_3d": 1.1157603309187458e-15,
+        "max_dist_uv": 1.2754170217141015e-15,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
+      },
+      "id": "y23_t6_ex5_four_boundary_curves",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    },
+    {
+      "class": "Y23 reconstruction",
+      "cpp": {
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": ["branch 1 covered 88% (max gap 1.72e-01)", "output curves 3 and 4 overlap (100% of one lies on the other)", "output curves 3 and 5 overlap (100% of one lies on the other)", "output curves 3 and 6 overlap (100% of one lies on the other)", "output curves 3 and 7 overlap (100% of one lies on the other)", "output curves 3 and 8 overlap (100% of one lies on the other)", "output curves 3 and 9 overlap (100% of one lies on the other)", "output curves 3 and 10 overlap (100% of one lies on the other)", "output curves 3 and 11 overlap (100% of one lies on the other)", "output curves 4 and 5 overlap (100% of one lies on the other)", "output curves 4 and 6 overlap (100% of one lies on the other)", "output curves 4 and 7 overlap (100% of one lies on the other)", "output curves 4 and 8 overlap (100% of one lies on the other)", "output curves 4 and 9 overlap (100% of one lies on the other)", "output curves 4 and 10 overlap (100% of one lies on the other)", "output curves 4 and 11 overlap (100% of one lies on the other)", "output curves 5 and 6 overlap (100% of one lies on the other)", "output curves 5 and 7 overlap (100% of one lies on the other)", "output curves 5 and 8 overlap (100% of one lies on the other)", "output curves 5 and 9 overlap (100% of one lies on the other)", "output curves 5 and 10 overlap (100% of one lies on the other)", "output curves 5 and 11 overlap (100% of one lies on the other)", "output curves 6 and 7 overlap (100% of one lies on the other)", "output curves 6 and 8 overlap (100% of one lies on the other)", "output curves 6 and 9 overlap (100% of one lies on the other)", "output curves 6 and 10 overlap (100% of one lies on the other)", "output curves 6 and 11 overlap (100% of one lies on the other)", "output curves 7 and 8 overlap (100% of one lies on the other)", "output curves 7 and 9 overlap (100% of one lies on the other)", "output curves 7 and 10 overlap (100% of one lies on the other)", "output curves 7 and 11 overlap (100% of one lies on the other)", "output curves 8 and 9 overlap (100% of one lies on the other)", "output curves 8 and 10 overlap (100% of one lies on the other)", "output curves 8 and 11 overlap (100% of one lies on the other)", "output curves 9 and 10 overlap (100% of one lies on the other)", "output curves 9 and 11 overlap (100% of one lies on the other)", "output curves 10 and 11 overlap (100% of one lies on the other)", "topology ['curve(free_ends=3)', 'point', 'point'], expected ['curve(free_ends=2)']"],
+        "hausdorff_out_to_truth": 8.745726051420545e-7,
+        "hausdorff_truth_to_out": 0.17194432265048398,
+        "max_dist_3d": 9.192061936727806e-7,
+        "max_dist_uv": 5.286868847015966e-7,
+        "n_curves": 14,
+        "n_out_points": 2,
+        "output_topology": ["curve(free_ends=3)", "point", "point"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "CROSSING", "TOUCHING", "TOUCHING"],
+        "verdict": "INCOMPLETE"
+      },
+      "id": "y23_t6_ex6_four_boundary_curves",
+      "rust": {
+        "deferred": {
+          "symbol": "SmSurfaceIntersector::DoIntersection",
+          "unit": "intersect.surface_intersector_p5"
+        },
+        "verdict": "DEFERRED"
+      },
+      "surfaces": ["nurbs", "nurbs"]
+    }
+  ],
+  "corpus": {
+    "commit": "b04c8a6093a8b3505d865d1dd874ec3879ccb1f9",
+    "glob": null,
+    "repo": "https://github.com/jyviko/ssi-corpus"
+  },
+  "samples_per_curve": 4001,
+  "summary": {
+    "cpp": {
+      "ERROR": 2,
+      "INCOMPLETE": 25,
+      "PASS": 81,
+      "WRONG TOPOLOGY": 11
+    },
+    "parity": {
+      "compared": 3,
+      "identical": 3,
+      "mismatched": 0,
+      "same_verdict": 3
+    },
+    "rust": {
+      "DEFERRED": 116,
+      "PASS": 3
+    }
+  }
+}

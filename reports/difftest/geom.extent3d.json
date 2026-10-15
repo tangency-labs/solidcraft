@@ -431,7 +431,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/geom.extent3d/cases.json#53 (upstream edge case)",
-      "values_compared": 2
+      "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
