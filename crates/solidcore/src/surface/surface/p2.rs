@@ -125,8 +125,10 @@
 //! - **`sm_CreateCrossSectionCurves`** keeps upstream's use of the start second
 //!   derivatives for the Taylor series' third-derivative term.
 //! - **`SmLSIGlobalSolver`.** The constructor is unit `surface.surface_p1`; the
-//!   struct's fields are public. `LocalSolve` (`surface.surface_p10`) and
-//!   `IdenticalSolutions` (`surface.surface_p5`) return [`SolidError::Unported`]. A
+//!   struct's fields are public. `LocalSolve` is unit `surface.surface_p10`
+//!   ([`LsiGlobalSolver::local_solve_branch`]; it reads the node patches through the
+//!   borrowed `surface_cache`), `IdenticalSolutions` (`surface.surface_p5`) returns
+//!   [`SolidError::Unported`]. A
 //!   failing `SmExtent3d::IntersectLine` (zero line vector, undefined box) leaves
 //!   upstream's hit count uninitialised; the port returns its error.
 //! - **Not ported here.** The destructors of the file-local evaluator classes
@@ -183,6 +185,7 @@ use crate::surface::srf_in_volume::SrfInVolume;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p1::StepSurface;
+use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::surface::torus::Torus;
 use crate::topology::database_io::DatabaseReader;
 
@@ -1682,7 +1685,7 @@ pub fn surface_cache<O: Copy + PartialEq>(
     k: &Kernel,
     surface: &Surface,
     handle: Option<O>,
-) -> Result<crate::surface::surface_cache::p1::SurfaceCache<O>> {
+) -> Result<SurfaceCache<O>> {
     crate::surface::surface::p1::get_surface_cache(k, surface, handle)
 }
 
@@ -3725,6 +3728,11 @@ pub struct LsiGlobalSolver<'t, 's, O> {
     pub ray_fire: bool,
     /// `m_dDistanceTolerance`: smallest distance between distinct points.
     pub distance_tolerance: f64,
+    /// The cache holding the patches of the surface tree's nodes, read by the leaf
+    /// solve (part 10; upstream reaches it through the node's tree owner).
+    pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// Geometry context for the leaf solve (part 10).
+    pub kernel: Option<&'s Kernel>,
 }
 
 impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
@@ -3812,12 +3820,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for LsiGlobalSolver<'t, '_, 
         self.may_contain_answers(branch)
     }
 
-    fn local_solve(&mut self, _branch: &Branch) -> Result<bool> {
-        // UNPORTED(surface.surface_p10): SmLSIGlobalSolver::LocalSolve
-        Err(SolidError::unported(
-            "SmLSIGlobalSolver::LocalSolve",
-            "surface.surface_p10",
-        ))
+    fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
+        self.local_solve_branch(branch)
     }
 
     fn identical_solutions(
@@ -4164,13 +4168,16 @@ mod tests {
             line_interval: None,
             ray_fire: false,
             distance_tolerance: 1e-6,
+            surface_cache: None,
+            kernel: None,
         };
         let mut branch: Branch = Default::default();
         branch[0] = Some(id);
         assert!(solver.may_contain_answers(&branch).unwrap());
         solver.line_point = Vec3::new(5.0, 5.0, 0.0);
         assert!(!solver.may_contain_answers(&branch).unwrap());
-        assert!(solver.local_solve(&branch).unwrap_err().is_unported());
+        // no surface cache to read the node patch from
+        assert!(solver.local_solve(&branch).is_err());
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

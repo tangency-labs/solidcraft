@@ -1936,6 +1936,8 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 line_interval: ivl.map(|i| Extent1d::from_min_max(i[0], i[1])),
                 ray_fire: *ray,
                 distance_tolerance: *tol,
+                surface_cache: None,
+                kernel: None,
             };
             let mut branch: Branch = Default::default();
             if let Some(slot) = branch.first_mut() {

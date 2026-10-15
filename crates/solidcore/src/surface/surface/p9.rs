@@ -109,7 +109,9 @@ fn iso_curve(
     Ok(typed_iso_curve(k, surface, direction, value)?.0)
 }
 
-fn implicit_iso(
+/// `SmIsoCurve(surface, direction, value, left)` (clamped input) over the B-spline
+/// view of `surface`.
+pub(super) fn implicit_iso(
     surface: &Surface,
     direction: SurfParamType,
     value: f64,
