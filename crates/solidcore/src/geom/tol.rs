@@ -130,7 +130,7 @@ use crate::surface::volume::Volume;
 // ApproximateLength.
 // CO-PORTED in intersect.curve_class_p1: SmTol::MapTo2d(const SmTol3d&, double, const
 // SmCurve&, const SmSurface&) is surface::surface::p1::map_to_2d_on_curve (its UV-curve
-// branch; the SmCrvOnSurf and 3D branches are UNPORTED(surface.surface_p5) there).
+// and 3D branches; the SmCrvOnSurf branch is Unported there).
 // CO-PORTED in surface.surface_p1: SmTol::MapTo2d(const SmTol3d&, const SmVector2d&,
 // [const SmVector2d&,] const SmSurface&), SmTol::GetScaledZero(const SmSurface&) and
 // the SmSurface branch of SmTol::GetZoneTol3d(const SmObject*) are

@@ -9574,6 +9574,7 @@
   "deferred_by_unit": {
     "intersect.surface_intersector_p5": 51,
     "surface.surface_p4": 15,
+    "surface.surface_p6": 51,
     "surface.surface_point_solve_p3": 2
   },
   "max_rel_err": 0.0,

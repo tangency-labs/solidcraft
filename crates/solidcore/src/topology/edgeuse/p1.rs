@@ -1195,7 +1195,8 @@ pub fn start_point_uv_loop_gap(b: &Brep, eu: EdgeuseId) -> Result<f64> {
         };
         let cw_drop =
             crate::error::ignored(surface.drop_point::<NoObject>(cw_end_3d, &domain, &cw_opts))?;
-        let cw_end_2d = cw_drop.map_or(Point2::UNDEF, |d| d.result_uv);
+        // upstream's DropPoint sets rResultUV to the guess before anything can fail
+        let cw_end_2d = cw_drop.map_or(start_2d, |d| d.result_uv);
         return Ok(start_2d.distance(cw_end_2d));
     };
     let start_uv = point_or_undef(tc.evaluate_point(start_param))?;

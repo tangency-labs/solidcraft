@@ -1208,20 +1208,13 @@ const fn is_offset_surface(surface: &Surface) -> bool {
 
 /// `surface.IsSingularity(uv, eWhichDir)` (default tolerance): the plane override
 /// (never singular); other kinds run `SmSurface::IsSingularity`.
-fn surface_is_singularity(surface: &Surface, _uv: Point2) -> Result<bool> {
+fn surface_is_singularity(surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-            Err(SolidError::unported(
-                "SmSurface::IsSingularity",
-                "surface.surface_p5",
-            ))
-        }
+        | SurfaceKind::Step(_) => Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular),
     }
 }
 

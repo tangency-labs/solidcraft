@@ -214,10 +214,13 @@ fn offset_local_point_solve(
     _point: Point3,
     _guess: Point2,
 ) -> Result<Option<(Point2, f64)>> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
+    // SmSurface::LocalPointSolve is ported (surface.surface_p5, `Surface::local_point_solve`) but an
+    // SmOffsetSurface is not a `Surface` kind: the solve evaluates it through
+    // SmOffsetSurface::Evaluate.
+    // UNPORTED(surface.offset_surface): SmOffsetSurface::Evaluate (via SmSurface::LocalPointSolve)
     Err(SolidError::Unported {
-        upstream: "SmSurface::LocalPointSolve",
-        unit: "surface.surface_p5",
+        upstream: "SmOffsetSurface::Evaluate",
+        unit: "surface.offset_surface",
     })
 }
 

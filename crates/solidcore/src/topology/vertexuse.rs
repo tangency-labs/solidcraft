@@ -729,16 +729,20 @@ struct PointDrop {
 /// an answer was found and the solution.
 fn local_point_solve(
     _k: &Kernel,
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _op: SolverOperation,
-    _point: Point3,
-    _guess: Point2,
+    surface: &Surface,
+    domain: &Extent2d,
+    op: SolverOperation,
+    point: Point3,
+    guess: Point2,
 ) -> Result<(bool, PointDrop)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
+    let r = surface
+        .local_point_solve::<crate::surface::surface::p4::NoObject>(domain, op, point, guess)?;
+    Ok((
+        r.found,
+        PointDrop {
+            uv: Point2::new(r.solution.start.param(0)?, r.solution.start.param(1)?),
+            value: r.solution.start.solution_value,
+        },
     ))
 }
 
@@ -776,19 +780,15 @@ fn global_point_solve(
 
 /// `pSurface->IsSingularity(uv, eDir, dTol3d)` (virtual: the plane override, the base
 /// body otherwise).
-fn is_singularity(surface: &Surface, _uv: Point2, _tol: f64) -> Result<(bool, SurfParamType)> {
+fn is_singularity(surface: &Surface, uv: Point2, tol: f64) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-            Err(SolidError::unported(
-                "SmSurface::IsSingularity",
-                "surface.surface_p5",
-            ))
+        | SurfaceKind::Step(_) => {
+            let r = surface.is_singularity(uv, tol, false)?;
+            Ok((r.singular, r.direction))
         }
     }
 }

@@ -7208,6 +7208,7 @@
     "surface.cone_p2": 10,
     "surface.surface_p3": 36,
     "surface.surface_p4": 13,
+    "surface.surface_p6": 1,
     "topology.trimming_tools": 1
   },
   "max_rel_err": 0.0,

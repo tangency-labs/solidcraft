@@ -1201,18 +1201,17 @@ fn eval_point(surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
 /// `m_pSrf->LocalPointSolve(domain, op, point, guess, bFoundAnswer, sSol)`: whether
 /// an answer was found and the solution.
 fn local_point_solve<O: SolutionObject>(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _op: SolverOperation,
-    _point: Point3,
-    _guess: Point2,
+    surface: &Surface,
+    domain: &Extent2d,
+    op: SolverOperation,
+    point: Point3,
+    guess: Point2,
     _sol: &Solution<O>,
 ) -> Result<(bool, Solution<O>)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
-    ))
+    // (upstream's LocalPointSolve overwrites the solution with its own, default when
+    // nothing was found)
+    let r = surface.local_point_solve::<O>(domain, op, point, guess)?;
+    Ok((r.found, r.solution))
 }
 
 /// `m_pSrf->InvertPointNearSingularity(testPt, domain, uv, tightTol, eReason)`: the
