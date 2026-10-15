@@ -76,8 +76,7 @@
 //!   `SmFindSingularParamWithGivenTangentDirEFO`, `sm_IsNodeValid`, `IsFlatCorner`,
 //!   `EvaluateSTEP`, `GetFace` and the base `CalculateBoundingBox`
 //!   (`surface.surface_p1`; the solver constructors also hand over the caches holding
-//!   the patch data of tree nodes); `SmSurfaceIntersector::DoIntersection`
-//!   (`intersect.surface_intersector_p5`).
+//!   the patch data of tree nodes).
 
 use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
@@ -1227,21 +1226,29 @@ impl Surface {
 
     /// The curves of the parallel projection of `curve` along `projection_vector`
     /// onto the surface over `uv_domain` (`CreateParallelProjectionCurves`): the
-    /// intersection with the curve's linear sweep.
+    /// intersection with the curve's linear sweep along the unit projection vector
+    /// times the projection distance (given, else four times the largest distance
+    /// between the curve's and the surface's boxes, the sweep then moved back by half
+    /// to run both ways), through `SmAdvSurfaceIntersector::DoIntersection`. Returns
+    /// the 3D curves and their UV curves on this surface (`None` for a `NULL` entry).
+    /// The surface and curve continuity checks only report.
     ///
     /// # Errors
     ///
-    /// `SM_ERR_INVALID_INPUT` for a zero projection vector; [`SolidError::Unported`]:
-    /// the surface cache (`smsurf_GetSurfaceCache`).
+    /// `SM_ERR_INVALID_INPUT` for a zero projection vector; `SM_ERR_NULL_POINTER`
+    /// without a surface cache; those of the continuities, the boxes, the sweep, its
+    /// move and the intersection; [`SolidError::Unported`] from unported callees (the
+    /// surface cache: `SmSurface::CalculateContinuities`, `surface.surface_p6`).
     pub fn create_parallel_projection_curves(
         &self,
+        k: &crate::kernel::Kernel,
         uv_domain: &Extent2d,
         curve: &BSplineCurve,
         projection_vector: Vec3,
         opt_projection_distance: Option<f64>,
         opt_approx_tol_3d: Option<f64>,
         opt_angle_tol_rad: Option<f64>,
-    ) -> Result<(Vec<Curve>, Vec<Curve>)> {
+    ) -> Result<(Vec<Curve>, Vec<Option<Curve>>)> {
         // check input (ZERO_VEC_ER: fails unless |v|^2 >= SM_EFF_ZERO_SQ, so also for NaN)
         if projection_vector
             .length_squared()
@@ -1251,25 +1258,72 @@ impl Surface {
             return Err(SolidError::invalid_input(OP_PROJ, "zero projection vector"));
         }
 
-        // check state - internal surface continuities are better than C0 (the surface
-        // cache, surface::surface::p1::get_surface_cache; only reported)
-        let _ = (
+        // check state - internal surface continuities are better than C0 (NER; the
+        // continuity is only reported)
+        let cache = super::p2::surface_cache::<()>(k, self, None).map_err(|e| {
+            if e.is_unported() {
+                e
+            } else {
+                SolidError::null_pointer(OP_PROJ)
+            }
+        })?;
+        cache.surface_continuity(uv_domain)?;
+
+        // check state - internal curve continuities are better than C0 (only reported)
+        curve.calculate_continuities(CONTINUITY_ANGLE)?;
+
+        // Select projection distance to be greater than max dist between curve and
+        // surface
+        let projection_distance = if let Some(d) = opt_projection_distance {
+            d
+        } else {
+            let surf_box = self
+                .calculate_bounding_box(k, uv_domain, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_default();
+            let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            };
+            let curve_box = curve
+                .calculate_bounding_box(&curve.natural_interval(), req)?
+                .normal
+                .unwrap_or_default();
+            4.0 * curve_box.max_distance(&surf_box)
+        };
+
+        // sweep vector
+        let sweep_vec = projection_vector.unitize()? * projection_distance;
+
+        // swept surface
+        let mut sweep_curve = curve.clone();
+        let mut projection_surface = Surface::from(BSplineSurface::create_linear_sweep(
+            &mut sweep_curve,
+            sweep_vec,
+        )?);
+
+        // when working with guessed Projection distance - move the swept surface so that
+        // it sweeps forward and backwards from its start point
+        if opt_projection_distance.is_none() {
+            let mut transform = crate::geom::axis2_placement::Axis2Placement::default();
+            transform.translate(sweep_vec * -0.5);
+            projection_surface.transform(k, &transform, None)?;
+        }
+
+        // intersection
+        let projection_domain = projection_surface.natural_uv_domain();
+        let x = crate::intersect::surface_intersector::p5::do_intersection(
+            k,
+            self,
             uv_domain,
-            curve,
-            opt_projection_distance,
+            &projection_surface,
+            &projection_domain,
+            [true, true],
             opt_approx_tol_3d,
             opt_angle_tol_rad,
-        );
-        // then: the cache's SurfaceCache::surface_continuity (only reported), the curve's
-        // CalculateContinuities (only reported), the projection distance (given, or 4x the
-        // largest box distance), the curve's linear sweep along the unit vector times the
-        // distance (translated back by half when not given), the intersector
-        // (`AdvSurfaceIntersector::new` of this surface and the sweep), and:
-        // UNPORTED(intersect.surface_intersector_p5): SmSurfaceIntersector::DoIntersection
-        Err(SolidError::unported(
-            "SmSurfaceIntersector::DoIntersection",
-            "intersect.surface_intersector_p5",
-        ))
+        )?;
+        Ok((x.curves_3d, x.surface1_uv_curves))
     }
 }
 

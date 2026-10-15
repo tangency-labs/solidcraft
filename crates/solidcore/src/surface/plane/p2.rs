@@ -47,9 +47,9 @@
 //!   surface kinds not in [`SurfaceKind`] yet. Against a surface of revolution, a plane
 //!   with a face returns [`SolidError::Unported`] (`SmFace::GetTolerance`) even where
 //!   the special case would not reach the plane's box. The general
-//!   `SmSurface::GlobalSurfaceIntersect` returns [`SolidError::Unported`] after building
-//!   the intersector (`SmSurfaceIntersector::DoIntersection`,
-//!   `intersect.surface_intersector_p5`).
+//!   `SmSurface::GlobalSurfaceIntersect` runs `SmSurfaceIntersector::DoIntersection`
+//!   (`intersect.surface_intersector_p5`), whose surface caches return
+//!   [`SolidError::Unported`] (`SmSurface::CalculateContinuities`, `surface.surface_p6`).
 
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
@@ -1387,6 +1387,7 @@ pub(crate) fn global_surface_intersect(
     // If we're here, then analytic intersection were not found - do general intersection
     if need_nurb_intersection {
         out = base_global_surface_intersect(
+            k,
             this,
             uv_domain,
             other,

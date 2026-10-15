@@ -559,8 +559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceIntersector::DoIntersection",
-        "unit": "intersect.surface_intersector_p5"
+        "symbol": "SmSurface::CalculateContinuities",
+        "unit": "surface.surface_p6"
       },
       "max_rel_err": 0.0,
       "name": "gssi_crossing_planes",
@@ -7204,10 +7204,10 @@
   "cases_passed": 808,
   "cases_total": 869,
   "deferred_by_unit": {
-    "intersect.surface_intersector_p5": 1,
     "surface.cone_p2": 10,
     "surface.surface_p4": 13,
     "surface.surface_p5": 36,
+    "surface.surface_p6": 1,
     "topology.trimming_tools": 1
   },
   "max_rel_err": 0.0,

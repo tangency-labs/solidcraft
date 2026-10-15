@@ -621,6 +621,7 @@ impl SurfOfRevolution {
         // If we're here, then analytic intersections were not found
         if need_nurb_intersection {
             let more = base_global_surface_intersect(
+                k,
                 this,
                 uv_domain,
                 other,

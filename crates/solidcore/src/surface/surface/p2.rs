@@ -95,10 +95,11 @@
 //!   error-reporting macros (`ERR`, `SE`) only log; where the base default returns a
 //!   value after them (`GetNaturalUVDomain`, `GetDegree`, ...) the port returns the
 //!   same value.
-//! - **Unported callees.** The intersection drivers (`GlobalSurfaceIntersect`,
-//!   `PointBasedSurfaceIntersect`) build the `SmAdvSurfaceIntersector` and then need
-//!   `SmSurfaceIntersector::DoIntersection` / `DoPointIntersection`
-//!   (`intersect.surface_intersector_p5` / `_p4`); `CurveOnClassify` needs
+//! - **Unported callees.** `GlobalSurfaceIntersect` runs
+//!   `SmSurfaceIntersector::DoIntersection` (unit `intersect.surface_intersector_p5`),
+//!   whose surface caches need `SmSurface::CalculateContinuities` (`surface.surface_p6`);
+//!   `PointBasedSurfaceIntersect` builds the `SmAdvSurfaceIntersector` and then needs
+//!   `DoPointIntersection` (`intersect.surface_intersector_p4`); `CurveOnClassify` needs
 //!   `SmCurveClassification` (`intersect.curve_class_p*`); `CreatePlaneWith3DCurves`
 //!   needs `SmTrimmingTools` (`topology.trimming_tools`); `smsurf_GetSurfaceCache`
 //!   needs the cache store to make surface caches (`SmSurface::CacheMakeOrValidate`,
@@ -1162,6 +1163,7 @@ impl Surface {
             ),
             SurfaceKind::BSpline(_) | SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
                 base_global_surface_intersect(
+                    k,
                     self,
                     uv_domain,
                     other,
@@ -1508,31 +1510,32 @@ pub const fn base_number_control_points() -> usize {
 /// `SmSurface::GlobalSurfaceIntersect`: the intersection curves of `this` over
 /// `uv_domain` with `other` over `other_uv_domain`, through `SmAdvSurfaceIntersector`
 /// (the general intersection of the kinds without an override, and the fall-back of the
-/// overrides).
+/// overrides): [`crate::intersect::surface_intersector::p5::do_intersection`].
 ///
 /// # Errors
 ///
-/// Those of the intersector's construction; [`SolidError::Unported`]:
-/// `SmSurfaceIntersector::DoIntersection` (`intersect.surface_intersector_p5`).
+/// Those of [`crate::intersect::surface_intersector::p5::do_intersection`].
+#[allow(clippy::too_many_arguments)] // upstream's argument list
 pub fn base_global_surface_intersect(
+    k: &Kernel,
     this: &Surface,
     uv_domain: &Extent2d,
     other: &Surface,
     other_uv_domain: &Extent2d,
     use_surface_edges: [bool; 2],
-    _approx_tol_3d: Option<f64>,
-    _ang_tol_rad: Option<f64>,
+    approx_tol_3d: Option<f64>,
+    ang_tol_rad: Option<f64>,
 ) -> Result<SurfaceIntersection> {
-    let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
-        AdvSurfaceIntersector::new(this, uv_domain, other, other_uv_domain, false)?;
-    ssi.base
-        .set_use_surface_edges(use_surface_edges[0], use_surface_edges[1]);
-
-    // UNPORTED(intersect.surface_intersector_p5): SmSurfaceIntersector::DoIntersection
-    Err(SolidError::unported(
-        "SmSurfaceIntersector::DoIntersection",
-        "intersect.surface_intersector_p5",
-    ))
+    crate::intersect::surface_intersector::p5::do_intersection(
+        k,
+        this,
+        uv_domain,
+        other,
+        other_uv_domain,
+        use_surface_edges,
+        approx_tol_3d,
+        ang_tol_rad,
+    )
 }
 
 /// `SmSurface::GetMaxAnalyticDomain`: reports `SM_ERR` and returns an initialised
