@@ -285,6 +285,13 @@ pub trait SolutionObject: Copy + PartialEq {
     fn natural_uv_domain(&self) -> Option<crate::geom::extent2d::Extent2d> {
         None
     }
+
+    /// For a poly vertex object, its point (`SmPolyVertex::GetPoint`, see
+    /// [`crate::query::poly::PolyBrep::vertex_point`]) when the handle can reach the
+    /// vertex; `None` (the default) when it cannot.
+    fn poly_vertex_point(&self) -> Option<Point3> {
+        None
+    }
 }
 
 /// One point of a solution space (`SmSolutionEnd`): a solution value (typically
@@ -1113,13 +1120,18 @@ fn volume_natural_param_domain<O>(_volume: &O) -> Result<crate::geom::extent3d::
     })
 }
 
-/// `SmPolyVertex::GetPoint`.
-fn poly_vertex_point<O>(_poly_vertex: &O) -> Result<Point3> {
-    // UNPORTED(query.poly): SmPolyVertex::GetPoint
-    Err(SolidError::Unported {
-        upstream: "SmPolyVertex::GetPoint",
-        unit: "query.poly",
-    })
+/// `SmPolyVertex::GetPoint` through the handle ([`SolutionObject::poly_vertex_point`]).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a handle that cannot reach its poly vertex.
+fn poly_vertex_point<O: SolutionObject>(poly_vertex: &O) -> Result<Point3> {
+    poly_vertex
+        .poly_vertex_point()
+        .ok_or(SolidError::InvalidInput {
+            operation: "geom::solution_array::poly_vertex_point",
+            reason: "solution object handle cannot reach its poly vertex",
+        })
 }
 
 /// A growable array of solutions (`SmSolutionArray`), the result container of

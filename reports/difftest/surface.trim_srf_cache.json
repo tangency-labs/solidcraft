@@ -1019,8 +1019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTessSrfCache subdivision surfaces",
-        "unit": "query.tess"
+        "symbol": "SmEdgeuse::GetUVTrimCurve",
+        "unit": "topology.edgeuse_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0095",
@@ -2110,16 +2110,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmTessSrfCache subdivision surfaces",
-        "unit": "query.tess"
-      },
       "max_rel_err": 0.0,
       "name": "gen0222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=1769723986011626995",
-      "values_compared": 0
+      "values_compared": 2883
     },
     {
       "max_rel_err": 0.0,
@@ -2623,8 +2619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTessSrfCache subdivision surfaces",
-        "unit": "query.tess"
+        "symbol": "SmEdgeuse::GetUVTrimCurve",
+        "unit": "topology.edgeuse_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0281",
@@ -5075,8 +5071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTessSrfCache subdivision surfaces",
-        "unit": "query.tess"
+        "symbol": "SmEdgeuse::GetUVTrimCurve",
+        "unit": "topology.edgeuse_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0568",
@@ -5351,15 +5347,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 95,
+  "cases_deferred": 94,
   "cases_failed": 0,
-  "cases_passed": 526,
+  "cases_passed": 527,
   "cases_total": 621,
   "deferred_by_unit": {
-    "query.tess": 4,
     "surface.surface_p3": 29,
     "topology.brep_p8": 60,
-    "topology.edgeuse_p1": 2
+    "topology.edgeuse_p1": 5
   },
   "max_rel_err": 0.0,
   "pass": true,

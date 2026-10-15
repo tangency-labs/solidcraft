@@ -482,6 +482,9 @@ fn cache_of(s: &BSplineSurface, opts: [f64; 6]) -> TrimSrfCache<i64> {
     };
     let mut c = TrimSrfCache::new(Surface::from(s.copy()), opts);
     c.base_mut().set_surface_handle(Some(SURFACE_HANDLE));
+    // the halves of split subdivision surfaces (any handles but SURFACE_HANDLE)
+    c.base_mut()
+        .set_subdivision_handles(Some(|n| 1000 + n as i64));
     c
 }
 

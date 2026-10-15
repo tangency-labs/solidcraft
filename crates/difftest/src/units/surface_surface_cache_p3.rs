@@ -13,8 +13,7 @@
 //! construction Bezier.
 //!
 //! Deferred cases: the paths into unported units (`SmSurface::CalculateContinuities` in
-//! every tree build, `SmSurface::SnapToKnots` when splitting a node that holds a
-//! subdivision surface, `SmSurface::GetSingularities` in pole searches, `SmSurface::
+//! every tree build, `SmSurface::GetSingularities` in pole searches, `SmSurface::
 //! EvaluateNormal` in the polar boxes of the angle tolerance test and
 //! `SmSurface::FindTessellationSplits` in block subdivisions, the last two through part 2).
 
@@ -334,6 +333,8 @@ fn cache_of(surface: Surface, opts: &OptsIn) -> SurfaceCache<i64> {
     let mut c = SurfaceCache::new(surface, dom, options_of(opts));
     c.start_fast_subdivision_angle_deg = opts.start;
     c.set_surface_handle(Some(SURFACE_HANDLE));
+    // the halves of split subdivision surfaces (any handles but SURFACE_HANDLE)
+    c.set_subdivision_handles(Some(|n| 1000 + n as i64));
     c
 }
 

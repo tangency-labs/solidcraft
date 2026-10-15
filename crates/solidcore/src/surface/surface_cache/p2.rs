@@ -328,6 +328,12 @@ pub struct ToleranceTest {
     pub direction: SurfParamType,
 }
 
+/// A `TestAgainstTolerances` for `SubdivideToTolerances` (upstream's virtual call:
+/// [`SurfaceCache::test_against_tolerances`] for the base class, a derived cache's
+/// override otherwise).
+pub type ToleranceTester<'a, O> =
+    dyn FnMut(&mut SurfaceCache<O>, &Kernel, NodeId) -> Result<ToleranceTest> + 'a;
+
 /// Turns an [`SolidError::Unported`] or any other error of an ignored status into
 /// "ignored": `Ok(None)` for ignored failures, the error for `Unported`.
 fn ignore<T>(r: Result<T>) -> Result<Option<T>> {

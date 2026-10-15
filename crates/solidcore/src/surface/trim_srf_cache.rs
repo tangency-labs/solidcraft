@@ -797,7 +797,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// Those of [`SurfaceCache::subdivide_node_split`]; [`SolidError::Unported`]:
     /// `SmEdgeuse::GetUVTrimCurve` (`topology.edgeuse_p1`) for an edge use to move,
-    /// the poly edge points (`query.poly`) for a poly edge to move.
+    /// `SmFace::GetSurface` (`topology.face_p2`) for a poly edge to move.
     fn subdivide_node(
         &mut self,
         k: &Kernel,
@@ -831,11 +831,13 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                     self.base.aux_mut(node)?.edgeuse_list.pop();
                 }
             } else {
-                // UNPORTED(query.poly): SmPolyEdge::GetStartPoint / GetEndPoint /
-                // GetTolerance (the PolyEdgeInput of ImplantPolyEdge)
+                // UNPORTED(topology.face_p2): SmFace::GetSurface of the poly edge's
+                // original face (the PolyEdgeInput of ImplantPolyEdge; the poly edge
+                // points and tolerance are query::poly, but the cache keeps opaque
+                // handles with no poly B-rep to read them from)
                 return Err(SolidError::unported(
-                    "SmPolyEdge::GetStartPoint",
-                    "query.poly",
+                    "SmFace::GetSurface",
+                    "topology.face_p2",
                 ));
             }
         }

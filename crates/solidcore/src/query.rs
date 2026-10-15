@@ -5,3 +5,5 @@
 //! `SmTopologyTraverser` in `source/SMLib`, and `SM_API/SmApiQueries`.
 
 pub mod r#loop;
+pub mod poly;
+pub mod tess;

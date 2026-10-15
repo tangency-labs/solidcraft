@@ -1388,6 +1388,11 @@ pub struct SurfaceCache<O> {
     iso_boundary_curves: Option<[BSplineCurve; 4]>,
     /// `m_sSubdivisionSurfaces`: construction surfaces with their handles.
     subdivision_surfaces: Vec<(O, Surface)>,
+    /// Names the halves of a split subdivision surface (see
+    /// [`SurfaceCache::set_subdivision_handles`]).
+    subdivision_handles: Option<fn(u64) -> O>,
+    /// Handles named so far by `subdivision_handles`.
+    subdivision_handle_count: u64,
     /// `m_sBoundingPlanes`.
     bounding_planes: PatchBoundaryBoundingPlanes,
     /// `m_bHaveTSurfaceCache`: the tree holds the face boundary lists.
@@ -1425,6 +1430,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             trim_subdivision_factor: 20.0,
             iso_boundary_curves: None,
             subdivision_surfaces: Vec::new(),
+            subdivision_handles: None,
+            subdivision_handle_count: 0,
             bounding_planes: PatchBoundaryBoundingPlanes::new(uv_domain),
             have_t_surface_cache: false,
             face_was_modified: false,
@@ -1492,6 +1499,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         &self.opts
     }
 
+    /// The tessellation controls, mutable (upstream's derived caches assign the
+    /// protected tolerance members, e.g. `SmTessSrfCache::TestAgainstTolerances`).
+    pub fn options_mut(&mut self) -> &mut SurfaceCacheOptions {
+        &mut self.opts
+    }
+
     /// The decomposition tree as stored (`m_pTree`), without building it.
     #[must_use]
     pub const fn tree(&self) -> Option<&Tree<O>> {
@@ -1550,6 +1563,22 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// The subdivision surfaces with their handles (`m_sSubdivisionSurfaces`).
     pub fn subdivision_surfaces_mut(&mut self) -> &mut Vec<(O, Surface)> {
         &mut self.subdivision_surfaces
+    }
+
+    /// Sets how the cache names new subdivision surfaces: `make(n)` is the handle of
+    /// the `n`-th surface named (`n` counts from 0 and is never reused). Upstream
+    /// stores the surface pointers; a cache that holds subdivision surfaces on its
+    /// nodes (`SmTessSrfCache`) needs this to split them (`SubdivideNode`).
+    pub fn set_subdivision_handles(&mut self, make: Option<fn(u64) -> O>) {
+        self.subdivision_handles = make;
+    }
+
+    /// A new subdivision surface handle, `None` when the cache cannot name them.
+    pub fn new_subdivision_handle(&mut self) -> Option<O> {
+        let make = self.subdivision_handles?;
+        let n = self.subdivision_handle_count;
+        self.subdivision_handle_count = n.saturating_add(1);
+        Some(make(n))
     }
 
     /// The continuity at every u knot (`GetUContinuitiesArray`).

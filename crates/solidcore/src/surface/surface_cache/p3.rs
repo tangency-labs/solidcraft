@@ -7,11 +7,11 @@
 //!
 //! | Rust                                   | Upstream                                 |
 //! |----------------------------------------|------------------------------------------|
-//! | [`SurfaceCache::find_uv_nodes`]        | `SmSurfaceCache::FindUVNodes`            |
+//! | [`SurfaceCache::find_uv_nodes`], [`SurfaceCache::find_uv_nodes_built`] | `SmSurfaceCache::FindUVNodes` |
 //! | [`SurfaceCache::subdivide_node`]       | `SmSurfaceCache::SubdivideNode`          |
-//! | [`SurfaceCache::subdivide_to_tolerances`] | `SmSurfaceCache::SubdivideToTolerances` |
-//! | [`SurfaceCache::build_tree_base`], [`TreeBase`] | `SmSurfaceCache::BuildTreeBase` |
-//! | [`SurfaceCache::build_tree`]           | `SmSurfaceCache::BuildTree`              |
+//! | [`SurfaceCache::subdivide_to_tolerances`], [`SurfaceCache::subdivide_to_tolerances_with`] | `SmSurfaceCache::SubdivideToTolerances` |
+//! | [`SurfaceCache::build_tree_base`], [`SurfaceCache::build_tree_base_with`], [`TreeBase`] | `SmSurfaceCache::BuildTreeBase` |
+//! | [`SurfaceCache::build_tree`], [`SurfaceCache::build_tree_with`] | `SmSurfaceCache::BuildTree` |
 //! | [`SurfaceCache::get_tree`]             | `SmSurfaceCache::GetTree`                |
 //! | [`SurfaceCache::new`] (in part 1)      | `SmSurfaceCache::SmSurfaceCache`         |
 //!
@@ -27,9 +27,10 @@
 //!   derived cache finishes the construction), `false` for NULL. New nodes and their data
 //!   come from zero-filled block memory upstream: all-zero boxes, as in part 2.
 //! - **Split surfaces.** Splitting a node that holds a temporary subdivision surface
-//!   (only `SmTessSrfCache` puts them on nodes; the tree build never does) stops at
-//!   `SmSurface::SnapToKnots` (unported) before the surface is split. When it is ported,
-//!   the two halves need handles of the caller's type `O` for `m_sSubdivisionSurfaces`.
+//!   (only `SmTessSrfCache` puts them on nodes; the tree build never does) snaps the
+//!   split to a knot and splits the surface; the halves are named by the cache's
+//!   subdivision handle maker ([`SurfaceCache::set_subdivision_handles`]): a cache
+//!   without one returns [`SolidError::InvalidInput`] there.
 //! - **Unused results.** `BuildTreeBase` reads the knots of a B-spline surface into
 //!   split arrays that only the disabled tree vertex code uses (the status is ignored):
 //!   not read. `SubdivideNode` fills split arrays for the same disabled code, and reads
@@ -55,10 +56,15 @@
 //!   `ImplantPolyEdge`, `ImplantEdgeuse`, `sm_ComputeBezierApproximation`), except
 //!   [`SolidError::Unported`], which is always propagated.
 //! - **Unported calls.** `SmSurface::CalculateContinuities` (`surface.surface_p6`, every
-//!   tree build), `SmSurface::SnapToKnots` (`surface.surface_p1`, splitting a node with
-//!   a subdivision surface) and `SmSurface::GetSingularities` (`surface.surface_p3`,
-//!   pole search) return [`SolidError::Unported`].
-//! - **Virtual calls.** `SubdivideNode` moves a boundary parent's edge uses and poly edges
+//!   tree build) and `SmSurface::GetSingularities` (`surface.surface_p3`, pole search)
+//!   return [`SolidError::Unported`].
+//! - **Virtual calls.** `SubdivideToTolerances` calls the virtual
+//!   `TestAgainstTolerances`: the `_with` variants
+//!   ([`SurfaceCache::subdivide_to_tolerances_with`], [`SurfaceCache::build_tree_with`],
+//!   [`SurfaceCache::build_tree_base_with`]) take the derived cache's override
+//!   ([`ToleranceTester`]); the plain ones run the base class test. `FindUVNodes` starts
+//!   with `GetTree`; a derived cache runs its own and then
+//!   [`SurfaceCache::find_uv_nodes_built`]. `SubdivideNode` moves a boundary parent's edge uses and poly edges
 //!   into the children through the virtual `ImplantEdgeuse` / `ImplantPolyEdge`:
 //!   [`SurfaceCache::subdivide_node`] runs the base class's (which fail: the edge uses are
 //!   dropped), and the trimmed surface cache splits through
@@ -90,7 +96,9 @@ use super::p1::{
     bspline_of, compute_bezier_approximation, invalid, BezierAux2d, BezierPatch, FaceContainment,
     SurfaceCache, FACE_TYPE,
 };
-use super::p2::{create_approximate_bezier_patch_block, create_bezier_patch_block};
+use super::p2::{
+    create_approximate_bezier_patch_block, create_bezier_patch_block, ToleranceTester,
+};
 
 const OP_FIND: &str = "surface::surface_cache::p3::SurfaceCache::find_uv_nodes";
 const OP_NODE: &str = "surface::surface_cache::p3::SurfaceCache::subdivide_node";
@@ -197,11 +205,27 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         uv_domain: &Extent2d,
         check_for_poles: bool,
     ) -> Result<Vec<NodeId>> {
+        // locals
+        self.get_tree(k)?;
+        self.find_uv_nodes_built(uv_domain, check_for_poles)
+    }
+
+    /// [`SurfaceCache::find_uv_nodes`] once `GetTree` has run: searches the stored
+    /// tree without building it (a derived cache runs its own `GetTree` first, the
+    /// virtual `BuildTree` upstream).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` without a tree; [`SolidError::Unported`] as
+    /// [`SurfaceCache::find_uv_nodes`].
+    pub fn find_uv_nodes_built(
+        &self,
+        uv_domain: &Extent2d,
+        check_for_poles: bool,
+    ) -> Result<Vec<NodeId>> {
         // init output
         let mut nodes = Vec::new();
 
-        // locals
-        self.get_tree(k)?;
         let top = self.tree_or(OP_FIND)?.top_node();
         let mut stack: Vec<Option<NodeId>> = Vec::new();
 
@@ -459,25 +483,28 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
             if let Some(handle) = subdivision_surface {
                 // if possible move the split parameter to a nearby existing knot, then
-                // split the subdivision surface in two
-                // (SmSurface::SnapToKnots and SplitAt need the surface behind the
-                // handle, which only SmTessSrfCache puts on nodes)
-                // UNPORTED(query.tess): SmTessSrfCache subdivision surfaces
-                let _ = handle;
-                return Err(SolidError::unported(
-                    "SmTessSrfCache subdivision surfaces",
-                    "query.tess",
-                ));
+                // split the subdivision surface in two (child boxes from the halves)
+                let split_param = self.split_subdivision_surface(
+                    handle,
+                    [node1, node2],
+                    SurfParamType::U,
+                    split_param,
+                    uv_min,
+                    uv_max,
+                )?;
+                (Direction::U, split_param)
+            } else {
+                // either an SM_AD_BEZIER_SURFACE with a Bezier patch, or embedding an
+                // edge use
+                self.aux_mut(node1)?.uv_domain =
+                    Extent2d::from_points(uv_min, Point2::new(split_param, uv_max.y));
+                self.aux_mut(node2)?.uv_domain =
+                    Extent2d::from_points(Point2::new(split_param, uv_min.y), uv_max);
+                if !split_patch {
+                    self.copy_parent_boxes(node1, node2, parent_bbox)?;
+                }
+                (Direction::U, split_param)
             }
-            // either an SM_AD_BEZIER_SURFACE with a Bezier patch, or embedding an edge use
-            self.aux_mut(node1)?.uv_domain =
-                Extent2d::from_points(uv_min, Point2::new(split_param, uv_max.y));
-            self.aux_mut(node2)?.uv_domain =
-                Extent2d::from_points(Point2::new(split_param, uv_min.y), uv_max);
-            if !split_patch {
-                self.copy_parent_boxes(node1, node2, parent_bbox)?;
-            }
-            (Direction::U, split_param)
         } else {
             // let child1 = bottom, child2 = top
             self.surface_aux_mut(node, OP_NODE)?.split_dir = SplitDir::V;
@@ -491,24 +518,26 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
             if let Some(handle) = subdivision_surface {
                 // if possible move the split parameter to a nearby existing knot, then
-                // split the subdivision surface in two
-                // (SmSurface::SnapToKnots and SplitAt need the surface behind the
-                // handle, which only SmTessSrfCache puts on nodes)
-                // UNPORTED(query.tess): SmTessSrfCache subdivision surfaces
-                let _ = handle;
-                return Err(SolidError::unported(
-                    "SmTessSrfCache subdivision surfaces",
-                    "query.tess",
-                ));
+                // split the subdivision surface in two (child boxes from the halves)
+                let split_param = self.split_subdivision_surface(
+                    handle,
+                    [node1, node2],
+                    SurfParamType::V,
+                    split_param,
+                    uv_min,
+                    uv_max,
+                )?;
+                (Direction::V, split_param)
+            } else {
+                self.aux_mut(node1)?.uv_domain =
+                    Extent2d::from_points(uv_min, Point2::new(uv_max.x, split_param));
+                self.aux_mut(node2)?.uv_domain =
+                    Extent2d::from_points(Point2::new(uv_min.x, split_param), uv_max);
+                if !split_patch {
+                    self.copy_parent_boxes(node1, node2, parent_bbox)?;
+                }
+                (Direction::V, split_param)
             }
-            self.aux_mut(node1)?.uv_domain =
-                Extent2d::from_points(uv_min, Point2::new(uv_max.x, split_param));
-            self.aux_mut(node2)?.uv_domain =
-                Extent2d::from_points(Point2::new(uv_min.x, split_param), uv_max);
-            if !split_patch {
-                self.copy_parent_boxes(node1, node2, parent_bbox)?;
-            }
-            (Direction::V, split_param)
         };
 
         // still need bounding boxes when the node has a Bezier patch to split
@@ -556,6 +585,95 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
 
         Ok(None)
+    }
+
+    /// The subdivision surface branch of `SubdivideNode`: snaps `split_param` to a
+    /// knot of the node's subdivision surface `handle` within a quarter of the node's
+    /// side, splits that surface there, keeps the halves as new subdivision surfaces
+    /// on the children `[node1, node2]` (`SM_CAST_PTR(SmBSplineSurface, ..)`: only
+    /// B-spline halves are kept on the nodes), sets the children's domains and their
+    /// boxes from the halves; returns the split parameter used. The u split ignores
+    /// the box statuses, the v split returns them (as upstream).
+    fn split_subdivision_surface(
+        &mut self,
+        handle: O,
+        [node1, node2]: [NodeId; 2],
+        direction: SurfParamType,
+        split_param: f64,
+        uv_min: Point2,
+        uv_max: Point2,
+    ) -> Result<f64> {
+        let sub = self.node_surface(Some(handle))?.clone();
+        let (orig, snap_dist) = if direction == SurfParamType::U {
+            (
+                Point2::new(split_param, uv_min.y),
+                (uv_max.x - uv_min.x) / 4.0,
+            )
+        } else {
+            (
+                Point2::new(uv_min.x, split_param),
+                (uv_max.y - uv_min.y) / 4.0,
+            )
+        };
+        let snapped = sub.snap_to_knots(orig, snap_dist)?;
+        let split_param = if direction == SurfParamType::U {
+            snapped.x
+        } else {
+            snapped.y
+        };
+
+        // build two new split child surfaces from the original - don't modify the original
+        let (half1, half2) = sub.split_at(split_param, direction)?;
+
+        // store the child surfaces in the subdivision surface list and on the nodes
+        let mut handles = [None, None];
+        for (slot, half) in handles.iter_mut().zip([half1, half2]) {
+            let h = self
+                .new_subdivision_handle()
+                .ok_or_else(|| invalid(OP_NODE, "cache cannot name new subdivision surfaces"))?;
+            let is_bspline = matches!(half.kind(), SurfaceKind::BSpline(_));
+            self.subdivision_surfaces_mut().push((h, half));
+            *slot = is_bspline.then_some(h);
+        }
+        self.surface_aux_mut(node1, OP_NODE)?.surface = handles[0];
+        self.surface_aux_mut(node2, OP_NODE)?.surface = handles[1];
+
+        // set child domains
+        let (d1, d2) = if direction == SurfParamType::U {
+            (
+                Extent2d::from_points(uv_min, Point2::new(split_param, uv_max.y)),
+                Extent2d::from_points(Point2::new(split_param, uv_min.y), uv_max),
+            )
+        } else {
+            (
+                Extent2d::from_points(uv_min, Point2::new(uv_max.x, split_param)),
+                Extent2d::from_points(Point2::new(uv_min.x, split_param), uv_max),
+            )
+        };
+        self.aux_mut(node1)?.uv_domain = d1;
+        self.aux_mut(node2)?.uv_domain = d2;
+
+        // set the node bounding boxes from the halves
+        let n = self.subdivision_surfaces_mut().len();
+        for (child, domain, k) in [(node1, d1, n - 2), (node2, d2, n - 1)] {
+            let r = {
+                let half = &self
+                    .subdivision_surfaces_mut()
+                    .get(k)
+                    .ok_or_else(|| invalid(OP_NODE, "subdivision surface missing"))?
+                    .1;
+                half_box(half, &domain)
+            };
+            let bbox = if direction == SurfParamType::U {
+                ignore(r)?
+            } else {
+                Some(r?)
+            };
+            if let Some(b) = bbox {
+                self.tree_mut_or(OP_NODE)?.node_mut(child)?.bbox = b;
+            }
+        }
+        Ok(split_param)
     }
 
     /// The end of `SubdivideNode` for a parent on the boundary, with the base class's
@@ -627,6 +745,25 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// `InvalidInput` past [`MAX_SUBDIVISION_DEPTH`] levels; the errors of the tolerance
     /// test, the block subdivision and [`SurfaceCache::subdivide_node`].
     pub fn subdivide_to_tolerances(&mut self, k: &Kernel, node: NodeId, depth: u32) -> Result<()> {
+        self.subdivide_to_tolerances_with(k, node, depth, &mut |c, k, n| {
+            c.test_against_tolerances(k, n)
+        })
+    }
+
+    /// [`SurfaceCache::subdivide_to_tolerances`] with `tester` as the virtual
+    /// `TestAgainstTolerances` (a derived cache's override, e.g.
+    /// [`crate::query::tess::TessSrfCache`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceCache::subdivide_to_tolerances`], with `tester`'s errors.
+    pub fn subdivide_to_tolerances_with(
+        &mut self,
+        k: &Kernel,
+        node: NodeId,
+        depth: u32,
+        tester: &mut ToleranceTester<'_, O>,
+    ) -> Result<()> {
         if depth > MAX_SUBDIVISION_DEPTH {
             return Err(invalid(
                 OP_TOL,
@@ -635,7 +772,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
 
         // test to see if subdivision is required and pick a split direction
-        let test = self.test_against_tolerances(k, node)?;
+        let test = tester(self, k, node)?;
         // no work - patch currently within tolerance
         if !test.needs_subdivision {
             return Ok(());
@@ -666,8 +803,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     .ok_or_else(|| invalid(OP_TOL, "split node has no child 2"))?,
             )
         };
-        self.subdivide_to_tolerances(k, c1, depth + 1)?;
-        self.subdivide_to_tolerances(k, c2, depth + 1)?;
+        self.subdivide_to_tolerances_with(k, c1, depth + 1, tester)?;
+        self.subdivide_to_tolerances_with(k, c2, depth + 1, tester)?;
 
         // a minimal bounding box: union the children's boxes
         {
@@ -708,6 +845,20 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// [`SolidError::Unported`] for `SmSurface::CalculateContinuities`; the box and
     /// subdivision errors.
     pub fn build_tree_base(&mut self, k: &Kernel) -> Result<TreeBase> {
+        self.build_tree_base_with(k, &mut |c, k, n| c.test_against_tolerances(k, n))
+    }
+
+    /// [`SurfaceCache::build_tree_base`] with `tester` as the virtual
+    /// `TestAgainstTolerances`.
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceCache::build_tree_base`].
+    pub fn build_tree_base_with(
+        &mut self,
+        k: &Kernel,
+        tester: &mut ToleranceTester<'_, O>,
+    ) -> Result<TreeBase> {
         // store an allocated and empty decomposition tree
         let mut tree: Tree<O> = Tree::new(Some(TreeOwner::SurfaceCache));
         tree.set_owner_surface(self.surface_handle());
@@ -755,7 +906,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let u_conts = calculate_continuities(self.surface(), SurfParamType::U)?;
         let v_conts = calculate_continuities(self.surface(), SurfParamType::V)?;
         self.set_continuities(u_conts, v_conts);
-        self.build_tree_base_nodes(k, u_count, v_count)
+        self.build_tree_base_nodes(k, u_count, v_count, tester)
     }
 
     /// The rest of [`SurfaceCache::build_tree_base`] once the continuities are set.
@@ -764,6 +915,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         k: &Kernel,
         u_count: usize,
         v_count: usize,
+        tester: &mut ToleranceTester<'_, O>,
     ) -> Result<TreeBase> {
         let mut nodes = Vec::with_capacity(u_count.saturating_mul(v_count));
         let u_conts = self.u_continuities().to_vec();
@@ -838,7 +990,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // subdivide each first generation node until all its children pass the tolerances
         for &node in &nodes {
-            self.subdivide_to_tolerances(k, node, 0)?;
+            self.subdivide_to_tolerances_with(k, node, 0, tester)?;
         }
 
         Ok(TreeBase {
@@ -860,19 +1012,41 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// The errors of [`SurfaceCache::build_tree_base`] and
     /// [`SurfaceCache::build_tree_top`].
     pub fn build_tree(&mut self, k: &Kernel, for_derived_cache: bool) -> Result<()> {
+        self.build_tree_with(k, for_derived_cache, &mut |c, k, n| {
+            c.test_against_tolerances(k, n)
+        })
+    }
+
+    /// [`SurfaceCache::build_tree`] with `tester` as the virtual
+    /// `TestAgainstTolerances`.
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceCache::build_tree`].
+    pub fn build_tree_with(
+        &mut self,
+        k: &Kernel,
+        for_derived_cache: bool,
+        tester: &mut ToleranceTester<'_, O>,
+    ) -> Result<()> {
         // to prevent bad recursion back into BuildTree - turn off point testing
         let saved_point_test = self.point_test_enabled;
         let saved_containment = self.face_containment_done;
         self.point_test_enabled = false;
         self.face_containment_done = FaceContainment::UnderConstruction;
-        let r = self.build_tree_inner(k, for_derived_cache);
+        let r = self.build_tree_inner(k, for_derived_cache, tester);
         self.point_test_enabled = saved_point_test;
         self.face_containment_done = saved_containment;
         r
     }
 
-    fn build_tree_inner(&mut self, k: &Kernel, for_derived_cache: bool) -> Result<()> {
-        let base = self.build_tree_base(k)?;
+    fn build_tree_inner(
+        &mut self,
+        k: &Kernel,
+        for_derived_cache: bool,
+        tester: &mut ToleranceTester<'_, O>,
+    ) -> Result<()> {
+        let base = self.build_tree_base_with(k, tester)?;
 
         // add parent nodes over the first generation
         self.build_tree_top(&base.nodes, base.u_count, base.v_count)?;
@@ -915,6 +1089,26 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             self.build_tree(k, false)?;
         }
         self.tree_mut_or(OP_GET)
+    }
+}
+
+/// `CalculateBoundingBox(domain, &box, NULL, NULL, NULL, NULL)` of a split half (the
+/// B-spline override, boxes expanded by the zone tolerance); the base body's `SM_ERR`
+/// for other kinds.
+fn half_box(half: &Surface, domain: &Extent2d) -> Result<crate::geom::extent3d::Extent3d> {
+    match half.kind() {
+        SurfaceKind::BSpline(b) => b
+            .calculate_bounding_box(
+                domain,
+                &BoundingBoxRequest {
+                    normal: true,
+                    expand_by_zone_tol: true,
+                    ..BoundingBoxRequest::default()
+                },
+            )?
+            .normal
+            .ok_or_else(|| invalid(OP_NODE, "no bounding box")),
+        _ => Err(SolidError::sm_err(OP_NODE)),
     }
 }
 

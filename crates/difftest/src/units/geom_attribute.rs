@@ -357,7 +357,9 @@ enum Step {
 
 fn kind(a: &Attribute) -> i64 {
     match a.value() {
-        AttributeValue::None => KIND_PLAIN,
+        AttributeValue::None
+        | AttributeValue::PolyToEuVu { .. }
+        | AttributeValue::PolyEdgeToVertexUse { .. } => KIND_PLAIN,
         AttributeValue::Generic { .. } => KIND_GENERIC,
         AttributeValue::Long(_) => KIND_LONG,
         AttributeValue::Pointer(_) => KIND_POINTER,
@@ -799,7 +801,9 @@ impl RustRun {
             let mut v: Vec<i64> = Vec::new();
             let mut d: Vec<f64> = Vec::new();
             match a.value() {
-                AttributeValue::None => {}
+                AttributeValue::None
+                | AttributeValue::PolyToEuVu { .. }
+                | AttributeValue::PolyEdgeToVertexUse { .. } => {}
                 AttributeValue::Generic { longs, doubles, chars } => {
                     v.push(longs.len() as i64);
                     v.extend(longs);

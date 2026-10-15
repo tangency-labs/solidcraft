@@ -143,8 +143,9 @@ use crate::surface::volume::Volume;
 // SmTol::GetSrcZoneTol3d / GetObjZoneTol3d / GetXSectTol3d of SmPointClassification
 // are intersect::point_class::PointClassification::src_zone_tol_3d / obj_zone_tol_3d /
 // xsect_tol_3d.
-// UNPORTED(query.poly): SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of
-// SmLineSegClassification / SmPolyPointClassification / SmLineSegInterval.
+// SmTol::GetSrcZoneTol3d / GetObjZoneTol3d of SmLineSegClassification /
+// SmPolyPointClassification / SmLineSegInterval: those classes have no Rust type (their
+// constructors are outside the in-scope call graph).
 // UNPORTED(blend.fillet_solver_p1): SmTol::GetAngTolRad(const SmFilletSolver*);
 // UNPORTED(blend.fillet_corner_p1): the SmFilletCorner branch of GetApproxTol3d(SmObject*);
 // the other GetApproxTol3d / GetAngTolRad overloads of algorithm objects (SmHCR,
