@@ -3845,6 +3845,29 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   with zero solutions in both orders. Part-2 regressions live in p2; only their
   shared scene builder remains in p1's test module.
 
+## topology.proto_topology_p1 (`SmOwningTopology`, `SmAssembly`, `SmCopyBrepMap`, `SmProtoTopology` part 1, API transforms, 2026-10-14; partial, no disagreements)
+
+- **Harness.** One shim entry runs scripts of three kinds (list, proto, transform); the
+  runner interprets the same script against the port and applies the shim's run-time
+  refusals to its own state, so an op the shim refuses as undefined upstream (null or
+  deleted pointer dereference, use after free in a destructor, a list walk that would
+  not end) ends both records with `-2`, and a state divergence shows up as a mismatch.
+  Proto ops are `[code, args...]` arrays exactly as the shim reads them.
+- **Upstream defects found:** UB-98 (`SmCopyBrepMap` release asserts call `GetType()`
+  on null objects; crashed the reference run), HANG-12 (`DropPoint` never returns after
+  `Reparameterize` to a zero-length domain; the Rust curve point solve loops the same
+  way, which belongs to the curve units), WR-73 (`RemoveCoincidentNoEdgeProtoVertex`
+  returns `SM_SUCCESS` as TRUE; ported for parity). The shim refuses the UB-98 calls and
+  zero-length `Reparameterize`.
+- **Deferred** (`Unported`): the B-rep walks of `sm_AreConnected` and point
+  classifications on bare topology objects (topology.vertex, topology.edge,
+  topology.face_p2), `SmProtoVertex::ContainsPoint` (query.face_p2), surface point
+  solves (surface.surface_p4), `SmBrep::Transform` (topology.brep_p5) and
+  `SmPolyBrep::Transform` (query.poly).
+- **Co-port wired:** `topology::edgeuse::p1::owning_topology_is_kind_of` (CO-PORTED in
+  topology.edgeuse_p1, PR #55) now calls `owning_topology::is_kind_of`; edgeuse_p1
+  difftest unchanged (2449 pass, 273 deferred).
+
 ## boolean.api_brep (`SmApiBrep.cpp` boolean entry points, PR #81, 2026-10-14)
 
 - **Scope.** Thin wrappers over `SmMerge`; everything past input validation is deferred

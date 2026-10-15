@@ -39,6 +39,7 @@
 pub mod brep_data;
 pub mod database_io;
 pub mod edgeuse;
+pub mod proto_topology;
 #[allow(clippy::module_inception)]
 pub mod topology;
 

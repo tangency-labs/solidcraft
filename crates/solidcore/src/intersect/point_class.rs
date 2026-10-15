@@ -53,6 +53,7 @@
 //! | [`PointClassification::tolerance`]                | `GetTolerance`                                   |
 //! | [`PointClassification::obj_zone_tol_3d`]          | `GetObjZoneTol3d`, `SmTol::GetObjZoneTol3d(const SmPointClassification*)` |
 //! | [`PointClassification::src_zone_tol_3d`]          | `GetSrcZoneTol3d`, `SmTol::GetSrcZoneTol3d(const SmPointClassification*)` |
+//! | [`object_zone_tol_3d`]                            | `SmTol::GetZoneTol3d(const SmObject*)`           |
 //! | [`PointClassification::xsect_tol_3d`]             | `SmTol::GetXSectTol3d(const SmPointClassification*)` |
 //! | [`PointClassification::set_src_zone_tol_3d`]      | `SetSrcZoneTol3d`                                |
 //! | [`PointClassification::combine`], [`Precedence`]  | `Combine`                                        |
@@ -1328,7 +1329,7 @@ impl<O: ClassObject> PointClassification<O> {
 /// `SmTol::GetZoneTol3d(const SmObject*)` (with `SM_USE_OLDTOL`): the system zone
 /// tolerance for no object, a curve or surface that no edge or face owns, and every
 /// non-topology object; the topology object's own tolerance otherwise.
-fn object_zone_tol_3d<O: ClassObject>(
+pub fn object_zone_tol_3d<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
     object: Option<O>,

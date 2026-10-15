@@ -23,7 +23,7 @@
 //! | [`Topology::mark`]                           | `SmTopology::Mark`                               |
 //! | [`Topology::get_mark`]                       | `SmTopology::GetMark`                            |
 //! | [`Topology::is_marked`]                      | `SmTopology::IsMarked`                           |
-//! | [`Topology::destroy`]                        | `SmTopology::~SmTopology`                        |
+//! | [`destroy_topology`](crate::topology::proto_topology::p1::destroy_topology) | `SmTopology::~SmTopology` (unit `topology.proto_topology_p1`) |
 //! | [`TopologyRecords`]                          | the `SmTopology*` casts of `Notify`'s arguments  |
 //! | [`notify`]                                   | `SmTopology::Notify`                             |
 //! | [`NotifyEvent`]                              | `SmNotifyEvent` (data only)                      |
@@ -57,8 +57,8 @@
 //! - `IsConnectedTo` is a "pure virtual" stub upstream (an `SE_MSG` compiled out of
 //!   the release build, then `FALSE`); the derived kinds override it.
 //! - The destructor unlinks the object from its owner's list
-//!   (`SmOwningTopology::Remove`, unit `topology.proto_topology_p1`); for a linked
-//!   object [`Topology::destroy`] returns [`SolidError::Unported`].
+//!   (`SmOwningTopology::Remove`); it needs the owner's list data and is
+//!   [`destroy_topology`](crate::topology::proto_topology::p1::destroy_topology).
 //! - **Change tracking.** Upstream the tracker owns the Rm/Add/Chg/event arrays and
 //!   installs a callback object holding pointers to them; `IsTracking` compares the
 //!   context's system callback with the address of that object. Here the tracker
@@ -283,24 +283,6 @@ impl Topology {
     #[must_use]
     pub fn is_marked(&self, context: &Context, mark_type: MarkType) -> bool {
         self.get_mark(mark_type) == context.current_mark(mark_type)
-    }
-
-    /// The destructor `~SmTopology`: an object on an owner's list removes itself
-    /// from it.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] (`topology.proto_topology_p1`) for an object that has
-    /// a list owner.
-    pub fn destroy(&mut self) -> Result<()> {
-        if self.list_owner.is_some() {
-            // UNPORTED(topology.proto_topology_p1): SmOwningTopology::Remove
-            return Err(SolidError::Unported {
-                upstream: "SmOwningTopology::Remove",
-                unit: "topology.proto_topology_p1",
-            });
-        }
-        Ok(())
     }
 }
 
@@ -789,11 +771,20 @@ mod tests {
     }
 
     #[test]
-    fn destroy_linked_is_unported() {
-        let mut t = Topology::new();
-        assert!(t.destroy().is_ok());
-        t.set_list_links(Some(ObjectKey(1)), None, None);
-        assert!(matches!(t.destroy(), Err(SolidError::Unported { .. })));
+    fn destroy_unlisted_and_linked() {
+        use crate::topology::proto_topology::p1::destroy_topology;
+        let mut recs: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+        recs.insert(ObjectKey(0), Topology::new());
+        assert!(destroy_topology(&mut recs, ObjectKey(0)).is_ok());
+        // an owner without list data (never an SmOwningTopology here)
+        recs.insert(ObjectKey(1), Topology::new());
+        if let Some(r) = recs.get_mut(&ObjectKey(0)) {
+            r.set_list_links(Some(ObjectKey(1)), None, None);
+        }
+        assert!(matches!(
+            destroy_topology(&mut recs, ObjectKey(0)),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]

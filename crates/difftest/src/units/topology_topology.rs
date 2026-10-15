@@ -377,11 +377,14 @@ impl State {
             }
             op::DESTROY => {
                 let o = need!(live!(a[1], false));
-                let mut r = self
-                    .recs
+                solidcore::topology::proto_topology::p1::destroy_topology(
+                    &mut self.recs,
+                    ObjectKey(o as u64),
+                )
+                .map_err(harness)?;
+                self.recs
                     .remove(&ObjectKey(o as u64))
                     .ok_or_else(|| harness("record"))?;
-                r.destroy().map_err(harness)?;
             }
             other => return Err(harness(format!("op {other}"))),
         }

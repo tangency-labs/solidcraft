@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**147 / 261 units ported** (89 green, 58 partial), **195,196 / 387,903 upstream lines (50.3%)**. 18 claimed, 0 blocked, 96 todo.
+**148 / 261 units ported** (89 green, 59 partial), **195,606 / 387,903 upstream lines (50.4%)**. 18 claimed, 0 blocked, 95 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -31,7 +31,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `intersect.curve_class_p5` (2017 lines) — missing: `intersect.curve_class_p2`, `intersect.curve_class_p3`, `intersect.curve_class_p6`, `intersect.curve_class_p7`
 - [ ] `intersect.curve_class_p8` (1900 lines) — missing: `intersect.curve_class_p3`, `intersect.curve_class_p5`
 - [ ] `intersect.curve_class_p9` (1220 lines) — missing: `intersect.curve_class_p3`, `intersect.curve_class_p5`
-- [ ] `topology.vertexuse` (1429 lines) — missing: `topology.face_p2`
 - [ ] `topology.vertex` (824 lines) — missing: `topology.proto_topology_p1`, `topology.vertexuse`
 - [ ] `topology.loopuse` (892 lines) — missing: `topology.face_p2`, `topology.vertexuse`
 - [ ] `topology.edge` (2213 lines) — missing: `topology.edgeuse_p2`, `topology.face_p2`, `topology.proto_topology_p1`, `topology.vertexuse`
@@ -108,7 +107,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `blend.fillet_geom_p2` (2077 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p6`, `blend.fillet_solver_p1` +4 more
 - [ ] `blend.fillet_geom_p5` (1952 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_geom_p4` +5 more
 - [ ] `blend.fillet_corner_p2` (1892 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_solver_p1` +2 more
-- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `boolean.api_brep` +13 more
+- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `heal.heal_data_p3` +12 more
 
 ## In progress
 
@@ -126,10 +125,10 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `intersect.surface_intersector_p5` (622 lines) — in progress: #82 @bherbruck (ready for review)
 - [ ] 🔨 `topology.edgeuse_p2` (600 lines) — in progress: #87 @bherbruck (draft)
 - [ ] 🔨 `topology.shell` (750 lines) — in progress: #80 @0xlillith (draft)
+- [ ] 🔨 `topology.vertexuse` (1429 lines) — in progress: #88 @bherbruck (draft)
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
 - [ ] 🔨 `query.poly` (2119 lines) — in progress: #73 @bherbruck (ready for review)
 - [ ] 🔨 `query.tess` (838 lines) — in progress: #83 @bherbruck (ready for review)
-- [ ] 🔨 `boolean.api_brep` (410 lines) — in progress: #81 @bherbruck (ready for review)
 
 ## By module
 
@@ -297,7 +296,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `topology.face_p2` (1827 lines) — waiting
 - [ ] 🔨 `topology.edgeuse_p2` (600 lines) — in progress: #87 @bherbruck (draft)
 - [ ] 🔨 `topology.shell` (750 lines) — in progress: #80 @0xlillith (draft)
-- [ ] ⏳ `topology.vertexuse` (1429 lines) — waiting
+- [ ] 🔨 `topology.vertexuse` (1429 lines) — in progress: #88 @bherbruck (draft)
 - [ ] ⏳ `topology.vertex` (824 lines) — waiting
 - [ ] ⏳ `topology.loopuse` (892 lines) — waiting
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
@@ -398,7 +397,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `offset.offset_executive_p1` (2107 lines) — waiting
 - [ ] ⏳ `offset.offset_executive_p2` (1846 lines) — waiting
 
-### boolean (0/9)
+### boolean (1/9)
 
 - [ ] ⏳ `boolean.topology_intersector_p1` (2491 lines) — waiting
 - [ ] ⏳ `boolean.topology_intersector_p2` (2195 lines) — waiting
@@ -408,7 +407,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] ⏳ `boolean.merge_p5` (475 lines) — waiting
 - [ ] ⏳ `boolean.merge_p4` (2590 lines) — waiting
 - [ ] ⏳ `boolean.merge_p3` (1152 lines) — waiting
-- [ ] 🔨 `boolean.api_brep` (410 lines) — in progress: #81 @bherbruck (ready for review)
+- [ ] 🟡 `boolean.api_brep` (410 lines) — partial
 
 ### blend (1/22)
 

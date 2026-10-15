@@ -46,7 +46,7 @@
 //! | [`loopuse_edgeuses`], [`loopuse_shell`] | `SmLoopuse::GetEdgeuses`, `GetShell` (CO-PORTED, `topology.loopuse`) |
 //! | [`vertexuse_edgeuse`]                  | `SmVertexuse::GetEdgeuse` (CO-PORTED, `topology.vertexuse`) |
 //! | [`shell_region`], [`shell_brep`]       | `SmShell::GetRegion`, `GetBrep` (CO-PORTED, `topology.shell`) |
-//! | [`owning_topology_is_kind_of`]         | `SmOwningTopology::IsKindOf` (CO-PORTED, `topology.proto_topology_p1`) |
+//! | [`owning_topology_is_kind_of`]         | `SmOwningTopology::IsKindOf` (unit `topology.proto_topology_p1`) |
 //!
 //! Deviations:
 //! - **Object model.** An edge or face use is a record in the [`Brep`]'s arenas; the
@@ -130,7 +130,7 @@ pub const FACEUSE_TYPE_STRING: &str = "SmFaceuse_TYPE";
 pub const FACEUSE_CLASS_STRING: &str = "SmFaceuse";
 
 /// `SmOwningTopology_TYPE` (`TOPO_BASE_TYPE + 10`).
-pub const OWNING_TOPOLOGY_TYPE: i64 = 16010;
+pub const OWNING_TOPOLOGY_TYPE: i64 = crate::topology::proto_topology::p1::owning_topology::TYPE;
 
 /// `SmEdgeuse::IsKindOf`: [`TYPE`], then the `SmTopology` chain.
 #[must_use]
@@ -142,15 +142,11 @@ pub const fn is_kind_of(t: i64) -> bool {
     }
 }
 
-/// `SmOwningTopology::IsKindOf` (CO-PORTED from unit `topology.proto_topology_p1`):
+/// `SmOwningTopology::IsKindOf` (unit `topology.proto_topology_p1`):
 /// [`OWNING_TOPOLOGY_TYPE`], then the `SmTopology` chain.
 #[must_use]
 pub const fn owning_topology_is_kind_of(t: i64) -> bool {
-    if t == OWNING_TOPOLOGY_TYPE {
-        true
-    } else {
-        topo::is_kind_of(t)
-    }
+    crate::topology::proto_topology::p1::owning_topology::is_kind_of(t)
 }
 
 /// `SmFaceuse::IsKindOf`: [`FACEUSE_TYPE`], then the `SmOwningTopology` chain.
