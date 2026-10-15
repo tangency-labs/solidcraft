@@ -2071,7 +2071,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 .map(|c| curve_of(c).map(SmCurve::from))
                 .collect::<Result<Vec<_>, _>>()?;
             record(|_| {
-                Surface::create_plane_with_3d_curves(&cs, *tol)?;
+                Surface::create_plane_with_3d_curves(&Kernel::default(), &cs, *tol)?;
                 Ok(())
             })
         }

@@ -158,7 +158,6 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
     line_closest_point, plane_drop_point, vec_lin_comb_two_vectors,
 };
@@ -193,6 +192,7 @@ use crate::surface::surface::p1::StepSurface;
 use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::surface::torus::Torus;
 use crate::topology::database_io::DatabaseReader;
+use crate::topology::trimming_tools;
 
 // ---- type codes ---------------------------------------------------------------------
 
@@ -489,43 +489,6 @@ pub struct PlaneWith3dCurves {
     pub orients: Vec<OrientType>,
     /// `*pOuterLoopCounts`: the number of loops in each outer loop.
     pub outer_loop_counts: Vec<usize>,
-}
-
-/// The curves of [`Surface::create_plane_with_3d_curves`] ordered into loops
-/// (`SmTrimmingTools::OrderCurvesIntoLoops`' outputs).
-#[derive(Debug, Clone)]
-struct OrderedLoops {
-    ordered: Vec<usize>,
-    loop_counts: Vec<usize>,
-    orients: Vec<OrientType>,
-    plane_base_pt: Point3,
-    plane_normal: Vec3,
-    face_extent: Extent3d,
-}
-
-/// `SmTrimmingTools::OrderCurvesIntoLoops(curves, tol, ...)`.
-fn order_curves_into_loops(_curves: &[Curve], _tol: f64) -> Result<OrderedLoops> {
-    // UNPORTED(topology.trimming_tools): SmTrimmingTools::OrderCurvesIntoLoops
-    Err(SolidError::unported(
-        "SmTrimmingTools::OrderCurvesIntoLoops",
-        "topology.trimming_tools",
-    ))
-}
-
-/// `SmTrimmingTools::FindOuterLoops(ordered, loop_counts, orients, normal, tol, ..)`:
-/// reorders the loops and returns the outer loop counts.
-fn find_outer_loops(
-    _ordered: &mut Vec<usize>,
-    _loop_counts: &mut Vec<usize>,
-    _orients: &mut Vec<OrientType>,
-    _normal: Vec3,
-    _tol: f64,
-) -> Result<Vec<usize>> {
-    // UNPORTED(topology.trimming_tools): SmTrimmingTools::FindOuterLoops
-    Err(SolidError::unported(
-        "SmTrimmingTools::FindOuterLoops",
-        "topology.trimming_tools",
-    ))
 }
 
 impl Surface {
@@ -1393,25 +1356,34 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the loop ordering ([`SolidError::Unported`]:
-    /// `SmTrimmingTools::OrderCurvesIntoLoops`, `topology.trimming_tools`), of the
-    /// plane frame and of the bilinear surface.
-    pub fn create_plane_with_3d_curves(curves: &[Curve], tol_3d: f64) -> Result<PlaneWith3dCurves> {
+    /// Those of the loop ordering ([`trimming_tools::order_curves_into_loops`], whose
+    /// status is `SM_ERR` for open loops or curves off the plane, and
+    /// [`trimming_tools::find_outer_loops`]), of the plane frame and of the bilinear
+    /// surface.
+    pub fn create_plane_with_3d_curves(
+        k: &Kernel,
+        curves: &[Curve],
+        tol_3d: f64,
+    ) -> Result<PlaneWith3dCurves> {
         // order curves into loops - clean up curves, build plane, check planarity
-        let OrderedLoops {
+        let r = trimming_tools::order_curves_into_loops(k, curves, tol_3d)?;
+        r.status()?;
+        let trimming_tools::OrderedLoops {
             mut ordered,
             mut loop_counts,
             mut orients,
-            plane_base_pt,
-            plane_normal,
-            face_extent,
-        } = order_curves_into_loops(curves, tol_3d)?;
+            plane_point: plane_base_pt,
+            mut plane_normal,
+            curves_box: face_extent,
+            ..
+        } = r;
 
-        let outer_loop_counts = find_outer_loops(
+        let outer_loop_counts = trimming_tools::find_outer_loops(
+            curves,
             &mut ordered,
             &mut loop_counts,
             &mut orients,
-            plane_normal,
+            &mut plane_normal,
             tol_3d,
         )?;
 
@@ -4219,6 +4191,7 @@ impl<'s> IsoCurveLengthIntegrand<'s> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::extent3d::Extent3d;
     use crate::geom::tree::NodeId;
     use crate::geom::vector2d::Vec2;
 
