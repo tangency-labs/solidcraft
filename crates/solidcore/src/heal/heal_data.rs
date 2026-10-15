@@ -8,4 +8,5 @@
 //! `source/SMLib/src/SmVertexProps.cpp`. The functions are split over the units
 //! `heal.heal_data_p1` .. `heal.heal_data_p3`; [`p2`] holds the types they share.
 
+pub mod p1;
 pub mod p2;

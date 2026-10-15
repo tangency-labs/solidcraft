@@ -303,6 +303,20 @@ fn targets(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 /// `SmEdgeProps::ReSet`; `21 sel` `SmVertexProps::ReSet`; `22`
 /// `SetupEmptyProbArrays` (steps `16..=22` output `0 0`).
 ///
+/// Steps of unit `heal.heal_data_p1` (outputs `status new_probs` unless noted):
+/// `23 flag` `ReSet(flag)` (last step only); `24 sel` `MoveToNotYetProblems` of the
+/// `sel`-th alive face props (outputs its index, or `-3` with none alive); `25`
+/// `Cache_FaceProps_Stage2`; `26` `Cache_FaceProps_Stage3`; `27` `Fix_BadSheets` (with
+/// a fresh mark lock of the B-rep's context); `28 flag` `Make_UVTrimCurves(flag)`; `29`
+/// `Fix_InfiniteRegion` (last step only); `30 mode op flag [targets]` `HealBrep` with
+/// a null B-rep (`mode` 0), every target (`1`) or the `targets` that follow (`2`),
+/// healer op `op` and `bMakeUVTrimCurves` `flag` (modes 1 and 2 last step only; the
+/// case ends after the status, without the state); `31` the stage 2/3 snapshot of
+/// every registered face props (outputs `n`, per record `0` freed or `1` and its
+/// values; layout in the difftest runner of `heal.heal_data_p1`). Steps `25..=28`
+/// output `-2` and end the case when a props record they would use has no face (see
+/// `solidcore::heal::heal_data::p1`).
+///
 /// # Errors
 ///
 /// [`FfiError::InvalidArgument`] for anything else.
@@ -317,9 +331,10 @@ pub fn check_heal(args: &[f64]) -> Result<(), FfiError> {
     }
     let nsteps = rd.index(MAX_STEPS)?;
     for s in 0..nsteps {
-        let code = rd.index(22)?;
+        let code = rd.index(31)?;
+        let last = s + 1 == nsteps;
         match code {
-            12..=14 | 21 => {
+            12..=14 | 21 | 24 => {
                 rd.index(MAX_SEL)?;
             }
             15 => {
@@ -348,6 +363,28 @@ pub fn check_heal(args: &[f64]) -> Result<(), FfiError> {
             20 => {
                 rd.index(MAX_SEL)?;
                 rd.flag()?;
+            }
+            23 | 29 => {
+                if code == 23 {
+                    rd.flag()?;
+                }
+                if !last {
+                    return Err(bad("ReSet / Fix_InfiniteRegion must be the last step"));
+                }
+            }
+            28 => {
+                rd.flag()?;
+            }
+            30 => {
+                let mode = rd.index(2)?;
+                rd.index(26)?;
+                rd.flag()?;
+                if mode == 2 {
+                    targets(&mut rd)?;
+                }
+                if mode != 0 && !last {
+                    return Err(bad("HealBrep on a B-rep must be the last step"));
+                }
             }
             _ => {}
         }

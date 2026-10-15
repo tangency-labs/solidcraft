@@ -28,9 +28,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::geom::context::{MarkLock, ALL_MARKS};
 use solidcore::heal::face_props::{
-    FaceProps, HealerOpType, LoopObject, MixedLinkType, TriedLinkType,
+    FaceProps, HealerOpType, LoopObject, MixedLinkType, Tri, TriedLinkType,
 };
+use solidcore::heal::heal_data::p1::HealBrepTargets;
 use solidcore::heal::heal_data::p2::{
     EdgeProps, EdgePropsId, FaceFlag, FaceFlagOf, FaceMixed, FaceMixedOf, FacePropsEntry,
     FacePropsId, FaceTried, FaceTriedOf, HealData, MixedProbArray, PairProbArray, ProbArray,
@@ -40,6 +42,7 @@ use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
 use solidcore::geom::vector2d::Point2;
 use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
+use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::heal_heal_data_p2 as ffi;
@@ -86,7 +89,7 @@ const STATE: f64 = -100.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Prim {
+pub(crate) enum Prim {
     /// `SmPrimitiveCreation::CreateBox(dx, dy, dz, SmAxis2Placement())`.
     Box { size: [f64; 3] },
     /// A face on the full domain of `SmSphere::CreateCanonical(radius)`.
@@ -99,7 +102,7 @@ enum Prim {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-enum BIn {
+pub(crate) enum BIn {
     Prim(Prim),
     Std(BrepIn),
 }
@@ -108,7 +111,7 @@ enum BIn {
 /// selectors (taken modulo the count).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Sel {
+pub(crate) enum Sel {
     All,
     Reverse,
     None,
@@ -116,15 +119,15 @@ enum Sel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Targets {
-    v: Sel,
-    e: Sel,
-    f: Sel,
+pub(crate) struct Targets {
+    pub(crate) v: Sel,
+    pub(crate) e: Sel,
+    pub(crate) f: Sel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "step", rename_all = "snake_case")]
-enum Step {
+pub(crate) enum Step {
     CacheEdgeProps,
     CacheVertexProps,
     CacheFacePropsGaps,
@@ -150,11 +153,33 @@ enum Step {
     ResetEdgeProps { sel: u64, metadata: bool },
     ResetVertexProps { sel: u64 },
     SetupEmptyProbArrays,
+    // ---- steps of unit heal.heal_data_p1 (runner `heal_heal_data_p1`) ----
+    /// `ReSet(new_obj_arrays)` (last step only).
+    Reset { new_obj_arrays: bool },
+    /// `MoveToNotYetProblems` of the `sel`-th alive face props.
+    MoveToNotYet { sel: u64 },
+    CacheFacePropsStage2,
+    CacheFacePropsStage3,
+    FixBadSheets,
+    MakeUvTrimCurves { make: bool },
+    /// Last step only.
+    FixInfiniteRegion,
+    /// `HealBrep`: `mode` 0 null B-rep, 1 every target, 2 `targets`; modes 1 and 2
+    /// last step only.
+    HealBrep {
+        mode: u8,
+        op: u8,
+        make: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        targets: Option<Targets>,
+    },
+    /// The stage 2/3 snapshot of every face props record.
+    FaceSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "case", rename_all = "snake_case")]
-enum Inputs {
+pub(crate) enum Inputs {
     Prob {
         /// 0 plain, 1 pair, 2 mixed, 3 tried.
         kind: u8,
@@ -291,6 +316,25 @@ fn args_of(t: &Targets, voxels: [u64; 3], steps: &[Step], n: [usize; 3]) -> Vec<
             Step::ResetEdgeProps { sel, metadata } => v.extend([20.0, *sel as f64, flag(*metadata)]),
             Step::ResetVertexProps { sel } => v.extend([21.0, *sel as f64]),
             Step::SetupEmptyProbArrays => v.push(22.0),
+            Step::Reset { new_obj_arrays } => v.extend([23.0, flag(*new_obj_arrays)]),
+            Step::MoveToNotYet { sel } => v.extend([24.0, *sel as f64]),
+            Step::CacheFacePropsStage2 => v.push(25.0),
+            Step::CacheFacePropsStage3 => v.push(26.0),
+            Step::FixBadSheets => v.push(27.0),
+            Step::MakeUvTrimCurves { make } => v.extend([28.0, flag(*make)]),
+            Step::FixInfiniteRegion => v.push(29.0),
+            Step::HealBrep { mode, op, make, targets } => {
+                v.extend([30.0, f64::from(*mode), f64::from(*op), flag(*make)]);
+                if *mode == 2 {
+                    let none = Targets {
+                        v: Sel::None,
+                        e: Sel::None,
+                        f: Sel::None,
+                    };
+                    push_targets(&mut v, targets.as_ref().unwrap_or(&none), n);
+                }
+            }
+            Step::FaceSnapshot => v.push(31.0),
         }
     }
     v
@@ -322,7 +366,7 @@ fn export_of(path: &str, block: &[f64]) -> Result<(Vec<f64>, Option<[usize; 3]>)
     Ok((ex, n))
 }
 
-fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
+pub(crate) fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     match i {
         Inputs::Prob { kind, n, ops } => ffi_out(ffi::prob(&prob_input(*kind, *n, ops))),
         Inputs::Heal {
@@ -916,6 +960,35 @@ fn restore(b: &mut Brep, extra: &[f64], c: [usize; 10]) -> Result<(), HarnessErr
     Ok(())
 }
 
+/// The stage 2/3 values of a face props record, as the shim's `put_face_snapshot`.
+fn put_face_snapshot(o: &mut Vec<f64>, p: &FaceProps<H>) {
+    let t = |x: Tri| x.code() as f64;
+    o.push(ix(p.face.map(FaceId::index)));
+    o.push(p.face_index as f64);
+    o.push(p.prop_stage.code() as f64);
+    o.push(p.not_yet_face_type.code() as f64);
+    o.push(flag(p.has_surface));
+    let d = &p.natural_uv_domain;
+    o.extend([d.u_min(), d.v_min(), d.u_max(), d.v_max()]);
+    o.extend([t(p.closed_u), t(p.closed_v), t(p.closed_surf)]);
+    o.push(f64::from(p.closed_val_u as i32));
+    o.push(f64::from(p.closed_val_v as i32));
+    o.extend([p.poles as f64, p.approx_poles as f64, p.no_vertex_poles as f64]);
+    for l in [&p.pole_points, &p.pole_normals, &p.flat_corner_points] {
+        o.push(l.len() as f64);
+        for v in l {
+            o.extend([v.x, v.y, v.z]);
+        }
+    }
+    o.push(flag(p.crv_class_u.is_some()));
+    o.push(flag(p.crv_class_v.is_some()));
+    o.push(f64::from(p.bad_crossed_seam_dir as i32));
+    o.push(f64::from(p.bad_missing_seam_dir as i32));
+    o.push(f64::from(p.bad_near_miss_seam_dir as i32));
+    o.push(p.closed_loop_cnt as f64);
+    o.push(p.loop_props.len() as f64);
+}
+
 #[allow(clippy::too_many_lines)]
 fn rust_heal(
     brep: &BIn,
@@ -940,7 +1013,8 @@ fn rust_heal(
     let extra = ffi::vertex_lists(&path, &block).map_err(|e| harness(format!("c++ lists: {e}")))?;
     restore(&mut b, &extra, c)?;
 
-    let k = Kernel::default();
+    let mut k = Kernel::default();
+    let mut marks = Marks::default();
     let (vs, es, fs) = targets_of(targets, n);
     let mut h: HealData<H> = HealData::with_targets(&vs, &es, &fs);
     h.x_cnt = voxels[0] as usize;
@@ -974,7 +1048,17 @@ fn rust_heal(
             Step::ResetEdgeProps { .. } => 20,
             Step::ResetVertexProps { .. } => 21,
             Step::SetupEmptyProbArrays => 22,
+            Step::Reset { .. } => 23,
+            Step::MoveToNotYet { .. } => 24,
+            Step::CacheFacePropsStage2 => 25,
+            Step::CacheFacePropsStage3 => 26,
+            Step::FixBadSheets => 27,
+            Step::MakeUvTrimCurves { .. } => 28,
+            Step::FixInfiniteRegion => 29,
+            Step::HealBrep { .. } => 30,
+            Step::FaceSnapshot => 31,
         };
+        let last_without_state = matches!(s, Step::HealBrep { mode, .. } if *mode != 0);
         o.push(f64::from(code));
         let r: Result<bool, SolidError> = match s {
             Step::CacheEdgeProps => h.cache_edge_props(&k, &mut b, HealerOpType::CacheEdgeprops),
@@ -1109,8 +1193,78 @@ fn rust_heal(
                 h.setup_empty_prob_arrays();
                 Ok(false)
             }
+            Step::Reset { new_obj_arrays } => h.reset(*new_obj_arrays).map(|()| false),
+            Step::MoveToNotYet { sel } => {
+                let alive: Vec<_> = h.face_props.alive().map(|(i, _)| i).collect();
+                let Some(p) = pick(&alive, *sel) else {
+                    o.push(NONE_ALIVE);
+                    continue;
+                };
+                match h.move_to_not_yet_problems(p) {
+                    Ok(()) => {
+                        o.push(p.index() as f64);
+                        continue;
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Step::CacheFacePropsStage2 => {
+                h.cache_face_props_stage2(&k, &b, HealerOpType::CacheFaceprops2)
+            }
+            Step::CacheFacePropsStage3 => {
+                h.cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3)
+            }
+            Step::FixBadSheets => {
+                let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)
+                    .map_err(|e| harness(format!("mark lock: {e}")))?;
+                let r = h.fix_bad_sheets(&mut k, &mut b, &mut marks, &lock, HealerOpType::FixBadsheets);
+                lock.release(std::slice::from_mut(&mut k.context))
+                    .map_err(|e| harness(format!("mark lock: {e}")))?;
+                r.map(|()| false)
+            }
+            Step::MakeUvTrimCurves { make } => h
+                .make_uv_trim_curves(&k, &mut b, *make, HealerOpType::MakeUvtrimcurves)
+                .map(|()| false),
+            Step::FixInfiniteRegion => h
+                .fix_infinite_region(&mut b, HealerOpType::FixInfiniteRegions)
+                .map(|()| false),
+            Step::HealBrep { mode, op, make, targets } => {
+                let op = HealerOpType::from_code(i64::from(*op)).unwrap_or(HealerOpType::None);
+                let lists = match (mode, targets) {
+                    (2, Some(t)) => Some(targets_of(t, n)),
+                    (2, None) => Some((Vec::new(), Vec::new(), Vec::new())),
+                    _ => None,
+                };
+                let t = lists.as_ref().map_or_else(HealBrepTargets::default, |(v, e, f)| {
+                    HealBrepTargets {
+                        vertices: Some(v),
+                        edges: Some(e),
+                        faces: Some(f),
+                    }
+                });
+                let brep = if *mode == 0 { None } else { Some(&mut b) };
+                h.heal_brep(&mut k, brep, op, t, *make).map(|()| false)
+            }
+            Step::FaceSnapshot => {
+                o.push(h.face_props.allocated() as f64);
+                for kk in 0..h.face_props.allocated() {
+                    match h.face_props.get(FacePropsId(kk)) {
+                        None => o.push(0.0),
+                        Some(e) => {
+                            o.push(1.0);
+                            put_face_snapshot(&mut o, &e.props);
+                        }
+                    }
+                }
+                continue;
+            }
         };
         match r {
+            Ok(new_probs) if last_without_state => {
+                o.extend([0.0, flag(new_probs)]);
+                stop = true;
+                break;
+            }
             Ok(new_probs) => o.extend([0.0, flag(new_probs)]),
             Err(e) => match classify(e) {
                 Fail::NullDeref => {
@@ -1139,7 +1293,7 @@ fn rust_heal(
     Ok(Output::new().values("out", o))
 }
 
-fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+pub(crate) fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     match i {
         Inputs::Prob { kind, n, ops } => rust_prob(*kind, *n, ops),
         Inputs::Heal {
@@ -1167,7 +1321,7 @@ fn gen_sel(rng: &mut Rng) -> Sel {
     }
 }
 
-fn gen_targets(rng: &mut Rng) -> Targets {
+pub(crate) fn gen_targets(rng: &mut Rng) -> Targets {
     Targets {
         // vertex props of face vertices need the vertex/face gap (often deferred):
         // leave the vertices out of a third of the cases
@@ -1177,11 +1331,11 @@ fn gen_targets(rng: &mut Rng) -> Targets {
     }
 }
 
-fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
+pub(crate) fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
     10f64.powf(rng.uniform(lo.log10(), hi.log10()))
 }
 
-fn gen_brep_in(rng: &mut Rng) -> BIn {
+pub(crate) fn gen_brep_in(rng: &mut Rng) -> BIn {
     match rng.below(20) {
         0..=5 => BIn::Prim(Prim::Box {
             size: [

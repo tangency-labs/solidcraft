@@ -789,6 +789,205 @@ template <class P, class T, class Pred> bool lists_drift(const SmTArray<P*>& pro
     return false;
 }
 
+// ---- steps of unit heal.heal_data_p1 ---------------------------------------------------
+//
+// 23 flag            ReSet(flag) (last step only)
+// 24 sel             MoveToNotYetProblems(alive face props sel), outputs its index (-3 none)
+// 25                 Cache_FaceProps_Stage2
+// 26                 Cache_FaceProps_Stage3
+// 27                 Fix_BadSheets (with a fresh SmNewMarkAndLock of the B-rep's context)
+// 28 flag            Make_UVTrimCurves(flag)
+// 29                 Fix_InfiniteRegion (last step only)
+// 30 mode op flag .. HealBrep(mode 0: NULL B-rep; 1: every target; 2: `targets`
+//                    follow), op, bMakeUVTrimCurves; modes 1, 2 last step only, no state
+// 31                 the stage 2/3 snapshot of every registered face props record
+
+enum P1Kind
+{
+    P1_STATUS = 0,  // `status new_probs` follows (the case stops on a failure)
+    P1_REFUSED = 1, // `-2` written, the case stops
+    P1_WRITTEN = 2, // outputs written, no status
+    P1_LAST = 3,    // `status new_probs`, then the case stops without the state
+};
+
+struct P1Out
+{
+    P1Kind kind;
+    SmStatus stat;
+    SmBoolean bNew;
+};
+
+void mark_all_dead(SmHealData& h, Registry& r)
+{
+    for (ULONG i = 0; i < h.m_sTgtVertexProps.GetSize(); i++)
+        r.dead.insert(h.m_sTgtVertexProps[i]);
+    for (ULONG i = 0; i < h.m_sTgtEdgeProps.GetSize(); i++)
+        r.dead.insert(h.m_sTgtEdgeProps[i]);
+    for (ULONG i = 0; i < h.m_sTgtFaceProps.GetSize(); i++)
+        r.dead.insert(h.m_sTgtFaceProps[i]);
+    for (ULONG i = 0; i < h.m_sNotYetFaceProps.GetSize(); i++)
+        r.dead.insert(h.m_sNotYetFaceProps[i]);
+}
+
+// Whether a Cache_FaceProps_Stage2/3 or Make_UVTrimCurves step would use the null
+// face of a props record (only before Cache_FaceProps_Gaps); the Rust port refuses it.
+bool step_meets_null_face(SmHealData& h, SmPropStageType stage, bool any)
+{
+    ULONG n = h.m_sTgtFaceProps.GetSize();
+    if (n == 0 || n == h.m_lOldFaceCnt)
+        return false;
+    for (ULONG ii = h.m_lOldFaceCnt; ii < n; ii++)
+    {
+        SmFaceProps* p = h.m_sTgtFaceProps[ii];
+        if (p->m_pFace == NULL && (any || !p->HasProps(stage, p->m_pFace)))
+            return true;
+    }
+    return false;
+}
+
+void put_face_snapshot(std::vector<double>& o, Graph& g, SmFaceProps& p)
+{
+    o.push_back((double)g.find(3, p.m_pFace));
+    o.push_back((double)p.m_lFaceIndx);
+    o.push_back((double)p.m_ePropStage);
+    o.push_back((double)p.m_eNotYetFaceType);
+    o.push_back(p.m_cpSurface != NULL ? 1.0 : 0.0);
+    o.push_back(p.m_sNaturalUVDomain.GetUMin());
+    o.push_back(p.m_sNaturalUVDomain.GetVMin());
+    o.push_back(p.m_sNaturalUVDomain.GetUMax());
+    o.push_back(p.m_sNaturalUVDomain.GetVMax());
+    o.push_back((double)p.m_bClosedU);
+    o.push_back((double)p.m_bClosedV);
+    o.push_back((double)p.m_bClosedSurf);
+    o.push_back((double)p.m_eClosedValU);
+    o.push_back((double)p.m_eClosedValV);
+    o.push_back((double)p.m_lPoles);
+    o.push_back((double)p.m_lApproxPoles);
+    o.push_back((double)p.m_lNoVertexPoles);
+    o.push_back((double)p.m_sPolePoints.GetSize());
+    for (ULONG i = 0; i < p.m_sPolePoints.GetSize(); i++)
+        put_vec(o, p.m_sPolePoints[i]);
+    o.push_back((double)p.m_sPoleNormals.GetSize());
+    for (ULONG i = 0; i < p.m_sPoleNormals.GetSize(); i++)
+        put_vec(o, p.m_sPoleNormals[i]);
+    o.push_back((double)p.m_sFlatCornerPoints.GetSize());
+    for (ULONG i = 0; i < p.m_sFlatCornerPoints.GetSize(); i++)
+        put_vec(o, p.m_sFlatCornerPoints[i]);
+    o.push_back(p.m_pCrvClassU != NULL ? 1.0 : 0.0);
+    o.push_back(p.m_pCrvClassV != NULL ? 1.0 : 0.0);
+    o.push_back((double)p.m_eBadCrossedSeam);
+    o.push_back((double)p.m_eBadMissingSeam);
+    o.push_back((double)p.m_eBadNearMissSeam);
+    o.push_back((double)p.m_lClosedLoopCnt);
+    o.push_back((double)p.m_sLoopProps.GetSize());
+}
+
+P1Out p1_step(int64_t code, Rd& rd, SmHealData& h, SmBrep* brep, Graph& g, Registry& r, std::vector<double>& o)
+{
+    P1Out res{P1_STATUS, SM_SUCCESS, FALSE};
+    switch (code)
+    {
+    case 23:
+    {
+        SmBoolean flag = rd.bflag();
+        mark_all_dead(h, r);
+        h.ReSet(flag);
+        break;
+    }
+    case 24:
+    {
+        int64_t sel = rd.idx();
+        SmFaceProps* p = r.pick(r.f, sel);
+        res.kind = P1_WRITTEN;
+        if (p == nullptr)
+        {
+            o.push_back(-3.0);
+            break;
+        }
+        h.MoveToNotYetProblems(p);
+        o.push_back((double)idx_of(r.iff, p));
+        break;
+    }
+    case 25:
+    case 26:
+    {
+        SmPropStageType stage = code == 25 ? SM_PROPSTAGE_2 : SM_PROPSTAGE_3;
+        if (step_meets_null_face(h, stage, false))
+        {
+            o.push_back(ST_NULL_DEREF);
+            res.kind = P1_REFUSED;
+            break;
+        }
+        res.stat = code == 25 ? h.Cache_FaceProps_Stage2(brep, &res.bNew, SM_HO_CACHE_FACEPROPS_2)
+                              : h.Cache_FaceProps_Stage3(brep, &res.bNew, SM_HO_CACHE_FACEPROPS_3);
+        break;
+    }
+    case 27:
+    {
+        for (ULONG i = 0; i < h.m_sFaceProps_Sheets.GetSize(); i++)
+            if (h.m_sFaceProps_Sheets[i]->m_pFace == NULL)
+            {
+                o.push_back(ST_NULL_DEREF);
+                res.kind = P1_REFUSED;
+                return res;
+            }
+        SmNewMarkAndLock lock(brep->GetContext());
+        res.stat = h.Fix_BadSheets(brep, lock, SM_HO_FIX_BADSHEETS);
+        break;
+    }
+    case 28:
+    {
+        SmBoolean flag = rd.bflag();
+        if (flag && step_meets_null_face(h, SM_PROPSTAGE_GAPS, true))
+        {
+            o.push_back(ST_NULL_DEREF);
+            res.kind = P1_REFUSED;
+            break;
+        }
+        res.stat = h.Make_UVTrimCurves(brep, flag, SM_HO_MAKE_UVTRIMCURVES);
+        break;
+    }
+    case 29: res.stat = h.Fix_InfiniteRegion(brep, SM_HO_FIX_INFINITE_REGIONS); break;
+    case 30:
+    {
+        int64_t mode = rd.idx();
+        SmHealerOpType op = (SmHealerOpType)rd.idx();
+        SmBoolean make = rd.bflag();
+        if (mode == 0)
+        {
+            res.stat = h.HealBrep(NULL, op, NULL, NULL, NULL, make);
+            break;
+        }
+        SmTArray<SmVertex*> vs;
+        SmTArray<SmEdge*> es;
+        SmTArray<SmFace*> fs;
+        if (mode == 2)
+            read_targets(rd, g, vs, es, fs);
+        mark_all_dead(h, r);
+        res.stat = mode == 2 ? h.HealBrep(brep, op, &vs, &es, &fs, make) : h.HealBrep(brep, op, NULL, NULL, NULL, make);
+        res.kind = P1_LAST;
+        break;
+    }
+    default: // 31
+    {
+        o.push_back((double)r.f.size());
+        for (SmFaceProps* p : r.f)
+        {
+            if (!r.alive(p))
+            {
+                o.push_back(0.0);
+                continue;
+            }
+            o.push_back(1.0);
+            put_face_snapshot(o, g, *p);
+        }
+        res.kind = P1_WRITTEN;
+        break;
+    }
+    }
+    return res;
+}
+
 void run_heal(Rd& rd, const char* path, std::vector<double>& o)
 {
     Graph g;
@@ -1058,6 +1257,36 @@ void run_heal(Rd& rd, const char* path, std::vector<double>& o)
             break;
         }
         case 22: h->SetupEmptyProbArrays(); break;
+        // ---- steps of unit heal.heal_data_p1 (see p1_step) ----
+        case 23:
+        case 24:
+        case 25:
+        case 26:
+        case 27:
+        case 28:
+        case 29:
+        case 30:
+        case 31:
+        {
+            P1Out res = p1_step(code, rd, *h, brep, g, r, o);
+            if (res.kind == P1_REFUSED)
+            {
+                stop = true;
+                continue;
+            }
+            if (res.kind == P1_WRITTEN)
+                continue;
+            stat = res.stat;
+            bNew = res.bNew;
+            if (res.kind == P1_LAST)
+            {
+                o.push_back(st(stat));
+                o.push_back(flg(bNew));
+                stop = true;
+                continue;
+            }
+            break;
+        }
         default: stat = SC_ERR_ARG; break;
         }
         o.push_back(st(stat));
