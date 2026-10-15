@@ -144,9 +144,9 @@
 //!   the B-rep topology walks of `sm_AreConnected` (`topology.vertex`,
 //!   `topology.edge`), `SmVertex::GetPoint`, `SmEdge::GetBrep`, `SmBrep::GetTolerance`
 //!   (`topology.brep_p1`) in the manager's fallback tolerance,
-//!   `SmProtoVertex::ContainsPoint` (`query.face_p2`) in `FindProtoVertex` and
-//!   `sm_WhichPVToCombine`, `SmBrep::Transform` (`topology.brep_p5`) and
-//!   `SmPolyBrep::Transform` (`query.poly`).
+//!   `SmBrep::Transform` (`topology.brep_p5`) and `SmPolyBrep::Transform`
+//!   (`query.poly`). `SmProtoVertex::ContainsPoint` / `DistanceTo` (unit
+//!   `query.face_p2`) are [`crate::query::face::p2`]'s.
 //! - **Copy map.** `SetAt` takes two objects and `GetAt` of an object without an entry
 //!   is [`SolidError::InvalidInput`](crate::SolidError): upstream's release `SM_ASSERT`s
 //!   call `GetType()` on null objects there (plan/upstream-issues.md UB-98).

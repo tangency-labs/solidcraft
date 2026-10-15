@@ -524,13 +524,14 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError
 /// Whether each face's surface and each edge's curve was imported exactly (an
 /// `SmBSplineSurface` subclass other than `SmPlane`, or an `SmBSplineCurve` subclass
 /// other than `SmLine`, is imported as its B-spline part).
-struct Exact {
-    faces: Vec<bool>,
-    edges: Vec<bool>,
+pub(crate) struct Exact {
+    pub(crate) faces: Vec<bool>,
+    pub(crate) edges: Vec<bool>,
 }
 
-/// Builds the Rust B-rep from the shim's export (see the module docs).
-fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
+/// Builds the Rust B-rep from the shim's export (see the module docs; shared with unit
+/// `query.face_p2`, whose shim exports the same layout).
+pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
     let c = ffi::counts(ex).ok_or_else(|| harness("import of a failed build"))?;
     let [n_r, n_s, n_fu, n_f, n_lu, n_l, n_eu, n_e, n_vu, n_v] = c;
     let mut rd = Rd { v: ex, at: 1 };
