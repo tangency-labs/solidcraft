@@ -5029,8 +5029,7 @@
   "cases_total": 600,
   "deferred_by_unit": {
     "surface.surface_cache_p1": 8,
-    "surface.surface_p3": 47,
-    "surface.surface_p6": 57
+    "surface.surface_p3": 47
   },
   "max_rel_err": 0.0,
   "pass": true,

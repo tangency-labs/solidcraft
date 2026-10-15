@@ -9572,10 +9572,9 @@
   "cases_passed": 1110,
   "cases_total": 1167,
   "deferred_by_unit": {
-    "intersect.surface_intersector_p5": 51,
-    "surface.surface_p4": 15,
-    "surface.surface_p6": 51,
-    "surface.surface_point_solve_p3": 2
+    "surface.surface_cache_p1": 30,
+    "surface.surface_p11": 10,
+    "surface.surface_point_solve_p3": 17
   },
   "max_rel_err": 0.0,
   "pass": true,

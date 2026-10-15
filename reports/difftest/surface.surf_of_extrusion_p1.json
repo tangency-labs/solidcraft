@@ -16672,9 +16672,7 @@
   "cases_passed": 1999,
   "cases_total": 2055,
   "deferred_by_unit": {
-    "curve.curve_p9": 41,
-    "surface.surface_p4": 30,
-    "surface.surface_point_solve_p3": 26
+    "surface.surface_point_solve_p3": 56
   },
   "max_rel_err": 0.0,
   "pass": true,

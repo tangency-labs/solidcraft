@@ -109,19 +109,18 @@ fn surface_local_curve_intersect(
 }
 
 /// `sm_FilterSolution`: whether to keep a curve/surface solution (`rbKeepSolution`).
-fn filter_solution<O>(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _conts: [[ContinuityType; 2]; 3],
-    _solution: &Solution<O>,
+fn filter_solution<O: SolutionObject>(
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    conts: [[ContinuityType; 2]; 3],
+    solution: &Solution<O>,
 ) -> Result<bool> {
-    // UNPORTED(surface.surface_p5): sm_FilterSolution
-    Err(SolidError::unported(
-        "sm_FilterSolution",
-        "surface.surface_p5",
-    ))
+    let [u_conts, v_conts, t_conts] = conts;
+    crate::surface::surface::p5::filter_solution(
+        surface, domain, curve, interval, u_conts, v_conts, t_conts, solution,
+    )
 }
 
 /// The outputs of `sm_ClassifyCurveSurfaceXSectPoint`.
@@ -150,17 +149,14 @@ fn classify_curve_surface_xsect_point(
 
 /// `SmSurface::LocalPointSolve` (`rbFoundAnswer`, `rSolution`).
 fn surface_local_point_solve<O: Copy>(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _operation: SolverOperation,
-    _point: Point3,
-    _uv_guess: Point2,
+    surface: &Surface,
+    domain: &Extent2d,
+    operation: SolverOperation,
+    point: Point3,
+    uv_guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
-    // UNPORTED(surface.surface_p5): SmSurface::LocalPointSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalPointSolve",
-        "surface.surface_p5",
-    ))
+    let r = surface.local_point_solve::<O>(domain, operation, point, uv_guess)?;
+    Ok((r.found, r.solution))
 }
 
 /// The outputs of `SmSurface::DropPoint` used here: `rbSuccess` and `rdGap`.
@@ -171,16 +167,20 @@ struct DroppedPoint {
 
 /// `SmSurface::DropPoint` with a guess.
 fn surface_drop_point(
-    _surface: &Surface,
-    _point: Point3,
-    _domain: &Extent2d,
-    _guess: Point2,
+    surface: &Surface,
+    point: Point3,
+    domain: &Extent2d,
+    guess: Point2,
 ) -> Result<DroppedPoint> {
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::unported(
-        "SmSurface::DropPoint",
-        "surface.surface_p5",
-    ))
+    let opts = crate::surface::surface::p5::DropPointOptions {
+        guess_uv: Some(guess),
+        ..Default::default()
+    };
+    let d = surface.drop_point::<p4::NoObject>(point, domain, &opts)?;
+    Ok(DroppedPoint {
+        success: d.success,
+        gap: d.gap,
+    })
 }
 
 /// `SmSurface::ClassifyIntersectingRangeSolution`: `bIsDegenerate` and, when it is,

@@ -447,7 +447,10 @@ fn iso_curve_of(
                 "curve.iso_curve",
             ))
         }
-        SurfaceKind::CurveBounded(_) | SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Step(_) => {
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => {
             // `SmIsoCurve` holds an `SmBSplineSurface` only (see plan/findings.md,
             // surface.surface_p5), so these kinds have no iso curve to build.
             // UNPORTED(curve.iso_curve): SmIsoCurve::SmIsoCurve over a non-B-spline surface
@@ -513,7 +516,7 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {}
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
         }
 
         // define the isoParameter Curve as an object

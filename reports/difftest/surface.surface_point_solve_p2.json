@@ -1499,8 +1499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0007",
@@ -2031,8 +2031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmFindPSNormalENFO::Evaluate",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0072",
@@ -2647,8 +2647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0148",
@@ -3199,8 +3199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0216",
@@ -3315,8 +3315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0230",
@@ -4419,8 +4419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0366",
@@ -4879,8 +4879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0422",
@@ -5887,8 +5887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmFindPSNormalENFO::Evaluate",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0546",
@@ -6643,8 +6643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0639",
@@ -7051,8 +7051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0689",
@@ -8031,8 +8031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmFindPSNormalENFO::Evaluate",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0808",
@@ -8043,8 +8043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0809",
@@ -8999,8 +8999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "rev_gen0027",
@@ -9247,8 +9247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmFindPSNormalENFO::Evaluate",
+        "unit": "surface.surface_p3"
       },
       "max_rel_err": 0.0,
       "name": "rev_gen0057",
@@ -10399,8 +10399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalPointSolve",
-        "unit": "surface.surface_p5"
+        "symbol": "SmSurface::LocalPointSolve_1",
+        "unit": "surface.surface_point_solve_p3"
       },
       "max_rel_err": 0.0,
       "name": "rev_gen0199",
@@ -10736,9 +10736,8 @@
   "cases_passed": 1278,
   "cases_total": 1320,
   "deferred_by_unit": {
-    "surface.surface_p3": 25,
-    "surface.surface_p4": 63,
-    "surface.surface_point_solve_p3": 2
+    "surface.surface_p3": 29,
+    "surface.surface_point_solve_p3": 13
   },
   "max_rel_err": 0.0,
   "pass": true,

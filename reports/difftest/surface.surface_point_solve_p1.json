@@ -8416,8 +8416,7 @@
   "cases_passed": 1003,
   "cases_total": 1035,
   "deferred_by_unit": {
-    "surface.surface_p3": 32,
-    "surface.surface_p4": 27
+    "surface.surface_p3": 32
   },
   "max_rel_err": 0.0,
   "pass": true,

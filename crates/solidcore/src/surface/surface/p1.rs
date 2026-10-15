@@ -77,7 +77,8 @@
 //!   `SmIsoCurve` over any surface (the ported iso curve holds a B-spline), the zone
 //!   tolerance of a surface with a face needs `SmFace::GetTolerance`
 //!   (`topology.face_p2`): those calls return [`SolidError::Unported`]. Every tree build
-//!   needs `SmSurface::CalculateContinuities` (`surface.surface_p6`).
+//!   needs `SmSurface::CalculateContinuities` (`surface.surface_p6`), whose iso curves
+//!   exist for the B-spline, plane and revolution kinds.
 //!   [`map_to_2d_on_curve`] ports the UV-curve and the general 3D branch of
 //!   `SmTol::MapTo2d(.., SmCurve, SmSurface)`; the same-surface `SmCrvOnSurf` branch
 //!   (`SmTol.cpp:1118-1123`) is `Unported`.

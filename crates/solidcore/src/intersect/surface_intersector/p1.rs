@@ -101,7 +101,6 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::TsectCurveType;
-use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::Surface;
 
 const OP_POINT: &str = "intersect::surface_intersector::p1::SurfaceIntersector::point";
@@ -1798,25 +1797,25 @@ fn surface_local_point_solve(
 /// `crSurface.GlobalPointSolve(domain, SM_SO_MINIMIZE, point, tol, NULL, SM_SR_ALL,
 /// ..)`: the solutions' start parameters.
 fn surface_global_point_solve(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     point: Point3,
     tol: f64,
 ) -> Result<Vec<[f64; 2]>> {
-    // `step_back_from_singularity_points` has no kernel to thread through, so use the
-    // default one (as the reviewed fix suggests).
-    Ok(global_point_solve_starts(
-        &Kernel::default(),
+    let starts = crate::surface::surface::p4::global_point_solve_starts(
+        k,
         surface,
         domain,
         SolverOperation::Minimize,
         point,
         tol,
         SolutionRequested::All,
-    )?
-    .iter()
-    .map(|s| [s.parameters[0], s.parameters[1]])
-    .collect())
+    )?;
+    starts
+        .iter()
+        .map(|s| Ok([s.param(0)?, s.param(1)?]))
+        .collect()
 }
 
 /// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.

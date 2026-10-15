@@ -433,7 +433,7 @@ fn get_or_create_uv_trim_curve(_b: &Brep, _eu: EdgeuseId) -> Result<Curve> {
 
 /// `pSurf->IsSingularity(uv, eDir, dTol3d, TRUE)` (virtual: the plane override, the
 /// base body otherwise).
-fn is_singularity(surface: &Surface, _uv: Point2, _tol: f64) -> Result<(bool, SurfParamType)> {
+fn is_singularity(surface: &Surface, uv: Point2, tol: f64) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
         SurfaceKind::BSpline(_)
@@ -441,11 +441,8 @@ fn is_singularity(surface: &Surface, _uv: Point2, _tol: f64) -> Result<(bool, Su
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p5): SmSurface::IsSingularity
-            Err(SolidError::unported(
-                "SmSurface::IsSingularity",
-                "surface.surface_p5",
-            ))
+            let r = surface.is_singularity(uv, tol, false)?;
+            Ok((r.singular, r.direction))
         }
     }
 }

@@ -47,8 +47,7 @@
 //!   `EvaluateNeighborhoodBoundaries`) are not part of this unit and are left out.
 //!   `SmBoolean` tri-states are enums / `Option<bool>`.
 //! - The surface drop of `SmCrvSrfGapFunction::Evaluate` and
-//!   `SmSrfSrfGapFunction::Evaluate` is `UNPORTED(surface.surface_p5)`
-//!   (`SmSurface::DropPoint`).
+//!   `SmSrfSrfGapFunction::Evaluate` is [`Surface::drop_point`] (`SmSurface::DropPoint`).
 //! - Sample counts: a count of zero (upstream indexes before the array) and more than
 //!   [`MAX_SAMPLES`] samples (upstream allocates whatever the counts say) return
 //!   [`SolidError::InvalidInput`] from [`GapFunction::build_sample_set`]. No recursion.
@@ -70,6 +69,8 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOZ;
 use crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::vertexuse as vu1;
@@ -1714,19 +1715,26 @@ fn curve_drop(
 }
 
 /// `pSurface->DropPoint(pt, domain, pOptGuess, bSuccess, uv, dist, bIsMulti)`: success,
-/// the drop parameters and distance.
+/// the drop parameters and distance; the status is ignored as upstream does.
 fn surface_drop(
     _k: &Kernel,
-    _surface: &Surface,
-    _point: Point3,
-    _domain: &Extent2d,
-    _guess: Option<Point2>,
+    surface: &Surface,
+    point: Point3,
+    domain: &Extent2d,
+    guess: Option<Point2>,
 ) -> Result<(bool, Point2, f64)> {
-    // UNPORTED(surface.surface_p5): SmSurface::DropPoint
-    Err(SolidError::unported(
-        "SmSurface::DropPoint",
-        "surface.surface_p5",
-    ))
+    let opts = DropPointOptions {
+        guess_uv: guess,
+        ..Default::default()
+    };
+    // Upstream ignores the DropPoint status (no `SER`) and reads `bSuccess`/`dDist`
+    // either way; on failure they keep their initial values (`FALSE`, the guess, `BIG_DOUBLE`).
+    Ok(
+        match ignored(surface.drop_point::<NoObject>(point, domain, &opts))? {
+            Some(d) => (d.success, d.result_uv, d.gap),
+            None => (false, guess.unwrap_or(Point2::UNDEF), BIG_DOUBLE),
+        },
+    )
 }
 
 /// `Evaluate(dOtherU, 1, TRUE, sOtherPD, TRUE)` of a curve, status ignored: the point

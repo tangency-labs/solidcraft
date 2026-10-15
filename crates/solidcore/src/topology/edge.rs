@@ -97,8 +97,9 @@
 //! - **Unported callees** return [`SolidError::Unported`]: `SmEdgeuse::NormalizedEvaluate`,
 //!   `EvaluateBinormal` and `GetOrCreateUVTrimCurve` (unit `topology.edgeuse_p3`),
 //!   `SmBrep::Notify` (`topology.brep_p2`), `SmBrep::GetInfiniteRegion`
-//!   (`topology.brep_p1`), `SmSurface::CoverOtherCoincidentSurface` (`surface.surface_p5`) and
-//!   `SmFace::CalculateUVDomainFromUVTrimCurves` (`topology.face_p1`).
+//!   (`topology.brep_p1`) and `SmFace::CalculateUVDomainFromUVTrimCurves`
+//!   (`topology.face_p1`). `SmSurface::CoverOtherCoincidentSurface` is wired to
+//!   `surface.surface_p5`, whose `CoverCoincidentSurface` (`surface.surface_p3`) is unported.
 
 use std::collections::BTreeMap;
 
@@ -246,9 +247,7 @@ fn vertex_set_tolerance(b: &mut Brep, v: VertexId, tolerance: f64) -> Result<()>
     crate::topology::vertex::set_tolerance(b, v, tolerance, true, true)
 }
 
-/// Which of the two input surfaces `SmSurface::CoverOtherCoincidentSurface` keeps
-/// (constructed once its unit, `surface.surface_p5`, is ported).
-#[allow(dead_code)]
+/// Which of the two input surfaces `SmSurface::CoverOtherCoincidentSurface` keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Covering {
     /// `this` (the first surface), possibly expanded.
@@ -265,7 +264,9 @@ struct Cover {
     merged_domain: Extent2d,
 }
 
-/// `SmSurface::CoverOtherCoincidentSurface` (unit `surface.surface_p5`).
+/// `pSurf0->CoverOtherCoincidentSurface(pSurf1, dTol, rdMaxDist, rpCoveringSurf,
+/// &sDomain0, &sDomain1, &rMergedDomain)` (unit `surface.surface_p5`). A merged domain
+/// that was not written stays the caller's default-constructed `sMergedDomain`.
 fn cover_other_coincident_surface(
     this: &Surface,
     other: &Surface,
@@ -273,12 +274,18 @@ fn cover_other_coincident_surface(
     domain0: &Extent2d,
     domain1: &Extent2d,
 ) -> Result<Cover> {
-    let _ = (this, other, tol, domain0, domain1);
-    // UNPORTED(surface.surface_p5): SmSurface::CoverOtherCoincidentSurface
-    Err(SolidError::unported(
-        "SmSurface::CoverOtherCoincidentSurface",
-        "surface.surface_p5",
-    ))
+    let r = this.cover_other_coincident_surface(other, tol, Some(domain0), Some(domain1), true)?;
+    Ok(Cover {
+        max_dist: r.max_dist,
+        covering: r.covering_is_other.map(|is_other| {
+            if is_other {
+                Covering::Other
+            } else {
+                Covering::This
+            }
+        }),
+        merged_domain: r.merged_domain.unwrap_or_else(Extent2d::new),
+    })
 }
 
 /// `SmFace::CalculateUVDomainFromUVTrimCurves(dom, TRUE)` (unit `topology.face_p1`).

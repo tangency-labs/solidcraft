@@ -1972,7 +1972,7 @@ mod tests {
             calc_edge_ccw_edge_gap(&mut b, a0, true, false),
             Err(SolidError::InvalidInput { .. })
         ));
-        // with curves: the edge/edge gap; the edge/face gap needs the surface drop
+        // with curves: the edge/edge gap and the edge/face gap
         for i in 0..4u32 {
             let e = EdgeId::from_index(i);
             let [v0, v1] = b.edge(e).unwrap().vertices;
@@ -1986,9 +1986,9 @@ mod tests {
             .unwrap();
         assert!(g.is_init() && g.gap_3d.abs() < 1e-12);
         assert_eq!(b.edgeuse(a0).unwrap().edge_ccw_edge_gap, g);
-        assert!(max_edge_face_gap(&k, &mut b, a0, true)
-            .unwrap_err()
-            .is_unported());
+        // the edge/face gap drops through the surface (`SmSurface::DropPoint`)
+        let fg = max_edge_face_gap(&k, &mut b, a0, true).unwrap().unwrap();
+        assert!(fg.gap_3d.abs() < 1e-12);
         // a degenerate edge interval fails before the gap function
         b.edge_mut(EdgeId::from_index(0)).unwrap().interval = Extent1d::from_value(0.5);
         assert!(matches!(

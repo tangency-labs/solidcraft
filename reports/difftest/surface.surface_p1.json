@@ -6557,8 +6557,7 @@
   "cases_total": 806,
   "deferred_by_unit": {
     "curve.iso_curve": 13,
-    "surface.surface_p3": 12,
-    "surface.surface_p6": 17
+    "surface.surface_p3": 12
   },
   "max_rel_err": 0.0,
   "pass": true,
