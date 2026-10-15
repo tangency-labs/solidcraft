@@ -2,6 +2,8 @@
 
 # solidcore
 
+**📊 Live progress: [bherbruck.github.io/solidcore](https://bherbruck.github.io/solidcore/)**: every unit's port status and difftest results, the upstream-issues log, and the surface/surface intersection corpus scores, regenerated on every merge.
+
 solidcore is a Rust port of NVIDIA's SMLib: a boundary-representation (B-rep) solid
 modeling kernel in safe Rust (SMLib is from [USD BRep](https://github.com/NVIDIA-Omniverse/usd-brep), Apache-2.0).
 
