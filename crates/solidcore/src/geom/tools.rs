@@ -27,7 +27,7 @@
 //! - **Edge and vertex queries** are those of `topology::edge` and `topology::vertex`.
 //! - **Unported callees.** Curve evaluation of the opaque target
 //!   curve, point drops, curve/curve distance,
-//!   `SmBrep::GetEdges`, `SmBrep::GetTolerance` and exact B-rep cache dependencies
+//!   `SmBrep::GetEdges` and exact B-rep cache dependencies
 //!   belong to units not ported yet; those calls return [`SolidError::Unported`]
 //!   (see the `UNPORTED` markers). The target curve of [`find_coincident_edge`] is
 //!   an opaque `C` until the curve units land (`curve.curve_p2`).
@@ -336,8 +336,8 @@ pub fn find_edge(brep: &Brep, point: Point3) -> Result<Option<EdgePick>> {
 /// owner keys must use the same mapping that assigned the geometry's owner links.
 ///
 /// # Errors
-/// [`SolidError::Unported`] while the B-rep tolerance and `BrepPointSolve` are not
-/// ported.
+/// Errors from B-rep cache construction and `BrepPointSolve`, including
+/// explicit deferrals for their unfinished dependencies.
 pub fn find_face(
     kernel: &Kernel,
     brep: &Brep,
@@ -346,7 +346,7 @@ pub fn find_face(
     keys: &dyn Fn(CacheObject) -> ObjectRef,
     owner_of: &dyn Fn(ObjectRef) -> Option<ObjectRef>,
 ) -> Result<Option<FaceId>> {
-    let tol = brep_tolerance(brep)? * 100.0;
+    let tol = brep.tolerance() * 100.0;
     let solution_faces = brep_point_solve_faces(kernel, brep, brep_id, point, tol, keys, owner_of)?;
     Ok(solution_faces.into_iter().flatten().next())
 }
@@ -471,15 +471,6 @@ fn brep_edges(_brep: &Brep) -> Result<Vec<EdgeId>> {
     // UNPORTED(topology.brep_p1): SmBrep::GetEdges
     Err(SolidError::Unported {
         upstream: "SmBrep::GetEdges",
-        unit: "topology.brep_p1",
-    })
-}
-
-/// `SmBrep::GetTolerance`.
-fn brep_tolerance(_brep: &Brep) -> Result<f64> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetTolerance
-    Err(SolidError::Unported {
-        upstream: "SmBrep::GetTolerance",
         unit: "topology.brep_p1",
     })
 }

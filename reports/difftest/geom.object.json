@@ -167,8 +167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "shape_single_face",
@@ -1727,8 +1727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0188",
@@ -2247,8 +2247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0252",
@@ -2683,8 +2683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0305",
@@ -3127,8 +3127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0359",
@@ -3287,8 +3287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0378",
@@ -3691,8 +3691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0427",
@@ -3719,8 +3719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0430",
@@ -3987,8 +3987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0462",
@@ -4099,8 +4099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0475",
@@ -4367,8 +4367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetSurface",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CalculateBoundingBox",
+        "unit": "query.face_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0507",
@@ -5124,9 +5124,9 @@
   "cases_passed": 593,
   "cases_total": 624,
   "deferred_by_unit": {
+    "query.face_p1": 11,
     "topology.brep_p1": 10,
     "topology.edge": 4,
-    "topology.face_p2": 11,
     "topology.vertex": 6
   },
   "max_rel_err": 0.0,

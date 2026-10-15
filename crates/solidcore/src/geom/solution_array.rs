@@ -674,6 +674,9 @@ impl<O: SolutionObject> Solution<O> {
     /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
     /// fixed arrays or a null object
     /// is reached; [`SolidError::Unported`] for object geometry.
+    /// The public query adapter currently resolves geometry in
+    /// `query::api_queries::solution_point`; keep its `GetPoint` semantics in sync
+    /// when wiring these object-geometry operations.
     pub fn point(&self, index: usize, get_end: bool) -> Result<Option<(Point3, Vec3)>> {
         const OP: &str = "geom::solution_array::Solution::point";
         self.check(OP)?;

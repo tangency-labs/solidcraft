@@ -400,11 +400,11 @@ impl Shape {
             });
         }
         if !faces.is_empty() {
-            // UNPORTED(topology.face_p2): SmFace::GetSurface (then
-            // SmFace::CalculateBoundingBox, SmFace::GetEdges / GetVertices)
+            // UNPORTED(query.face_p1): SmFace::CalculateBoundingBox (then
+            // SmFace::GetEdges / GetVertices). GetSurface/GetFace are ported.
             return Err(SolidError::Unported {
-                upstream: "SmFace::GetSurface",
-                unit: "topology.face_p2",
+                upstream: "SmFace::CalculateBoundingBox",
+                unit: "query.face_p1",
             });
         }
         if !edges.is_empty() {
@@ -665,7 +665,7 @@ mod tests {
         );
         assert_eq!(
             unit(Shape::new(&[], &[(b, FaceId::from_index(0))], &[], &[])),
-            "topology.face_p2"
+            "query.face_p1"
         );
         assert_eq!(
             unit(Shape::new(&[], &[], &[(b, EdgeId::from_index(0))], &[])),
