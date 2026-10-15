@@ -18,6 +18,7 @@
 //! | `Drop` (implicit)                                 | `~SmPointClassification`                         |
 //! | [`PointClassification::reset`]                    | `ReSet`                                          |
 //! | `Clone` / `Copy` (derived)                        | `operator=`                                      |
+//! | [`PointClassification::try_map_objects`]         | complete state copy with translated Rust handles (data-model bridge) |
 //! | [`PointClassification::copy_classification_only`] | `CopyClassificationOnly`                         |
 //! | [`PointClassification::copy_sss_point`]           | `CopySSSPoint`                                   |
 //! | [`PointClassification::brep`]                     | `GetBrep`                                        |
@@ -379,21 +380,23 @@ pub struct PointClassification<O> {
 }
 
 impl<O: ClassObject> PointClassification<O> {
-    /// The same classification with every object handle (`m_pObject`, `m_cpFace`)
-    /// replaced by `f` of it: a change of handle type, no new state.
+    /// Copy the complete classification state while translating object handles.
+    ///
+    /// This is a Rust data-model bridge between an application's geometry handles
+    /// and B-rep entity ids. All scalar state, including unset parameters and
+    /// non-finite payloads, is copied without recomputation.
     ///
     /// # Errors
-    ///
-    /// Those of `f`.
-    pub fn map_objects<P: ClassObject>(
+    /// Propagates a failed object/face translation without changing the source.
+    pub fn try_map_objects<P: ClassObject>(
         &self,
-        f: &mut dyn FnMut(O) -> Result<P>,
+        mut map: impl FnMut(O) -> Result<P>,
     ) -> Result<PointClassification<P>> {
         Ok(PointClassification {
             src_zone_tol_3d: self.src_zone_tol_3d,
             point_class: self.point_class,
-            object: self.object.map(&mut *f).transpose()?,
-            face: self.face.map(&mut *f).transpose()?,
+            object: self.object.map(&mut map).transpose()?,
+            face: self.face.map(&mut map).transpose()?,
             gap_3d: self.gap_3d,
             t_param: self.t_param,
             uv_param: self.uv_param,
