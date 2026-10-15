@@ -12,12 +12,15 @@
 //! | [`EdgeEdgeGap::new`]          | `SmEdgeEdgeGap()` (default arguments)            |
 //! | [`VertexFaceGap`]             | `SmVertexFaceGap` (members, `ReSet`, `IsInit`)   |
 //! | [`VertexFaceGap::new`]        | `SmVertexFaceGap()` (default arguments)          |
+//! | [`VertexEdgeGap`]             | `SmVertexEdgeGap` (members, `ReSet`, `IsInit`)   |
+//! | [`VertexEdgeGap::new`]        | `SmVertexEdgeGap()` (default arguments)          |
 //!
 //! Deviations: CO-PORTED by unit `topology.edgeuse_p1` (the records its edge and vertex
 //! uses cache), owned by unit `heal.gap`. The topology pointers are ids. The
 //! constructors take no arguments: with upstream's defaults they reach the reset state
 //! (gap `-SM_UNDEF_DOUBLE`, nothing set); setting a gap (`Set`, `SetEdgeEdgeGap`,
-//! which evaluate the gap through `CacheGap`) belongs to `heal.gap`.
+//! which evaluate the gap through `CacheGap`) belongs to `heal.gap`. [`VertexEdgeGap`]
+//! is CO-PORTED by unit `topology.vertexuse` (the record its vertex uses cache).
 
 use crate::geom::vector2d::Point2;
 use crate::math::UNDEF_DOUBLE;
@@ -163,6 +166,47 @@ impl VertexFaceGap {
     }
 }
 
+/// A gap between a vertex and the end of an edge's curve it bounds
+/// (`SmVertexEdgeGap`, CO-PORTED by unit `topology.vertexuse`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VertexEdgeGap {
+    /// `m_dGap3d`: the gap (`-SM_UNDEF_DOUBLE` when undefined).
+    pub gap_3d: f64,
+    /// `m_pVertexuse`: the vertex use connecting the vertex to the edge.
+    pub vertexuse: Option<VertexuseId>,
+    /// `m_dEdgeT`: the edge curve parameter bounding the gap.
+    pub edge_t: f64,
+}
+
+impl Default for VertexEdgeGap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VertexEdgeGap {
+    /// `SmVertexEdgeGap()`: the reset state.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            gap_3d: -UNDEF_DOUBLE,
+            vertexuse: None,
+            edge_t: UNDEF_DOUBLE,
+        }
+    }
+
+    /// `IsInit`: a vertex use is set.
+    #[must_use]
+    pub const fn is_init(&self) -> bool {
+        self.vertexuse.is_some()
+    }
+
+    /// `ReSet`: back to the uninitialised state.
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +234,12 @@ mod tests {
         assert!(v.is_init());
         v.reset();
         assert_eq!(v, VertexFaceGap::default());
+
+        let mut ve = VertexEdgeGap::new();
+        ve.vertexuse = Some(VertexuseId::from_index(1));
+        ve.edge_t = 0.5;
+        assert!(ve.is_init());
+        ve.reset();
+        assert_eq!(ve, VertexEdgeGap::default());
     }
 }

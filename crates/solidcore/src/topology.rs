@@ -15,7 +15,7 @@
 //! | [`Loop`] / [`LoopId`]       | `SmLoop`                                              |
 //! | [`Edgeuse`] / [`EdgeuseId`] | `SmEdgeuse` (unit `topology.edgeuse_p1`)              |
 //! | [`Edge`] / [`EdgeId`]       | `SmEdge`                                              |
-//! | [`Vertexuse`] / [`VertexuseId`] | `SmVertexuse` (minimal)                           |
+//! | [`Vertexuse`] / [`VertexuseId`] | `SmVertexuse` (unit `topology.vertexuse`)         |
 //! | [`Vertex`] / [`VertexId`]   | `SmVertex`                                            |
 //! | [`ObjectHandle`]            | an `SmObject*` a record keeps but never dereferences  |
 //! | [`Arena`]                   | upstream's intrusive `SmListNode` linked lists        |
@@ -42,6 +42,7 @@ pub mod edgeuse;
 pub mod proto_topology;
 #[allow(clippy::module_inception)]
 pub mod topology;
+pub mod vertexuse;
 
 use core::marker::PhantomData;
 
@@ -51,8 +52,9 @@ use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::ZONE_TOL_3D;
-use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexFaceGap};
-use crate::math::Point3;
+use crate::geom::vector2d::Point2;
+use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
+use crate::math::{Point3, BIG_DOUBLE};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p2::DropCurveFail;
 use crate::surface::surface::Surface;
@@ -421,15 +423,35 @@ pub enum VertexuseOwner {
     Shell(Option<ShellId>),
 }
 
-/// One use of a vertex (`SmVertexuse`, CO-PORTED minimal record).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// One use of a vertex (`SmVertexuse`; the methods are in unit `topology.vertexuse`,
+/// [`vertexuse`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertexuse {
     /// `m_pListOwner`: the vertex used (`GetVertex`).
     pub vertex: Option<VertexId>,
     /// `m_tVertexuseType` and `m_pSorLUorEU`.
     pub owner: VertexuseOwner,
+    /// `m_sVertexEdgeGap3d`: the cached vertex/edge gap.
+    pub vertex_edge_gap: VertexEdgeGap,
     /// `m_sVertexFaceGap3d`: the cached vertex/face gap.
     pub vertex_face_gap: VertexFaceGap,
+    /// `m_sUVPoint` (`GetUVPoint` / `SetUVPoint`; `(SM_BIG_DOUBLE, SM_BIG_DOUBLE)`
+    /// until set).
+    pub uv_point: Point2,
+}
+
+impl Default for Vertexuse {
+    /// `SmVertexuse()`: unlinked, unknown type, gaps reset, UV point
+    /// `(SM_BIG_DOUBLE, SM_BIG_DOUBLE)`.
+    fn default() -> Self {
+        Self {
+            vertex: None,
+            owner: VertexuseOwner::Unknown,
+            vertex_edge_gap: VertexEdgeGap::new(),
+            vertex_face_gap: VertexFaceGap::new(),
+            uv_point: Point2::new(BIG_DOUBLE, BIG_DOUBLE),
+        }
+    }
 }
 
 /// A boundary representation (`SmBrep`): arenas of shells, faces, loops, edges and
