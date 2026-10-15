@@ -43,6 +43,12 @@
 //! `ne + 3` rows and room for both offsets' columns; `Init*` needs rail `0` or `1`, a
 //! non-`NULL` first surface and, with `do2`, the guess and interval indices it reads
 //! and writes (`s1_index + 1 < ng`, `s1_index + 1 < dim`, `ng + 1 < dim`) in range.
+//!
+//! One known exception (`plan/upstream-issues.md` UB-99): when `CreateSurface` skins and
+//! the first `N_CreateSkinSrfBoundaryContinuity` attempt fails after refining the
+//! derivative curves, upstream's retry reads a freed knot vector of the derivative
+//! surfaces. Predicting that needs the skinning itself, so such inputs are not rejected
+//! (the difftest case `gen0137` is one).
 
 use crate::{call_with_buffer, FfiError};
 
