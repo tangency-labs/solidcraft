@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**172 / 261 units ported** (96 green, 76 partial), **230,543 / 387,903 upstream lines (59.4%)**. 26 claimed, 0 blocked, 63 todo.
+**173 / 261 units ported** (97 green, 76 partial), **231,574 / 387,903 upstream lines (59.7%)**. 25 claimed, 0 blocked, 63 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -76,7 +76,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `blend.fillet_geom_p2` (2077 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p6`, `blend.fillet_solver_p1` +1 more
 - [ ] `blend.fillet_geom_p5` (1952 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_geom_p4` +2 more
 - [ ] `blend.fillet_corner_p2` (1892 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_solver_p1`
-- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `heal.heal_data_p3` +9 more
+- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `heal.heal_data_p3` +8 more
 
 ## In progress
 
@@ -97,13 +97,12 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `topology.trimming_tools` (2878 lines) — in progress: #124 @bherbruck (ready for review)
 - [ ] 🔨 `query.face_p1` (465 lines) — in progress: #105 @0xlillith (draft)
 - [ ] 🔨 `heal.face_props` (1410 lines) — in progress: #122 @froglemonade2 (draft)
-- [ ] 🔨 `mass.integrator` (1031 lines) — in progress: #119 @damgru (ready for review)
 - [ ] 🔨 `query.brep` (517 lines) — in progress: #101 @0xlillith (draft)
 - [ ] 🔨 `topology.proto_topology_p2` (2091 lines) — in progress: #114 @bherbruck (ready for review)
 - [ ] 🔨 `heal.heal_data_p1` (922 lines) — in progress: #109 @bherbruck (ready for review)
 - [ ] 🔨 `query.api_queries` (809 lines) — in progress: #125 @damgru (ready for review)
 - [ ] 🔨 `topology.proto_topology_p3` (1577 lines) — in progress: #121 @froglemonade2 (draft)
-- [ ] 🔨 `sweep.rotational_sweep_geometry` (1542 lines) — in progress: #126 @bherbruck (draft)
+- [ ] 🔨 `sweep.rotational_sweep_geometry` (1542 lines) — in progress: #126 @bherbruck (ready for review)
 - [ ] 🔨 `sweep.trans_sweep_geometry` (817 lines) — in progress: #127 @damgru (draft)
 - [ ] 🔨 `sweep.api_brep` (529 lines) — in progress: #110 @bherbruck (ready for review)
 
@@ -208,7 +207,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [x] ✅ `curve.tangent_field` (319 lines) — green, 655 cases
 - [x] ✅ `curve.ellipse_p2` (1916 lines) — green, 2102 cases
 - [ ] 🟡 `curve.curve_p4` (2377 lines) — partial, 3259 cases
-- [ ] 🟡 `curve.curve_p3` (2072 lines) — partial, 3076 cases
+- [x] ✅ `curve.curve_p3` (2072 lines) — green, 3076 cases
 - [ ] 🟡 `curve.curve_p1` (2097 lines) — partial, 3083 cases
 - [x] ✅ `curve.curve_p6` (2376 lines) — green, 3136 cases
 - [ ] 🟡 `curve.crv_on_surf` (1728 lines) — partial, 2094 cases
@@ -346,14 +345,14 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `query.brep` (517 lines) — in progress: #101 @0xlillith (draft)
 - [ ] 🔨 `query.api_queries` (809 lines) — in progress: #125 @damgru (ready for review)
 
-### mass (0/1)
+### mass (1/1)
 
-- [ ] 🔨 `mass.integrator` (1031 lines) — in progress: #119 @damgru (ready for review)
+- [ ] 🟡 `mass.integrator` (1031 lines) — partial, 1528 cases
 
 ### sweep (1/5)
 
 - [ ] ⏳ `sweep.topology_sweep` (2456 lines) — waiting
-- [ ] 🔨 `sweep.rotational_sweep_geometry` (1542 lines) — in progress: #126 @bherbruck (draft)
+- [ ] 🔨 `sweep.rotational_sweep_geometry` (1542 lines) — in progress: #126 @bherbruck (ready for review)
 - [ ] 🔨 `sweep.trans_sweep_geometry` (817 lines) — in progress: #127 @damgru (draft)
 - [ ] 🔨 `sweep.api_brep` (529 lines) — in progress: #110 @bherbruck (ready for review)
 - [ ] 🟡 `sweep.api_surfaces` (381 lines) — partial
