@@ -323,6 +323,10 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
                 .sum::<f32>()
         })
         .fold(t.space_24 * 8.0 + t.space_8, f32::max);
+    let width = super::metrics::dimension(ui.available_width());
+    let action_width = bindings.iter().map(|(_, action)| super::ContentWidth::label(ui, action)).fold(0.0, f32::max);
+    // A narrow legend stacks every action so rows keep the same columns.
+    let beside = key_width + t.space_10 + action_width <= width;
     for (keys, action) in bindings {
         if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
             if !crate::prefs_search::texts_hit(ui, &[action, &keys.join(" ")]) {
@@ -330,9 +334,6 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
             }
             crate::prefs_search::reveal(ui);
         }
-        let width = super::metrics::dimension(ui.available_width());
-        let action_width = super::ContentWidth::label(ui, action);
-        let beside = key_width + t.space_10 + action_width <= width;
         let limit = if beside { key_width } else { width };
         let cap_height = t.control_height - t.space_8;
         let mut caps = Vec::new();

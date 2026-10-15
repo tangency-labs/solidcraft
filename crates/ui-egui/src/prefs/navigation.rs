@@ -22,13 +22,16 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
     let mut gestures: Vec<_> = nav_preset(&app.preferences.nav)
         .bindings
         .iter()
-        .filter(|binding| !(crate::mouse_gesture::active(app) && binding.button == NavButton::Right))
+        .filter(|binding| binding.button != NavButton::Trackpad && !(crate::mouse_gesture::active(app) && binding.button == NavButton::Right))
         .filter(|binding| app.preferences.right_drag_orbits || !(binding.button == NavButton::Right && binding.mode == NavMode::Orbit))
         .map(|binding| {
-            let button = match binding.button {
-                NavButton::Left => "prefs.button_left",
-                NavButton::Middle => "prefs.button_middle",
-                NavButton::Right => "prefs.button_right",
+            let buttons: &[&str] = match binding.button {
+                NavButton::Left => &["prefs.button_left"],
+                NavButton::Middle => &["prefs.button_middle"],
+                NavButton::Right => &["prefs.button_right"],
+                NavButton::MiddleLeft => &["prefs.button_middle", "prefs.button_left"],
+                NavButton::MiddleRight => &["prefs.button_middle", "prefs.button_right"],
+                NavButton::Trackpad => &[],
             };
             let mut keys = Vec::new();
             if binding.keys.shift {
@@ -40,7 +43,7 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
             if binding.keys.alt {
                 keys.push("Alt/Option");
             }
-            keys.push(crate::i18n::tr(button));
+            keys.extend(buttons.iter().map(|button| crate::i18n::tr(button)));
             let action = match binding.mode {
                 NavMode::Orbit => "prefs.gesture_orbit",
                 NavMode::Pan => "prefs.gesture_pan",
@@ -105,6 +108,14 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     });
                 });
             });
+        });
+        ui_kit::row(ui, crate::i18n::tr_label("Trackpad"), |ui| {
+            let help = match app.preferences.trackpad_mode(Modifiers::NONE) {
+                NavMode::Pan => "Two-finger movement pans; Shift+two-finger movement orbits. Pinch or Ctrl/Cmd+vertical movement zooms. No click is needed.",
+                NavMode::Orbit => "Two-finger movement orbits; Shift+two-finger movement pans. Pinch or Ctrl/Cmd+vertical movement zooms. No click is needed.",
+                NavMode::Zoom => "Vertical two-finger movement and pinch zoom.",
+            };
+            ui_kit::text(ui, crate::i18n::tr_label(help), ui_kit::Text::Hint("trackpad"));
         });
         if nav_preset(&app.preferences.nav).bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit) {
             let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
