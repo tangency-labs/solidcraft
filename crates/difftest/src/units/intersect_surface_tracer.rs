@@ -14,8 +14,10 @@
 //! of ops; both sides produce the record documented in the ffi module, reported as the values
 //! `rec`.
 //!
-//! Deferred cases: `DoTrace` (the surface cache lookup `smsurf_GetSurfaceCache`,
-//! `surface.surface_p1`).
+//! `DoTrace` runs on the surface's cache (`smsurf_GetSurfaceCache` through
+//! `tracer_surface_cache`). Deferred cases: traces reaching the general `DropCurve`
+//! (`intersect.surface_drop_lib_p3`) or the surface cache's unported members
+//! (`surface.surface_cache_p1`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,12 +26,12 @@ use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::solution_array::{Solution, SolutionArray, SolutionType};
+use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType};
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::intersect::surface_tracer::{
-    flush_curve, tracer_surface_cache, BoundaryCurve, SurfaceTrace, SurfaceTracer, TraceOutput,
-    TracePoint, TracePointType,
+    do_trace_base, flush_curve, tracer_surface_cache, BoundaryCurve, SurfaceTrace, SurfaceTracer,
+    TraceOutput, TracePoint, TracePointType,
 };
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -753,11 +755,20 @@ fn run_op(
         }
         OpIn::DoTrace => {
             // smsurf_GetSurfaceCache: the cache the trace runs on
-            st(tracer_surface_cache::<()>(k, &t.base))?
+            let mut cache = st(tracer_surface_cache::<CacheObj>(k, &t.base))?
                 .map_err(|_| Fail::Harness(harness("surface cache lookup failed")))?;
-            return Err(Fail::Harness(harness(
-                "the surface cache store cannot hand out caches yet",
-            )));
+            // DoTrace(ctx, &tol, &ang, ..) with the current tolerances
+            let (tol, ang) = (t.base.approx_tol_3d, t.base.ang_tol_rad);
+            match st(do_trace_base(t, k, &mut cache, Some(tol), Some(ang)))? {
+                Ok(r) => {
+                    o.push(0.0);
+                    put_curves(o, &r.curves_3d);
+                    put_curves(o, &r.uv_curves);
+                    put_doubles(o, &r.max_drop_dists);
+                    put_doubles(o, &r.deviations);
+                }
+                Err(s) => o.push(s),
+            }
         }
     }
     Ok(())
@@ -811,6 +822,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     put_doubles(&mut o, &acc.max_drop_dists);
     put_doubles(&mut o, &acc.deviations);
     Ok(Output::new().values("rec", o))
+}
+
+/// The solution object of the trace's surface cache (its solves keep no objects).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CacheObj;
+
+impl SolutionObject for CacheObj {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Surface
+    }
 }
 
 fn op_code(op: &OpIn) -> f64 {

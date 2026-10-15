@@ -313,8 +313,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// # Errors
     ///
     /// Those of the tree construction, the implanting and the classification;
-    /// [`SolidError::Unported`] for the unported callees (always, today: the tree
-    /// construction or `GetFace`).
+    /// [`SolidError::Unported`] for the unported callees (`GetFace` and those of the tree
+    /// construction).
     pub fn build_tree(&mut self, k: &Kernel) -> Result<()> {
         // prevent bad recursion back into BuildTree
         let saved = self.base.face_containment_done;
@@ -1382,10 +1382,10 @@ mod tests {
     }
 
     #[test]
-    fn build_tree_unported_restores_state() {
+    fn build_tree_without_face_restores_state() {
         let k = Kernel::default();
         let mut c: TrimSrfCache<i64> = TrimSrfCache::new(plane(), SurfaceCacheOptions::default());
-        assert!(c.build_tree(&k).unwrap_err().is_unported());
+        c.build_tree(&k).unwrap();
         assert_eq!(c.base().face_containment_done, FaceContainment::NotDone);
     }
 }

@@ -942,28 +942,20 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282190",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282191",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1007,8 +999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0006",
@@ -1018,16 +1010,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282197",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -1054,16 +1042,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282200",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -1171,8 +1155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0022",
@@ -1222,16 +1206,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282217",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -1247,8 +1227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0029",
@@ -1398,16 +1378,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0043",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282233",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -1455,8 +1431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0048",
@@ -1475,8 +1451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -1519,8 +1495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0054",
@@ -1734,16 +1710,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282264",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -1907,8 +1879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0091",
@@ -2055,8 +2027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0104",
@@ -2142,16 +2114,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0113",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282303",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -2198,16 +2166,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0118",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282308",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -2270,28 +2234,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0124",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282314",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0125",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282315",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -2358,21 +2314,17 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0132",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282322",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0133",
@@ -2402,16 +2354,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0136",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282326",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -2626,16 +2574,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0157",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282347",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -2867,8 +2811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0180",
@@ -2938,16 +2882,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282376",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -3082,16 +3022,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0200",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282390",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -3118,16 +3054,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282393",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -3235,8 +3167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0213",
@@ -3290,16 +3222,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0218",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282408",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -3355,8 +3283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0225",
@@ -3658,16 +3586,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0253",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282443",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3778,16 +3702,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282455",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -3846,16 +3766,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0271",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282461",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -3883,8 +3799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0274",
@@ -3907,8 +3823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0276",
@@ -3927,8 +3843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0278",
@@ -4067,8 +3983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0292",
@@ -4166,16 +4082,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282491",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -4239,8 +4151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0308",
@@ -4486,16 +4398,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0331",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282521",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -4523,8 +4431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0334",
@@ -4763,8 +4671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0357",
@@ -4854,28 +4762,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0366",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282556",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0367",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282557",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -5267,8 +5167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0406",
@@ -5623,8 +5523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0441",
@@ -5794,16 +5694,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0457",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282647",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -5947,8 +5843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0472",
@@ -6238,16 +6134,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282689",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -6386,16 +6278,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0513",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282703",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -6406,16 +6294,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0515",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282705",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -6482,16 +6366,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0522",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282712",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -6594,16 +6474,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0532",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282722",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -6687,8 +6563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0541",
@@ -6722,16 +6598,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0544",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282734",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -6747,8 +6619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0546",
@@ -7430,16 +7302,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0611",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282801",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7470,16 +7338,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0615",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282805",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -7514,16 +7378,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0619",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282809",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -7546,28 +7406,20 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0622",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282812",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0623",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282813",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -7646,16 +7498,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0631",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282821",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -7722,16 +7570,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0638",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282828",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -7742,21 +7586,17 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282830",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0641",
@@ -7786,16 +7626,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0644",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282834",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -7911,8 +7747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0655",
@@ -7986,16 +7822,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0662",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282852",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -8022,16 +7854,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0665",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282855",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -8099,8 +7927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0672",
@@ -8135,8 +7963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0675",
@@ -8183,8 +8011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0679",
@@ -8254,16 +8082,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0685",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282875",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8275,8 +8099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0687",
@@ -8519,8 +8343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0710",
@@ -8543,8 +8367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0712",
@@ -8663,8 +8487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0723",
@@ -8710,16 +8534,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0727",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282917",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -8758,16 +8578,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0731",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282921",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -8906,16 +8722,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0745",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282935",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9055,8 +8867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0759",
@@ -9094,16 +8906,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0763",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282953",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -9171,8 +8979,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0770",
@@ -9222,28 +9030,20 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0775",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282965",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0776",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282966",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9266,16 +9066,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0779",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845282969",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -9471,8 +9267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0798",
@@ -9630,16 +9426,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0813",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283003",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
@@ -9787,8 +9579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0827",
@@ -9867,8 +9659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0834",
@@ -9887,8 +9679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0836",
@@ -9927,8 +9719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0840",
@@ -9938,16 +9730,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0841",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283031",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -10014,16 +9802,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0849",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283039",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -10299,8 +10083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0875",
@@ -10399,8 +10183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0884",
@@ -10526,16 +10310,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0897",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283087",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -11094,16 +10874,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0949",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283139",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11182,16 +10958,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0958",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283148",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11218,16 +10990,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0962",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283152",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -11334,16 +11102,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0972",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283162",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
@@ -11638,16 +11402,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283191",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -11678,21 +11438,17 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283195",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1006",
@@ -12123,8 +11879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1046",
@@ -12255,8 +12011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1058",
@@ -12314,16 +12070,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1063",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283253",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12611,8 +12363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1092",
@@ -12631,8 +12383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1094",
@@ -12698,16 +12450,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1100",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283290",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12731,8 +12479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1103",
@@ -12950,16 +12698,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1124",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283314",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -12995,8 +12739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1128",
@@ -13075,8 +12819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1135",
@@ -13098,16 +12842,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1137",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283327",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13150,16 +12890,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1142",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283332",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -13175,8 +12911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1144",
@@ -13187,8 +12923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1145",
@@ -13231,8 +12967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1149",
@@ -13395,8 +13131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1165",
@@ -13482,16 +13218,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1173",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283363",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -13538,16 +13270,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1178",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283368",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
@@ -13575,8 +13303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1181",
@@ -13834,16 +13562,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1206",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283396",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14494,16 +14218,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1270",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283460",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -14618,16 +14338,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1282",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283472",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -14983,8 +14699,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1314",
@@ -15014,16 +14730,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1317",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283507",
-      "values_compared": 0
+      "values_compared": 28
     },
     {
       "deferred": {
@@ -15070,16 +14782,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1322",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283512",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -15122,16 +14830,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1327",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283517",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15203,8 +14907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1334",
@@ -15343,8 +15047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1348",
@@ -15507,8 +15211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1363",
@@ -15519,8 +15223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1364",
@@ -15634,16 +15338,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1375",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283565",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15667,8 +15367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1378",
@@ -16035,8 +15735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1412",
@@ -16202,28 +15902,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1427",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283617",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1428",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283618",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -16266,16 +15958,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1433",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283623",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -16303,8 +15991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1436",
@@ -16463,8 +16151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1451",
@@ -16498,16 +16186,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1454",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283644",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -16546,16 +16230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1458",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283648",
-      "values_compared": 0
+      "values_compared": 28
     },
     {
       "deferred": {
@@ -16642,16 +16322,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1468",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283658",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "deferred": {
@@ -16666,16 +16342,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1470",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283660",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -16834,16 +16506,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1485",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283675",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -16910,16 +16578,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1492",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023561391845283682",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -17026,16 +16690,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_apart_plane_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -17070,16 +16730,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_apart_bilinear_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -17122,16 +16778,12 @@
       "values_compared": 87
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_corner_touch_out_plane_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
@@ -17174,16 +16826,12 @@
       "values_compared": 87
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_corner_touch_out_bilinear_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
@@ -17235,8 +16883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_corner_touch_back_plane_cachetree",
@@ -17295,8 +16943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_corner_touch_back_bilinear_cachetree",
@@ -17346,16 +16994,12 @@
       "values_compared": 87
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_corner_coplanar_plane_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -17390,16 +17034,12 @@
       "values_compared": 87
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_corner_coplanar_bilinear_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "deferred": {
@@ -17451,8 +17091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_edge_coplanar_plane_cachetree",
@@ -17494,16 +17134,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_edge_coplanar_bilinear_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 28
     },
     {
       "deferred": {
@@ -17555,8 +17191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_edge_fold_up_plane_cachetree",
@@ -17615,8 +17251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_edge_fold_up_bilinear_cachetree",
@@ -17675,8 +17311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_edge_fold_45_plane_cachetree",
@@ -17735,8 +17371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_edge_fold_45_bilinear_cachetree",
@@ -17778,16 +17414,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_parallel_gap_plane_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -17822,16 +17454,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_parallel_gap_bilinear_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -17883,8 +17511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_coincident_plane_cachetree",
@@ -17935,8 +17563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_coincident_bilinear_cachetree",
@@ -17995,8 +17623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_coincident_swapped_plane_cachetree",
@@ -18047,8 +17675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_coincident_swapped_bilinear_cachetree",
@@ -18090,16 +17718,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_near_parallel_2deg_plane_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -18134,16 +17758,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "edge_near_parallel_2deg_bilinear_cachetree",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -18195,8 +17815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_crossing_plane_cachetree",
@@ -18255,8 +17875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_crossing_bilinear_cachetree",
@@ -18315,8 +17935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "edge_crossing_tiny_plane_cachetree",
@@ -18375,8 +17995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "edge_crossing_tiny_bilinear_cachetree",
@@ -18395,15 +18015,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 1148,
+  "cases_deferred": 1053,
   "cases_failed": 0,
-  "cases_passed": 577,
+  "cases_passed": 672,
   "cases_total": 1725,
   "deferred_by_unit": {
-    "surface.surface_cache_p1": 449,
-    "surface.surface_p11": 234,
-    "surface.surface_p6": 174,
-    "surface.surface_p8": 291
+    "surface.surface_cache_p1": 488,
+    "surface.surface_p11": 252,
+    "surface.surface_p8": 313
   },
   "max_rel_err": 0.0,
   "pass": true,

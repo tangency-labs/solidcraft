@@ -63,8 +63,7 @@
 //! - **Unported callees.** Part 2 now supplies the local traversal and its six
 //!   local classes. Curve/curve solves, surface solves, topology tolerances and
 //!   face classification still propagate their owning units' unported errors.
-//!   Face silhouettes use the ported surface cache factory; building its tree
-//!   needs `surface.surface_p6`. The face-silhouette loop names temporary curves
+//!   Face silhouettes use the ported surface cache factory. The face-silhouette loop names temporary curves
 //!   by their face owner through the adapter.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;

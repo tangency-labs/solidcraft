@@ -462,16 +462,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "trimmed_plane_trapezoid",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/nurbs.b_spline_surface_p2/cases.json#57 (upstream source/SMLib/src/SmBSplineSurface.cpp CreateTrimmedPlaneFromRuled (not a rectangle))",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -770,16 +766,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0032",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781682",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -1086,16 +1078,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0071",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781721",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -1626,16 +1614,12 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0138",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781788",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -3262,16 +3246,12 @@
       "values_compared": 288
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152781991",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -4294,16 +4274,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0469",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782119",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -5810,16 +5786,12 @@
       "values_compared": 142
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0658",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782308",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -6082,16 +6054,12 @@
       "values_compared": 379
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0691",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782341",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -6126,16 +6094,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CreateNaturalUVTrimCurves",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0696",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2892966347152782346",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -6163,13 +6127,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 14,
+  "cases_deferred": 5,
   "cases_failed": 0,
-  "cases_passed": 749,
+  "cases_passed": 758,
   "cases_total": 763,
   "deferred_by_unit": {
-    "surface.cone_p2": 5,
-    "surface.surface_p6": 9
+    "surface.cone_p2": 5
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -2155,8 +2155,8 @@ where
 ///
 /// # Errors
 ///
-/// Those of the cache builds ([`SolidError::Unported`]: every tree build needs
-/// `SmSurface::CalculateContinuities`, `surface.surface_p6`).
+/// Those of the cache builds (the continuities of the tree build:
+/// `SmSurface::CalculateContinuities`).
 pub fn tracer_surface_cache<O: Copy + PartialEq>(
     k: &Kernel,
     t: &SurfaceTracer<'_>,
@@ -2295,9 +2295,8 @@ mod tests {
         let mut uv = Vec2::ZERO;
         assert!(!t.does_point_lie_on_curve(&k, &mut uv, true).unwrap());
         assert!(!t.test_iso_curve(&k, SurfParamType::U, 0.0).unwrap());
-        assert!(tracer_surface_cache::<()>(&k, &t)
-            .unwrap_err()
-            .is_unported());
+        // (the cache builds: its continuities are surface::surface::p6)
+        assert!(tracer_surface_cache::<()>(&k, &t).is_ok());
     }
 
     #[test]

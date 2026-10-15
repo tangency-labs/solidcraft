@@ -1099,8 +1099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -1803,8 +1803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -1911,8 +1911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0110",
@@ -2115,8 +2115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -2303,8 +2303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0155",
@@ -2407,8 +2407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0167",
@@ -2551,8 +2551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -2899,8 +2899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0226",
@@ -3435,8 +3435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0291",
@@ -3671,8 +3671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0319",
@@ -4171,8 +4171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0379",
@@ -4787,8 +4787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0454",
@@ -5139,8 +5139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0496",
@@ -5259,8 +5259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0510",
@@ -5563,8 +5563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0547",
@@ -5843,8 +5843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0580",
@@ -6459,8 +6459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0652",
@@ -6511,8 +6511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0658",
@@ -7331,8 +7331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0759",
@@ -8039,8 +8039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0843",
@@ -8167,8 +8167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0858",
@@ -8235,8 +8235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0866",
@@ -8339,8 +8339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0878",
@@ -8351,8 +8351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0879",
@@ -8643,8 +8643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0913",
@@ -8883,8 +8883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0942",
@@ -9287,8 +9287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0991",
@@ -9959,8 +9959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1073",
@@ -10207,8 +10207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1103",
@@ -10407,8 +10407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1127",
@@ -10659,8 +10659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1158",
@@ -11363,8 +11363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1244",
@@ -11655,8 +11655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1280",
@@ -11927,8 +11927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1313",
@@ -11995,8 +11995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1321",
@@ -12211,8 +12211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1347",
@@ -12311,8 +12311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1359",
@@ -12323,8 +12323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1360",
@@ -13671,8 +13671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1525",
@@ -13935,8 +13935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1557",
@@ -14103,8 +14103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1577",
@@ -14379,8 +14379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1610",
@@ -14467,8 +14467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1620",
@@ -14543,8 +14543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1629",
@@ -14791,8 +14791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1659",
@@ -14883,8 +14883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1670",
@@ -14895,8 +14895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1671",
@@ -15331,8 +15331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1724",
@@ -15367,8 +15367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1728",
@@ -15639,8 +15639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1761",
@@ -16143,8 +16143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1822",
@@ -17107,8 +17107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1940",
@@ -17415,8 +17415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalPointSolve",
+        "unit": "surface.surface_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen1977",
@@ -17583,8 +17583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmIsoCurve over a non-B-spline surface",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen1996",
@@ -17725,10 +17725,10 @@
   "cases_total": 2125,
   "deferred_by_unit": {
     "curve.crv_on_surf": 24,
+    "curve.iso_curve": 22,
     "intersect.curve_class_p4": 6,
-    "surface.surface_p4": 54,
+    "surface.surface_p4": 86,
     "surface.surface_p5": 20,
-    "surface.surface_p6": 54,
     "topology.edge": 9,
     "topology.face_p2": 10,
     "topology.vertex": 2

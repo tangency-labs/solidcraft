@@ -5351,8 +5351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen0000",
@@ -6291,8 +6291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0116",
@@ -7539,8 +7539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0265",
@@ -9835,8 +9835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0544",
@@ -10123,8 +10123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0579",
@@ -12427,8 +12427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0860",
@@ -12535,8 +12535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0872",
@@ -12787,8 +12787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0902",
@@ -13115,8 +13115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0942",
@@ -14398,16 +14398,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1099",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548449734098095538",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14839,8 +14835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1152",
@@ -16343,8 +16339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1332",
@@ -16911,8 +16907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1400",
@@ -18415,8 +18411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1583",
@@ -18611,8 +18607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1606",
@@ -19119,8 +19115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen1668",
@@ -19903,8 +19899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen1764",
@@ -20890,16 +20886,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen1881",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548449734098096320",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -22759,8 +22751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen2108",
@@ -23442,16 +23434,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen2190",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9548449734098096629",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -24755,8 +24743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen2349",
@@ -24851,8 +24839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::GlobalCurveIntersect",
+        "unit": "surface.surface_p8"
       },
       "max_rel_err": 0.0,
       "name": "gen2360",
@@ -29203,8 +29191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen2889",
@@ -29687,8 +29675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurface::CalculateBoundingBox",
+        "unit": "surface.surface_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen2949",
@@ -30111,15 +30099,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 207,
+  "cases_deferred": 204,
   "cases_failed": 0,
-  "cases_passed": 3453,
+  "cases_passed": 3456,
   "cases_total": 3660,
   "deferred_by_unit": {
+    "surface.surface_p1": 15,
     "surface.surface_p11": 59,
     "surface.surface_p4": 52,
-    "surface.surface_p6": 24,
-    "surface.surface_p8": 72
+    "surface.surface_p8": 78
   },
   "max_rel_err": 0.0,
   "pass": true,

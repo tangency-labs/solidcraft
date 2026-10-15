@@ -2511,8 +2511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_14_0",
@@ -2523,8 +2523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_14_1",
@@ -2631,8 +2631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_14_0",
@@ -2643,8 +2643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_14_1",
@@ -2751,8 +2751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_14_0",
@@ -2763,8 +2763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_14_1",
@@ -2871,8 +2871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_14_0",
@@ -2883,8 +2883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::CalculateContinuities",
-        "unit": "surface.surface_p6"
+        "symbol": "SmSurfaceSilhouette::DoTrace",
+        "unit": "intersect.surface_silhouette"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_14_1",
@@ -19620,9 +19620,9 @@
   "cases_passed": 2384,
   "cases_total": 2429,
   "deferred_by_unit": {
+    "intersect.surface_silhouette": 8,
     "surface.surface_p11": 20,
     "surface.surface_p4": 8,
-    "surface.surface_p6": 8,
     "surface.surface_p8": 4,
     "topology.brep_p1": 2,
     "topology.edge": 3

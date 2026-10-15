@@ -29,10 +29,12 @@
 //!   ([`BSplineSurface::natural_uv_domain`], [`BSplineSurface::knots`]),
 //!   `EvaluatePoint` to [`BSplineSurface::evaluate_point`] and `Evaluate` to
 //!   [`BSplineSurface::evaluate`] (whose `[nu + 1][nv + 1]` result is flattened, as
-//!   upstream writes it into the curve's array); `CalculateContinuities` (not overridden:
-//!   `SmSurface::CalculateContinuities`, unit `surface.surface_p6`) returns
-//!   [`SolidError::Unported`], as does `SmSurface::ReadFromDB`
-//!   ([`Surface::read_from_db`]) for the surface types not ported yet. `CreateUVIsoLine` builds an `SmLine`
+//!   upstream writes it into the curve's array); `CalculateContinuities` passes the
+//!   call to `SmSurface::CalculateContinuities` (not overridden; unit
+//!   `surface.surface_p6`) with a default kernel, as its iso curves need no trim
+//!   domain (upstream uses the surface's context). `SmSurface::ReadFromDB`
+//!   ([`Surface::read_from_db`]) returns [`SolidError::Unported`] for the surface
+//!   types not ported yet. `CreateUVIsoLine` builds an `SmLine`
 //!   ([`crate::curve::line::Line`]).
 //! - **Equality.** `operator==` accepts identical surface pointers before comparing the
 //!   surfaces (`SmBSplineSurface::operator==`); the port always compares the surfaces
@@ -383,14 +385,13 @@ impl IsoCurve {
 /// `SmSurface::CalculateContinuities(eSurfParam, ..)` (not overridden by
 /// `SmBSplineSurface`).
 fn surface_calculate_continuities(
-    _srf: &BSplineSurface,
-    _surf_param: SurfParamType,
+    srf: &BSplineSurface,
+    surf_param: SurfParamType,
 ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
-    // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
-    Err(SolidError::Unported {
-        upstream: "SmSurface::CalculateContinuities",
-        unit: "surface.surface_p6",
-    })
+    // (its iso curves are made without a trim domain, which never reaches the kernel;
+    // upstream uses the surface's context)
+    let k = Kernel::default();
+    Surface::from(srf.copy()).calculate_continuities(&k, surf_param)
 }
 
 /// `SmSurface::ReadFromDB(type, db, .., version)`: the surface of the record (the

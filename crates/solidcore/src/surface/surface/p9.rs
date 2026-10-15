@@ -447,20 +447,23 @@ fn tangent_drop(surface: &Surface, uv: Point2, point: Point3) -> Result<Point2> 
     .copied()
     .ok_or(SolidError::sm_err(OP))
 }
+/// `SmSurface::LocalCurveIntersect` (virtual; no kind overrides it).
 fn intersect_surface_curve(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
-    _uv: Point2,
-    _t: f64,
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
+    uv: Point2,
+    t: f64,
 ) -> Result<Option<CsiIntersection>> {
-    // UNPORTED(surface.surface_p6): SmSurface::LocalCurveIntersect
-    Err(SolidError::unported(
-        "SmSurface::LocalCurveIntersect",
-        "surface.surface_p6",
-    ))
+    Ok(surface
+        .local_curve_intersect(domain, curve, interval, tol, uv, t)?
+        .map(|x| CsiIntersection {
+            uv: x.uv,
+            parameter: x.t,
+            deviation: x.deviation,
+        }))
 }
 fn filter_solution<O>(
     _surface: &Surface,

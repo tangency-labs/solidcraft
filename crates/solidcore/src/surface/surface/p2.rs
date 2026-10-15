@@ -96,8 +96,7 @@
 //!   value after them (`GetNaturalUVDomain`, `GetDegree`, ...) the port returns the
 //!   same value.
 //! - **Unported callees.** `GlobalSurfaceIntersect` runs
-//!   `SmSurfaceIntersector::DoIntersection` (unit `intersect.surface_intersector_p5`),
-//!   whose surface caches need `SmSurface::CalculateContinuities` (`surface.surface_p6`);
+//!   `SmSurfaceIntersector::DoIntersection` (unit `intersect.surface_intersector_p5`);
 //!   `PointBasedSurfaceIntersect` builds the `SmAdvSurfaceIntersector` and then needs
 //!   `DoPointIntersection` (`intersect.surface_intersector_p4`); `CurveOnClassify` needs
 //!   `SmCurveClassification` (`intersect.curve_class_p*`); `CreatePlaneWith3DCurves`

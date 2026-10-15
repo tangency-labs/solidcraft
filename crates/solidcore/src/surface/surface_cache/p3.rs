@@ -55,9 +55,8 @@
 //! - **Ignored statuses** stay ignored (`CalculateBoundingBox` of the u split halves,
 //!   `ImplantPolyEdge`, `ImplantEdgeuse`, `sm_ComputeBezierApproximation`), except
 //!   [`SolidError::Unported`], which is always propagated.
-//! - **Unported calls.** `SmSurface::CalculateContinuities` (`surface.surface_p6`, every
-//!   tree build) and `SmSurface::GetSingularities` (`surface.surface_p3`, pole search)
-//!   return [`SolidError::Unported`].
+//! - **Unported calls.** `SmSurface::GetSingularities` (`surface.surface_p3`, pole search)
+//!   returns [`SolidError::Unported`].
 //! - **Virtual calls.** `SubdivideToTolerances` calls the virtual
 //!   `TestAgainstTolerances`: the `_with` variants
 //!   ([`SurfaceCache::subdivide_to_tolerances_with`], [`SurfaceCache::build_tree_with`],
@@ -905,8 +904,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.auxs_mut().clear();
 
         // set the continuities (continuity is in the opposite direction to the query)
-        let u_conts = calculate_continuities(self.surface(), SurfParamType::U)?;
-        let v_conts = calculate_continuities(self.surface(), SurfParamType::V)?;
+        let u_conts = calculate_continuities(k, self.surface(), SurfParamType::U)?;
+        let v_conts = calculate_continuities(k, self.surface(), SurfParamType::V)?;
         self.set_continuities(u_conts, v_conts);
         self.build_tree_base_nodes(k, u_count, v_count, tester)
     }
@@ -1116,12 +1115,12 @@ fn half_box(half: &Surface, domain: &Extent2d) -> Result<crate::geom::extent3d::
 
 /// `SmSurface::CalculateContinuities(eSurfParam, ..)`: the continuity at every unique
 /// knot of the surface in `dir`.
-fn calculate_continuities(_surface: &Surface, _dir: SurfParamType) -> Result<Vec<ContinuityType>> {
-    // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
-    Err(SolidError::unported(
-        "SmSurface::CalculateContinuities",
-        "surface.surface_p6",
-    ))
+fn calculate_continuities(
+    k: &Kernel,
+    surface: &Surface,
+    dir: SurfParamType,
+) -> Result<Vec<ContinuityType>> {
+    Ok(surface.calculate_continuities(k, dir)?.1)
 }
 
 /// `sm_InitNurbSurfaceMemory` with the sizes of `like` on zero-filled block memory.

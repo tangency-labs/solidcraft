@@ -286,14 +286,17 @@ fn new_plane(point: Point3, x_dir: Vec3, y_dir: Vec3, domain: &Extent2d) -> Plan
 /// `SmSurface::CreateNaturalUVTrimCurves(domain, SM_SP_U, FALSE, ..)`: the 3D trimming
 /// curves and their orientations.
 fn create_natural_uv_trim_curves(
-    _srf: &BSplineSurface,
-    _domain: &Extent2d,
+    k: &Kernel,
+    srf: &BSplineSurface,
+    domain: &Extent2d,
 ) -> Result<(Vec<SmCurve>, Vec<OrientType>)> {
-    // UNPORTED(surface.surface_p6): SmSurface::CreateNaturalUVTrimCurves
-    Err(SolidError::Unported {
-        upstream: "SmSurface::CreateNaturalUVTrimCurves",
-        unit: "surface.surface_p6",
-    })
+    let t = Surface::from(srf.copy()).create_natural_uv_trim_curves(
+        k,
+        domain,
+        SurfParamType::U,
+        false,
+    )?;
+    Ok((t.curves_3d, t.orients))
 }
 
 /// `SmSurface::IsDegeneratePoint(d3DTol, pUVDomain)` (the base body, on a copy of the
@@ -903,9 +906,10 @@ impl BSplineSurface {
     /// # Errors
     ///
     /// `SM_ERR` when a curve has no NURB or the surfaces cannot be built or the curves
-    /// do not lie on one plane; [`SolidError::Unported`] for the non-rectangular case
-    /// (`SmSurface::Evaluate1stDerivatives`).
+    /// do not lie on one plane; those of `SmSurface::CreateNaturalUVTrimCurves` (the
+    /// kernel builds its iso curves) for the non-rectangular case.
     pub fn create_trimmed_plane_from_ruled(
+        k: &Kernel,
         curve1: &BSplineCurve,
         curve2: &BSplineCurve,
     ) -> Result<TrimmedPlane> {
@@ -969,7 +973,7 @@ impl BSplineSurface {
         }
 
         let (trimming_curves, trim_orientations) =
-            create_natural_uv_trim_curves(&ruled_surface, &domain)?;
+            create_natural_uv_trim_curves(k, &ruled_surface, &domain)?;
         let [c0, c1, c2, c3] = plane.corners;
         let plane = Self::create_bilinear_surface(c0, c1, c2, c3)?;
         Ok(TrimmedPlane {
@@ -1669,7 +1673,7 @@ mod tests {
             Point3::new(1.0, 1.0, 0.0),
         )
         .expect("c2");
-        let r = BSplineSurface::create_trimmed_plane_from_ruled(&c1, &c2);
+        let r = BSplineSurface::create_trimmed_plane_from_ruled(&Kernel::default(), &c1, &c2);
         // the lines run the same way: param1 = 0, param2 = 1
         let t = r.expect("plane");
         assert!(t.plane.is_bilinear());

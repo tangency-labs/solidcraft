@@ -822,12 +822,17 @@ impl Surface {
                 Ok(planar_of(s.base(), &self.natural_uv_domain())?.is_planar(tol_3d))
             }
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-                // SmSurface::CalculateBoundingBox (surface::surface::p1) builds a surface
-                // cache, whose tree build needs the continuities
-                // UNPORTED(surface.surface_p6): SmSurface::CalculateContinuities
+                // DISPATCH GAP: SmSurface::CalculateBoundingBox
+                // (Surface::base_calculate_bounding_box, surface::surface::p1) builds the
+                // surface's cache, which needs the kernel this signature does not take. No
+                // UNPORTED marker: the callees are ported (the continuities of the cache's
+                // tree build are surface::surface::p6); the error names the owner of the
+                // base body. Once the kernel is plumbed, the next blocker for these kinds is
+                // surface.surface_p5: CalculateContinuities calls the base
+                // CreateIsoParametricCurve, which that unit owns.
                 Err(SolidError::unported(
-                    "SmSurface::CalculateContinuities",
-                    "surface.surface_p6",
+                    "SmSurface::CalculateBoundingBox",
+                    "surface.surface_p1",
                 ))
             }
         }
@@ -1239,8 +1244,8 @@ impl Surface {
     ///
     /// `SM_ERR_INVALID_INPUT` for a zero projection vector; `SM_ERR_NULL_POINTER`
     /// without a surface cache; those of the continuities, the boxes, the sweep, its
-    /// move and the intersection; [`SolidError::Unported`] from unported callees (the
-    /// surface cache: `SmSurface::CalculateContinuities`, `surface.surface_p6`).
+    /// move and the intersection; [`SolidError::Unported`] from unported callees of the
+    /// surface cache and the intersector.
     pub fn create_parallel_projection_curves(
         &self,
         k: &crate::kernel::Kernel,
@@ -2226,14 +2231,11 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for SsGlobalSolver<'t, '_, O
 
     fn identical_solutions(
         &self,
-        _sol1: &Solution<O>,
-        _sol2: &Solution<O>,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        // UNPORTED(surface.surface_p6): SmSSGlobalSolver::IdenticalSolutions
-        Err(SolidError::unported(
-            "SmSSGlobalSolver::IdenticalSolutions",
-            "surface.surface_p6",
-        ))
+        // (surface::surface::p6)
+        self.solutions_identical(sol1, sol2)
     }
 }
 
