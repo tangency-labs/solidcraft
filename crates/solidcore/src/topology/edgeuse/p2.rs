@@ -785,6 +785,7 @@ mod tests {
             .add_vertex_record(Vertex {
                 point: Point3::new(0.0, 0.0, 0.0),
                 tolerance: 0.0,
+                ..Vertex::default()
             })
             .unwrap();
         let eu = EdgeuseId::from_index(0);

@@ -725,7 +725,11 @@ fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
     for _ in 0..n_v {
         let point = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
         let tolerance = rd.num()?;
-        vertices.push(Vertex { point, tolerance });
+        vertices.push(Vertex {
+            point,
+            tolerance,
+            ..Vertex::default()
+        });
     }
     if rd.at != ex.len() {
         return Err(harness("export: trailing data"));

@@ -1,0 +1,9901 @@
+{
+ "cases": [
+  {
+   "name": "scale1em06_turn0p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn0p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1em06_turn0p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn0p49_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.99996343090164e-06,
+        8.55200908682682e-09,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn0p49_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.99996343090164e-06,
+        8.55200908682682e-09,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1em06_turn0p49_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.99996343090164e-06,
+        8.55200908682682e-09,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn0p51_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999603847661207e-06,
+        8.901061644095575e-09,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn0p51_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999603847661207e-06,
+        8.901061644095575e-09,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1em06_turn0p51_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999603847661207e-06,
+        8.901061644095575e-09,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn180p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473532e-22,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn180p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473532e-22,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1em06_turn180p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473532e-22,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn90p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        1e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_turn90p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        1e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1em06_turn90p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        1e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1em06_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1e-15
+   }
+  },
+  {
+   "name": "scale1em06_setpt_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     1e-06,
+     9.999999999999999e-14,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale1em06_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1e-15
+   }
+  },
+  {
+   "name": "scale1em06_setpt_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1e-06,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2e-06,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     1e-06,
+     9.999999999999999e-14,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale1em06_face_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1e-06,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "scale0p001_turn0p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn0p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale0p001_turn0p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn0p49_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0019999634309016403,
+        8.552009086826822e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn0p49_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0019999634309016403,
+        8.552009086826822e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale0p001_turn0p49_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0019999634309016403,
+        8.552009086826822e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn0p51_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0019999603847661207,
+        8.901061644095576e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn0p51_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0019999603847661207,
+        8.901061644095576e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale0p001_turn0p51_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0019999603847661207,
+        8.901061644095576e-06,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn180p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473531e-19,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn180p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473531e-19,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale0p001_turn180p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473531e-19,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn90p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.001,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_turn90p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.001,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale0p001_turn90p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.001,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale0p001_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1.0000000000000002e-12
+   }
+  },
+  {
+   "name": "scale0p001_setpt_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     0.001,
+     1e-10,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale0p001_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1.0000000000000002e-12
+   }
+  },
+  {
+   "name": "scale0p001_setpt_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0.001,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.002,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     0.001,
+     1e-10,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale0p001_face_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0.001,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p49_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999.96343090164,
+        8.552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p49_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999.96343090164,
+        8.552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p49_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999.96343090164,
+        8.552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p51_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999.9603847661206,
+        8.901061644095575,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p51_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999.9603847661206,
+        8.901061644095575,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000p0_turn0p51_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999.9603847661206,
+        8.901061644095575,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn180p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473532e-13,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn180p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473532e-13,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000p0_turn180p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473532e-13,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn90p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0000000000001,
+        1000.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_turn90p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0000000000001,
+        1000.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000p0_turn90p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0000000000001,
+        1000.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000p0_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1.0000000000000002e-06
+   }
+  },
+  {
+   "name": "scale1000p0_setpt_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     1000.0,
+     9.999999999999999e-05,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale1000p0_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1.0000000000000002e-06
+   }
+  },
+  {
+   "name": "scale1000p0_setpt_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     1000.0,
+     9.999999999999999e-05,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale1000p0_face_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1000.0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p49_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999963.43090164,
+        8552.009086826822,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p49_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999963.43090164,
+        8552.009086826822,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p49_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999963.43090164,
+        8552.009086826822,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p51_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999960.3847661205,
+        8901.061644095576,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p51_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999960.3847661205,
+        8901.061644095576,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000000p0_turn0p51_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1999960.3847661205,
+        8901.061644095576,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn180p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473533e-10,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn180p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473533e-10,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000000p0_turn180p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        0.0,
+        1.2246467991473533e-10,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn90p0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0000000001,
+        1000000.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_turn90p0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0000000001,
+        1000000.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "scale1000000p0_turn90p0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0000000001,
+        1000000.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "scale1000000p0_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "scale1000000p0_setpt_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     1000000.0,
+     0.09999999999999999,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale1000000p0_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "scale1000000p0_setpt_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1000000.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2000000.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "set_point",
+    "v": 1,
+    "p": [
+     1000000.0,
+     0.09999999999999999,
+     0
+    ]
+   }
+  },
+  {
+   "name": "scale1000000p0_face_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1000000.0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "zero_len_sml_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "tiny_sml_v0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "tiny_sml_v0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "tiny_sml_v0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_sml_v0_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 0,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "tiny_sml_v1_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "tiny_sml_v1_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "tiny_sml_v1_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_sml_v1_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 1,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "tiny_sml_v2_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 2
+   }
+  },
+  {
+   "name": "tiny_sml_v2_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "tiny_sml_v2_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 2,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_sml_v2_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 2,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "tiny_sml_v3_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 3
+   }
+  },
+  {
+   "name": "tiny_sml_v3_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 3
+   }
+  },
+  {
+   "name": "tiny_sml_v3_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 3,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_sml_v3_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        2,
+        3
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 3,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "zero_len_bsl_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "tiny_bsl_v0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "tiny_bsl_v0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "tiny_bsl_v0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_bsl_v0_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 0,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "tiny_bsl_v1_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "tiny_bsl_v1_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "tiny_bsl_v1_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_bsl_v1_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 1,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "tiny_bsl_v2_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 2
+   }
+  },
+  {
+   "name": "tiny_bsl_v2_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "tiny_bsl_v2_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 2,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_bsl_v2_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 2,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "tiny_bsl_v3_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 3
+   }
+  },
+  {
+   "name": "tiny_bsl_v3_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 3
+   }
+  },
+  {
+   "name": "tiny_bsl_v3_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 3,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "tiny_bsl_v3_common",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1.000000001,
+        0,
+        0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.000000001,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        1e-09,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 3,
+    "other": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "point_curve_v0_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "point_curve_v0_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "point_curve_v0_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v0_tan1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 1,
+    "e2": 3,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v0_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v0_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v1_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 1
+   }
+  },
+  {
+   "name": "point_curve_v1_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "point_curve_v1_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v1_tan1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 1,
+    "e2": 3,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v1_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v1_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 1,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v2_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 2
+   }
+  },
+  {
+   "name": "point_curve_v2_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "point_curve_v2_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 2,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v2_tan1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 2,
+    "e1": 1,
+    "e2": 3,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v2_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 2,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v2_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 2,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v3_q",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "query",
+    "v": 3
+   }
+  },
+  {
+   "name": "point_curve_v3_topo",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 3
+   }
+  },
+  {
+   "name": "point_curve_v3_tan",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 3,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v3_tan1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 3,
+    "e1": 1,
+    "e2": 3,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "point_curve_v3_gaps_g0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "gaps",
+    "v": 3,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_curve_v3_gaps_g1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 3,
+    "want_array": true,
+    "has_tol": false,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "settol0_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 0.0,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol0_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 0.0,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol1_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e-300,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol1_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e-300,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol2_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e-12,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol2_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e-12,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol3_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e-05,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol3_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e-05,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol4_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1.0000001e-05,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol4_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1.0000001e-05,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol5_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 9876543.21,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol5_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 9876543.21,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol6_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e+300,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol6_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": 1e+300,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol7_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": -0.001,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol7_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": -0.001,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol8_l0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": -0.0,
+    "only_if_larger": false,
+    "cascade": false
+   }
+  },
+  {
+   "name": "settol8_l1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": false,
+    "op": "set_tolerance",
+    "v": 1,
+    "tol": -0.0,
+    "only_if_larger": true,
+    "cascade": false
+   }
+  },
+  {
+   "name": "gaptol0_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "gaptol0_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "gaptol1_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": -0.0
+   }
+  },
+  {
+   "name": "gaptol1_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": -0.0
+   }
+  },
+  {
+   "name": "gaptol2_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": 1e-300
+   }
+  },
+  {
+   "name": "gaptol2_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1e-300
+   }
+  },
+  {
+   "name": "gaptol3_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": 1e-15
+   }
+  },
+  {
+   "name": "gaptol3_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1e-15
+   }
+  },
+  {
+   "name": "gaptol4_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "gaptol4_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "gaptol5_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": -1e-09
+   }
+  },
+  {
+   "name": "gaptol5_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": -1e-09
+   }
+  },
+  {
+   "name": "gaptol6_a0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": false,
+    "has_tol": true,
+    "tol": 1e+300
+   }
+  },
+  {
+   "name": "gaptol6_a1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "init_gaps": true,
+    "op": "gaps",
+    "v": 0,
+    "want_array": true,
+    "has_tol": true,
+    "tol": 1e+300
+   }
+  },
+  {
+   "name": "notify0_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 0
+   }
+  },
+  {
+   "name": "notify0_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 0
+   }
+  },
+  {
+   "name": "notify0_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 0
+   }
+  },
+  {
+   "name": "notify1_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 1
+   }
+  },
+  {
+   "name": "notify1_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 1
+   }
+  },
+  {
+   "name": "notify1_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 1
+   }
+  },
+  {
+   "name": "notify2_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 2
+   }
+  },
+  {
+   "name": "notify2_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 2
+   }
+  },
+  {
+   "name": "notify2_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 2
+   }
+  },
+  {
+   "name": "notify3_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 3
+   }
+  },
+  {
+   "name": "notify3_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 3
+   }
+  },
+  {
+   "name": "notify3_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 3
+   }
+  },
+  {
+   "name": "notify4_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 4
+   }
+  },
+  {
+   "name": "notify4_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 4
+   }
+  },
+  {
+   "name": "notify4_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 4
+   }
+  },
+  {
+   "name": "notify5_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 5
+   }
+  },
+  {
+   "name": "notify5_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 5
+   }
+  },
+  {
+   "name": "notify5_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 5
+   }
+  },
+  {
+   "name": "notify6_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 6
+   }
+  },
+  {
+   "name": "notify6_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 6
+   }
+  },
+  {
+   "name": "notify6_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 6
+   }
+  },
+  {
+   "name": "notify7_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 7
+   }
+  },
+  {
+   "name": "notify7_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 7
+   }
+  },
+  {
+   "name": "notify7_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 7
+   }
+  },
+  {
+   "name": "notify8_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 8
+   }
+  },
+  {
+   "name": "notify8_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 8
+   }
+  },
+  {
+   "name": "notify8_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 8
+   }
+  },
+  {
+   "name": "notify9_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 9
+   }
+  },
+  {
+   "name": "notify9_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 9
+   }
+  },
+  {
+   "name": "notify9_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 9
+   }
+  },
+  {
+   "name": "notify10_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 10
+   }
+  },
+  {
+   "name": "notify10_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 10
+   }
+  },
+  {
+   "name": "notify10_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 10
+   }
+  },
+  {
+   "name": "notify11_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 11
+   }
+  },
+  {
+   "name": "notify11_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 11
+   }
+  },
+  {
+   "name": "notify11_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 11
+   }
+  },
+  {
+   "name": "notify12_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 12
+   }
+  },
+  {
+   "name": "notify12_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 12
+   }
+  },
+  {
+   "name": "notify12_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 12
+   }
+  },
+  {
+   "name": "notify13_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 13
+   }
+  },
+  {
+   "name": "notify13_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 13
+   }
+  },
+  {
+   "name": "notify13_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 13
+   }
+  },
+  {
+   "name": "notify14_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 14
+   }
+  },
+  {
+   "name": "notify14_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 14
+   }
+  },
+  {
+   "name": "notify14_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 14
+   }
+  },
+  {
+   "name": "notify15_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 15
+   }
+  },
+  {
+   "name": "notify15_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 15
+   }
+  },
+  {
+   "name": "notify15_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 15
+   }
+  },
+  {
+   "name": "notify16_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 16
+   }
+  },
+  {
+   "name": "notify16_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 1,
+    "operation": 16
+   }
+  },
+  {
+   "name": "notify16_net",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "init_gaps": true,
+    "op": "notify",
+    "v": 2,
+    "operation": 16
+   }
+  },
+  {
+   "name": "plane_square_vu_f_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "vu_of_face",
+    "v": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "plane_square_vus_f_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "vus_of_face",
+    "v": 0,
+    "face": -1,
+    "ty": 16016,
+    "index": -1
+   }
+  },
+  {
+   "name": "plane_square_vus_e_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "vus_of_edge",
+    "v": 0,
+    "edge": -1,
+    "ty": 16016,
+    "index": -1
+   }
+  },
+  {
+   "name": "plane_square_common_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 0,
+    "other": -1,
+    "face": -1
+   }
+  },
+  {
+   "name": "plane_square_region_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "shell_in_region",
+    "v": 0,
+    "region": -1
+   }
+  },
+  {
+   "name": "plane_square_conn_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "connected",
+    "v": 0,
+    "ty": 16016,
+    "index": -1
+   }
+  },
+  {
+   "name": "plane_square_conn_brep",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "connected",
+    "v": 0,
+    "ty": 16011,
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_conn_other",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "connected",
+    "v": 0,
+    "ty": 7,
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_tan_far1_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 1,
+    "e2": 3,
+    "tol_deg": 1.0
+   }
+  },
+  {
+   "name": "plane_square_tan_far5_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 5,
+    "e2": 5,
+    "tol_deg": 1.0
+   }
+  },
+  {
+   "name": "plane_square_tan_far0_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 0,
+    "tol_deg": 1.0
+   }
+  },
+  {
+   "name": "plane_square_tan_tol0p0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.0
+   }
+  },
+  {
+   "name": "plane_square_tan_tolm1p0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": -1.0
+   }
+  },
+  {
+   "name": "plane_square_tan_tol1em300",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 1e-300
+   }
+  },
+  {
+   "name": "plane_square_tan_tol180p0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 180.0
+   }
+  },
+  {
+   "name": "plane_square_tan_tol1e+300",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 1e+300
+   }
+  },
+  {
+   "name": "cone_vu_f_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "vu_of_face",
+    "v": 0,
+    "face": -1
+   }
+  },
+  {
+   "name": "cone_vus_f_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "vus_of_face",
+    "v": 0,
+    "face": -1,
+    "ty": 16016,
+    "index": -1
+   }
+  },
+  {
+   "name": "cone_vus_e_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "vus_of_edge",
+    "v": 0,
+    "edge": -1,
+    "ty": 16016,
+    "index": -1
+   }
+  },
+  {
+   "name": "cone_common_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "common_edges",
+    "v": 0,
+    "other": -1,
+    "face": -1
+   }
+  },
+  {
+   "name": "cone_region_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "shell_in_region",
+    "v": 0,
+    "region": -1
+   }
+  },
+  {
+   "name": "cone_conn_null",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "connected",
+    "v": 0,
+    "ty": 16016,
+    "index": -1
+   }
+  },
+  {
+   "name": "cone_conn_brep",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "connected",
+    "v": 0,
+    "ty": 16011,
+    "index": 0
+   }
+  },
+  {
+   "name": "cone_conn_other",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "connected",
+    "v": 0,
+    "ty": 7,
+    "index": 0
+   }
+  },
+  {
+   "name": "cone_tan_far1_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 1,
+    "e2": 3,
+    "tol_deg": 1.0
+   }
+  },
+  {
+   "name": "cone_tan_far5_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 5,
+    "e2": 5,
+    "tol_deg": 1.0
+   }
+  },
+  {
+   "name": "cone_tan_far0_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 0,
+    "tol_deg": 1.0
+   }
+  },
+  {
+   "name": "cone_tan_tol0p0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 0.0
+   }
+  },
+  {
+   "name": "cone_tan_tolm1p0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": -1.0
+   }
+  },
+  {
+   "name": "cone_tan_tol1em300",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 1e-300
+   }
+  },
+  {
+   "name": "cone_tan_tol180p0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 180.0
+   }
+  },
+  {
+   "name": "cone_tan_tol1e+300",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 0,
+    "e1": 0,
+    "e2": 2,
+    "tol_deg": 1e+300
+   }
+  },
+  {
+   "name": "vo_disk_q",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "init_gaps": false,
+    "validate_only": true,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "vo_disk_topo",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "init_gaps": false,
+    "validate_only": true,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "vo_disk_settol",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "init_gaps": false,
+    "validate_only": true,
+    "op": "set_tolerance",
+    "v": 0,
+    "tol": 1.0,
+    "only_if_larger": true,
+    "cascade": true
+   }
+  },
+  {
+   "name": "vo_surf_rev_q",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "init_gaps": false,
+    "validate_only": true,
+    "op": "query",
+    "v": 0
+   }
+  },
+  {
+   "name": "vo_surf_rev_topo",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "init_gaps": false,
+    "validate_only": true,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "vo_surf_rev_settol",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "init_gaps": false,
+    "validate_only": true,
+    "op": "set_tolerance",
+    "v": 0,
+    "tol": 1.0,
+    "only_if_larger": true,
+    "cascade": true
+   }
+  }
+ ]
+}

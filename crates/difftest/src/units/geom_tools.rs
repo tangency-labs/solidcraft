@@ -185,8 +185,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut brep = Brep::new();
             let ids: Vec<VertexId> = vertices
                 .iter()
-                .map(|&[x, y, z, _]| brep.add_vertex(p3([x, y, z])))
-                .collect::<Result<_, _>>()
+                .map(|&[x, y, z, t]| {
+                    let v = brep.add_vertex(p3([x, y, z]))?;
+                    brep.vertex_mut(v)?.tolerance = t;
+                    Ok(v)
+                })
+                .collect::<Result<_, SolidError>>()
                 .map_err(|e| harness(&e))?;
             match tools::find_first_vertex_within_tol_to_pnt(&brep, &ids, p3(*pnt), *tol) {
                 Ok(m) => Ok(point_out(m.found, index_i64(m.index)?, vec![m.distance])),

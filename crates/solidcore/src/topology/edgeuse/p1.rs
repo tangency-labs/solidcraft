@@ -1652,6 +1652,7 @@ mod tests {
             b.add_vertex_record(Vertex {
                 point: Vec3::new(c[0], c[1], 0.0),
                 tolerance: ZONE_TOL_3D,
+                ..Vertex::default()
             })
             .unwrap();
             let i = i as u32;

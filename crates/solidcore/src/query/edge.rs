@@ -1042,12 +1042,14 @@ mod tests {
             .add_vertex_record(Vertex {
                 point: a,
                 tolerance: 1e-6,
+                ..Vertex::default()
             })
             .unwrap();
         let v1 = br
             .add_vertex_record(Vertex {
                 point: b,
                 tolerance: 1e-6,
+                ..Vertex::default()
             })
             .unwrap();
         let eu0 = EdgeuseId::from_index(0);

@@ -22,7 +22,6 @@
 //! | [`compute_uv_point`]                        | `SmVertexuse::ComputeUVPoint`                    |
 //! | [`compute_uv_sector`], [`UvSectorIo`], [`UvSector`] | `SmVertexuse::ComputeUVSector`, `SmUVSectorIO` |
 //! | [`notify`]                                  | `SmVertexuse::Notify`                            |
-//! | `vertexuses_of_edge`, `vertexuses_of_face` (private) | `SmVertex::GetVertexusesOfEdge`, `GetVertexusesOfFace` without connect target (CO-PORTED, `topology.vertex`) |
 //! | [`edge_is_wire`]                            | `SmEdge::IsWire` (CO-PORTED, `topology.edge`)    |
 //!
 //! Deviations:
@@ -39,10 +38,9 @@
 //!   the `SM_DEBUG_CODE` blocks are compiled out of the reference build and are not
 //!   ported (so `SmTol::IsZeroSpeed` of the sector speeds and `SmEdge::IsSeam` are
 //!   never called).
-//! - **Vertex use lists.** `SmVertex::GetVertexuses` walks the vertex's use list; the
-//!   port's vertices keep no list, so the uses of a vertex are the B-rep's vertex uses
-//!   whose `vertex` it is, in arena order. The two callers only reset the caches of
-//!   every member, so the order is not observable.
+//! - **Vertex use lists.** `SmVertex::GetVertexusesOfEdge` / `GetVertexusesOfFace`
+//!   are [`vertex::vertexuses_of_edge`] / [`vertex::vertexuses_of_face`] over the
+//!   vertex's use list ([`crate::topology::Vertex::vertexuses`]).
 //! - **Statuses ignored upstream.** Where upstream ignores a status (`ComputeUVPoint`
 //!   inside `ComputeUVSector`, `FindDegenParamForDirection`, `DropVectors`,
 //!   `Unitize`, the angle computations, ...) the port ignores the error as well and
@@ -95,6 +93,7 @@ use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::topology::{self as topo, Topology};
+use crate::topology::vertex;
 use crate::topology::{
     Brep, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, LoopuseId, ShellId, VertexId,
     VertexuseId, VertexuseOwner,
@@ -435,62 +434,36 @@ pub fn is_connected_to(b: &Brep, vu: VertexuseId, target: Option<EntityRef>) -> 
 
 // ---- gaps -----------------------------------------------------------------------------
 
-/// `SmVertex::GetVertexuses` (CO-PORTED from unit `topology.vertex`): the B-rep's vertex
-/// uses of `v` (see the module docs).
-fn vertexuses_of(b: &Brep, v: VertexId) -> Vec<VertexuseId> {
-    b.vertexuses()
-        .iter()
-        .filter(|(_, r)| r.vertex == Some(v))
-        .map(|(id, _)| id)
-        .collect()
-}
-
-/// `pVertex->GetVertexusesOfEdge(pEdge, list)` (CO-PORTED from unit `topology.vertex`,
-/// no connect target): the uses of the vertex whose edge use's edge is `edge`; empty
-/// for no edge.
+/// `pVertex->GetVertexusesOfEdge(pEdge, list)` ([`vertex::vertexuses_of_edge`], no
+/// connect target) of the use's vertex: the uses of the vertex whose edge use's edge is
+/// `edge`; empty for no edge.
 fn vertexuses_of_edge(
     b: &Brep,
     v: Option<VertexId>,
     edge: Option<EdgeId>,
 ) -> Result<Vec<VertexuseId>> {
     // no work - no edge
-    let Some(e) = edge else {
+    if edge.is_none() {
         return Ok(Vec::new());
-    };
-    let v = v.ok_or_else(|| null("GetVertexusesOfEdge: vertex use without vertex"))?;
-    let mut out = Vec::new();
-    for x in vertexuses_of(b, v) {
-        if let Some(eu) = edgeuse(b, x)? {
-            if b.edgeuse(eu)?.edge == Some(e) {
-                out.push(x);
-            }
-        }
     }
-    Ok(out)
+    let v = v.ok_or_else(|| null("GetVertexusesOfEdge: vertex use without vertex"))?;
+    vertex::vertexuses_of_edge(b, v, edge, None)
 }
 
-/// `pVertex->GetVertexusesOfFace(pFace, list)` (CO-PORTED from unit `topology.vertex`,
-/// no connect target): the uses of the vertex whose face use's face is `face`; empty
-/// for no face.
+/// `pVertex->GetVertexusesOfFace(pFace, list)` ([`vertex::vertexuses_of_face`], no
+/// connect target) of the use's vertex: the uses of the vertex whose face use's face is
+/// `face`; empty for no face.
 fn vertexuses_of_face(
     b: &Brep,
     v: Option<VertexId>,
     face: Option<FaceId>,
 ) -> Result<Vec<VertexuseId>> {
     // no work - no face
-    let Some(f) = face else {
+    if face.is_none() {
         return Ok(Vec::new());
-    };
-    let v = v.ok_or_else(|| null("GetVertexusesOfFace: vertex use without vertex"))?;
-    let mut out = Vec::new();
-    for x in vertexuses_of(b, v) {
-        if let Some(fu) = faceuse(b, x)? {
-            if b.faceuse(fu)?.face == Some(f) {
-                out.push(x);
-            }
-        }
     }
-    Ok(out)
+    let v = v.ok_or_else(|| null("GetVertexusesOfFace: vertex use without vertex"))?;
+    vertex::vertexuses_of_face(b, v, face, None)
 }
 
 /// `SmVertexEdgeGap::Set(vu, dEdgeT)`: records the vertex use and parameter and
@@ -1608,6 +1581,7 @@ mod tests {
                 b.add_vertex_record(Vertex {
                     point: Vec3::new(f64::from(i), 0.0, 0.0),
                     tolerance: ZONE_TOL_3D,
+                    ..Vertex::default()
                 })
                 .unwrap()
             })
@@ -1654,6 +1628,10 @@ mod tests {
                 ..crate::topology::Vertexuse::default()
             })
             .unwrap();
+        for (i, &vu) in vus.iter().enumerate() {
+            b.vertex_mut(v[i]).unwrap().vertexuses.push(vu);
+        }
+        b.vertex_mut(v[2]).unwrap().vertexuses.push(svu);
         (b, [vus[0], vus[1], svu], [eus[0], eus[1]])
     }
 

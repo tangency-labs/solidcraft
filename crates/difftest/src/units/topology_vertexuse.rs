@@ -591,7 +591,11 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     for _ in 0..n_v {
         let point = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
         let tolerance = rd.num()?;
-        vertices.push(Vertex { point, tolerance });
+        vertices.push(Vertex {
+            point,
+            tolerance,
+            ..Vertex::default()
+        });
     }
     if rd.at != ex.len() {
         return Err(harness("export: trailing data"));
@@ -676,6 +680,14 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     }
     for vu in vertexuses {
         b.add_vertexuse_record(vu).map_err(|e| harness(e.to_string()))?;
+    }
+    // the vertex use lists are not exported: each vertex lists its uses in arena order
+    let uses: Vec<(VertexuseId, Option<VertexId>)> =
+        b.vertexuses().iter().map(|(id, r)| (id, r.vertex)).collect();
+    for (id, v) in uses {
+        if let Some(v) = v {
+            b.vertex_mut(v).map_err(|e| harness(e.to_string()))?.vertexuses.push(id);
+        }
     }
     Ok((b, exact_faces))
 }

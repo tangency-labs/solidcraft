@@ -16,7 +16,7 @@
 //! | [`Edgeuse`] / [`EdgeuseId`] | `SmEdgeuse` (unit `topology.edgeuse_p1`)              |
 //! | [`Edge`] / [`EdgeId`]       | `SmEdge`                                              |
 //! | [`Vertexuse`] / [`VertexuseId`] | `SmVertexuse` (unit `topology.vertexuse`)         |
-//! | [`Vertex`] / [`VertexId`]   | `SmVertex`                                            |
+//! | [`Vertex`] / [`VertexId`]   | `SmVertex` (unit `topology.vertex`)                   |
 //! | [`ObjectHandle`]            | an `SmObject*` a record keeps but never dereferences  |
 //! | [`Arena`]                   | upstream's intrusive `SmListNode` linked lists        |
 //!
@@ -43,6 +43,7 @@ pub mod face;
 pub mod proto_topology;
 #[allow(clippy::module_inception)]
 pub mod topology;
+pub mod vertex;
 pub mod vertexuse;
 
 use core::marker::PhantomData;
@@ -58,6 +59,7 @@ use crate::geom::vector2d::Point2;
 use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
 use crate::math::{Point3, BIG_DOUBLE};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::poly::PolyVertexId;
 use crate::surface::surface::p2::DropCurveFail;
 use crate::surface::surface::Surface;
 
@@ -238,13 +240,32 @@ impl SolutionObject for ObjectHandle {
     }
 }
 
-/// A vertex (`SmVertex`): a point where edges meet.
+/// A vertex (`SmVertex`): a point where edges meet (the methods are in unit
+/// `topology.vertex`, [`vertex`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
-    /// Position in model space.
+    /// `m_vPoint`: position in model space.
     pub point: Point3,
-    /// `m_sZoneTol3d` (CO-PORTED, `SM_USE_OLDTOL`): the vertex tolerance.
+    /// `m_sZoneTol3d` (`SM_USE_OLDTOL`): the vertex tolerance.
     pub tolerance: f64,
+    /// `m_pList` / `m_lListSize`: the vertex's vertex uses in list order from the head
+    /// (the primary vertex use, `GetPrimaryVertexuse`, is first).
+    pub vertexuses: Vec<VertexuseId>,
+    /// `m_pPolyVertex3D`: the temporary back pointer to the 3D poly vertex made from the
+    /// vertex during tessellation.
+    pub poly_vertex: Option<PolyVertexId>,
+}
+
+impl Default for Vertex {
+    /// `SmVertex()`: at the origin, tolerance `0`, no vertex uses, no poly vertex.
+    fn default() -> Self {
+        Self {
+            point: Point3::new(0.0, 0.0, 0.0),
+            tolerance: 0.0,
+            vertexuses: Vec::new(),
+            poly_vertex: None,
+        }
+    }
 }
 
 /// An edge (`SmEdge`): a bounded curve between two vertices.
@@ -839,6 +860,7 @@ impl Brep {
         self.vertices.insert(Vertex {
             point,
             tolerance: ZONE_TOL_3D,
+            ..Vertex::default()
         })
     }
 
