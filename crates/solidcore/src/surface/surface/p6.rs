@@ -560,7 +560,8 @@ impl Surface {
         // If we're at a singularity, any value of the degenerate parameter will be a
         // solution: return a parameter value on one end of the degenerate domain,
         // whichever end is closer to the guess point.
-        let (singular, sing_dir) = is_singularity(self, uv, distance_tolerance)?;
+        let (singular, sing_dir) =
+            is_singularity(&Kernel::default(), self, uv, distance_tolerance)?;
         if singular {
             // If one end of the subdomain coincides with an end of the whole domain,
             // use that.
@@ -1404,10 +1405,10 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
 
             // 3d points are the same.  Need to check seams and poles. If either is
             // nonsingular, they're distinct.
-            let surf1_singular = is_singularity(surf1, uv1a, EFF_ZERO)?.0
-                && is_singularity(surf1, uv1b, EFF_ZERO)?.0;
-            let surf2_singular = is_singularity(surf2, uv2a, EFF_ZERO)?.0
-                && is_singularity(surf2, uv2b, EFF_ZERO)?.0;
+            let surf1_singular = is_singularity(self.kernel, surf1, uv1a, EFF_ZERO)?.0
+                && is_singularity(self.kernel, surf1, uv1b, EFF_ZERO)?.0;
+            let surf2_singular = is_singularity(self.kernel, surf2, uv2a, EFF_ZERO)?.0
+                && is_singularity(self.kernel, surf2, uv2b, EFF_ZERO)?.0;
 
             // when neither Surf1 nor Surf2 solutions are on a singularity
             if !surf1_singular && !surf2_singular {
@@ -1893,7 +1894,12 @@ fn create_iso_parametric_curve(
 
 /// `IsSingularity(uv, eSingDir, tol)` (virtual): the plane override (a plane has no
 /// singularity), the base body otherwise.
-fn is_singularity(surface: &Surface, uv: Point2, tol: f64) -> Result<(bool, SurfParamType)> {
+fn is_singularity(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    tol: f64,
+) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
         SurfaceKind::BSpline(_)
@@ -1901,7 +1907,7 @@ fn is_singularity(surface: &Surface, uv: Point2, tol: f64) -> Result<(bool, Surf
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_) => {
-            let r = surface.is_singularity(uv, tol, false)?;
+            let r = surface.is_singularity(k, uv, tol, false)?;
             Ok((r.singular, r.direction))
         }
     }

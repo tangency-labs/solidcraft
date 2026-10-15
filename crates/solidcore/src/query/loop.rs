@@ -28,9 +28,9 @@
 //!   trim curve (of the edge use or its mate) as given in [`LoopEdgeuse::uv_trim_curve`];
 //!   when there is none it would build one (`SmEdgeuse::CreateUVTrimCurve`, unit
 //!   `topology.edgeuse_p3`), which returns [`SolidError::Unported`].
-//! - **Poles.** `SmSurface::GetSingularities` (unit `surface.surface_p3`) is
-//!   [`SolidError::Unported`]; it is only reached when the point lies on a side of the
-//!   surface's natural domain and an edge use end of the loop does too.
+//! - **Poles.** `SmSurface::GetSingularities` (unit `surface.surface_p3`) is only
+//!   reached when the point lies on a side of the surface's natural domain and an edge
+//!   use end of the loop does too.
 //! - **Ignored statuses.** Upstream ignores the status of `EvaluatePoint` /
 //!   `Evaluate` of the surface and the trim curves and then reads the (uninitialised)
 //!   outputs; the port returns their error instead (no valid input reaches it).
@@ -308,9 +308,8 @@ fn unit_from(origin: Point3, p: Point3) -> (Vec3, f64) {
 /// # Errors
 ///
 /// [`SolidError::Unported`]: `SmEdgeuse::GetOrCreateUVTrimCurve` for an edge use
-/// without trim curve (`topology.edgeuse_p3`), `SmSurface::GetSingularities`
-/// (`surface.surface_p3`) for a point and loop end on a side of the surface's
-/// natural domain, and those of the callees; the errors of the surface and trim curve
+/// without trim curve (`topology.edgeuse_p3`), and those of the callees (the
+/// tolerance of a face-owned surface in `SmSurface::GetSingularities`); the errors of the surface and trim curve
 /// evaluations (see the module Deviations).
 pub fn contains_uv_point(
     k: &Kernel,

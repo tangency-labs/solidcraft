@@ -317,14 +317,16 @@ pub(super) fn calculate_bounding_box(
 
 /// `SmSurface::IsSingularity(uv, eSingDir)`: the `SmPlane` override (a plane has no
 /// singularity); the other ported kinds run the base class body.
-fn is_singularity(surface: &Surface, uv: Point2) -> Result<bool> {
+fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular),
+        | SurfaceKind::SrfInVolume(_) => {
+            Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
+        }
     }
 }
 
@@ -833,7 +835,7 @@ pub fn compute_bezier_approximation(
         };
         let p00 = d(&mat, 0, 0)?;
         let (du, dv, duv);
-        if is_singularity(surface, uv)? {
+        if is_singularity(&Kernel::default(), surface, uv)? {
             let uvu = Point2::new(uv.x + su * (size.x * EFF_ZERO_SQRT), uv.y);
             let uvv = Point2::new(uv.x, uv.y + sv * (size.y * EFF_ZERO_SQRT));
             let mu = surface.evaluate(uvu, 1, 1, flags)?;

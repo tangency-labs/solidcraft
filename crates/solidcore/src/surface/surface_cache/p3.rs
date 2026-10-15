@@ -55,8 +55,6 @@
 //! - **Ignored statuses** stay ignored (`CalculateBoundingBox` of the u split halves,
 //!   `ImplantPolyEdge`, `ImplantEdgeuse`, `sm_ComputeBezierApproximation`), except
 //!   [`SolidError::Unported`], which is always propagated.
-//! - **Unported calls.** `SmSurface::GetSingularities` (`surface.surface_p3`, pole search)
-//!   returns [`SolidError::Unported`].
 //! - **Virtual calls.** `SubdivideToTolerances` calls the virtual
 //!   `TestAgainstTolerances`: the `_with` variants
 //!   ([`SurfaceCache::subdivide_to_tolerances_with`], [`SurfaceCache::build_tree_with`],

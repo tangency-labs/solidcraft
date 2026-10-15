@@ -15009,8 +15009,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
       },
       "max_rel_err": 0.0,
       "name": "pinched_v1_pole_g1",
@@ -15377,8 +15377,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
+        "symbol": "SmEdgeuse::NormalizedEvaluate",
+        "unit": "topology.edgeuse_p3"
       },
       "max_rel_err": 0.0,
       "name": "pinched_v2_pole_g1",
@@ -31104,16 +31104,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "cone_v0_pole_g0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#457 (upstream TestFiles/pt_TestFiles/cone.smb)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -37420,16 +37416,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_v0_pole_g0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1177 (upstream TestFiles/pt_TestFiles/sphere.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -37796,16 +37788,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_v1_pole_g1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1219 (upstream TestFiles/pt_TestFiles/sphere.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -38192,16 +38180,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_v3_pole_g1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1262 (upstream TestFiles/pt_TestFiles/sphere.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -40992,16 +40976,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v0_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1585 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -41192,16 +41172,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v0_pole_g0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1609 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -41572,16 +41548,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v1_pole_g1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1651 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -41728,16 +41700,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v2_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1667 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -41976,16 +41944,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v3_pole_g1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1694 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42096,16 +42060,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_rebuild_v3_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1706 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42120,16 +42080,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v4_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1708 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42144,16 +42100,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v6_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1710 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42168,16 +42120,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v8_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1712 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42192,16 +42140,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v10_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1714 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42216,16 +42160,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v12_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1716 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42240,16 +42180,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v14_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1718 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42264,16 +42200,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v16_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1720 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42288,16 +42220,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v18_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1722 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42312,16 +42240,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v20_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1724 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -42336,16 +42260,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::IsSingularity",
-        "unit": "surface.surface_p5"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_v22_topo",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/upstream_files.json#1726 (upstream TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "deferred": {
@@ -46245,13 +46165,12 @@
     }
   ],
   "cases_both_errored": 2,
-  "cases_deferred": 544,
+  "cases_deferred": 524,
   "cases_failed": 0,
-  "cases_passed": 4964,
+  "cases_passed": 4984,
   "cases_total": 5508,
   "deferred_by_unit": {
-    "surface.surface_p5": 22,
-    "topology.edgeuse_p3": 446,
+    "topology.edgeuse_p3": 448,
     "topology.face_p3": 76
   },
   "max_rel_err": 0.0,

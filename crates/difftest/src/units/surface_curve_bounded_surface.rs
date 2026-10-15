@@ -907,7 +907,7 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
         OpIn::Singular { uv, tol } => record(|o| {
             push3(
                 o,
-                the_cbs(&s)?.evaluate_normal_at_singularity(p2(*uv), *tol)?,
+                the_cbs(&s)?.evaluate_normal_at_singularity(&Kernel::default(), p2(*uv), *tol)?,
             );
             Ok(())
         }),

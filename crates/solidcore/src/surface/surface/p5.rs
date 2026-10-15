@@ -44,12 +44,18 @@
 //!   returns the (non-zero) status, that is `TRUE`, with the direction left at
 //!   `SM_SP_NEITHER`; the port does the same ([`Singularity::singular`]).
 //! - **Debug-only work** (drawing, dumps, assertions) is not ported.
+//! - **Kernel.** `IsSingularity` (through `GetSingularities`' approximation tolerance),
+//!   `EvaluateNormalAtSingularity` and `CoverOtherCoincidentSurface` take the
+//!   [`Kernel`]. The `IdenticalSolutions` overrides and the image-space
+//!   `LocalSurfaceSurfaceIntersect` have no kernel threaded to them yet and use
+//!   `Kernel::default()` (upstream's global tolerances at their defaults).
+//! - **`CoverOtherCoincidentSurface`** takes both surfaces `&mut`: the covering surface
+//!   is expanded in place by `CoverCoincidentSurface`, as upstream. A failing
+//!   `CoverCoincidentSurface` leaves `rdMaxDist` at `SM_BIG_DOUBLE` (its first
+//!   statement).
 //! - **Unported callees** (return [`SolidError::Unported`]): `SmSurface::GetFace`,
-//!   `SmFace::GetTolerance`, `LocalPointSolve_1`, `SmFindPSNormalENFO::Evaluate`,
-//!   `SmSurface::GetSingularities`, `sm_GetSurfaceToEvaluate`,
-//!   `SmSurface::CoverCoincidentSurface`, `SmSurface::EvaluateNormalSection`, the STEP
-//!   domain conversions, the surface cache
-//!   and the surface/surface/surface local solve from UV guesses.
+//!   `SmFace::GetTolerance`, `LocalPointSolve_1`, `sm_GetSurfaceToEvaluate`, the STEP
+//!   domain conversions and the surface cache.
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
@@ -57,13 +63,13 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::error::{ignored, Result, SolidError};
-use crate::geom::extent1d::{Extent1d, ExtentPointType};
+use crate::geom::extent1d::{Extent1d, ExtentNd, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{
     GlobalSolver, PreferredSolution, SolutionPairType, SolutionRequested, SolverOperation,
 };
-use crate::geom::local_solve_nd::TerminationReason;
+use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd, TerminationReason};
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tol::{are_same, ZONE_TOL_3D};
 use crate::geom::vector2d::Vec2;
@@ -163,15 +169,16 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the evaluations of a curve-bounded surface and
-    /// `GetSingularities` (`surface.surface_p3`).
+    /// [`SolidError::Unported`]: the evaluations of a curve-bounded surface and the
+    /// tolerance of a face-owned surface in `GetSingularities`.
     pub fn is_singularity(
         &self,
+        k: &Kernel,
         uv: Point2,
         d3d_tol: f64,
         pt_test_only: bool,
     ) -> Result<Singularity> {
-        self.is_singularity_with_poles(uv, SS_UNKNOWN, None, d3d_tol, pt_test_only)
+        self.is_singularity_with_poles(k, uv, SS_UNKNOWN, None, d3d_tol, pt_test_only)
     }
 
     /// [`Surface::is_singularity`] with the surface's singular sides (`SM_SS_*` bits) and
@@ -185,6 +192,7 @@ impl Surface {
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn is_singularity_with_poles(
         &self,
+        k: &Kernel,
         uv: Point2,
         singularities: u64,
         pole_points: Option<&[Point3]>,
@@ -316,11 +324,16 @@ impl Surface {
             let (sides, poles) = match pole_points {
                 Some(p) => (singularities, p.to_vec()),
                 None => {
-                    // UNPORTED(surface.surface_p3): SmSurface::GetSingularities
-                    return Err(SolidError::unported(
-                        "SmSurface::GetSingularities",
-                        "surface.surface_p3",
-                    ));
+                    // GetSingularities returns no status; a failing evaluation inside it
+                    // leaves its initial outputs (SM_SS_NONE)
+                    match ignored(self.get_singularities(k, true, false))? {
+                        Some(r) => (
+                            u64::from(r.singular),
+                            r.pole_points
+                                .map_or_else(|| vec![Vec3::UNDEF; 4], |p| p.to_vec()),
+                        ),
+                        None => (SS_NONE, vec![Vec3::UNDEF; 4]),
+                    }
                 }
             };
 
@@ -361,13 +374,18 @@ impl Surface {
     ///
     /// Those of `EvaluateNormal` and of unitizing the sum; [`SolidError::Unported`] from
     /// the singularity test.
-    pub fn evaluate_normal_at_singularity(&self, uv: Point2, d3d_tol: f64) -> Result<Vec3> {
+    pub fn evaluate_normal_at_singularity(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        d3d_tol: f64,
+    ) -> Result<Vec3> {
         if let SurfaceKind::CurveBounded(c) = self.kind() {
-            return c.basis().evaluate_normal_at_singularity(uv, d3d_tol);
+            return c.basis().evaluate_normal_at_singularity(k, uv, d3d_tol);
         }
 
         // skip nonSingular points
-        let sing = self.is_singularity(uv, d3d_tol, false)?;
+        let sing = self.is_singularity(k, uv, d3d_tol, false)?;
         if !sing.singular {
             // This point is not a singularity (a warning upstream).
             let dom = self.natural_uv_domain();
@@ -538,7 +556,7 @@ impl Surface {
         }
 
         // If we have a singluarity create a degenerate curve
-        if self.is_singularity(uv, EFF_ZERO, false)?.singular {
+        if self.is_singularity(k, uv, EFF_ZERO, false)?.singular {
             let pnt = self.evaluate_point(uv)?;
             let mut curve = BSplineCurve::create_point_curve(pnt)?;
 
@@ -677,18 +695,45 @@ struct PsSolve {
 fn find_ps_normal_solve(
     surface: &Surface,
     test_point: Point3,
-    _domain: &Extent2d,
+    domain: &Extent2d,
     op: SolverOperation,
-    _guess: Point2,
+    guess: Point2,
 ) -> Result<PsSolve> {
-    // SmFindPSNormalENFO sEvalFun(crTestPoint, *this, SM_EFF_ZERO * SM_EFF_ZERO, eSolverOperation)
-    let _equations = FindPsNormalEnfo::new(test_point, surface, EFF_ZERO * EFF_ZERO, op);
-    // UNPORTED(surface.surface_p3): SmFindPSNormalENFO::Evaluate (the equations
-    // SmLocalSolveNd::SolveIt iterates)
-    Err(SolidError::unported(
-        "SmFindPSNormalENFO::Evaluate",
-        "surface.surface_p3",
-    ))
+    let mut intervals = ExtentNd::new(2);
+    if let Some(slot) = intervals.get_mut(0) {
+        *slot = Extent1d::from_min_max(domain.min().x, domain.max().x);
+    }
+    if let Some(slot) = intervals.get_mut(1) {
+        *slot = Extent1d::from_min_max(domain.min().y, domain.max().y);
+    }
+
+    // In the local solver, we don't check for periodicity.
+    let periodicities = [false; 2];
+
+    // set the guess value
+    let guess_t = [guess.x, guess.y];
+
+    // construct - the equation set callback function
+    //           - the Newton-Raphson solver using the equation set
+    //           - specify boundary behavior
+    let mut equations = FindPsNormalEnfo::new(test_point, surface, EFF_ZERO * EFF_ZERO, op);
+    let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
+    solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
+
+    // let solver look for an answer with a loose tolerance (SER)
+    let loose_tol = 1.0; // formerly SM_EFF_ZERO_SQRT*100.0
+    let r = solver.solve_it(&guess_t, loose_tol)?;
+    let solution = [
+        r.x.first().copied().unwrap_or(f64::NAN),
+        r.x.get(1).copied().unwrap_or(f64::NAN),
+    ];
+
+    Ok(PsSolve {
+        found: r.found,
+        solution,
+        reason: solver.termination_reason(),
+        iterations: i32::try_from(solver.current_iteration()).unwrap_or(i32::MAX),
+    })
 }
 
 /// The tail of `LocalPointSolve_0` for minimise, maximise and normalise: reject a failed
@@ -1190,15 +1235,15 @@ impl Surface {
     /// The local intersection of this surface and two others near the image-space guess
     /// `xyz_guess1` (or `opt_xyz_guess2` when the first does not project): each surface's
     /// nearest point is found with a global point solve, then the local
-    /// three-surface solve of unit `surface.surface_p3` refines them
+    /// three-surface solve (`surface.surface_p3`) refines them
     /// (`LocalSurfaceSurfaceIntersect`). Faces' tolerances are `1e-5` for surfaces no
     /// face owns.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `GetFace`/`SmFace::GetTolerance` for an owned surface,
-    /// the surface caches (`smsurf_GetSurfaceCache`) and the UV-guess overload of
-    /// `LocalSurfaceSurfaceIntersect` (`surface.surface_p3`).
+    /// [`SolidError::Unported`]: `GetFace`/`SmFace::GetTolerance` for an owned surface
+    /// and the surface caches (`smsurf_GetSurfaceCache`). The status of the UV-guess
+    /// `LocalSurfaceSurfaceIntersect` is ignored, as upstream (no answer).
     #[allow(clippy::too_many_arguments)] // upstream's argument list
     pub fn local_surface_surface_intersect_xyz<O: SolutionObject>(
         &self,
@@ -1276,14 +1321,25 @@ impl Surface {
         let Some(uv3) = nearest(surface3, uv_domain3, uv_domain1)? else {
             return Ok((false, Solution::new()));
         };
-        let _ = (uv1, uv2, uv3);
 
-        // find surf/surf/surf intersection in this neighborhood
-        // UNPORTED(surface.surface_p3): SmSurface::LocalSurfaceSurfaceIntersect (UV guesses)
-        Err(SolidError::unported(
-            "SmSurface::LocalSurfaceSurfaceIntersect",
-            "surface.surface_p3",
-        ))
+        // find surf/surf/surf intersection in this neighborhood (status ignored: a
+        // failing solve leaves rbFoundAnswer FALSE and rSolution untouched)
+        let mut solution = Solution::new();
+        let Some(Some(sss)) = ignored(self.local_surface_surface_intersect(
+            uv_domain1, surface2, uv_domain2, surface3, uv_domain3, uv1, uv2, uv3,
+        ))?
+        else {
+            return Ok((false, solution));
+        };
+        solution.solution_type = SolutionType::SingleValue;
+        solution.start.solution_value = sss.distance;
+        *solution.start.param_mut(0)? = sss.uv1.x;
+        *solution.start.param_mut(1)? = sss.uv1.y;
+        *solution.start.param_mut(2)? = sss.uv2.x;
+        *solution.start.param_mut(3)? = sss.uv2.y;
+        *solution.start.param_mut(4)? = sss.uv3.x;
+        *solution.start.param_mut(5)? = sss.uv3.y;
+        Ok((true, solution))
     }
 }
 
@@ -1316,25 +1372,31 @@ struct CoverCoincident {
 }
 
 /// `cover->CoverCoincidentSurface(covered, tol, bSuccess, rdMaxDist, &covered_domain
-/// [, &step_domain])`: whether `cover` covers `covered` and the largest gap; it also
-/// shrinks `covered_domain` to the part that is covered.
+/// [, &step_domain])`: whether `cover` covers `covered_domain` of `covered` and the
+/// largest gap. `cover` is expanded on success.
 fn cover_coincident_surface(
-    _cover: &Surface,
-    _covered: &Surface,
-    _tol: f64,
-    _covered_domain: &mut Extent2d,
-    _want_step_domain: bool,
+    k: &Kernel,
+    cover: &mut Surface,
+    covered: &Surface,
+    tol: f64,
+    covered_domain: &Extent2d,
+    want_step_domain: bool,
 ) -> Result<CoverCoincident> {
-    // UNPORTED(surface.surface_p3): SmSurface::CoverCoincidentSurface
-    Err(SolidError::unported(
-        "SmSurface::CoverCoincidentSurface",
-        "surface.surface_p3",
-    ))
+    let r = cover.cover_coincident_surface(k, covered, tol, Some(covered_domain))?;
+    Ok(CoverCoincident {
+        success: r.success,
+        max_dist: r.max_dist,
+        step_domain: if want_step_domain {
+            r.covered_step_domain
+        } else {
+            None
+        },
+    })
 }
 
 /// The state `CoverOtherCoincidentSurface`'s `Cover` lambda updates.
 struct CoverState {
-    /// `sDomain0`: this surface's domain (reduced when it is covered).
+    /// `sDomain0`: this surface's domain.
     domain0: Extent2d,
     /// `sDomain1`: the other surface's domain.
     domain1: Extent2d,
@@ -1345,17 +1407,20 @@ struct CoverState {
 }
 
 /// The `Cover` lambda: `cover` covers the other surface; returns `bSuccess && eStat ==
-/// SM_SUCCESS`. A failing `CoverCoincidentSurface` or conversion is no cover; only
+/// SM_SUCCESS`. A failing `CoverCoincidentSurface` or conversion is no cover (a failing
+/// `CoverCoincidentSurface` has already set `rdMaxDist` to `SM_BIG_DOUBLE`); only
 /// [`SolidError::Unported`] propagates.
+#[allow(clippy::too_many_arguments)] // the lambda's captures
 fn try_cover(
+    k: &Kernel,
     st: &mut CoverState,
-    this: &Surface,
-    other: &Surface,
+    this: &mut Surface,
+    other: &mut Surface,
     cover_is_other: bool,
     tol: f64,
     want_merged: bool,
 ) -> Result<bool> {
-    let (cover, covered) = if cover_is_other {
+    let (cover, covered): (&mut Surface, &Surface) = if cover_is_other {
         (other, this)
     } else {
         (this, other)
@@ -1366,35 +1431,40 @@ fn try_cover(
         st.domain0
     };
     let covered_domain = if cover_is_other {
-        &mut st.domain0
+        st.domain0
     } else {
-        &mut st.domain1
+        st.domain1
     };
 
     if !want_merged {
-        return match cover_coincident_surface(cover, covered, tol, covered_domain, false) {
+        return match cover_coincident_surface(k, cover, covered, tol, &covered_domain, false) {
             Ok(r) => {
                 st.max_dist = r.max_dist;
                 Ok(r.success)
             }
             Err(e) if e.is_unported() => Err(e),
-            Err(_) => Ok(false),
+            Err(_) => {
+                st.max_dist = BIG_DOUBLE;
+                Ok(false)
+            }
         };
     }
 
     // STEP coordinates survive rebuilding an analytic surface's NURBS form. Save the
     // retained subset before coverage changes the surface, union it with the projected
     // subset, then map back using the final parameters.
-    let this_step = match cover.convert_domain_from_nurbs_to_step(&Kernel::default(), &cover_domain)
-    {
+    let this_step = match cover.convert_domain_from_nurbs_to_step(k, &cover_domain) {
         Ok(d) => d,
         Err(e) if e.is_unported() => return Err(e),
         Err(_) => return Ok(false),
     };
-    let r = match cover_coincident_surface(cover, covered, tol, covered_domain, true) {
+    let r = match cover_coincident_surface(k, cover, covered, tol, &covered_domain, true) {
         Ok(r) => r,
         Err(e) if e.is_unported() => return Err(e),
-        Err(_) => return Ok(false),
+        Err(_) => {
+            st.max_dist = BIG_DOUBLE;
+            return Ok(false);
+        }
     };
     st.max_dist = r.max_dist;
     if !r.success {
@@ -1403,7 +1473,7 @@ fn try_cover(
     // (upstream's sOtherSTEPDomain is default constructed when none is written)
     let other_step = r.step_domain.unwrap_or_else(Extent2d::new);
     let merged_step = this_step.union(&other_step);
-    match cover.convert_domain_from_step_to_nurbs(&Kernel::default(), &merged_step) {
+    match cover.convert_domain_from_step_to_nurbs(k, &merged_step) {
         Ok(d) => {
             st.merged = Some(d);
             Ok(true)
@@ -1418,18 +1488,20 @@ impl Surface {
     /// planes first, then bilinear surfaces, then B-splines, then anything, each trying to
     /// cover the other with `CoverCoincidentSurface` (a failing try goes on to the next
     /// candidate). `this_domain` and `other_domain` are subsets in NURBS parameters
-    /// (`None`: the natural domains); the covered domain of a try carries over to later
-    /// tries as upstream's `sDomain0`/`sDomain1`. With `want_merged` the union of both
-    /// retained domains in the covering surface's final NURBS parameters is returned.
+    /// (`None`: the natural domains). With `want_merged` the union of both retained
+    /// domains in the covering surface's final NURBS parameters is returned. The
+    /// covering surface may have been expanded (`CoverCoincidentSurface` changes the
+    /// surface it is called on when it succeeds).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::CoverCoincidentSurface`
-    /// (`surface.surface_p3`) and, when a merged domain is wanted, the STEP domain
-    /// conversions (`surface.surface_p1`).
+    /// [`SolidError::Unported`] from `CoverCoincidentSurface` (`SmFace::RemoveUVTrimCurves`
+    /// for a face-owned surface, the tolerance of an owned surface) and, when a merged
+    /// domain is wanted, the STEP domain conversions.
     pub fn cover_other_coincident_surface(
-        &self,
-        other: &Self,
+        &mut self,
+        k: &Kernel,
+        other: &mut Self,
         tol: f64,
         this_domain: Option<&Extent2d>,
         other_domain: Option<&Extent2d>,
@@ -1461,13 +1533,13 @@ impl Surface {
         // Favor SmPlanes:
         if is_plane(self) {
             tried0 = true;
-            if try_cover(&mut st, self, other, false, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, false, tol, want_merged)? {
                 return Ok(done(&st, false));
             }
         }
         if is_plane(other) {
             tried1 = true;
-            if try_cover(&mut st, self, other, true, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, true, tol, want_merged)? {
                 return Ok(done(&st, true));
             }
         }
@@ -1475,13 +1547,13 @@ impl Surface {
         // Next look for bilinear.
         if !tried0 && self.is_bilinear() {
             tried0 = true;
-            if try_cover(&mut st, self, other, false, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, false, tol, want_merged)? {
                 return Ok(done(&st, false));
             }
         }
         if !tried1 && other.is_bilinear() {
             tried1 = true;
-            if try_cover(&mut st, self, other, true, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, true, tol, want_merged)? {
                 return Ok(done(&st, true));
             }
         }
@@ -1489,13 +1561,13 @@ impl Surface {
         // Next, favor SmBSplineSurfaces.
         if !tried0 && is_bspline(self) {
             tried0 = true;
-            if try_cover(&mut st, self, other, false, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, false, tol, want_merged)? {
                 return Ok(done(&st, false));
             }
         }
         if !tried1 && is_bspline(other) {
             tried1 = true;
-            if try_cover(&mut st, self, other, true, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, true, tol, want_merged)? {
                 return Ok(done(&st, true));
             }
         }
@@ -1503,14 +1575,14 @@ impl Surface {
         // No special cases.
         if !tried0 {
             tried0 = true;
-            if try_cover(&mut st, self, other, false, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, false, tol, want_merged)? {
                 return Ok(done(&st, false));
             }
         }
         let _ = tried0;
         if !tried1 {
             tried1 = true;
-            if try_cover(&mut st, self, other, true, tol, want_merged)? {
+            if try_cover(k, &mut st, self, other, true, tol, want_merged)? {
                 return Ok(done(&st, true));
             }
         }
@@ -1704,17 +1776,14 @@ pub fn sp_local_solve<O: SolutionObject>(
 // ---- sm_FilterSolution --------------------------------------------------------------------------
 
 /// `SmSurface::EvaluateNormalSection(uv, TRUE, TRUE, direction, ..)`: the curvature of the
-/// normal section in `direction` and the unit surface normal (unit `surface.surface_p3`).
+/// normal section in `direction` and the unit surface normal.
 fn surface_evaluate_normal_section(
-    _surface: &Surface,
-    _uv: Point2,
-    _direction: Vec3,
+    surface: &Surface,
+    uv: Point2,
+    direction: Vec3,
 ) -> Result<(f64, Vec3)> {
-    // UNPORTED(surface.surface_p3): SmSurface::EvaluateNormalSection
-    Err(SolidError::unported(
-        "SmSurface::EvaluateNormalSection",
-        "surface.surface_p3",
-    ))
+    let r = surface.evaluate_normal_section(uv, Side::Left, Side::Left, direction)?;
+    Ok((r.curvature, r.normal))
 }
 
 /// Whether to keep a curve/surface solution found at the end of a subdivided curve
@@ -1948,10 +2017,16 @@ fn surface_identical_solutions<O: SolutionObject>(
 
         // 3d points are the same. Need to check seams and poles. Check poles first,
         // it's a cheaper check. If either is nonsingular, they're distinct.
-        if !surf.is_singularity(uv1, EFF_ZERO, false)?.singular {
+        if !surf
+            .is_singularity(&Kernel::default(), uv1, EFF_ZERO, false)?
+            .singular
+        {
             return Ok((SolutionPairType::DiffParameters, None));
         }
-        if !surf.is_singularity(uv2, EFF_ZERO, false)?.singular {
+        if !surf
+            .is_singularity(&Kernel::default(), uv2, EFF_ZERO, false)?
+            .singular
+        {
             return Ok((SolutionPairType::DiffParameters, None));
         }
 
@@ -2063,7 +2138,7 @@ mod tests {
     fn plane_has_no_singularity() {
         let s = xy_plane();
         let r = s
-            .is_singularity(Point2::new(0.5, 0.5), EFF_ZERO, false)
+            .is_singularity(&Kernel::default(), Point2::new(0.5, 0.5), EFF_ZERO, false)
             .unwrap();
         assert!(!r.singular);
         assert_eq!(r.direction, SurfParamType::Neither);
@@ -2073,7 +2148,7 @@ mod tests {
     fn normal_off_a_singularity_is_the_surface_normal() {
         let s = xy_plane();
         let n = s
-            .evaluate_normal_at_singularity(Point2::new(0.25, 0.75), EFF_ZERO)
+            .evaluate_normal_at_singularity(&Kernel::default(), Point2::new(0.25, 0.75), EFF_ZERO)
             .unwrap();
         assert_eq!(n, Vec3::new(0.0, 0.0, 1.0));
     }
@@ -2102,14 +2177,14 @@ mod tests {
             Point2::new(0.0, 0.0),
         );
         assert!(r.unwrap_err().is_unported());
-        // a maximise solve runs LocalPointSolve_0, whose Newton solve is not ported
+        // a maximise solve runs LocalPointSolve_0 (the SmFindPSNormalENFO Newton solve)
         let r = s.local_point_solve::<Obj>(
             &dom,
             SolverOperation::Maximize,
             Vec3::new(0.0, 0.0, 1.0),
             Point2::new(0.0, 0.0),
         );
-        assert!(r.unwrap_err().is_unported());
+        assert!(r.is_ok(), "{r:?}");
     }
 
     #[test]
@@ -2156,10 +2231,13 @@ mod tests {
     }
 
     #[test]
-    fn cover_needs_the_unported_coverage_test() {
-        let a = xy_plane();
-        let b = xy_plane();
-        let r = a.cover_other_coincident_surface(&b, 1e-6, None, None, false);
-        assert!(r.unwrap_err().is_unported());
+    fn a_plane_covers_an_identical_plane() {
+        let mut a = xy_plane();
+        let mut b = xy_plane();
+        let r = a
+            .cover_other_coincident_surface(&Kernel::default(), &mut b, 1e-6, None, None, false)
+            .unwrap();
+        assert_eq!(r.covering_is_other, Some(false));
+        assert!(r.max_dist <= 1e-6);
     }
 }

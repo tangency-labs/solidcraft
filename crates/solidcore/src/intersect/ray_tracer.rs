@@ -69,7 +69,6 @@
 //!   passes as the skip element is `m_apNodes[0]`, which `FireRay` always clears, so
 //!   no element is skipped; unsigned products wrap as upstream's `ULONG`.
 //! - **Unported callees.** `SmSurface::LocalLineIntersect` (`surface.surface_p8`),
-//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`),
 //!   `SmFace::PointClassify` (`query.face_p2`), `Grid::expand_hierarchy` and the poly
 //!   types return [`SolidError::Unported`] (see the `UNPORTED` markers). The surface
 //!   cache and its tree (`smsurf_GetSurfaceCache`, `GetTree`) are ported.

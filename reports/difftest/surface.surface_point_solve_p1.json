@@ -1315,8 +1315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0029",
@@ -1895,8 +1895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0101",
@@ -2291,8 +2291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0150",
@@ -2303,8 +2303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0151",
@@ -2347,8 +2347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0156",
@@ -2855,8 +2855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0219",
@@ -3291,8 +3291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0273",
@@ -3327,8 +3327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0277",
@@ -4179,8 +4179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0383",
@@ -4535,8 +4535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0427",
@@ -4779,8 +4779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0457",
@@ -4855,8 +4855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0466",
@@ -5267,8 +5267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0517",
@@ -5503,8 +5503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0546",
@@ -5547,8 +5547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0551",
@@ -5807,8 +5807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0583",
@@ -5843,8 +5843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0587",
@@ -6303,8 +6303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0644",
@@ -6619,8 +6619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0683",
@@ -6711,8 +6711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0694",
@@ -6779,8 +6779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0702",
@@ -6935,8 +6935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0721",
@@ -7307,8 +7307,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0767",
@@ -7479,8 +7479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0788",
@@ -7499,8 +7499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0790",
@@ -7591,8 +7591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0801",
@@ -7603,8 +7603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0802",
@@ -7623,8 +7623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0804",
@@ -7707,8 +7707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0814",
@@ -7775,8 +7775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0822",
@@ -7827,8 +7827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0828",
@@ -7863,8 +7863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0832",
@@ -8416,7 +8416,7 @@
   "cases_passed": 1003,
   "cases_total": 1035,
   "deferred_by_unit": {
-    "surface.surface_p3": 32
+    "curve.iso_curve": 32
   },
   "max_rel_err": 0.0,
   "pass": true,

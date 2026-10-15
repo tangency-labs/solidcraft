@@ -104,6 +104,7 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use crate::nurbs::crv_adv::p1::CurveEnd;
@@ -194,10 +195,10 @@ fn surface_nurb<'a>(surface: &'a BSplineSurface, operation: &'static str) -> Res
 
 /// `SmSurface::IsSingularity(uv, dir)`: whether `uv` is a singularity and its
 /// direction.
-fn is_singularity(srf: &BSplineSurface, uv: Point2) -> Result<(bool, SurfParamType)> {
+fn is_singularity(k: &Kernel, srf: &BSplineSurface, uv: Point2) -> Result<(bool, SurfParamType)> {
     // the SmSurface body (surface.surface_p5), on a surface holding a copy
     let surface = crate::surface::surface::Surface::from(srf.clone_exact());
-    let s = surface.is_singularity(uv, crate::math::EFF_ZERO, false)?;
+    let s = surface.is_singularity(k, uv, crate::math::EFF_ZERO, false)?;
     Ok((s.singular, s.direction))
 }
 
@@ -1155,7 +1156,7 @@ impl BSplineSurface {
             ext_direction,
             dist,
             extension_continuity,
-            &|uv| is_singularity(self, uv),
+            &|uv| is_singularity(&Kernel::default(), self, uv),
             &|domain, dir| is_closed(self, domain, dir),
         )
     }
@@ -1891,12 +1892,10 @@ mod tests {
     }
 
     #[test]
-    fn extended_surface_is_unported() {
+    fn extended_surface_runs() {
         let s = plane_surface();
-        assert!(matches!(
-            s.create_extended_surface(0.1, ContinuityType::G1),
-            Err(SolidError::Unported { .. })
-        ));
+        let r = s.create_extended_surface(0.1, ContinuityType::G1);
+        assert!(r.is_ok(), "{r:?}");
     }
 
     #[test]

@@ -13,8 +13,8 @@
 //! `min[3] max[3]`. A solution is `type nvars value end_value start[5] end[5]` (its objects
 //! are the op's curve/surfaces). A curve record is `ivl_min ivl_max` and the points at 0, 1/4,
 //! 1/2, 3/4 and 1 of the natural interval. Every output starts with the status (`0` =
-//! `SM_SUCCESS`, else the `SmStatus`; `-3` = a surface or curve the shim could not build;
-//! `-2` = `sm_SCLocalSolve` reached `sm_SpLocalSolve`); the rest:
+//! `SM_SUCCESS`, else the `SmStatus`; `-3` = a surface or curve the shim could not build);
+//! the rest:
 //!
 //! | [`Op`]     | upstream                                   | parameters after the surface | outputs |
 //! |------------|--------------------------------------------|------------------------------|---------|

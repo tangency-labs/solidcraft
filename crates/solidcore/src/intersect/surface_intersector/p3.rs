@@ -413,8 +413,8 @@ impl SurfaceIntersector<'_> {
                         *at_mut(&mut uvs, this) = this_uv(par(&sol.start, 0));
 
                         // skip start points which are on surface singularities
-                        if surface_is_singularity(self.surface(this), *at(&uvs, this))?
-                            || surface_is_singularity(self.surface(other), *at(&uvs, other))?
+                        if surface_is_singularity(k, self.surface(this), *at(&uvs, this))?
+                            || surface_is_singularity(k, self.surface(other), *at(&uvs, other))?
                         {
                             continue;
                         }
@@ -518,8 +518,12 @@ impl SurfaceIntersector<'_> {
                             *at_mut(&mut uvs, other) = uv;
 
                             // skip start points on surface singularities
-                            if surface_is_singularity(self.surface(SrfIndex::First), uvs[0])?
-                                || surface_is_singularity(self.surface(SrfIndex::Second), uvs[1])?
+                            if surface_is_singularity(k, self.surface(SrfIndex::First), uvs[0])?
+                                || surface_is_singularity(
+                                    k,
+                                    self.surface(SrfIndex::Second),
+                                    uvs[1],
+                                )?
                             {
                                 continue;
                             }
@@ -1319,14 +1323,16 @@ impl SurfaceIntersector<'_> {
 
 /// `surface.IsSingularity(uv, eSingDir)` (default tolerance): the plane override
 /// (never singular); other kinds run `SmSurface::IsSingularity`.
-fn surface_is_singularity(surface: &Surface, uv: Point2) -> Result<bool> {
+fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular),
+        | SurfaceKind::SrfInVolume(_) => {
+            Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
+        }
     }
 }
 

@@ -579,6 +579,7 @@ fn global_point_solve(
 /// `SmSurface::IsSingularity(uv, dir)`, virtual: `SmPlane::IsSingularity` is an inline
 /// override returning FALSE (`SmPlane.h:369`), so a plane answers it here.
 fn is_singularity(
+    k: &Kernel,
     surface: &crate::surface::surface::Surface,
     _srf: &BSplineSurface,
     uv: Point2,
@@ -587,7 +588,7 @@ fn is_singularity(
         return Ok(p.is_singularity().0);
     }
     // the SmSurface body (surface.surface_p5)
-    Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular)
+    Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
 }
 
 /// `SmSurface::IsClosed(domain, dir)` (unit `surface.surface_p7`), virtual:
@@ -1856,7 +1857,7 @@ impl BSplineSurface {
         };
 
         // when point is on a singular boundary
-        if is_singularity(surface, self, uv)? {
+        if is_singularity(k, surface, self, uv)? {
             location = LocationType::Pole;
         }
 

@@ -425,7 +425,12 @@ fn get_or_create_uv_trim_curve(_b: &Brep, _eu: EdgeuseId) -> Result<Curve> {
 
 /// `pSurf->IsSingularity(uv, eDir, dTol3d, TRUE)` (virtual: the plane override, the
 /// base body otherwise).
-fn is_singularity(surface: &Surface, uv: Point2, tol: f64) -> Result<(bool, SurfParamType)> {
+fn is_singularity(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    tol: f64,
+) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
         SurfaceKind::BSpline(_)
@@ -433,7 +438,7 @@ fn is_singularity(surface: &Surface, uv: Point2, tol: f64) -> Result<(bool, Surf
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => {
-            let r = surface.is_singularity(uv, tol, false)?;
+            let r = surface.is_singularity(k, uv, tol, false)?;
             Ok((r.singular, r.direction))
         }
     }
@@ -590,8 +595,8 @@ pub fn are_connected(
 
     // when gaps across singularities are allowed
     if singularity_ok {
-        let (on_1, dir_1) = is_singularity(surf, uv1, tol_3d)?;
-        let (on_2, dir_2) = is_singularity(surf, uv2, tol_3d)?;
+        let (on_1, dir_1) = is_singularity(k, surf, uv1, tol_3d)?;
+        let (on_2, dir_2) = is_singularity(k, surf, uv2, tol_3d)?;
 
         // both ends are on a singularity
         if on_1 && on_2 {

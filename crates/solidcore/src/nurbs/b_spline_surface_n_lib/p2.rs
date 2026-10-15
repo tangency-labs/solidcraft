@@ -39,8 +39,8 @@
 //! - **Tangent fields** are [`TangentField`]s of `SmCurve` views of the B-spline
 //!   curves (the same data, not a copy-constructed curve).
 //! - **Unported callees** return [`SolidError::Unported`]:
-//!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`),
-//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`). (`SmSurface::EvaluateNormal`
+//!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`). (`SmSurface::EvaluateNormalSection`
+//!   is `surface::surface::p3`'s, `SmSurface::EvaluateNormal`
 //!   is `surface::surface::p7`'s, `Evaluate1stDerivatives` `surface::surface::p1`'s.) Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
 //! - Status values upstream ignores stay ignored (`EditParameterization` before

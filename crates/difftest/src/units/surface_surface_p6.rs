@@ -19,7 +19,8 @@
 //! (`SmCSIntersectENFO::Evaluate`), the `SimpleCoincidenceChecker` cases whose boxes meet
 //! (`GlobalPointSolve`), the range classifications (`LocalPointSolve`), the identical-solution
 //! tests that reach a non-plane singularity test, the iso curves of curve-bounded surfaces,
-//! and the `sm_SCLocalSolve` cases that reach `sm_SpLocalSolve`, a local point or curve solve.
+//! and the `sm_SCLocalSolve` cases whose `sm_SpLocalSolve` reaches an unported point solve
+//! (`LocalPointSolve_1`); the shim runs a verbatim copy of `sm_SpLocalSolve`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -559,10 +559,10 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let mut o = Vec::new();
     match &i.op {
         OpIn::IsSing { uv, tol, pt_only } => {
-            let r = must(s.is_singularity(p2(*uv), *tol, *pt_only), "is_singularity")?;
+            let r = must(s.is_singularity(&k, p2(*uv), *tol, *pt_only), "is_singularity")?;
             o.extend([0.0, b(r.singular), f64::from(r.direction as i32)]);
         }
-        OpIn::NormalSing { uv, tol } => match st(s.evaluate_normal_at_singularity(p2(*uv), *tol))? {
+        OpIn::NormalSing { uv, tol } => match st(s.evaluate_normal_at_singularity(&k, p2(*uv), *tol))? {
             Ok(n) => {
                 o.push(0.0);
                 pv(&mut o, n);
@@ -643,8 +643,9 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::Cover { other, tol, merged } => {
-            let other = surface_of(other)?;
-            match st(s.cover_other_coincident_surface(&other, *tol, None, None, *merged))? {
+            let mut this = s.clone();
+            let mut other = surface_of(other)?;
+            match st(this.cover_other_coincident_surface(&k, &mut other, *tol, None, None, *merged))? {
                 Ok(r) => {
                     let which = r.covering_is_other.map_or(-1.0, b);
                     o.extend([0.0, which, r.max_dist]);

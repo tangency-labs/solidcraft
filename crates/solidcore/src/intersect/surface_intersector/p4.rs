@@ -925,8 +925,8 @@ impl SurfaceIntersector<'_> {
                     let p = self.point(f)?;
                     (p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second))
                 };
-                is_singular = surface_is_singularity(self.surface(SrfIndex::First), uv0)?;
-                is_singular |= surface_is_singularity(self.surface(SrfIndex::Second), uv1)?;
+                is_singular = surface_is_singularity(k, self.surface(SrfIndex::First), uv0)?;
+                is_singular |= surface_is_singularity(k, self.surface(SrfIndex::Second), uv1)?;
             }
         }
 
@@ -1208,14 +1208,16 @@ const fn is_offset_surface(surface: &Surface) -> bool {
 
 /// `surface.IsSingularity(uv, eWhichDir)` (default tolerance): the plane override
 /// (never singular); other kinds run `SmSurface::IsSingularity`.
-fn surface_is_singularity(surface: &Surface, uv: Point2) -> Result<bool> {
+fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => Ok(surface.is_singularity(uv, EFF_ZERO, false)?.singular),
+        | SurfaceKind::SrfInVolume(_) => {
+            Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
+        }
     }
 }
 

@@ -588,8 +588,8 @@ impl SurfaceIntersector<'_> {
             {
                 let at_singularity = match previous {
                     Some(_) => {
-                        is_singularity(self.surface(SrfIndex::First), uv_values[0])?.0
-                            || is_singularity(self.surface(SrfIndex::Second), uv_values[1])?.0
+                        is_singularity(k, self.surface(SrfIndex::First), uv_values[0])?.0
+                            || is_singularity(k, self.surface(SrfIndex::Second), uv_values[1])?.0
                     }
                     None => false,
                 };
@@ -633,7 +633,7 @@ impl SurfaceIntersector<'_> {
                     } else {
                         uv_values[1]
                     };
-                    let (sing, sing_dir) = is_singularity(self.surface(s), uv)?;
+                    let (sing, sing_dir) = is_singularity(k, self.surface(s), uv)?;
                     if sing {
                         // step back along the 3D curve and recompute the tangents
                         let mut p = prev.clone();
@@ -1515,7 +1515,7 @@ fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
 
 /// `crSurface.IsSingularity(uv, eSingDir)`: the plane override (none); other kinds
 /// run `SmSurface::IsSingularity`.
-fn is_singularity(surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)> {
+fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
         SurfaceKind::BSpline(_)
@@ -1523,7 +1523,7 @@ fn is_singularity(surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => {
-            let r = surface.is_singularity(uv, EFF_ZERO, false)?;
+            let r = surface.is_singularity(k, uv, EFF_ZERO, false)?;
             Ok((r.singular, r.direction))
         }
     }
@@ -1539,7 +1539,7 @@ fn surface_local_point_solve_normalize(
 ) -> Result<Option<[f64; 2]>> {
     let r = surface.local_point_solve::<crate::surface::surface::p4::NoObject>(
         domain,
-        crate::geom::global_solver::SolverOperation::Normalize,
+        SolverOperation::Normalize,
         point,
         guess,
     )?;

@@ -58,16 +58,12 @@
       "values_compared": 384
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824783",
-      "values_compared": 0
+      "values_compared": 480
     },
     {
       "max_rel_err": 0.0,
@@ -94,16 +90,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0011",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824787",
-      "values_compared": 0
+      "values_compared": 646
     },
     {
       "max_rel_err": 0.0,
@@ -383,8 +375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0046",
@@ -554,16 +546,12 @@
       "values_compared": 847
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0067",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824843",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -598,16 +586,12 @@
       "values_compared": 246
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0072",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824848",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -646,16 +630,12 @@
       "values_compared": 142
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0077",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824853",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -887,8 +867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0106",
@@ -923,8 +903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0110",
@@ -1118,28 +1098,20 @@
       "values_compared": 276
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0134",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824910",
-      "values_compared": 0
+      "values_compared": 1932
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0135",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824911",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -1350,16 +1322,12 @@
       "values_compared": 288
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0162",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801824938",
-      "values_compared": 0
+      "values_compared": 389
     },
     {
       "max_rel_err": 0.0,
@@ -1859,8 +1827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0225",
@@ -1942,16 +1910,12 @@
       "values_compared": 331
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0235",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825011",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -2166,16 +2130,12 @@
       "values_compared": 330
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0262",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825038",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -2342,21 +2302,17 @@
       "values_compared": 18109
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0283",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825059",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0284",
@@ -2746,16 +2702,12 @@
       "values_compared": 384
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0332",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825108",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -2870,16 +2822,12 @@
       "values_compared": 384
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0347",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825123",
-      "values_compared": 0
+      "values_compared": 1238
     },
     {
       "max_rel_err": 0.0,
@@ -3311,8 +3259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0401",
@@ -3347,8 +3295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0405",
@@ -3391,8 +3339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0410",
@@ -3442,16 +3390,12 @@
       "values_compared": 216
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0416",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825192",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -3678,16 +3622,12 @@
       "values_compared": 97189
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0445",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825221",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -3883,8 +3823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0470",
@@ -3894,16 +3834,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0471",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825247",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -3962,16 +3898,12 @@
       "values_compared": 246
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0479",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825255",
-      "values_compared": 0
+      "values_compared": 5973
     },
     {
       "max_rel_err": 0.0,
@@ -4030,16 +3962,12 @@
       "values_compared": 202
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0487",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825263",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -4098,16 +4026,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0495",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825271",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -4406,21 +4330,17 @@
       "values_compared": 202
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0533",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825309",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
+        "symbol": "SmIsoCurve::SmIsoCurve(non-B-spline surface)",
+        "unit": "curve.iso_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0534",
@@ -4810,16 +4730,12 @@
       "values_compared": 276
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0582",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825358",
-      "values_compared": 0
+      "values_compared": 384
     },
     {
       "max_rel_err": 0.0,
@@ -4950,26 +4866,22 @@
       "values_compared": 558
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::GetSingularities",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0599",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17500105236801825375",
-      "values_compared": 0
+      "values_compared": 384
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 40,
+  "cases_deferred": 18,
   "cases_failed": 0,
-  "cases_passed": 560,
+  "cases_passed": 582,
   "cases_total": 600,
   "deferred_by_unit": {
-    "surface.surface_cache_p1": 8,
-    "surface.surface_p5": 32
+    "curve.iso_curve": 10,
+    "surface.surface_cache_p1": 8
   },
   "max_rel_err": 0.0,
   "pass": true,
