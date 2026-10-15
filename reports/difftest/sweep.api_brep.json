@@ -1,0 +1,5672 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_empty",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#0",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_empty_uncapped",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#1",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_rotational_empty",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#2",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_circle_neg_zero",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#3",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_circle_zero",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#4",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_halfarcs_neg",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#5",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_closed_curve_neg",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#6",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_arc_359_neg",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#7",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_circle_zero_dir",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#8",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_circle_negdir",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#9",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_linear_null_then_circle_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#10",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_linear_herm_then_circle_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#11",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_reps_circle_neg",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#12",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_linear_reps_circle_neg_r0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#13",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_linear_reps_null_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#14",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_draft_null_then_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#15",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_taper_herm_then_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#16",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_draft_square_h0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#17",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_draft_square_a90",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#18",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_taper_square_a0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#19",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_taper_square_caps_neg",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#20",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_taper_null_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#21",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_rot_reps_big",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#22",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_rot_zero_axis",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#23",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_rot_angle0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#24",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_pipe_tiny_radius",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#25",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_pipe_circle_path",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#26",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_pipe_line_path_huge",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#27",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_curve_sweep_null_null",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#28",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_curve_sweep_scale_ref_only",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#29",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_curve_sweep_scale_only",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#30",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_curve_sweep_empty_nullpath",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#31",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "review_from_edges_two_discs_nullpath",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#32",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_from_faces_disc_line_path",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#33",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#34",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#35",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#36",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#37",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#38",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#39",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#40",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_00111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#41",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#42",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#43",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#44",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#45",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#46",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#47",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#48",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_01111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#49",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#50",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#51",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#52",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#53",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#54",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#55",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#56",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_10111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#57",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#58",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#59",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#60",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#61",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#62",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#63",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#64",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_11111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#65",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#66",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#67",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#68",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#69",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#70",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#71",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#72",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_00111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#73",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#74",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#75",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#76",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#77",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#78",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#79",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#80",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_01111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#81",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#82",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#83",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#84",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#85",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#86",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#87",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#88",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_10111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#89",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#90",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#91",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#92",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#93",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#94",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#95",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#96",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_herm_11111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#97",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#98",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#99",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#100",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#101",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#102",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#103",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#104",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_00111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#105",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#106",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#107",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#108",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#109",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#110",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#111",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#112",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_01111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#113",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#114",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#115",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#116",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#117",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#118",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#119",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#120",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_10111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#121",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#122",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11100_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#123",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11101",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#124",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11101_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#125",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#126",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11110_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#127",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#128",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_null_herm_11111_scaled",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#129",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_line_path",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#130",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "review_cs_nobspline_circle_path",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/review.json#131",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_circle_along_z",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#0 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1731)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_from_faces_disc",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#1 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1774)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_from_edges_disc",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#2 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1774)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "taper_extrude_null_entry",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#3 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1841)",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "taper_extrude_square",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#4 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1846)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "pipe_sweep_zigzag",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#5 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1856)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "pipe_sweep_zero_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#6 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1856)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "pipe_sweep_null_path",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#7 (upstream tests/SM_API_test/src/TestSmBrep.cpp:1856)",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "draft_sweep_rectangle",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#8 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:401)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "rotational_sweep_semicircle_sphere",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#9 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:261)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "rotational_sweep_degenerate_curve",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#10 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:283)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_reps_zero_capped",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#11 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:298)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_semicircle_and_line",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#12 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:312)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_plane",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#13 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:344)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_cylinder",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#14 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:372)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "planar_path_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#15 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2879)",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_rectangle_line",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#16 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2906)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_circle_caps0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#17 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3004)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_circle_caps1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#18 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3004)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_circle_caps2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#19 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3004)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_circle_caps3",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#20 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3004)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "planar_path_circle_bad_caps-1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#21 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3079)",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "planar_path_circle_bad_caps4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#22 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3079)",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "planar_path_connected",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#23 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3096)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_open_profile_capped",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#24 (upstream tests/SM_API_test/src/TestSmGeneral.cpp:1180)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_closed_profile_capped",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#25 (upstream tests/SM_API_test/src/TestSmGeneral.cpp:1203)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_no_profile",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#26",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_sweep_no_path",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#27",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "from_faces_none",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#28",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "from_edges_none",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#29",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "from_faces_no_path",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#30",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "taper_extrude_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#31",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "linear_reps_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#32",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rotational_reps_empty",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#33",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "rotational_reps_semicircle",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#34",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_hermite_no_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#35",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_hermite_before_null",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#36",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "linear_sweep_null_before_hermite",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#37",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "draft_sweep_hermite",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#38",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "pipe_sweep_negative_zero_radius",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#39",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "pipe_sweep_analytic_circle_path",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/sweep.api_brep/upstream.json#40",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966007",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966008",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966009",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966010",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966011",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966012",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966013",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966014",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966015",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966016",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966017",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966018",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966019",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966020",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966021",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966022",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966023",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966024",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966025",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966026",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966027",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966028",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966029",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966030",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966031",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966032",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966033",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966034",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966035",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966036",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966037",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966038",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966039",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966040",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966041",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966042",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966043",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966044",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966045",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966046",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966047",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966048",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966049",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966050",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966051",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966052",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966053",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966054",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966055",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966056",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966057",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966058",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966059",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966060",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966061",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966062",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966063",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966064",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966065",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966066",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966067",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966068",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966069",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966070",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966071",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966072",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966073",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966074",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966075",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966076",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966077",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966078",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966079",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966080",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966081",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966082",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966083",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966084",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966085",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966086",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966087",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966088",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966089",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966090",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966091",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966092",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966093",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966094",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966095",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966096",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966097",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966098",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966099",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966100",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966101",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966102",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966103",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966104",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966105",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966106",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966107",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966108",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966109",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966110",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966111",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966112",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966113",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966114",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966115",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966116",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966117",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966118",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966119",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966120",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966121",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966122",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966123",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966124",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966125",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966126",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966127",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966128",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966129",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966130",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966131",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966132",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966133",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966134",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966135",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966136",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966137",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966138",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966139",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966140",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966141",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966142",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966143",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966144",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966145",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966146",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966147",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966148",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966149",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966150",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966151",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966152",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966153",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966154",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966155",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966156",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966157",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966158",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966159",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966160",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966161",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966162",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966163",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966164",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966165",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966166",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966167",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966168",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966169",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966170",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966171",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966172",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966173",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966174",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966175",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966176",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966177",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966178",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966179",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966180",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966181",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966182",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966183",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966184",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966185",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966186",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966187",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966188",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966189",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966190",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966191",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966192",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966193",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966194",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966195",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966196",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966197",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966198",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966199",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966200",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966201",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966202",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966203",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966204",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966205",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966206",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966207",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966208",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966209",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966210",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966211",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966212",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966213",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966214",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966215",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966216",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966217",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966218",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966219",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966220",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966221",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966222",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966223",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966224",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966225",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966226",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966227",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966228",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966229",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966230",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966231",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966232",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966233",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966234",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966235",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966236",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966237",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966238",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966239",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966240",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966241",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966242",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966243",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966244",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966245",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966246",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966247",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966248",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966249",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966250",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966251",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966252",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966253",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966254",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966255",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966256",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966257",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966258",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966259",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966260",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966261",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966262",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966263",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966264",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateTaperExtrude",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966265",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966266",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966267",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966268",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966269",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966270",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966271",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966272",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966273",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966274",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966275",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966276",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966277",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966278",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966279",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966280",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966281",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966282",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966283",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966284",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966285",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966286",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966287",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966288",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966289",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966290",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966291",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966292",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966293",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966294",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966295",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966296",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966297",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966298",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966299",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966300",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966301",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966302",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966303",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966304",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966305",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966306",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966307",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966308",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966309",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966310",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966311",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966312",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966313",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966314",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966315",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966316",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0310",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966317",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966318",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966319",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966320",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966321",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966322",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0316",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966323",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966324",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966325",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966326",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0320",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966327",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966328",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0322",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966329",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0323",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966330",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966331",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966332",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966333",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0327",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966334",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966335",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966336",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0330",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966337",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966338",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966339",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966340",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966341",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0335",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966342",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966343",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966344",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966345",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966346",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromEdges",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966347",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0341",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966348",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966349",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966350",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966351",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreatePipeSweep",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966352",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966353",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966354",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966355",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0349",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966356",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0350",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966357",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966358",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0352",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966359",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966360",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966361",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966362",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966363",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0357",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966364",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966365",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966366",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0360",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966367",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0361",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966368",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0362",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966369",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0363",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966370",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0364",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966371",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0365",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966372",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0366",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966373",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0367",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966374",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateRotationalSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0368",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966375",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0369",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966376",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0370",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966377",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0371",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966378",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0372",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966379",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0373",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966380",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0374",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966381",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0375",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966382",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0376",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966383",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0377",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966384",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0378",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966385",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0379",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966386",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateCurveSweepFromFaces",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0380",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966387",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0381",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966388",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0382",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966389",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0383",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966390",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0384",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966391",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0385",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966392",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0386",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966393",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0387",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966394",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0388",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966395",
+      "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateSweepAlongPlanarPath",
+        "unit": "primitive.primitive_creation_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0389",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966396",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPrimitiveCreation::CreateLinearSweep",
+        "unit": "primitive.primitive_creation_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0390",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=350913456981966397",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0391",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966398",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0392",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966399",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0393",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966400",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0394",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966401",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0395",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966402",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0396",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966403",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0397",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966404",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0398",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966405",
+      "values_compared": 1
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0399",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=350913456981966406",
+      "values_compared": 1
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 267,
+  "cases_failed": 0,
+  "cases_passed": 306,
+  "cases_total": 573,
+  "deferred_by_unit": {
+    "primitive.primitive_creation_p2": 80,
+    "primitive.primitive_creation_p3": 187
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "sweep.api_brep"
+}

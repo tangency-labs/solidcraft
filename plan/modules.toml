@@ -3052,7 +3052,7 @@ tests = ["SM_API_test:TestSmCreatePlanarCircle", "SM_API_test:TestSmCreatePlane"
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "19 fns; largest: SmPrimitiveCreation::Boolean2D, SmPrimitiveCreation::CreateLinearSweep, SmPrimitiveCreation::CreateSphereNoPole, sm_CreateAnalyticRotationalSweep; cycle back-edges (call into later units; stub or co-port): boolean.topology_intersector_p1(5), sweep.topology_sweep(4), boolean.topology_intersector_p2(3); unit-SCC #22 (220 units); 131 upstream test entry points reach this unit"
+notes = "19 fns; largest: SmPrimitiveCreation::Boolean2D, SmPrimitiveCreation::CreateLinearSweep, SmPrimitiveCreation::CreateSphereNoPole, sm_CreateAnalyticRotationalSweep; cycle back-edges (call into later units; stub or co-port): boolean.topology_intersector_p1(5), sweep.topology_sweep(4), boolean.topology_intersector_p2(3); unit-SCC #22 (220 units); 131 upstream test entry points reach this unit; CO-PORTED in sweep.api_brep (PR #110): SmSweepOptions -> solidcore::primitive::primitive_creation::SweepOptions (crates/solidcore/src/primitive/primitive_creation.rs, parent module of p1..p3; the type comes from SmPrimitiveCreation.h)"
 
 [[unit]]
 id = "query.api_queries"
@@ -3290,7 +3290,7 @@ tests = ["SM_API_test:TestSmCreateSwungPrimitive", "SM_API_test:TestSmCreateSkin
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "8 fns; largest: SmPrimitiveCreation::CreateCurveSweep, sm_CreateRuledSurfaceFromOffsetCurve, SmPrimitiveCreation::CreateLinearSweep, SmPrimitiveCreation::CreateRotationalSweep; 60 upstream test entry points reach this unit"
+notes = "CO-PORTED in sweep.api_brep (PR #110): SmSweepOptions -> solidcore::primitive::primitive_creation::SweepOptions (crates/solidcore/src/primitive/primitive_creation.rs, parent module of p1..p3); 8 fns; largest: SmPrimitiveCreation::CreateCurveSweep, sm_CreateRuledSurfaceFromOffsetCurve, SmPrimitiveCreation::CreateLinearSweep, SmPrimitiveCreation::CreateRotationalSweep; 60 upstream test entry points reach this unit"
 
 [[unit]]
 id = "blend.fillet_executive_p3"
@@ -3402,7 +3402,7 @@ tests = ["SM_API_test:TestSmCreateSkinPrimitive", "SM_API_test:TestSmPipeSweep",
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "12 fns; largest: SmPrimitiveCreation::CreateTaperExtrude, SmPrimitiveCreation::CreateSweepAlongPlanarPath, sm_CreateSkinPrimitiveInternal, SmPrimitiveCreation::CreateCone; 45 upstream test entry points reach this unit"
+notes = "CO-PORTED in sweep.api_brep (PR #110): SmSweepOptions -> solidcore::primitive::primitive_creation::SweepOptions (crates/solidcore/src/primitive/primitive_creation.rs, parent module of p1..p3); 12 fns; largest: SmPrimitiveCreation::CreateTaperExtrude, SmPrimitiveCreation::CreateSweepAlongPlanarPath, sm_CreateSkinPrimitiveInternal, SmPrimitiveCreation::CreateCone; 45 upstream test entry points reach this unit"
 
 [[unit]]
 id = "blend.fillet_corner_p1"
@@ -3483,10 +3483,10 @@ soft_depends_on = ["curve.curve_p2", "geom.context", "geom.object", "geom.vector
 est_lines = 529
 layer = 59
 tests = ["SM_API_test:TestSmCurveSweep", "SM_API_test:TestSmPipeSweep", "SM_API_test:TestSmCurveSweepFromFaces", "SM_API_test:TestSmCurveSweepFailureCleanup", "SM_API_test:TestSmCreateDraftSweep", "SM_API_test:TestSmTaperExtrude"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "12 fns; largest: SmApiCreateDraftSweep, SmApiCreateLinearSweep, SmApiCreateCurveSweep, SmApiCreateCurveSweepFromEdges; entry points: SmApiCreateCurveSweep, SmApiCreateCurveSweepFromEdges, SmApiCreateCurveSweepFromFaces, SmApiCreateDraftSweep, SmApiCreateLinearSweep, SmApiCreateLinearSweepWithRepetitions, SmApiCreatePipeSweep, SmApiCreateRotationalSweep, SmApiCreateRotationalSweepWithRepetitions, SmApiCreateSweepAlongPlanarPath, SmApiCreateTaperExtrude; 15 upstream test entry points reach this unit"
+notes = "partial (PR #110): difftest cases=573 passed=306 deferred=267 (blocked_by primitive.primitive_creation_p2(80), primitive.primitive_creation_p3(187): every entry point validates and copies its inputs as upstream, then stubs the SmPrimitiveCreation sweep it wraps); compared: NULL curves, curves without Copy (SM_ERR), empty inputs, missing path, non-positive pipe radius, cap selector range; FFI fences off UB-111, UB-112, UB-113, UB-114, HANG-13; 12 fns; largest: SmApiCreateDraftSweep, SmApiCreateLinearSweep, SmApiCreateCurveSweep, SmApiCreateCurveSweepFromEdges; entry points: SmApiCreateCurveSweep, SmApiCreateCurveSweepFromEdges, SmApiCreateCurveSweepFromFaces, SmApiCreateDraftSweep, SmApiCreateLinearSweep, SmApiCreateLinearSweepWithRepetitions, SmApiCreatePipeSweep, SmApiCreateRotationalSweep, SmApiCreateRotationalSweepWithRepetitions, SmApiCreateSweepAlongPlanarPath, SmApiCreateTaperExtrude; 15 upstream test entry points reach this unit"
 
 [[unit]]
 id = "sweep.api_surfaces"

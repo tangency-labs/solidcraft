@@ -5,3 +5,4 @@
 //! `SM_API/SmApiPrimitives`.
 
 pub mod api_curves;
+pub mod primitive_creation;
