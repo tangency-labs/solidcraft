@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::curve::Curve as SmCurve;
+use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -41,6 +42,7 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
+use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::p7::{
     approx_derivative_lengths, base_evaluate_normal, base_is_closed, check_seam_drop,
     compute_higher_order_derivs, compute_inward_vector, drop_points_to_tangent_plane,
@@ -100,6 +102,16 @@ pub(crate) enum SrfIn {
     Sms(String),
     /// An `SmCurveBoundedSurface` without boundary curves over `basis`.
     Bounded { basis: Box<SrfIn>, implicit: bool },
+    /// An `SmSurfOfRevolution` (`CreateCanonical`) of the line `a`-`b` about the axis
+    /// through `p` along `axis`, with `SetOutOfBoundsEnabled(oob)` (surface and generator).
+    Revolution {
+        a: [f64; 3],
+        b: [f64; 3],
+        p: [f64; 3],
+        axis: [f64; 3],
+        swap: bool,
+        oob: bool,
+    },
 }
 
 fn numbers(path: &str) -> Result<Vec<f64>, HarnessError> {
@@ -291,6 +303,13 @@ pub(crate) fn push_srf(o: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> 
             o.push(2.0);
             push_srf(o, basis)?;
             o.push(b(*implicit));
+        }
+        SrfIn::Revolution { a, b: bb, p, axis, swap, oob } => {
+            o.push(3.0);
+            for v in [a, bb, p, axis] {
+                o.extend_from_slice(v);
+            }
+            o.extend([b(*swap), b(*oob)]);
         }
         SrfIn::Plane { o: org, n } => {
             o.push(1.0);
@@ -600,6 +619,21 @@ pub(crate) fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
             *implicit,
         ))),
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
+        SrfIn::Revolution { a, b, p, axis, swap, oob } => {
+            let k = solidcore::kernel::Kernel::default();
+            let mut l = Line::from_points(v3(*a), v3(*b), 3);
+            l.make_nurb().map_err(|e| harness(format!("line nurb: {e}")))?;
+            let mut r = SurfOfRevolution::create_canonical(
+                &k,
+                SmCurve::from(l),
+                v3(*p),
+                v3(*axis),
+                *swap,
+            )
+            .map_err(|e| harness(format!("revolution: {e}")))?;
+            r.set_out_of_bounds_enabled(*oob);
+            Ok(Surface::from(r))
+        }
         SrfIn::Bspline(bs) => {
             let net = bs
                 .net
@@ -1270,7 +1304,7 @@ pub(crate) fn natural(s: &SrfIn) -> [f64; 4] {
             bs.u.last().copied().unwrap_or(1.0),
             bs.v.last().copied().unwrap_or(1.0),
         ],
-        SrfIn::Plane { .. } => {
+        SrfIn::Plane { .. } | SrfIn::Revolution { .. } => {
             let d = surface_of(s).map_or_else(
                 |_| Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
                 |x| x.natural_uv_domain(),
@@ -1299,7 +1333,9 @@ pub(crate) fn gen_uv(rng: &mut Rng, s: &SrfIn) -> [f64; 2] {
     };
     let (ku, kv) = match base {
         SrfIn::Bspline(bs) => (Some(bs.u.as_slice()), Some(bs.v.as_slice())),
-        SrfIn::Plane { .. } | SrfIn::Sms(_) | SrfIn::Bounded { .. } => (None, None),
+        SrfIn::Plane { .. } | SrfIn::Revolution { .. } | SrfIn::Sms(_) | SrfIn::Bounded { .. } => {
+            (None, None)
+        }
     };
     [gen_param(rng, u0, u1, ku), gen_param(rng, v0, v1, kv)]
 }

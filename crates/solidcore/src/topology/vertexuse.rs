@@ -807,12 +807,8 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfPa
 }
 
 /// `pSurface->GetSingularities() != 0`.
-fn has_singularities(_surface: &Surface) -> Result<bool> {
-    // UNPORTED(surface.surface_p3): SmSurface::GetSingularities
-    Err(SolidError::unported(
-        "SmSurface::GetSingularities",
-        "surface.surface_p3",
-    ))
+fn has_singularities(k: &Kernel, surface: &Surface) -> Result<bool> {
+    Ok(surface.get_singularities(k, false, false)?.singular != 0)
 }
 
 // ---- UV point and sector --------------------------------------------------------------
@@ -1511,7 +1507,7 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<bool> {
 
     // when vertexuse connects to a face->Surface with poles - see if vertex is on pole
     if let Some(f) = f {
-        if has_singularities(face_surface(b, f)?)? && has_vertex_face_gap(b, vu)? {
+        if has_singularities(k, face_surface(b, f)?)? && has_vertex_face_gap(b, vu)? {
             // find the gap to the surface
             let gap = vertex_face_gap(k, b, vu, false)?
                 .ok_or_else(|| null("IsOnPole: no vertex/face gap"))?;

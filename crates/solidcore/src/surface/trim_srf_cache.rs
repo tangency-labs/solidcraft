@@ -52,8 +52,7 @@
 //!   `SmSurfaceCache::BuildTree`, `FindUVNodes` and `SubdivideNode`
 //!   ([`crate::surface::surface_cache::p3`]); `SmSurface::GetFace` (through
 //!   [`SurfaceCache::face`]) and `Evaluate1stDerivatives`, `SmTol::MapTo2d` over a
-//!   surface (`surface.surface_p1`); `SmSurface::GetSingularities`
-//!   (`surface.surface_p3`); `SmPointClassification` (`intersect.point_class`) and
+//!   surface (`surface.surface_p1`); `SmPointClassification` (`intersect.point_class`) and
 //!   `SmFace::PointClassify` (`query.face_p2`); `SmTol::GetZoneTol3d` of a face
 //!   (`topology.brep_p1`, as in [`SurfaceCache::mark_face_containment`]); and the face
 //!   walk of `BuildTree` (`SmFace::GetBrep`, `CreateUVTrimCurves`,
@@ -922,8 +921,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// Those of the tree and of `Evaluate1stDerivatives`; [`SolidError::Unported`]:
-    /// `FindUVNodes` (`surface.surface_cache_p3`).
+    /// Those of the tree, of `Evaluate1stDerivatives` and of
+    /// [`SurfaceCache::find_uv_nodes`] and `GetSingularities`.
     pub fn implant_vertexuse(
         &mut self,
         k: &Kernel,

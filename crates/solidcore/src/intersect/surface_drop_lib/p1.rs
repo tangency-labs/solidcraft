@@ -52,8 +52,7 @@
 //! - **`DropAndTrimCurve`.** The record's `pUVCurvesArg` (the caller's output array)
 //!   has no handle; it stays `None`. The surface and curve handles the record keeps
 //!   come with the record ([`DropFailRecord`]).
-//! - **Unported callees.** `smsurf_IsPointOnNormal` (`surface.surface_p3`) and
-//!   `SmSurfaceDropCurve` (`SetCurveIsOnSurface`, `DoTrace`;
+//! - **Unported callees.** `SmSurfaceDropCurve` (`SetCurveIsOnSurface`, `DoTrace`;
 //!   `intersect.surface_drop_curve`) return [`SolidError::Unported`].
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, `Dump`, `Draw`,
 //!   `my_AssertAndDrawDropCurve` (graphics) and the `SM_ASSERT`s.
@@ -77,6 +76,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFail, DropCurveFailArgs, UNSURE,
 };
+use crate::surface::surface::p4::is_point_on_normal as is_point_on_normal_p4;
 use crate::surface::surface::Surface;
 
 /// `SM_BIG_ULONG` (`SmMath.h`): the unset `m_eDropDerivRtn`.
@@ -183,18 +183,26 @@ struct PointOnNormal {
 
 /// `smsurf_IsPointOnNormal(surface, &domain, uv, point, &tangent, ...)`.
 fn is_point_on_normal(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _uv: Point2,
-    _point: Point3,
-    _tangent: Vec3,
-    _approx_tol_3d: f64,
+    surface: &Surface,
+    domain: &Extent2d,
+    uv: Point2,
+    point: Point3,
+    tangent: Vec3,
+    approx_tol_3d: f64,
 ) -> Result<PointOnNormal> {
-    // UNPORTED(surface.surface_p3): smsurf_IsPointOnNormal
-    Err(SolidError::unported(
-        "smsurf_IsPointOnNormal",
-        "surface.surface_p3",
-    ))
+    let r = is_point_on_normal_p4(
+        surface,
+        Some(domain),
+        uv,
+        point,
+        Some(tangent),
+        approx_tol_3d,
+    )?;
+    Ok(PointOnNormal {
+        is_good: r.good_point,
+        drop_to_surf: r.drop_to_surf,
+        approx_dev: r.approx_dev,
+    })
 }
 
 /// The sector of a counter-clockwise angle from a boundary tangent:

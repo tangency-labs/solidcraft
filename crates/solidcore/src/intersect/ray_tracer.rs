@@ -199,15 +199,16 @@ fn surface_local_line_intersect(
 
 /// `SmSurface::EvaluateNormalSection` (`bUFromLeft`, `bVFromLeft` both true).
 fn surface_evaluate_normal_section(
-    _surface: &Surface,
-    _uv: Point2,
-    _direction: Vec3,
+    surface: &Surface,
+    uv: Point2,
+    direction: Vec3,
 ) -> Result<NormalSection> {
-    // UNPORTED(surface.surface_p3): SmSurface::EvaluateNormalSection
-    Err(SolidError::unported(
-        "SmSurface::EvaluateNormalSection",
-        "surface.surface_p3",
-    ))
+    let s = surface.evaluate_normal_section(uv, Side::Left, Side::Left, direction)?;
+    Ok(NormalSection {
+        tangent_plane_direction: s.tangent,
+        curvature: s.curvature,
+        normal: s.normal,
+    })
 }
 
 /// `SmSurface::GetFace`: the face owning the surface, if any.

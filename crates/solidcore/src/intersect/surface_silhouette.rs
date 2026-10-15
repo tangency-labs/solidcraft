@@ -48,8 +48,7 @@
 //!   [`BoundaryCurve`] (with its natural interval) where upstream stores the curve
 //!   pointer.
 //! - **Unported callees** return [`SolidError::Unported`] (see the `UNPORTED`
-//!   markers): `SmSurface::EvaluateGeometric` and `SmSurface::EvaluateNormalSection`
-//!   (`surface.surface_p3`).
+//!   markers): none left for `surface.surface_p3`.
 //! - The `SM_DEBUG_CODE` drawing blocks and `Dump` are not ported. Recursion:
 //!   `ComputePointValues` calls itself only without a previous point, which does not
 //!   recurse again (depth at most 1); the Brent loop of `LocalPointSolve` stops after
@@ -137,13 +136,7 @@ fn evaluate_geometric_at(surface: &Surface, uv: Point2) -> Result<GeometricPrope
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p3): SmSurface::EvaluateGeometric
-            Err(SolidError::unported(
-                "SmSurface::EvaluateGeometric",
-                "surface.surface_p3",
-            ))
-        }
+        | SurfaceKind::SrfInVolume(_) => surface.evaluate_geometric(uv, Side::Left, Side::Left),
     }
 }
 
@@ -163,11 +156,12 @@ fn evaluate_normal_section(
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => {
-            // UNPORTED(surface.surface_p3): SmSurface::EvaluateNormalSection
-            Err(SolidError::unported(
-                "SmSurface::EvaluateNormalSection",
-                "surface.surface_p3",
-            ))
+            let n = surface.evaluate_normal_section(uv, Side::Left, Side::Left, direction)?;
+            Ok(NormalSection {
+                tangent_plane_direction: n.tangent,
+                curvature: n.curvature,
+                normal: n.normal,
+            })
         }
     }
 }
@@ -1251,10 +1245,13 @@ mod tests {
     }
 
     #[test]
-    fn unported_callees_defer() {
+    fn wired_callees_do_not_defer() {
         let s = plane();
         let efo = FindSilSingEfo::new(&s, Vec2::ZERO, Vec2::new(1.0, 1.0), true, false, Vec3::Z);
         let mut out = FunctionValue::default();
-        assert!(efo.evaluate_into(0.5, &mut out).unwrap_err().is_unported());
+        assert!(!efo
+            .evaluate_into(0.5, &mut out)
+            .err()
+            .is_some_and(|e| e.is_unported()));
     }
 }

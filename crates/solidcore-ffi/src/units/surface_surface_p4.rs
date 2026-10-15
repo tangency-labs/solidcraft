@@ -123,7 +123,7 @@ fn uv_bounds(dom: Domain) -> Vec<(f64, f64)> {
 /// [`FfiError::InvalidArgument`] for anything the shim must not see.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader { input, at: 0 };
-    let (dom, is_bspline) = surface_kind(&mut rd, false)?;
+    let (dom, is_bspline) = surface_kind(&mut rd, false, false)?;
     let bspline_only = |dom: Domain| {
         dom.filter(|_| is_bspline)
             .ok_or_else(|| bad("this op needs a B-spline surface"))

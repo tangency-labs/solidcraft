@@ -222,12 +222,8 @@ fn calc_quad_num(origin: Point3, test: Point3) -> i32 {
 }
 
 /// `SmSurface::GetSingularities`: the sides of the natural domain that are poles.
-fn surface_singularities(_surface: &Surface) -> Result<u32> {
-    // UNPORTED(surface.surface_p3): SmSurface::GetSingularities
-    Err(SolidError::unported(
-        "SmSurface::GetSingularities",
-        "surface.surface_p3",
-    ))
+fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u32> {
+    Ok(surface.get_singularities(k, false, false)?.singular)
 }
 
 /// `DropPoint` of the test point onto an edge curve (`SM_SO_INTERSECT`, no snapping
@@ -361,7 +357,7 @@ pub fn contains_uv_point(
 
     // When point and loop touch the surface UVBoundaries - does surface have poles
     let poles = if uv_boundaries & loop_boundaries != 0 {
-        surface_singularities(surface)?
+        surface_singularities(k, surface)?
     } else {
         0
     };
@@ -871,8 +867,9 @@ mod tests {
             &dom,
         ));
         let lp = view(&s2, &e, &t);
-        let err = contains_uv_point(&k, &lp, Point2::new(-5.0, 0.0), 0.0).unwrap_err();
-        assert!(matches!(err, SolidError::Unported { .. }));
+        // a plane has no singular sides, so GetSingularities is wired and no longer defers
+        let r = contains_uv_point(&k, &lp, Point2::new(-5.0, 0.0), 0.0);
+        assert!(!matches!(r, Err(SolidError::Unported { .. })));
     }
 
     #[test]

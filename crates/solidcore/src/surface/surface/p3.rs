@@ -15,8 +15,8 @@
 //! | [`Surface::get_singularities`], [`Singularities`] | `SmSurface::GetSingularities`                    |
 //! | [`Surface::cover_coincident_surface`], [`CoverCoincident`] | `SmSurface::CoverCoincidentSurface`     |
 //! | [`check_shape_match`]                             | `smsurf_CheckShapeMatch`                         |
-//! | [`FindPsNormal`]                                  | `SmFindPSNormalENFO` (constructor, `Evaluate`)   |
-//! | [`SssIntersect`]                                  | `SmSSSIntersectENFO` (constructor, `Evaluate`)   |
+//! | [`FindPsNormalEnfo`] (`EvalNFunctions`)           | `SmFindPSNormalENFO::Evaluate` (struct: `surface.surface_p1`) |
+//! | [`SssIntersectEnfo`] (`EvalNFunctions`)           | `SmSSSIntersectENFO::Evaluate` (struct: `surface.surface_p1`) |
 //! | [`Surface::local_plane_surface_intersect`]        | `SmSurface::LocalPlaneSurfaceIntersect`          |
 //! | [`Surface::local_surface_solve`], [`LocalSurfaceSolution`] | `SmSurface::LocalSurfaceSolve`          |
 //! | [`Surface::local_surface_surface_intersect`], [`LocalSssSolution`] | `SmSurface::LocalSurfaceSurfaceIntersect` |
@@ -38,9 +38,6 @@
 //!   (`topology.face_p2`) and returns [`SolidError::Unported`].
 //! - **Unported callees** (return [`SolidError::Unported`]): `SmFace::RemoveUVTrimCurves`
 //!   (`topology.face_p1`) when the surface is owned by a face.
-//! - **Co-ported callee.** `sm_CrossedSeamOrPole` (unit `surface.surface_p1`) is a few
-//!   comparisons that `CoverCoincidentSurface` needs to run at all; it is ported here
-//!   (recorded as `CO-PORTED` in the plan notes).
 
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::labels;
@@ -58,28 +55,25 @@ use crate::kernel::Kernel;
 use crate::math::{
     max2, max3, rad_to_deg, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT,
 };
-use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 
+use super::p1::{
+    crossed_seam_or_pole, evaluate_1st_derivatives, evaluate_2nd_derivatives,
+    evaluate_normal_section as smsurf_evaluate_normal_section, FindPsNormalEnfo, SsNormalizeEnfo,
+    SspIntersectEnfo, SssIntersectEnfo,
+};
 use super::p2::evaluate_geometric as smsurf_evaluate_geometric;
 use super::p2::{GeometricProperties, SurfaceEvaluate};
-use super::p4::{
-    evaluate_normal_section as smsurf_evaluate_normal_section, SsNormalize, SspIntersect,
-};
-use super::p7::{
-    approx_derivative_lengths, check_seam_drop, evaluate_1st_derivatives, evaluate_2nd_derivatives,
-};
+use super::p7::{approx_derivative_lengths, check_seam_drop};
 use super::{Surface, SurfaceKind};
 
-const OP_FIND_PS_NORMAL: &str = "surface::surface::p3::FindPsNormal::evaluate";
-const OP_SSS_INTERSECT: &str = "surface::surface::p3::SssIntersect::evaluate";
+const OP_FIND_PS_NORMAL: &str = "surface::surface::p3::FindPsNormalEnfo::evaluate";
+const OP_SSS_INTERSECT: &str = "surface::surface::p3::SssIntersectEnfo::evaluate";
 const OP_LOCAL_SOLVE: &str = "surface::surface::p3::Surface::local_surface_solve";
 const OP_PVV: &str = "surface::surface::p3::evaluate_pvv";
 
-/// `sdMaxStepRatio` of `sm_CrossedSeamOrPole`: the largest step, as a fraction of the domain.
-const MAX_STEP_RATIO: f64 = 0.4;
 /// `lSmpCnt` of `GetSingularities`: the samples along a natural boundary.
 const SMP_CNT: usize = 5;
 /// `lNumSamples` of `CoverCoincidentSurface`: the grid is `6 x 6` points.
@@ -110,21 +104,28 @@ fn surface_approx_tol_3d(k: &Kernel, surface: &Surface) -> Result<f64> {
 }
 
 /// `GetOutOfBoundsEnabled` of a surface that is an `SmBSplineSurface` (a B-spline
-/// surface or a plane); `None` for the other kinds (the `SM_CAST_NONNULL_PTR` is null).
+/// surface, a plane or a surface of revolution); `None` for the other kinds
+/// (`SM_CAST_NONNULL_PTR(SmBSplineSurface, ..)` is null, so `SmTemporaryChangeValue`
+/// changes a local instead). An `SmSTEPSurface` is an `SmSurface`, not a B-spline surface.
 fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
     match surface.kind() {
         SurfaceKind::BSpline(s) => Some(s.is_out_of_bounds_enabled()),
         SurfaceKind::Plane(s) => Some(s.is_out_of_bounds_enabled()),
-        SurfaceKind::CurveBounded(_) => None,
+        SurfaceKind::SurfOfRevolution(s) => Some(s.is_out_of_bounds_enabled()),
+        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => None,
     }
 }
 
-/// Sets the out-of-bounds flag of a B-spline based surface (no-op for other kinds).
+/// Sets the `m_bOutOfBoundsEnabled` member of a B-spline based surface (no-op for other
+/// kinds). Only the `SmBSplineSurface` member changes, as `SmTemporaryChangeValue`
+/// through `GetOutOfBoundsEnabled()` does: a surface of revolution's generator keeps its
+/// own flag (the virtual `SmSurfOfRevolution::SetOutOfBoundsEnabled` is not called).
 fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
     match surface.kind_mut() {
         SurfaceKind::BSpline(s) => *s.out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::Plane(s) => s.set_out_of_bounds_enabled(enabled),
-        SurfaceKind::CurveBounded(_) => {}
+        SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = enabled,
+        SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
     }
 }
 
@@ -280,33 +281,6 @@ fn uv_at(v: &[f64], i: usize, op: &'static str) -> Result<Point2> {
     Ok(Point2::new(nth(v, i, op)?, nth(v, i + 1, op)?))
 }
 
-/// Whether a step crossed a seam or a pole (`sm_CrossedSeamOrPole`, co-ported from unit
-/// `surface.surface_p1`): a jump of more than 0.4 of the domain size.
-fn crossed_seam_or_pole(
-    surface: &Surface,
-    prev_uv: Point2,
-    curr_uv: Point2,
-    domain: &Extent2d,
-) -> bool {
-    // First special cases: SmPlane or bilinear.
-    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
-        return false;
-    }
-    if let SurfaceKind::BSpline(b) = surface.kind() {
-        if b.degree(SurfParamType::U) == 1 && b.degree(SurfParamType::V) == 1 {
-            return false;
-        }
-    }
-
-    // Just look for a big jump.
-    let step = curr_uv - prev_uv;
-
-    // Check u and v separately.
-    let dom_size_u = domain.u_interval().length();
-    let dom_size_v = domain.v_interval().length();
-    step.x.abs() > MAX_STEP_RATIO * dom_size_u || step.y.abs() > MAX_STEP_RATIO * dom_size_v
-}
-
 /// Whether two surface evaluations (matrices with two derivatives) match in position,
 /// normal and the normal curvatures in the directions of the first surface's first
 /// derivatives (`smsurf_CheckShapeMatch`).
@@ -353,20 +327,20 @@ pub fn check_shape_match(
     let mut kappa0 = 0.0;
     let mut kappa1 = 0.0;
     if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv0, dir1))? {
-        kappa0 = s.curvature;
+        kappa0 = s.1;
     }
     if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv1, dir1))? {
-        kappa1 = s.curvature;
+        kappa1 = s.1;
     }
     if (flip * kappa0 - kappa1).abs() > ang_tol_rad {
         return Ok(false);
     }
 
     if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv0, dir2))? {
-        kappa0 = s.curvature;
+        kappa0 = s.1;
     }
     if let Some(s) = ignored(smsurf_evaluate_normal_section(pvv1, dir2))? {
-        kappa1 = s.curvature;
+        kappa1 = s.1;
     }
     if (flip * kappa0 - kappa1).abs() > ang_tol_rad {
         return Ok(false);
@@ -430,8 +404,8 @@ pub fn evaluate_normal_section_of<S: SurfaceEvaluate + ?Sized>(
     pvv[2][2] = surface_normal;
     let section = smsurf_evaluate_normal_section(&mut pvv, direction)?;
     Ok(SurfaceNormalSection {
-        tangent: section.tangent,
-        curvature: section.curvature,
+        tangent: section.0,
+        curvature: section.1,
         normal: surface_normal,
     })
 }
@@ -679,6 +653,7 @@ impl Surface {
     /// (`topology.face_p1`); those of the evaluations and of `STEPInversion`.
     pub fn cover_coincident_surface(
         &mut self,
+        k: &Kernel,
         other: &Surface,
         tol: f64,
         other_domain: Option<&Extent2d>,
@@ -688,7 +663,7 @@ impl Surface {
         if saved.is_some() {
             set_out_of_bounds_enabled(self, true);
         }
-        let result = self.cover_coincident_surface_inner(other, tol, other_domain);
+        let result = self.cover_coincident_surface_inner(k, other, tol, other_domain);
         if let Some(saved) = saved {
             set_out_of_bounds_enabled(self, saved);
         }
@@ -698,6 +673,7 @@ impl Surface {
     /// The body of [`Surface::cover_coincident_surface`] with out-of-bounds evaluation on.
     fn cover_coincident_surface_inner(
         &mut self,
+        k: &Kernel,
         other: &Surface,
         tol: f64,
         other_domain: Option<&Extent2d>,
@@ -711,7 +687,7 @@ impl Surface {
 
         // We're going to have to expand ourselves right away.
         let big_domain = self.max_analytic_domain()?;
-        if big_domain.is_degenerate(EFF_ZERO) {
+        if big_domain.is_degenerate(0.0) {
             return Ok(failure);
         }
 
@@ -728,6 +704,7 @@ impl Surface {
 
         // upstream ignores the status of the point evaluations
         let mut pt = Vec3::UNDEF;
+        let mut pt2 = Vec3::UNDEF; // keeps its last value when an evaluation fails
         let mut max_dist = -1.0;
 
         // Before even doing corners, just check one point in the middle.  This can rule
@@ -737,7 +714,7 @@ impl Surface {
         if let Some(p) = ignored(other.evaluate_point(uv_other))? {
             pt = p;
         }
-        if ignored(self.step_inversion(&big_domain, pt, tol, None))?.is_none() {
+        if ignored(self.step_inversion(k, &big_domain, pt, tol, None))?.is_none() {
             return Ok(failure);
         }
 
@@ -750,7 +727,7 @@ impl Surface {
                 }
 
                 let Some((mut uv_this, location)) =
-                    ignored(self.step_inversion(&big_domain, pt, tol, None))?
+                    ignored(self.step_inversion(k, &big_domain, pt, tol, None))?
                 else {
                     return Ok(failure);
                 };
@@ -778,7 +755,9 @@ impl Surface {
                 new_domain.add_point(uv_this);
 
                 // Check max distance.
-                let pt2 = self.evaluate_step_point(uv_this)?;
+                if let Some(p) = ignored(self.evaluate_step_point(uv_this))? {
+                    pt2 = p;
+                }
                 let dist = pt.distance(pt2);
                 max_dist = max2(dist, max_dist);
 
@@ -796,7 +775,7 @@ impl Surface {
             // our domain with our original domain, and update our domain to it.
             let orig_domain = self.step_uv_domain();
             let update_domain = orig_domain.union(&new_domain);
-            self.adjust_step_uv_domain(&update_domain)?;
+            self.adjust_step_uv_domain(k, &update_domain)?;
 
             // Have to do this after AdjustSTEPUVDomain call:
             self.remove_uv_trim_curves_of_owner()?;
@@ -839,7 +818,7 @@ impl Surface {
                 }
 
                 let Some((mut uv_this, location)) =
-                    ignored(self.step_inversion(&big_domain, pt, tol, Some(guess_uv)))?
+                    ignored(self.step_inversion(k, &big_domain, pt, tol, Some(guess_uv)))?
                 else {
                     // If any DropPoint fails, they're not coincident.
                     return Ok(failure);
@@ -859,7 +838,9 @@ impl Surface {
                 }
 
                 // Check max distance.
-                let pt2 = self.evaluate_step_point(uv_this)?;
+                if let Some(p) = ignored(self.evaluate_step_point(uv_this))? {
+                    pt2 = p;
+                }
                 let dist = pt.distance(pt2);
                 max_dist = max2(dist, max_dist);
 
@@ -921,7 +902,7 @@ impl Surface {
                 }
 
                 let Some((mut drop_uv, location)) =
-                    ignored(self.step_inversion(&big_domain, pt, tol, Some(guess_uv)))?
+                    ignored(self.step_inversion(k, &big_domain, pt, tol, Some(guess_uv)))?
                 else {
                     // If any DropPoint fails, they're not coincident.
                     return Ok(failure);
@@ -946,7 +927,9 @@ impl Surface {
                 }
 
                 // Check max distance.
-                let pt2 = self.evaluate_step_point(drop_uv)?;
+                if let Some(p) = ignored(self.evaluate_step_point(drop_uv))? {
+                    pt2 = p;
+                }
                 let dist = pt.distance(pt2);
                 max_dist = max2(dist, max_dist);
 
@@ -979,7 +962,7 @@ impl Surface {
         let orig_domain = self.step_uv_domain();
         let update_domain = orig_domain.union(&new_domain);
 
-        self.adjust_step_uv_domain(&update_domain)?;
+        self.adjust_step_uv_domain(k, &update_domain)?;
 
         // Have to do this after AdjustSTEPUVDomain call:
         self.remove_uv_trim_curves_of_owner()?;
@@ -989,15 +972,6 @@ impl Surface {
             max_dist,
             covered_step_domain: Some(new_domain),
         })
-    }
-
-    /// `EvaluateSTEPPoint`: the point at the STEP parameter `uv`.
-    ///
-    /// # Errors
-    ///
-    /// Those of `EvaluatePoint`.
-    fn evaluate_step_point(&self, uv: Point2) -> Result<Point3> {
-        self.evaluate_point(uv)
     }
 
     /// `SmFace::RemoveUVTrimCurves` of the face that owns this surface, if any.
@@ -1050,7 +1024,15 @@ impl Surface {
         let plane_surface = Plane::from_normal(plane_origin, plane_norm);
 
         // construct surf/surf/plane
-        let mut equations = SspIntersect::new(self, other, steepest_descent, Some(&plane_surface));
+        let node_tol = xsect_tol_3d / 100.0; // max allowed Param Space deviations for solution
+        let sq_node_tol = node_tol * node_tol;
+        let mut equations = SspIntersectEnfo::new(
+            self,
+            other,
+            steepest_descent,
+            Some(&plane_surface),
+            sq_node_tol,
+        );
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
 
         solver.set_desired_accuracy(EFF_ZERO_SQ);
@@ -1118,7 +1100,8 @@ impl Surface {
         let n = guess.len();
         let periodicities = periodicities.get(..n).unwrap_or(&[]);
 
-        let mut equations = SsNormalize::new(self, other, operation, opt_vectors);
+        let mut equations =
+            SsNormalizeEnfo::new(self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(periodicities));
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
@@ -1205,7 +1188,7 @@ impl Surface {
         ];
 
         // Construct the Newton-Raphson Solver class with the surf/surf/surf equation set
-        let mut equations = SssIntersect::new(s1, s2, s3);
+        let mut equations = SssIntersectEnfo::new(s1, s2, s3, EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
 
         // set the solver's exit behavior for solutions that run outside the boundary
@@ -1220,9 +1203,10 @@ impl Surface {
         }
 
         // failure case 2 - one or more of the surfaces have a degenerate surface normal.
-        let len1 = equations.du[0].cross(equations.dv[0]).length();
-        let len2 = equations.du[1].cross(equations.dv[1]).length();
-        let len3 = equations.du[2].cross(equations.dv[2]).length();
+        let [[du1, dv1], [du2, dv2], [du3, dv3]] = equations.srf_tangents;
+        let len1 = du1.cross(dv1).length();
+        let len2 = du2.cross(dv2).length();
+        let len3 = du3.cross(dv3).length();
         if len1 < 1.0e-8 || len2 < 1.0e-8 || len3 < 1.0e-8 {
             return Ok(None);
         }
@@ -1232,9 +1216,9 @@ impl Surface {
         // miter.
 
         // find the max distance between any pair of surface evaluations
-        let dist = equations.points[0].distance(equations.points[1]);
-        let dist2 = equations.points[1].distance(equations.points[2]);
-        let dist3 = equations.points[2].distance(equations.points[0]);
+        let dist = equations.srf_points[0].distance(equations.srf_points[1]);
+        let dist2 = equations.srf_points[1].distance(equations.srf_points[2]);
+        let dist3 = equations.srf_points[2].distance(equations.srf_points[0]);
         let dist = max3(dist, dist2, dist3);
 
         Ok(Some(LocalSssSolution {
@@ -1246,31 +1230,10 @@ impl Surface {
     }
 }
 
-/// Newton equations that put the surface point on the normal-projection of a target point
-/// (`SmFindPSNormalENFO`): `x = [u v]`, `F = [S_u.(S - P)/|S_u|, S_v.(S - P)/|S_v|]` with
-/// the normalized first derivatives. Converges when both projected distances are below
-/// the tolerance.
-#[derive(Debug)]
-pub struct FindPsNormal<'a> {
-    point: Point3,
-    surface: &'a Surface,
-    squared_tolerance: f64,
-}
-
-impl<'a> FindPsNormal<'a> {
-    /// The equations for the target `point` on `surface` (the constructor; the solver
-    /// operation argument is not used upstream).
-    #[must_use]
-    pub const fn new(point: Point3, surface: &'a Surface, squared_tolerance: f64) -> Self {
-        Self {
-            point,
-            surface,
-            squared_tolerance,
-        }
-    }
-}
-
-impl EvalNFunctions for FindPsNormal<'_> {
+/// `SmFindPSNormalENFO::Evaluate` (the struct is `surface.surface_p1`): `x = [u v]`,
+/// `F = [S_u.(S - P)/|S_u|, S_v.(S - P)/|S_v|]` with the normalized first derivatives.
+/// Converges when both projected distances are below the tolerance.
+impl EvalNFunctions for FindPsNormalEnfo<'_> {
     /// `Evaluate`: true when both projected distances are below the tolerance.
     fn evaluate(
         &mut self,
@@ -1370,42 +1333,6 @@ impl EvalNFunctions for FindPsNormal<'_> {
     }
 }
 
-/// Newton equations of the three-surface intersection (`SmSSSIntersectENFO`):
-/// `x = [u1 v1 u2 v2 u3 v3]`, `F = [S1 - S2, S1 - S3]`. Keeps the surface points and
-/// tangents of the last evaluation (`m_sSrfPoint*`, `m_sDU*`, `m_sDV*`).
-#[derive(Debug)]
-pub struct SssIntersect<'a> {
-    surfaces: [&'a Surface; 3],
-    count: u64,
-    /// The solution points on the three surfaces.
-    pub points: [Point3; 3],
-    /// The `u` tangents at the solution points (near-zero components forced to zero).
-    pub du: [Vec3; 3],
-    /// The `v` tangents at the solution points (near-zero components forced to zero).
-    pub dv: [Vec3; 3],
-}
-
-impl<'a> SssIntersect<'a> {
-    /// The equations for three surfaces (the constructor; the squared tolerance is not
-    /// used upstream).
-    #[must_use]
-    pub const fn new(surface1: &'a Surface, surface2: &'a Surface, surface3: &'a Surface) -> Self {
-        Self {
-            surfaces: [surface1, surface2, surface3],
-            count: 0,
-            points: [Vec3::UNDEF; 3],
-            du: [Vec3::UNDEF; 3],
-            dv: [Vec3::UNDEF; 3],
-        }
-    }
-
-    /// The number of evaluation calls (`m_lCount`).
-    #[must_use]
-    pub const fn count(&self) -> u64 {
-        self.count
-    }
-}
-
 /// A tangent with its near-zero components forced to zero (prevents matrix inversions
 /// of non-invertible matrices).
 fn snap_tangent(v: Vec3) -> Vec3 {
@@ -1413,7 +1340,10 @@ fn snap_tangent(v: Vec3) -> Vec3 {
     Vec3::new(snap(v.x), snap(v.y), snap(v.z))
 }
 
-impl EvalNFunctions for SssIntersect<'_> {
+/// `SmSSSIntersectENFO::Evaluate` (the struct is `surface.surface_p1`): `x = [u1 v1 u2 v2
+/// u3 v3]`, `F = [S1 - S2, S1 - S3]`; keeps the surface points and tangents of the last
+/// evaluation (`m_sSrfPoint*`, `m_sDU*`, `m_sDV*`).
+impl EvalNFunctions for SssIntersectEnfo<'_> {
     /// `Evaluate`: never reports an answer found.
     fn evaluate(
         &mut self,
@@ -1430,25 +1360,22 @@ impl EvalNFunctions for SssIntersect<'_> {
         self.count += 1;
 
         // evaluate the positions and tangents of the three surfaces
-        for (i, surface) in self.surfaces.iter().enumerate() {
+        let surfaces = [self.surface1, self.surface2, self.surface3];
+        for (i, surface) in surfaces.iter().enumerate() {
             let uv = uv_at(x, 2 * i, OP_SSS_INTERSECT)?;
             let (p, du, dv) = evaluate_1st_derivatives(*surface, uv, Side::Left, Side::Left)?;
-            if let (Some(sp), Some(sdu), Some(sdv)) = (
-                self.points.get_mut(i),
-                self.du.get_mut(i),
-                self.dv.get_mut(i),
-            ) {
+            if let (Some(sp), Some(st)) = (self.srf_points.get_mut(i), self.srf_tangents.get_mut(i))
+            {
                 *sp = p;
-                *sdu = du;
-                *sdv = dv;
+                *st = [du, dv];
             }
         }
 
         // if we have a zero length tangent then we must fail
         if self
-            .du
+            .srf_tangents
             .iter()
-            .chain(self.dv.iter())
+            .flatten()
             .any(|t| t.length_squared() < EFF_ZERO_SQ)
         {
             return Err(SolidError::sm_err(OP_SSS_INTERSECT));
@@ -1456,13 +1383,12 @@ impl EvalNFunctions for SssIntersect<'_> {
 
         // force near zero tangent components to equal zero to prevent matrix inversions
         // of non-invertable matrices
-        for t in self.du.iter_mut().chain(self.dv.iter_mut()) {
+        for t in self.srf_tangents.iter_mut().flatten() {
             *t = snap_tangent(*t);
         }
 
-        let [p1, p2, p3] = self.points;
-        let [du1, du2, du3] = self.du;
-        let [dv1, dv2, dv3] = self.dv;
+        let [p1, p2, p3] = self.srf_points;
+        let [[du1, dv1], [du2, dv2], [du3, dv3]] = self.srf_tangents;
 
         // Intersection simply tries to minimize the following six functions
         // fun[0..3] = S1(u1,v1) - S2(u2,v2); fun[3..6] = S1(u1,v1) - S3(u3,v3)
@@ -1508,5 +1434,45 @@ impl EvalNFunctions for SssIntersect<'_> {
         }
 
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::curve::Curve;
+    use crate::curve::line::Line;
+    use crate::nurbs::b_spline_curve::BSplineCurve as Bsc;
+    use crate::surface::surf_of_revolution::p1::gen_base;
+    use crate::surface::surf_of_revolution::SurfOfRevolution;
+
+    /// The temporary out-of-bounds change sets only the surface's own flag member: a
+    /// surface of revolution's generator keeps its flag (upstream
+    /// `SmTemporaryChangeValue` never calls the virtual `SetOutOfBoundsEnabled`).
+    #[test]
+    fn out_of_bounds_change_leaves_the_generator_flag() {
+        let k = Kernel::default();
+        let mut l = Line::from_points(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 1.0, 2.0), 3);
+        l.make_nurb().unwrap();
+        let mut rev =
+            SurfOfRevolution::create_canonical(&k, Curve::from(l), Vec3::ZERO, Vec3::Z, false)
+                .unwrap();
+        rev.set_out_of_bounds_enabled(false);
+        let gen_flag = |s: &Surface| match s.kind() {
+            SurfaceKind::SurfOfRevolution(r) => r
+                .gen_curve()
+                .and_then(|g| gen_base(g).ok())
+                .map(Bsc::is_out_of_bounds_enabled),
+            _ => None,
+        };
+        let mut s = Surface::from(rev);
+        assert_eq!(out_of_bounds_enabled(&s), Some(false));
+        assert_eq!(gen_flag(&s), Some(false));
+        let copy = out_of_bounds_copy(&s).unwrap();
+        assert_eq!(out_of_bounds_enabled(&copy), Some(true));
+        assert_eq!(gen_flag(&copy), Some(false));
+        set_out_of_bounds_enabled(&mut s, true);
+        set_out_of_bounds_enabled(&mut s, false);
+        assert_eq!(gen_flag(&s), Some(false));
     }
 }

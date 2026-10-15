@@ -71,12 +71,9 @@
 //! - **Surface calls.** `SmSurface::IsClosed`, `SmSurface::EvaluateNormal` and
 //!   `SmSurface::Evaluate1stDerivatives` go through `surface::surface::p7` (the
 //!   last co-ported there from unit `surface.surface_p1`).
-//! - **Unported callees.** `SmSurface::EvaluateGeometric`
-//!   (`surface.surface_p3`), `smsurf_EvaluateNormalSection` (`surface.surface_p1`),
-//!   `SmSurface::LocalPointSolve` and `SmSurface::DropPoint` (`surface.surface_p5`),
+//! - **Unported callees.** `SmSurface::LocalPointSolve` and `SmSurface::DropPoint` (`surface.surface_p5`),
 //!   `SmSurface::GlobalPointSolve` (`surface.surface_p4`),
 //!   `SmSurface::LocalSurfaceIntersect` (`surface.surface_p11`),
-//!   `SmSurface::LocalPlaneSurfaceIntersect` (`surface.surface_p3`),
 //!   `SmFilletLaw::Evaluate` (`blend.fillet_executive_p1`) and
 //!   `SmOffsetSurface::SetOffsetDistance` (`surface.offset_surface`) return
 //!   [`SolidError::Unported`]. Statuses upstream ignores are ignored, except

@@ -269,13 +269,31 @@ pub(crate) type Domain = Option<[f64; 4]>;
 
 /// A surface block (no nested curve-bounded surfaces): its domain (`None` for a plane
 /// basis) and whether it is a plain B-spline.
-pub(crate) fn surface_kind(rd: &mut Reader<'_>, nested: bool) -> Result<(Domain, bool), FfiError> {
-    let kind = rd.index(2)?;
+///
+/// Kind 3 (a surface of revolution) is accepted only when `revolution` is set: only the
+/// `surface_p3` shim builds one; the `surface_p4`/`surface_p7` shims have no such branch.
+pub(crate) fn surface_kind(
+    rd: &mut Reader<'_>,
+    nested: bool,
+    revolution: bool,
+) -> Result<(Domain, bool), FfiError> {
+    let kind = rd.index(if revolution { 3 } else { 2 })?;
+    if kind == 3 {
+        // a surface of revolution of the line a-b about the axis p, axis (domain: its own)
+        for _ in 0..3 {
+            rd.vec3()?;
+        }
+        rd.nonzero3()?;
+        rd.flag()?;
+        rd.flag()?;
+        // an `SmBSplineSurface` subclass: the `SmBSplineSurface` members apply
+        return Ok((None, true));
+    }
     if kind == 2 {
         if nested {
             return Err(bad("nested curve-bounded surface"));
         }
-        let (dom, _) = surface_kind(rd, true)?;
+        let (dom, _) = surface_kind(rd, true, revolution)?;
         rd.flag()?;
         return Ok((dom, false));
     }
@@ -307,7 +325,12 @@ pub(crate) fn surface_kind(rd: &mut Reader<'_>, nested: bool) -> Result<(Domain,
 
 /// A surface block; returns its parameter domain (`None` for a plane basis).
 pub(crate) fn surface(rd: &mut Reader<'_>) -> Result<Domain, FfiError> {
-    Ok(surface_kind(rd, false)?.0)
+    Ok(surface_kind(rd, false, false)?.0)
+}
+
+/// As [`surface`], also accepting kind 3 (a surface of revolution; `surface_p3` only).
+pub(crate) fn surface_rev(rd: &mut Reader<'_>) -> Result<Domain, FfiError> {
+    Ok(surface_kind(rd, false, true)?.0)
 }
 
 /// A B-spline curve block; returns its parameter range.
@@ -402,7 +425,7 @@ pub(crate) const SO_SIGNED_MIN: usize = 9;
 /// [`FfiError::InvalidArgument`] for anything the shim must not see.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader { input, at: 0 };
-    let (dom, is_bspline) = surface_kind(&mut rd, false)?;
+    let (dom, is_bspline) = surface_kind(&mut rd, false, false)?;
     let bspline_only = |dom: Domain| {
         dom.filter(|_| is_bspline)
             .ok_or_else(|| bad("this op needs a B-spline surface"))
@@ -508,7 +531,7 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         Op::Gss => {
             let d = bspline_only(dom)?;
             domain_in(&mut rd, Some(d))?;
-            let (d2, b2) = surface_kind(&mut rd, false)?;
+            let (d2, b2) = surface_kind(&mut rd, false, false)?;
             let d2 = d2
                 .filter(|_| b2)
                 .ok_or_else(|| bad("this op needs a B-spline surface"))?;
@@ -588,4 +611,26 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The p7 (and p4) shims have no surface-of-revolution branch, so kind 3 must be
+    /// rejected by their validators.
+    #[test]
+    fn kind_3_rejected() {
+        let probe = [
+            3.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.5,
+            0.0, 0.0,
+        ];
+        assert!(validate(Op::Eval1, &probe).is_err());
+        assert!(validate(Op::Normal, &probe).is_err());
+        assert!(super::super::surface_surface_p4::validate(
+            super::super::surface_surface_p4::Op::NormalEval,
+            &probe
+        )
+        .is_err());
+    }
 }

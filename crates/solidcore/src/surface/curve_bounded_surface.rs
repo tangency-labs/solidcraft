@@ -34,12 +34,11 @@
 //! - **Object model.** The surface is the [`SurfaceKind::CurveBounded`] kind of
 //!   [`Surface`]; the `SmSurface` virtuals it does not override run the base-class
 //!   defaults there. Its own overrides pass the call along to the basis surface.
-//! - **Unported callees.** The basis surface's `EvaluateSimple`, `EvaluateSTEP`, `EvaluateSTEPPoint`
-//!   (`surface.surface_p1`), `EvaluateNormalAtSingularity` (`surface.surface_p5`),
-//!   `EvaluateGeometric` and `EvaluateNormalSection` (`surface.surface_p3`) are not in
-//!   the [`Surface`] dispatch yet, nor is `SmSurface::operator==`
-//!   (`surface.surface_p1`), which `operator==` calls first: those calls return
-//!   [`SolidError::Unported`].
+//! - **Unported callees.** The basis surface's `EvaluateNormalAtSingularity`
+//!   (`surface.surface_p5`) is not in the [`Surface`] dispatch yet: that call returns
+//!   [`SolidError::Unported`]. The other basis-surface calls (`EvaluateSimple`,
+//!   `EvaluateSTEP`, `EvaluateSTEPPoint`, `operator==`, `EvaluateGeometric`,
+//!   `EvaluateNormalSection`) are wired.
 //! - **`operator==`** keeps upstream's loop bound: the UV boundaries are compared over
 //!   the number of 3D boundaries. Reading past the UV arrays (undefined upstream) ends
 //!   the comparison with the elements compared so far.
@@ -282,7 +281,7 @@ impl CurveBoundedSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::EvaluateSimple` (`surface.surface_p1`).
+    /// Those of the basis surface's evaluation.
     pub fn evaluate_simple(
         &self,
         uv: Point2,
@@ -370,7 +369,7 @@ impl CurveBoundedSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::EvaluateSTEP` (`surface.surface_p1`).
+    /// Those of the basis surface's evaluation.
     pub fn evaluate_step(
         &self,
         uv: Point2,
@@ -398,7 +397,7 @@ impl CurveBoundedSurface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmSurface::EvaluateSTEPPoint` (`surface.surface_p1`).
+    /// Those of the basis surface's evaluation.
     pub fn evaluate_step_point(&self, uv: Point2) -> Result<Point3> {
         self.basis.evaluate_step_point(uv)
     }

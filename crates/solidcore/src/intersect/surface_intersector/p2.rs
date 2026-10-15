@@ -41,8 +41,7 @@
 //!   `EvaluateLawPoint` never sets (an uninitialised `double` upstream) is stored as
 //!   `SM_UNDEF_DOUBLE`.
 //! - **Unported callees.** `SmSurface::IsSingularity` of a surface that is not a
-//!   plane and `SmSurface::LocalPointSolve` (`surface.surface_p5`) and
-//!   `SmSurface::LocalSurfaceSolve` (`surface.surface_p3`) return
+//!   plane and `SmSurface::LocalPointSolve` (`surface.surface_p5`) return
 //!   [`SolidError::Unported`], which always propagates (also where upstream ignores
 //!   the status).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps) and the
@@ -56,6 +55,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
+use crate::geom::global_solver::SolverOperation;
 use crate::geom::matrix::Matrix;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::are_same;
@@ -1557,19 +1557,25 @@ fn surface_local_point_solve_normalize(
 /// NULL, guess, other_guess, found, sol)`: the solution's start parameters `[u0, v0,
 /// u1, v1]` when found.
 fn surface_local_surface_solve_normalize(
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _other: &Surface,
-    _other_domain: &Extent2d,
+    surface: &Surface,
+    domain: &Extent2d,
+    other: &Surface,
+    other_domain: &Extent2d,
     _tol: f64,
-    _guess: Point2,
-    _other_guess: Point2,
+    guess: Point2,
+    other_guess: Point2,
 ) -> Result<Option<[f64; 4]>> {
-    // UNPORTED(surface.surface_p3): SmSurface::LocalSurfaceSolve
-    Err(SolidError::unported(
-        "SmSurface::LocalSurfaceSolve",
-        "surface.surface_p3",
-    ))
+    Ok(surface
+        .local_surface_solve(
+            domain,
+            other,
+            other_domain,
+            SolverOperation::Normalize,
+            &[],
+            guess,
+            other_guess,
+        )?
+        .map(|s| [s.uv.x, s.uv.y, s.other_uv.x, s.other_uv.y]))
 }
 
 #[cfg(test)]

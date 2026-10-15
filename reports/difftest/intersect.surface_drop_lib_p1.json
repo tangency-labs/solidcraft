@@ -810,28 +810,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_cone_line_0.2_0.2000000001_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#101 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_cone_line_0_1_0x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#102 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -842,16 +834,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_cone_line_0_1_0.9x0.1_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#104 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -870,28 +858,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_cone_circ_0_1_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#107 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_cone_circ_0_1_0.5x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#108 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -902,28 +882,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_cone_circ_0_1_0.9x0.1_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#110 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_line_0_0_0x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#111 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -934,28 +906,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_line_0_1_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#113 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_line_0_1_0.5x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#114 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -966,16 +930,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_circ_0_0_0.9x0.1_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#116 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -986,76 +946,52 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_circ_0.2_0.2000000001_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#118 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_circ_0.2_0.2000000001_0.0x0.0_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#119 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_circ_0_1_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#120 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_conesw_circ_0_1_0.0x0.0_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#121 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_line_0_0_0.5x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#122 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_line_0_0_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#123 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1074,40 +1010,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_line_0.2_0.2000000001_0x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#126 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_line_0_1_0.9x0.1_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#127 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_circ_0_0_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#128 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1126,28 +1050,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_circ_0.2_0.2000000001_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#131 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sph_circ_0_1_0x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#132 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1166,28 +1082,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sphsw_line_0.2_0.2000000001_0.5x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#135 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sphsw_line_0.2_0.2000000001_0.9x0.1_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#136 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1198,40 +1106,28 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sphsw_circ_0_0_0x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#138 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sphsw_circ_0_0_0.5x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#139 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sphsw_circ_0_0_0.9x0.1_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#140 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1242,16 +1138,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_sphsw_circ_0.2_0.2000000001_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#142 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1294,52 +1186,36 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_bigsph_line_0.2_0.2000000001_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#148 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_bigsph_line_0.2_0.2000000001_0.0x0.0_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#149 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_bigsph_circ_0_0_0x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#150 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_bigsph_circ_0_0_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#151 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1358,100 +1234,68 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_bigsph_circ_0_1_0.5x0.5_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#154 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_line_0_0_0x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#155 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_line_0_0_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#156 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_line_0.2_0.2000000001_0.0x0.0_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#157 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_line_0.2_0.2000000001_0.9x0.1_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#158 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_line_0_1_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#159 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_line_0_1_0.0x0.0_10.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#160 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_circ_0_0_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#161 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -1470,28 +1314,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_circ_0.2_0.2000000001_0.5x0.5_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#164 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "adv_span_coll_circ_0.2_0.2000000001_0.0x0.0_1e-06",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/review_poles.json#165 (upstream review of PR #98 (adversarial): poles (cone apex, spheres r=1 and 1e3, both swaps), a B-spline with a collapsed u=0 edge, sm_FixBoundaryCurves and duplicate-solution edge cases)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -2998,16 +2834,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "line_span_leaves_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.surface_drop_lib_p1/upstream_shapes.json#26 (upstream tests/prog_test/src/smTopoTest.cpp:3861)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3070,16 +2902,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179769941",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3282,16 +3110,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179769967",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3358,16 +3182,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0035",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179769976",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3594,16 +3414,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770005",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -3846,16 +3662,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0095",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770036",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4058,16 +3870,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0121",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770062",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4174,16 +3982,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0135",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770076",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4234,16 +4038,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0142",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770083",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4422,28 +4222,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0165",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770106",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0166",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770107",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4510,16 +4302,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0175",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770116",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -4626,16 +4414,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0189",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770130",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5002,16 +4786,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0235",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770176",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5046,16 +4826,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0240",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770181",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5074,16 +4850,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0243",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770184",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5118,16 +4890,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0248",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770189",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5386,16 +5154,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770222",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5414,28 +5178,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0284",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770225",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0285",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770226",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5510,16 +5266,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770236",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5562,16 +5314,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770242",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5646,16 +5394,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0311",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770252",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5690,16 +5434,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770257",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5806,16 +5546,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0330",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770271",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -5898,28 +5634,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0341",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770282",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0342",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770283",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6002,16 +5730,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0353",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770294",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6090,16 +5814,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0363",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770304",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6110,16 +5830,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0365",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770306",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6250,28 +5966,20 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0382",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770323",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0383",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770324",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6414,16 +6122,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0401",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770342",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6514,16 +6218,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0413",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770354",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6598,28 +6298,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0423",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770364",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0424",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770365",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6686,16 +6378,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0433",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770374",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -6762,16 +6450,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0442",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770383",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7266,16 +6950,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0504",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770445",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7294,16 +6974,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0507",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770448",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7582,16 +7258,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0542",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770483",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7810,16 +7482,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0570",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770511",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7894,16 +7562,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0580",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770521",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -7914,16 +7578,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0582",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770523",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8094,16 +7754,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0604",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770545",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8250,16 +7906,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0623",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770564",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8406,16 +8058,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0642",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770583",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8574,16 +8222,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0662",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770603",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8658,16 +8302,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0672",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770613",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8702,16 +8342,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0677",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770618",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8802,16 +8438,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0689",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770630",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -8878,28 +8510,20 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0698",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770639",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0699",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770640",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9034,16 +8658,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0716",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770657",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9342,16 +8962,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0753",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770694",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9522,16 +9138,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0775",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770716",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9726,16 +9338,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0800",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770741",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9746,16 +9354,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0802",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770743",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9766,16 +9370,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0804",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770745",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9826,16 +9426,12 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0811",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770752",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9918,16 +9514,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0822",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770763",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10218,16 +9810,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0859",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770800",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10318,16 +9906,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0871",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770812",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10338,16 +9922,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0873",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770814",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10358,16 +9938,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0875",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770816",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10394,16 +9970,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0879",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770820",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10750,16 +10322,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0923",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770864",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10770,16 +10338,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0925",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770866",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -10822,16 +10386,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0931",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770872",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11098,16 +10658,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0965",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770906",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11158,16 +10714,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0972",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770913",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11258,16 +10810,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0984",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770925",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11302,16 +10850,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0989",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770930",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11330,16 +10874,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0992",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770933",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11446,16 +10986,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770947",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11474,16 +11010,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179770950",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -11970,16 +11502,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1070",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771011",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12130,16 +11658,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1089",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771030",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12310,16 +11834,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1111",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771052",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12434,16 +11954,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1126",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771067",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12494,16 +12010,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1133",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771074",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12522,16 +12034,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1136",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771077",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12686,16 +12194,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1156",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771097",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12738,16 +12242,12 @@
       "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1162",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771103",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12798,16 +12298,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1169",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771110",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12874,16 +12370,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1178",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771119",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -12950,16 +12442,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1187",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771128",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13082,28 +12570,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771144",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1204",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771145",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13138,16 +12618,12 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1209",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771150",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13302,16 +12778,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1229",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771170",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13330,16 +12802,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771173",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13350,16 +12818,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771175",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13378,16 +12842,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1237",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771178",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13422,16 +12882,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1242",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771183",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13494,16 +12950,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1250",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771191",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13546,16 +12998,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1256",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771197",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13582,28 +13030,20 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1260",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771201",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1261",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771202",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13630,16 +13070,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1265",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771206",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13698,16 +13134,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1273",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771214",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13734,16 +13166,12 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1277",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771218",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13810,16 +13238,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1286",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771227",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13846,16 +13270,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1290",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771231",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13922,16 +13342,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1299",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771240",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -13942,16 +13358,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1301",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771242",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14010,16 +13422,12 @@
       "values_compared": 45
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1309",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771250",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14134,28 +13542,20 @@
       "values_compared": 78
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1324",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771265",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1325",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771266",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14246,16 +13646,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771278",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14338,28 +13734,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1348",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771289",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1349",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771290",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14394,28 +13782,20 @@
       "values_compared": 39
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1354",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771295",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1355",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771296",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14450,16 +13830,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1360",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771301",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14518,16 +13894,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1368",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771309",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14666,16 +14038,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1386",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771327",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14702,16 +14070,12 @@
       "values_compared": 40
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1390",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771331",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14914,16 +14278,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1416",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771357",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -14982,16 +14342,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1424",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771365",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -15194,16 +14550,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1450",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771391",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -15438,16 +14790,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1480",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771421",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -15602,26 +14950,21 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "smsurf_IsPointOnNormal",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1499",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=13903232358179771440",
-      "values_compared": 0
+      "values_compared": 5
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 179,
+  "cases_deferred": 15,
   "cases_failed": 0,
-  "cases_passed": 1683,
+  "cases_passed": 1847,
   "cases_total": 1862,
   "deferred_by_unit": {
-    "intersect.surface_drop_curve": 15,
-    "surface.surface_p3": 164
+    "intersect.surface_drop_curve": 15
   },
   "max_rel_err": 0.0,
   "pass": true,

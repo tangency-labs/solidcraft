@@ -239,8 +239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -371,8 +371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0019",
@@ -483,8 +483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0030",
@@ -2562,16 +2562,12 @@
       "values_compared": 599
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0244",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356910645",
-      "values_compared": 0
+      "values_compared": 533
     },
     {
       "deferred": {
@@ -3246,16 +3242,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356910717",
-      "values_compared": 0
+      "values_compared": 437
     },
     {
       "deferred": {
@@ -4011,8 +4003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0394",
@@ -5042,16 +5034,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0501",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356910902",
-      "values_compared": 0
+      "values_compared": 1263
     },
     {
       "max_rel_err": 0.0,
@@ -5103,8 +5091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0507",
@@ -6287,8 +6275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0635",
@@ -6495,8 +6483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0655",
@@ -6571,8 +6559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0662",
@@ -6706,28 +6694,20 @@
       "values_compared": 597
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0676",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356911077",
-      "values_compared": 0
+      "values_compared": 1327
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0677",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356911078",
-      "values_compared": 0
+      "values_compared": 435
     },
     {
       "deferred": {
@@ -7423,8 +7403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0751",
@@ -7731,8 +7711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0783",
@@ -7895,8 +7875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0800",
@@ -8403,8 +8383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0853",
@@ -8703,8 +8683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen0883",
@@ -11610,16 +11590,12 @@
       "values_compared": 437
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356911589",
-      "values_compared": 0
+      "values_compared": 597
     },
     {
       "max_rel_err": 0.0,
@@ -12094,16 +12070,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1240",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356911641",
-      "values_compared": 0
+      "values_compared": 759
     },
     {
       "max_rel_err": 0.0,
@@ -12243,8 +12215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1256",
@@ -12595,8 +12567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1292",
@@ -13179,8 +13151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1354",
@@ -13675,8 +13647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1405",
@@ -13835,8 +13807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
+        "symbol": "SmSurface::LocalSurfaceIntersect",
+        "unit": "surface.surface_p11"
       },
       "max_rel_err": 0.0,
       "name": "gen1423",
@@ -13970,16 +13942,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmSurface::LocalSurfaceSolve",
-        "unit": "surface.surface_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen1437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=6023562491356911838",
-      "values_compared": 0
+      "values_compared": 1414
     },
     {
       "max_rel_err": 0.0,
@@ -14755,13 +14723,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 604,
+  "cases_deferred": 596,
   "cases_failed": 0,
-  "cases_passed": 938,
+  "cases_passed": 946,
   "cases_total": 1542,
   "deferred_by_unit": {
-    "surface.surface_p11": 578,
-    "surface.surface_p3": 26
+    "surface.surface_p11": 596
   },
   "max_rel_err": 0.0,
   "pass": true,

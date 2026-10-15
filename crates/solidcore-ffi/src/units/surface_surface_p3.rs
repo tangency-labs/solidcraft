@@ -32,7 +32,7 @@
 use crate::{call_with_buffer, FfiError};
 
 use super::surface_surface_p7::{
-    bad, domain_in, sop, surface, surface_kind, uv, vectors, Domain, Reader, SO_MAXIMIZE,
+    bad, domain_in, sop, surface_kind, surface_rev, uv, vectors, Domain, Reader, SO_MAXIMIZE,
     SO_MINIMIZE, SO_NORMALIZE, SO_SIGNED_MIN,
 };
 
@@ -120,7 +120,7 @@ fn guess(rd: &mut Reader<'_>, dom: Domain) -> Result<(), FfiError> {
 /// [`FfiError::InvalidArgument`] for anything the shim must not see.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader { input, at: 0 };
-    let (dom, is_bspline) = surface_kind(&mut rd, false)?;
+    let (dom, is_bspline) = surface_kind(&mut rd, false, true)?;
     match op {
         Op::EvalGeometric => {
             uv(&mut rd, dom)?;
@@ -141,7 +141,7 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             if !is_bspline {
                 return Err(bad("this op needs a B-spline surface"));
             }
-            let d2 = surface(&mut rd)?;
+            let d2 = surface_rev(&mut rd)?;
             rd.positive("tolerance")?;
             if rd.flag()? {
                 domain_in(&mut rd, d2)?;
@@ -150,7 +150,7 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             }
         }
         Op::ShapeMatch => {
-            let d2 = surface(&mut rd)?;
+            let d2 = surface_rev(&mut rd)?;
             uv(&mut rd, dom)?;
             uv(&mut rd, d2)?;
             rd.positive("tolerance")?;
@@ -162,25 +162,25 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             points(&mut rd, &uv_bounds(dom))?;
         }
         Op::SssIntersect => {
-            let d2 = surface(&mut rd)?;
-            let d3 = surface(&mut rd)?;
+            let d2 = surface_rev(&mut rd)?;
+            let d3 = surface_rev(&mut rd)?;
             let mut bounds = uv_bounds(dom);
             bounds.extend(uv_bounds(d2));
             bounds.extend(uv_bounds(d3));
             points(&mut rd, &bounds)?;
         }
         Op::LocalPlane => {
-            let d2 = surface(&mut rd)?;
+            let d2 = surface_rev(&mut rd)?;
             domain_in(&mut rd, dom)?;
             domain_in(&mut rd, d2)?;
             rd.positive("tolerance")?;
             guess(&mut rd, dom)?;
             guess(&mut rd, d2)?;
             rd.vec3()?;
-            rd.nonzero3()?;
+            rd.vec3()?; // a zero plane normal is fine: Unitize gives (0, 0, 1)
         }
         Op::LocalSolve => {
-            let d2 = surface(&mut rd)?;
+            let d2 = surface_rev(&mut rd)?;
             domain_in(&mut rd, dom)?;
             domain_in(&mut rd, d2)?;
             let s = sop(&mut rd, &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN])?;
@@ -192,8 +192,8 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             guess(&mut rd, d2)?;
         }
         Op::LocalSss => {
-            let d2 = surface(&mut rd)?;
-            let d3 = surface(&mut rd)?;
+            let d2 = surface_rev(&mut rd)?;
+            let d3 = surface_rev(&mut rd)?;
             domain_in(&mut rd, dom)?;
             domain_in(&mut rd, d2)?;
             domain_in(&mut rd, d3)?;
@@ -228,4 +228,29 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Kind 3 is accepted by p3 (the only shim that builds a surface of revolution).
+    #[test]
+    fn kind_3_accepted() {
+        let probe = [
+            3.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        assert!(validate(Op::Singularities, &probe).is_ok());
+    }
+
+    /// A generator on the axis makes `CreateCanonical` fail; the shim returns an error
+    /// rather than dereferencing a null surface.
+    #[test]
+    fn generator_on_axis_is_an_error() {
+        let probe = [
+            3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        assert!(validate(Op::Singularities, &probe).is_ok());
+        assert!(eval(Op::Singularities, &probe).is_err());
+    }
 }
