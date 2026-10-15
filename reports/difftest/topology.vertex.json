@@ -2316,16 +2316,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "net_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#22 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2648,16 +2644,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "net_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#63 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2980,16 +2972,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "net_v2_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#104 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3312,16 +3300,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "net_v3_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#145 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3644,16 +3628,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "net_v4_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#186 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4056,16 +4036,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "repair_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#237 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -4388,16 +4364,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "repair_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#278 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7032,16 +7004,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_sml_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#608 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7236,16 +7204,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_sml_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#633 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7440,16 +7404,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_sml_v2_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#658 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7644,16 +7604,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_sml_v3_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#683 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7848,16 +7804,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_bsl_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#708 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8052,16 +8004,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_bsl_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#733 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8256,16 +8204,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_bsl_v2_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#758 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8460,16 +8404,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "square_bsl_v3_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#783 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -8664,16 +8604,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "seam_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#808 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -8996,16 +8932,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "collinear3_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#849 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9200,16 +9132,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "collinear3_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#874 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9404,16 +9332,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "collinear3_v2_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#899 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9608,16 +9532,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "collinear3_v3_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#924 (upstream tests/prog_test/src/smTopoTest.cpp:3767)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -9812,16 +9732,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "wire_full_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#949 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10144,16 +10060,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "wire_full_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#990 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10476,16 +10388,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "wire_sub_v0_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#1031 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10808,16 +10716,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::SetTolerance",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "wire_sub_v1_refresh_n",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertex/constructed.json#1072 (upstream tests/prog_test/src/smTopoTest.cpp:4616)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -47593,13 +47497,12 @@
     }
   ],
   "cases_both_errored": 2,
-  "cases_deferred": 881,
+  "cases_deferred": 857,
   "cases_failed": 0,
-  "cases_passed": 4627,
+  "cases_passed": 4651,
   "cases_total": 5508,
   "deferred_by_unit": {
     "surface.surface_p3": 382,
-    "topology.edge": 24,
     "topology.edgeuse_p3": 399,
     "topology.face_p3": 76
   },

@@ -46,7 +46,8 @@
 //! - **Unported callees.** `SmEdgeuse::EvaluateBinormal` and
 //!   `SmEdgeuse::CreateUVTrimCurve` (unit `topology.edgeuse_p3`),
 //!   `SmSurface::GlobalPointSolve` (unit `surface.surface_p4`) and
-//!   `SmEdge::SetTolerance` (unit `topology.edge`) return [`SolidError::Unported`].
+//!   `SmVertex::SetTolerance` (unit `topology.vertex`, reached through
+//!   `SmEdge::SetTolerance`) return [`SolidError::Unported`].
 //!   `SmCrvOnSurf` is ported for B-spline base surfaces only (unit `curve.crv_on_surf`,
 //!   partial): on a face of another surface kind `CheckAndSetUVTrimCurve` returns
 //!   [`SolidError::Unported`] naming that unit (a dispatch gap, as in
@@ -152,14 +153,11 @@ fn surface_global_point_solve(
     )
 }
 
-/// `SmEdge::SetTolerance` (unit `topology.edge`).
+/// `pE->SetTolerance(tolerance)` of the edge use's edge (`SmEdge::SetTolerance` with
+/// its default arguments).
 fn edge_set_tolerance(b: &mut Brep, eu: EdgeuseId, tolerance: f64) -> Result<()> {
-    let _ = (b, eu, tolerance);
-    // UNPORTED(topology.edge): SmEdge::SetTolerance
-    Err(SolidError::unported(
-        "SmEdge::SetTolerance",
-        "topology.edge",
-    ))
+    let e = edge(b, eu)?.ok_or_else(|| null("SetTolerance: edge use without edge"))?;
+    crate::topology::edge::set_tolerance(b, e, tolerance, true, true)
 }
 
 /// Whether `SER` of a failing status in an `SmBoolean` function returns `TRUE`

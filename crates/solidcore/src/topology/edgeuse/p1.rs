@@ -80,12 +80,11 @@
 //!   ([`SolidError::Unported`] still propagates), leaving the outputs of a failed
 //!   evaluation at their `SM_UNDEF_DOUBLE` defaults. `sm_AreSeamCurves`' unused
 //!   edge use argument is dropped.
-//! - **Unported callees.** `SmEdge::SetTolerance` (`topology.edge`),
-//!   `SmSurface::DropPoint` (`surface.surface_p5`) and `SmEdgeuse::EvaluateBinormal`
-//!   (`topology.edgeuse_p3`) return [`SolidError::Unported`]. The gap computations are
-//!   [`crate::heal::gap`]; `CalcMaxEdgeFaceGap`'s cross-section tolerance is the
-//!   context one with no context (`SmTol::GetXSectTol3d(NULL)`: the B-rep records
-//!   carry no context).
+//! - **Unported callees.** `SmSurface::DropPoint` (`surface.surface_p5`) and
+//!   `SmEdgeuse::EvaluateBinormal` (`topology.edgeuse_p3`) return
+//!   [`SolidError::Unported`]. The gap computations are [`crate::heal::gap`];
+//!   `CalcMaxEdgeFaceGap`'s cross-section tolerance is the context one with no
+//!   context (`SmTol::GetXSectTol3d(NULL)`: the B-rep records carry no context).
 //! - **Co-ports.** The small accessors of other units this unit reaches are ported
 //!   here (table above) and recorded as CO-PORTED in `plan/modules.toml`.
 //!   [`loopuse_edgeuses`] has no attribute or connection filter (callers here pass
@@ -736,8 +735,8 @@ pub(crate) fn brep_handle(b: &Brep, eu: EdgeuseId) -> Result<Option<ObjectHandle
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null (no edge, primary edge use, vertex use or B-rep);
-/// [`SolidError::Unported`] when the edge tolerance must grow (`SmEdge::SetTolerance`,
-/// unit `topology.edge`).
+/// [`SolidError::Unported`] when growing the edge tolerance must grow a vertex
+/// tolerance (`SmVertex::SetTolerance`, unit `topology.vertex`).
 pub fn set_uv_trim_curve(
     b: &mut Brep,
     eu: EdgeuseId,
@@ -836,11 +835,13 @@ pub fn set_uv_trim_curve(
             let e = edge(b, eu)?.ok_or_else(|| null("SetUVTrimCurve: edge use without edge"))?;
             let curr_tol = b.edge(e)?.tolerance;
             if curr_tol < TOL_FACTOR * max_dist_to_surface {
-                // UNPORTED(topology.edge): SmEdge::SetTolerance
-                return Err(SolidError::unported(
-                    "SmEdge::SetTolerance",
-                    "topology.edge",
-                ));
+                crate::topology::edge::set_tolerance(
+                    b,
+                    e,
+                    TOL_FACTOR * max_dist_to_surface,
+                    true,
+                    true,
+                )?;
             }
         }
     }
@@ -1869,16 +1870,18 @@ mod tests {
         assert!(old.is_some());
         assert!(drop_curve_fail(&b, a0).unwrap().0.is_none());
 
-        // growing the edge tolerance needs SmEdge::SetTolerance
-        let e = set_uv_trim_curve(
+        // growing the edge tolerance grows the vertex tolerances: SmVertex::SetTolerance
+        set_uv_trim_curve(
             &mut b,
             a0,
             UvTrimCurveArg::New(Box::new(uv_line([0.0, 1.0], [1.0, 1.0]))),
             1.0,
             true,
             None,
-        );
-        assert!(e.unwrap_err().is_unported());
+        )
+        .unwrap();
+        let e = edge(&b, a0).unwrap().unwrap();
+        assert_eq!(b.edge(e).unwrap().tolerance, 2.0);
         b.set_validate_only(true);
         set_uv_trim_curve(
             &mut b,

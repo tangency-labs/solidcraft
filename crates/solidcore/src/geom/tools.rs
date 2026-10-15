@@ -24,8 +24,9 @@
 //!   `rbSameOrient` / `rlFoundIndex` unset or holding a rejected candidate's value).
 //! - [`find_edge`] and [`find_face`] report "nothing found" (upstream `SM_ERR`) as
 //!   `Ok(None)`. Faces are returned as [`FaceId`]s.
-//! - **Unported callees.** Edge tolerances, edge geometry (curve,
-//!   interval, end vertices), curve evaluation, point drops, curve/curve distance,
+//! - **Edge and vertex queries** are those of `topology::edge` and `topology::vertex`.
+//! - **Unported callees.** Curve evaluation of the opaque target
+//!   curve, point drops, curve/curve distance,
 //!   `SmBrep::GetEdges`, `SmBrep::GetTolerance` and the B-rep cache tree adapter
 //!   needed by the ported `SmTopologySolver::BrepPointSolve`
 //!   belong to units not ported yet; those calls return [`SolidError::Unported`]
@@ -245,8 +246,9 @@ pub fn find_coincident_edge<C: ?Sized>(
             continue;
         }
 
-        let matches = (edge_vertex(brep, e)? == v1 && edge_other_vertex(brep, e, v1)? == v2)
-            || (edge_vertex(brep, e)? == v2 && edge_other_vertex(brep, e, v2)? == v1);
+        let matches = (edge_vertex(brep, e)? == Some(v1)
+            && edge_other_vertex(brep, e, v1)? == Some(v2))
+            || (edge_vertex(brep, e)? == Some(v2) && edge_other_vertex(brep, e, v2)? == Some(v1));
         if !matches {
             continue;
         }
@@ -355,66 +357,42 @@ fn curve_owner<C: ?Sized>(_curve: &C) -> Result<Option<EdgeId>> {
 }
 
 /// `SmEdge::GetVertex`.
-fn edge_vertex(brep: &Brep, e: EdgeId) -> Result<VertexId> {
-    brep.edge(e)?;
-    // UNPORTED(topology.edge): SmEdge::GetVertex
-    Err(SolidError::Unported {
-        upstream: "SmEdge::GetVertex",
-        unit: "topology.edge",
-    })
+fn edge_vertex(brep: &Brep, e: EdgeId) -> Result<Option<VertexId>> {
+    crate::topology::edge::vertex(brep, e)
 }
 
 /// `SmEdge::GetOtherVertex`.
-fn edge_other_vertex(brep: &Brep, e: EdgeId, v: VertexId) -> Result<VertexId> {
-    brep.edge(e)?;
-    brep.vertex(v)?;
-    // UNPORTED(topology.edge): SmEdge::GetOtherVertex
-    Err(SolidError::Unported {
-        upstream: "SmEdge::GetOtherVertex",
-        unit: "topology.edge",
-    })
+fn edge_other_vertex(brep: &Brep, e: EdgeId, v: VertexId) -> Result<Option<VertexId>> {
+    crate::topology::edge::other_vertex(brep, e, Some(v))
 }
 
 /// `SmEdge::GetTolerance`.
 fn edge_tolerance(brep: &Brep, e: EdgeId) -> Result<f64> {
-    brep.edge(e)?;
-    // UNPORTED(topology.edge): SmEdge::GetTolerance
-    Err(SolidError::Unported {
-        upstream: "SmEdge::GetTolerance",
-        unit: "topology.edge",
-    })
+    crate::topology::edge::tolerance(brep, e)
 }
 
 /// `SmEdge::GetInterval`.
 fn edge_interval(brep: &Brep, e: EdgeId) -> Result<Extent1d> {
-    brep.edge(e)?;
-    // UNPORTED(topology.edge): SmEdge::GetInterval
-    Err(SolidError::Unported {
-        upstream: "SmEdge::GetInterval",
-        unit: "topology.edge",
-    })
+    crate::topology::edge::interval(brep, e)
+}
+
+/// `pE->GetCurve()`, `NER` on a missing curve.
+fn edge_curve(brep: &Brep, e: EdgeId) -> Result<&crate::curve::curve::Curve> {
+    crate::topology::edge::curve(brep, e)?
+        .ok_or(SolidError::null_pointer("geom::tools::edge_curve"))
 }
 
 /// `pE->GetCurve()->EvaluatePoint(t)` (`NER` on a missing curve).
-fn edge_curve_point(brep: &Brep, e: EdgeId, _t: f64) -> Result<Point3> {
-    brep.edge(e)?;
-    // UNPORTED(topology.edge): SmEdge::GetCurve
-    // UNPORTED(curve.curve_p2): SmCurve::EvaluatePoint
-    Err(SolidError::Unported {
-        upstream: "SmEdge::GetCurve",
-        unit: "topology.edge",
-    })
+fn edge_curve_point(brep: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
+    edge_curve(brep, e)?.evaluate_point(t)
 }
 
 /// First derivative from `pE->GetCurve()->Evaluate(t, 1, TRUE, ...)`.
-fn edge_curve_derivative(brep: &Brep, e: EdgeId, _t: f64) -> Result<Vec3> {
-    brep.edge(e)?;
-    // UNPORTED(topology.edge): SmEdge::GetCurve
-    // UNPORTED(curve.curve_p2): SmCurve::Evaluate
-    Err(SolidError::Unported {
-        upstream: "SmEdge::GetCurve",
-        unit: "topology.edge",
-    })
+fn edge_curve_derivative(brep: &Brep, e: EdgeId, t: f64) -> Result<Vec3> {
+    let pv = edge_curve(brep, e)?.evaluate(t, 1, true, true)?;
+    pv.get(1).copied().ok_or(SolidError::null_pointer(
+        "geom::tools::edge_curve_derivative",
+    ))
 }
 
 /// First derivative from `pCurve->Evaluate(t, 1, TRUE, ...)`.
@@ -450,12 +428,11 @@ fn edge_drop_point(
     _pt: Point3,
     _tol: f64,
 ) -> Result<Drop> {
-    brep.edge(e)?;
-    // UNPORTED(topology.edge): SmEdge::GetCurve
+    edge_curve(brep, e)?;
     // UNPORTED(curve.curve_p6): SmCurve::DropPoint
     Err(SolidError::Unported {
-        upstream: "SmEdge::GetCurve",
-        unit: "topology.edge",
+        upstream: "SmCurve::DropPoint",
+        unit: "curve.curve_p6",
     })
 }
 

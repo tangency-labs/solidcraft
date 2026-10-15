@@ -38,6 +38,7 @@
 
 pub mod brep_data;
 pub mod database_io;
+pub mod edge;
 pub mod edgeuse;
 pub mod face;
 pub mod proto_topology;
