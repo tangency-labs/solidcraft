@@ -372,6 +372,26 @@ pub fn notify<R: TopologyRecords + ?Sized>(
     data2: Option<ObjectRef>,
     data3: Option<ObjectRef>,
 ) -> Result<()> {
+    notify_with_regions(
+        records, attributes, context, operation, this, data1, data2, data3, None,
+    )
+}
+
+/// Propagate topology marks, then notify attributes with an actual region lookup.
+///
+/// # Errors
+/// Missing topology records, attribute errors or failed region resolution.
+pub fn notify_with_regions<R: TopologyRecords + ?Sized>(
+    records: &mut R,
+    attributes: &mut AttributeStore,
+    context: Option<&mut Context>,
+    operation: NotifyOperation,
+    this: ObjectRef,
+    data1: Option<ObjectRef>,
+    data2: Option<ObjectRef>,
+    data3: Option<ObjectRef>,
+    regions: Option<&dyn crate::topology::shell::RegionLookup>,
+) -> Result<()> {
     use NotifyOperation as N;
     let key = |o: Option<ObjectRef>| o.map(|r| r.key);
     let mut copy = false;
@@ -426,7 +446,9 @@ pub fn notify<R: TopologyRecords + ?Sized>(
     }
 
     // pass the call along to the base class
-    a_object::notify(attributes, context, operation, this, data1, data2, data3)
+    a_object::notify_with_regions(
+        attributes, context, operation, this, data1, data2, data3, regions,
+    )
 }
 
 // ---- change tracking ---------------------------------------------------------------

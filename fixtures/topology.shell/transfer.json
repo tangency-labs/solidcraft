@@ -1,0 +1,2315 @@
+{
+  "cases": [
+    {
+      "name": "self_vertex_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_face_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_face_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_face_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_face_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_face_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_face_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_wire_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_wire_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_wire_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "self_wire_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "self_wire_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            4,
+            2,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "self_wire_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            4,
+            3,
+            2,
+            1,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            4,
+            2,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            4,
+            3,
+            2,
+            1,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            4,
+            2,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            4,
+            3,
+            2,
+            1,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_0_1_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_0_1_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_1_0_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_1_0_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_0_1_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_0_1_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [],
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_1_0_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_1_0_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [],
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_0_1_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_0_1_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_1_0_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_1_0_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    }
+  ]
+}

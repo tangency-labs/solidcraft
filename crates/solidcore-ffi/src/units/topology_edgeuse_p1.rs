@@ -12,6 +12,7 @@
 //! | `1 curve t0 t1 validate_only init_gaps`       | `CreateWireEdgeFromCurve(curve, [t0, t1])`|
 //! | `2 surface u0 v0 u1 v1 validate_only init_gaps` | `CreateFaceFromSurface(surface, dom)`   |
 //! | `3 validate_only init_gaps`                   | the wire network of `prog_test` `my_test_topology` |
+//! | `4 n points(x y z)*n validate_only init_gaps` | actual `MakeShellVertex` calls (0..64 vertices) |
 //!
 //! A surface block is `0 oob form n m p q r s cpts(x y z w) u v` (`SmBSplineSurface`) or
 //! `1 O[3] N[3]` (`SmPlane(O, N)`); a curve block `dim n p m cpts(x y z w) knots`
@@ -32,13 +33,22 @@
 //! | `Gaps`      | `eu which flag want_out`                | per `which` (`0` `GetMaxEdgeFaceGap`, `1` `GetEdgeCCWEdgeGap`, `2` `CalcMaxEdgeFaceGap`, `3` `CalcEdgeCCWEdgeGap`) |
 //! | `SetOrient` | `eu orientation`                        | `orient mate radial` |
 //!
+//! The graph export ends with a versioned extension: `3 infinite_region`, then
+//! one raw void flag per region and one raw wire-edge-use/vertex-use head index
+//! per shell (`-1` for other member classes), then a vertex-use index list per
+//! vertex in native list order, then literal next/last indices per face use.
+//! The original graph prefix and the
+//! ten entity counts remain unchanged. This supplies shell state independently
+//! of the shell operations being compared.
+//!
 //! Geometry ops: `StepOff` (`surface dist P[3] N[3] u v jac` -> `status found F0 F1
 //! J00 J01 J10 J11`), `DistDev` (`surface P[3] u v value obj want_dev` -> `dist dev`;
 //! `obj` 0 null, 1 the surface, 2 a line), `Seam` (`n curve*n a b called` -> `seam`).
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: existing
 //! `.smb` files, well-formed clamped B-splines, planes with a non-zero normal,
-//! parameters within 100 domain lengths of a surface's domain, indices inside the
+//! parameters within 100 domain lengths of a surface's domain, plane-face domains
+//! bounded by 1e6 for graph export (1e4 for other operations), indices inside the
 //! B-rep's export (it builds the B-rep once more to count), finite inputs.
 
 use std::path::Path;
@@ -323,8 +333,8 @@ fn uv(rd: &mut Reader<'_>, dom: Domain) -> Result<(), FfiError> {
 }
 
 /// A B-rep block.
-pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
-    match rd.index(3)? {
+fn brep_block(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
+    match rd.index(4)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -357,10 +367,16 @@ pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError
                     }
                 }
                 None => {
-                    if d.iter().any(|x| x.abs() > 1e4) {
+                    if d.iter().any(|x| x.abs() > plane_domain_limit) {
                         return Err(bad("plane face domain too large"));
                     }
                 }
+            }
+        }
+        4 => {
+            let count = rd.index(MAX_LIST)?;
+            for _ in 0..count {
+                rd.vec3()?;
             }
         }
         _ => {}
@@ -542,7 +558,11 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         rd.done()?;
         return raw(op, path, input);
     }
-    brep_block(&mut rd, path)?;
+    // Export constructs the graph but does not run an edge-use geometry
+    // operation. Actual native shell probes cover plane domains through 1e6;
+    // retain the existing 1e4 bound for the other edge-use operations.
+    let plane_domain_limit = if op == Op::Export { 1e6 } else { 1e4 };
+    brep_block(&mut rd, path, plane_domain_limit)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
     let export = raw(Op::Export, path, block)?;
     if op == Op::Export {

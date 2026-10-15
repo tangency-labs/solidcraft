@@ -1584,11 +1584,17 @@ mod tests {
     /// shell vertex use of a third vertex.
     fn wire() -> (Brep, [VertexuseId; 3], [EdgeuseId; 2]) {
         let mut b = Brep::new();
-        let r = b.add_region_record(Region { in_brep: true }).unwrap();
+        let r = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
         let s = b
             .add_shell_record(Shell {
                 faces: Vec::new(),
                 region: Some(r),
+                ..Shell::default()
             })
             .unwrap();
         let v: Vec<VertexId> = (0..3)
@@ -1596,7 +1602,7 @@ mod tests {
                 b.add_vertex_record(Vertex {
                     point: Vec3::new(f64::from(i), 0.0, 0.0),
                     tolerance: ZONE_TOL_3D,
-                    ..Vertex::default()
+                    vertexuses: Vec::new(),
                 })
                 .unwrap()
             })
@@ -1643,10 +1649,12 @@ mod tests {
                 ..crate::topology::Vertexuse::default()
             })
             .unwrap();
-        for (i, &vu) in vus.iter().enumerate() {
-            b.vertex_mut(v[i]).unwrap().vertexuses.push(vu);
+        b.region_mut(r).unwrap().shells.push(s);
+        b.shell_mut(s).unwrap().shell_type = crate::topology::shell::ShellType::Wire;
+        b.shell_mut(s).unwrap().members = crate::topology::shell::ShellMembers::Edgeuse(eus[0]);
+        for (vertex, vertexuse) in v.iter().zip([vus[0], vus[1], svu]) {
+            b.vertex_mut(*vertex).unwrap().vertexuses.push(vertexuse);
         }
-        b.vertex_mut(v[2]).unwrap().vertexuses.push(svu);
         (b, [vus[0], vus[1], svu], [eus[0], eus[1]])
     }
 

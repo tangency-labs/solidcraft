@@ -168,7 +168,9 @@ fn dbls_of(v: Option<&Value>) -> Result<Vec<f64>, HarnessError> {
                     .ok_or_else(|| HarnessError::new(format!("expected number, got {x}")))
             })
             .collect(),
-        Some(other) => Err(HarnessError::new(format!("expected number list, got {other}"))),
+        Some(other) => Err(HarnessError::new(format!(
+            "expected number list, got {other}"
+        ))),
     }
 }
 
@@ -199,8 +201,16 @@ fn decode(v: &Value) -> Result<Script, HarnessError> {
             .ok_or_else(|| HarnessError::new(format!("op {o} has no name")))?;
         let code = op_code(name)?;
         let mut rec = [code, 0, 0, 0, 0, 0, 0];
-        let scalars: Vec<&Value> = items.iter().skip(1).filter(|x| !x.is_array() && !x.is_null()).collect();
-        let lists: Vec<&Value> = items.iter().skip(1).filter(|x| x.is_array() || x.is_null()).collect();
+        let scalars: Vec<&Value> = items
+            .iter()
+            .skip(1)
+            .filter(|x| !x.is_array() && !x.is_null())
+            .collect();
+        let lists: Vec<&Value> = items
+            .iter()
+            .skip(1)
+            .filter(|x| x.is_array() || x.is_null())
+            .collect();
         for (slot, x) in rec.iter_mut().skip(1).zip(&scalars) {
             *slot = as_int(x)?;
         }
@@ -245,10 +255,16 @@ fn decode(v: &Value) -> Result<Script, HarnessError> {
         let data = if let Some(t) = st.get("text").and_then(Value::as_str) {
             t.as_bytes().to_vec()
         } else {
-            ints_of(st.get("data"))?.into_iter().map(|b| b as u8).collect()
+            ints_of(st.get("data"))?
+                .into_iter()
+                .map(|b| b as u8)
+                .collect()
         };
         let ft = st.get("file_type").map(as_int).transpose()?.unwrap_or(0) as i32;
-        let swap = st.get("byte_swap").and_then(Value::as_bool).unwrap_or(false);
+        let swap = st
+            .get("byte_swap")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         s.stream = Some((data, ft, swap));
     }
     Ok(s)
@@ -258,11 +274,21 @@ fn decode(v: &Value) -> Result<Script, HarnessError> {
 
 /// Parses the shim's int/double streams (or the Rust side's identical ones) into
 /// named outputs.
-fn to_output(n_objects: i64, n_ops: usize, ints: &[i64], dbls: &[f64]) -> Result<Output, HarnessError> {
+fn to_output(
+    n_objects: i64,
+    n_ops: usize,
+    ints: &[i64],
+    dbls: &[f64],
+) -> Result<Output, HarnessError> {
     let mut it = ints.iter().copied();
-    let mut next = || it.next().ok_or_else(|| HarnessError::new("truncated output"));
+    let mut next = || {
+        it.next()
+            .ok_or_else(|| HarnessError::new("truncated output"))
+    };
     let take = |n: i64, next: &mut dyn FnMut() -> Result<i64, HarnessError>| {
-        (0..n.max(0)).map(|_| next()).collect::<Result<Vec<i64>, _>>()
+        (0..n.max(0))
+            .map(|_| next())
+            .collect::<Result<Vec<i64>, _>>()
     };
     let mut status = Vec::new();
     let mut outs = Vec::new();
@@ -329,9 +355,17 @@ fn run_cpp_case(v: &Value) -> Result<Output, HarnessError> {
         file_type: *ft,
         byte_swap: *swap,
     });
-    match ffi::run(s.n_objects, &s.ops, &s.payload_i, &s.payload_d, stream.as_ref()) {
+    match ffi::run(
+        s.n_objects,
+        &s.ops,
+        &s.payload_i,
+        &s.payload_d,
+        stream.as_ref(),
+    ) {
         Ok(raw) => to_output(s.n_objects, s.ops.len(), &raw.ints, &raw.dbls),
-        Err(e @ FfiError::InvalidArgument(_)) => Err(HarnessError::new(format!("ffi rejected: {e}"))),
+        Err(e @ FfiError::InvalidArgument(_)) => {
+            Err(HarnessError::new(format!("ffi rejected: {e}")))
+        }
         Err(e) => Ok(Output::err(e.to_string())),
     }
 }
@@ -340,6 +374,7 @@ fn run_cpp_case(v: &Value) -> Result<Output, HarnessError> {
 
 struct RustRun {
     store: AttributeStore,
+    regions: crate::fixtures::regions::RegionScene,
     n_objects: i64,
     handles: Vec<AttributeHandle>,
     all: Vec<Option<AttributeHandle>>,
@@ -435,11 +470,15 @@ impl RustRun {
     }
 
     fn next_i(&mut self) -> Result<i64, HarnessError> {
-        self.pay_i.next().ok_or_else(|| HarnessError::new("payload exhausted"))
+        self.pay_i
+            .next()
+            .ok_or_else(|| HarnessError::new("payload exhausted"))
     }
 
     fn next_d(&mut self) -> Result<f64, HarnessError> {
-        self.pay_d.next().ok_or_else(|| HarnessError::new("payload exhausted"))
+        self.pay_d
+            .next()
+            .ok_or_else(|| HarnessError::new("payload exhausted"))
     }
 
     fn next_vec(&mut self) -> Result<Vec3, HarnessError> {
@@ -499,12 +538,19 @@ impl RustRun {
                 return Ok(Step::Status(0));
             }
             op::NEW_GENERIC => {
-                let l = (0..a[3]).map(|_| self.next_i()).collect::<Result<Vec<_>, _>>()?;
-                let d = (0..a[4]).map(|_| self.next_d()).collect::<Result<Vec<_>, _>>()?;
+                let l = (0..a[3])
+                    .map(|_| self.next_i())
+                    .collect::<Result<Vec<_>, _>>()?;
+                let d = (0..a[4])
+                    .map(|_| self.next_d())
+                    .collect::<Result<Vec<_>, _>>()?;
                 let c = (0..a[5])
                     .map(|_| self.next_i().map(|x| x as u8))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.add_handle(Attribute::generic(a[1] as u64, behavior(a[2])?, &l, &d, &c), out)?;
+                self.add_handle(
+                    Attribute::generic(a[1] as u64, behavior(a[2])?, &l, &d, &c),
+                    out,
+                )?;
                 return Ok(Step::Status(0));
             }
             op::NEW_LONG => {
@@ -512,7 +558,10 @@ impl RustRun {
                 return Ok(Step::Status(0));
             }
             op::NEW_POINTER => {
-                self.add_handle(Attribute::pointer(a[1] as u64, a[2] as u64, behavior(a[3])?), out)?;
+                self.add_handle(
+                    Attribute::pointer(a[1] as u64, a[2] as u64, behavior(a[3])?),
+                    out,
+                )?;
                 return Ok(Step::Status(0));
             }
             op::NEW_POINTER_LIST => {
@@ -520,7 +569,10 @@ impl RustRun {
                     .map(|_| self.next_i().map(|x| x as u64))
                     .collect::<Result<Vec<_>, _>>()?;
                 let list = if a[4] != 0 { None } else { Some(&l[..]) };
-                self.add_handle(Attribute::pointer_list(a[1] as u64, list, behavior(a[2])?), out)?;
+                self.add_handle(
+                    Attribute::pointer_list(a[1] as u64, list, behavior(a[2])?),
+                    out,
+                )?;
                 return Ok(Step::Status(0));
             }
             op::NEW_VECTOR3D | op::NEW_COLOR => {
@@ -539,12 +591,18 @@ impl RustRun {
                 for x in &mut t {
                     *x = self.next_i()?;
                 }
-                self.add_handle(Attribute::tag(a[1] as u64, TagData::from_array(t), behavior(a[2])?), out)?;
+                self.add_handle(
+                    Attribute::tag(a[1] as u64, TagData::from_array(t), behavior(a[2])?),
+                    out,
+                )?;
                 return Ok(Step::Status(0));
             }
             op::NEW_MERGE_REGION => {
                 let (r1, r2) = (self.obj(a[1])?, self.obj(a[3])?);
-                self.add_handle(Attribute::merge_region(r1, a[2] as u64 as i64, r2, a[4] as u64 as i64), out)?;
+                self.add_handle(
+                    Attribute::merge_region(r1, a[2] as u64 as i64, r2, a[4] as u64 as i64),
+                    out,
+                )?;
                 return Ok(Step::Status(0));
             }
             op::READ_INDEXED => {
@@ -552,8 +610,13 @@ impl RustRun {
                     return Ok(Step::Status(ST_SKIP));
                 }
                 let before = self.all.clone();
-                let reader = self.reader.as_mut().ok_or_else(|| HarnessError::new("no stream"))?;
-                let res = self.store.read_indexed_attributes_from_db(&mut self.all, reader);
+                let reader = self
+                    .reader
+                    .as_mut()
+                    .ok_or_else(|| HarnessError::new("no stream"))?;
+                let res = self
+                    .store
+                    .read_indexed_attributes_from_db(&mut self.all, reader);
                 for (i, slot) in self.all.iter().enumerate() {
                     if let Some(h) = slot {
                         if before.get(i).copied().flatten().is_none() {
@@ -628,7 +691,7 @@ impl RustRun {
                         return Ok(Step::Status(ST_SKIP));
                     }
                 }
-                Self::status(self.store.merge(h, o1, o2, m))
+                Self::status(self.store.merge_with_regions(h, o1, o2, m, &self.regions))
             }
             op::COINCIDENT => {
                 let (f, t) = (self.obj(a[2])?, self.obj(a[3])?);
@@ -653,7 +716,8 @@ impl RustRun {
                         })
                     };
                     let (c1, c2, cm) = (find(o1), find(o2), find(m));
-                    if c1.is_some() && c2.is_some() && !(is_vec(c1)? && is_vec(c2)? && is_vec(cm)?) {
+                    if c1.is_some() && c2.is_some() && !(is_vec(c1)? && is_vec(c2)? && is_vec(cm)?)
+                    {
                         return Ok(Step::Status(ST_SKIP));
                     }
                 }
@@ -700,7 +764,10 @@ impl RustRun {
                 let Some(d) = at.merge_region_data() else {
                     return Ok(Step::Status(ST_SKIP));
                 };
-                let prop = self.store.has_any_other_propagated_attribs(h).map_err(|e| harness(&e))?;
+                let prop = self
+                    .store
+                    .has_any_other_propagated_attribs(h)
+                    .map_err(|e| harness(&e))?;
                 out.push(i64::from(d.has_this_infinite_region()));
                 out.push(i64::from(d.has_other_infinite_region()));
                 out.push(i64::from(d.has_any_solid(a[2] as u64)));
@@ -716,12 +783,20 @@ impl RustRun {
             }
             op::MR_SET_REGIONS => {
                 let (r1, r2) = (self.obj(a[3])?, self.obj(a[5])?);
-                let Some(d) = self.store.get_mut(h).and_then(Attribute::merge_region_data_mut) else {
+                let Some(d) = self
+                    .store
+                    .get_mut(h)
+                    .and_then(Attribute::merge_region_data_mut)
+                else {
                     return Ok(Step::Status(ST_SKIP));
                 };
                 let idx = a[2] as u64;
                 let n_this = d.this_regions().len() as u64;
-                let others = [d.this_types.len(), d.other_regions.len(), d.other_types.len()];
+                let others = [
+                    d.this_types.len(),
+                    d.other_regions.len(),
+                    d.other_types.len(),
+                ];
                 if idx < n_this && others.iter().any(|&n| idx >= n as u64) {
                     return Ok(Step::Status(ST_SKIP));
                 }
@@ -729,7 +804,11 @@ impl RustRun {
                 Self::status(d.set_regions(index, r1, a[4] as u64 as i64, r2, a[6] as u64 as i64))
             }
             op::MR_SET_OPERATION => {
-                let Some(d) = self.store.get_mut(h).and_then(Attribute::merge_region_data_mut) else {
+                let Some(d) = self
+                    .store
+                    .get_mut(h)
+                    .and_then(Attribute::merge_region_data_mut)
+                else {
                     return Ok(Step::Status(ST_SKIP));
                 };
                 d.set_operation(a[2] as i32);
@@ -737,7 +816,10 @@ impl RustRun {
             }
             op::SET_VECTOR => {
                 let v = self.next_vec()?;
-                let at = self.store.get_mut(h).ok_or_else(|| HarnessError::new("dead"))?;
+                let at = self
+                    .store
+                    .get_mut(h)
+                    .ok_or_else(|| HarnessError::new("dead"))?;
                 if at.vector3d_value().is_none() {
                     return Ok(Step::Status(ST_SKIP));
                 }
@@ -804,7 +886,11 @@ impl RustRun {
                 AttributeValue::None
                 | AttributeValue::PolyToEuVu { .. }
                 | AttributeValue::PolyEdgeToVertexUse { .. } => {}
-                AttributeValue::Generic { longs, doubles, chars } => {
+                AttributeValue::Generic {
+                    longs,
+                    doubles,
+                    chars,
+                } => {
                     v.push(longs.len() as i64);
                     v.extend(longs);
                     v.push(chars.len() as i64);
@@ -869,8 +955,13 @@ fn run_rust_case(v: &Value) -> Result<Output, HarnessError> {
         }
         None => (None, Vec::new()),
     };
+    let regions = crate::fixtures::regions::RegionScene::orphan_objects(
+        (0..s.n_objects).map(|i| ObjectKey(i as u64)),
+    )
+    .map_err(|e| HarnessError::new(e.to_string()))?;
     let mut run = RustRun {
         store: AttributeStore::new(),
+        regions,
         n_objects: s.n_objects,
         handles: Vec::new(),
         all: Vec::new(),
@@ -1096,8 +1187,13 @@ impl Gen<'_> {
             83 => {
                 let pool = self.mr_handles.clone();
                 let a = self.reference_in(&pool);
-                let i = if self.rng.chance(0.7) { 0 } else { self.rng.range_i64(-1, 3) };
-                let (r1, t1, r2, t2) = (self.obj(), self.rng.below(3), self.obj(), self.rng.below(3));
+                let i = if self.rng.chance(0.7) {
+                    0
+                } else {
+                    self.rng.range_i64(-1, 3)
+                };
+                let (r1, t1, r2, t2) =
+                    (self.obj(), self.rng.below(3), self.obj(), self.rng.below(3));
                 serde_json::json!(["mr_set_regions", a, i, r1, t1, r2, t2])
             }
             84 => {

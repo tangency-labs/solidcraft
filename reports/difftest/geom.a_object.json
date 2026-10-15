@@ -178,16 +178,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "reg_propagation_other_colour_only",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.a_object/edge_cases.json#22",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -326,16 +322,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "region_propagation_union_colour",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/geom.a_object/upstream.json#7 (upstream source/SMLib/src/SmAObject.cpp:387)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -414,16 +406,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717507",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -570,16 +558,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717525",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -846,16 +830,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0060",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717558",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -866,16 +846,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0062",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717560",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -1798,16 +1774,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0174",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717672",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -2674,16 +2646,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0281",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717779",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2850,16 +2818,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0302",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717800",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3130,28 +3094,20 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0336",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717834",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717835",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3534,16 +3490,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0384",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717882",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -3594,16 +3546,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0391",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717889",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -3782,16 +3730,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0414",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717912",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "deferred": {
@@ -4310,16 +4254,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031717975",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6170,16 +6110,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0704",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718202",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -6214,16 +6150,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0709",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718207",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -6582,16 +6514,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0754",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718252",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6730,16 +6658,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0771",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718269",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -7398,16 +7322,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0852",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718350",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -7490,16 +7410,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0862",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718360",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7794,16 +7710,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0899",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718397",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -8222,16 +8134,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen0950",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718448",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -9002,16 +8910,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1044",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718542",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -9262,16 +9166,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1076",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718574",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -10682,16 +10582,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1245",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718743",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10790,16 +10686,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1258",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031718756",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -13122,16 +13014,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1538",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719036",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -13290,16 +13178,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1558",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719056",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14742,16 +14626,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1733",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719231",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14858,16 +14738,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1747",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719245",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15626,16 +15502,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1838",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719336",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15898,16 +15770,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1870",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719368",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15942,16 +15810,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1875",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719373",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16118,16 +15982,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1896",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719394",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16250,16 +16110,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1911",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719409",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -16302,16 +16158,12 @@
       "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmRegion::IsVoid",
-        "unit": "topology.shell"
-      },
       "max_rel_err": 0.0,
       "name": "gen1917",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=17606177428031719415",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16995,13 +16847,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 168,
+  "cases_deferred": 131,
   "cases_failed": 0,
-  "cases_passed": 1872,
+  "cases_passed": 1909,
   "cases_total": 2040,
   "deferred_by_unit": {
-    "query.brep": 131,
-    "topology.shell": 37
+    "topology.brep_cache": 131
   },
   "max_rel_err": 0.0,
   "pass": true,

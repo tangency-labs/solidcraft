@@ -414,7 +414,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     for _ in 0..n_r {
         let in_brep = rd.num()? != 0.0;
         rd.list()?;
-        regions.push(Region { in_brep });
+        regions.push(Region { in_brep, ..Region::default() });
     }
     let mut shells = Vec::new();
     for _ in 0..n_s {
@@ -424,6 +424,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
         shells.push(Shell {
             faces: Vec::new(),
             region,
+            ..Shell::default()
         });
     }
     let mut faceuses = Vec::new();
@@ -443,6 +444,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
             mate,
             orientation,
             loopuses,
+            sibling_links: None,
         });
     }
     let mut surfaces = Vec::new();
@@ -593,11 +595,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Vec<bool>), HarnessError> {
     for _ in 0..n_v {
         let point = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
         let tolerance = rd.num()?;
-        vertices.push(Vertex {
-            point,
-            tolerance,
-            ..Vertex::default()
-        });
+        vertices.push(Vertex { point, tolerance, vertexuses: Vec::new() });
     }
     if rd.at != ex.len() {
         return Err(harness("export: trailing data"));

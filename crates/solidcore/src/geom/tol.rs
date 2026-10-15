@@ -159,7 +159,7 @@ use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 // UNPORTED(topology.vertex): SmTol::GetScaledZero(const SmVertex&) (SmVertex::GetPoint).
 // UNPORTED(topology.edge): SmTol::GetScaledZero(const SmEdge&) (SmEdge::GetCurve).
 // UNPORTED(topology.face_p2): SmTol::GetScaledZero(const SmFace&) (SmFace::GetSurface).
-// UNPORTED(topology.shell): SmTol::GetScaledZero(const SmRegion&) and (const SmShell&)
+// UNPORTED(query.face_p1): SmTol::GetScaledZero(const SmRegion&) and (const SmShell&)
 // (CalculateBoundingBox).
 // SmTol::UpdateObjectTolerance(SmTopology*, double, double, SmBoolean) is
 // update_object_tolerance below (CO-PORTED in boolean.topology_intersector_p1).

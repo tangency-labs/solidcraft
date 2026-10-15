@@ -1054,25 +1054,33 @@ mod tests {
     /// running with the curve).
     fn wire(a: Point3, b: Point3, with_curve: bool) -> (Brep, EdgeId) {
         let mut br = Brep::new();
-        let r = br.add_region_record(Region { in_brep: true }).unwrap();
+        let r = br
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::new()
+            })
+            .unwrap();
         let s = br
             .add_shell_record(Shell {
                 faces: Vec::new(),
                 region: Some(r),
+                shell_type: crate::topology::shell::ShellType::Wire,
+                members: crate::topology::shell::ShellMembers::Edgeuse(EdgeuseId::from_index(0)),
             })
             .unwrap();
+        br.region_mut(r).unwrap().shells.push(s);
         let v0 = br
             .add_vertex_record(Vertex {
                 point: a,
                 tolerance: 1e-6,
-                ..Vertex::default()
+                vertexuses: Vec::new(),
             })
             .unwrap();
         let v1 = br
             .add_vertex_record(Vertex {
                 point: b,
                 tolerance: 1e-6,
-                ..Vertex::default()
+                vertexuses: Vec::new(),
             })
             .unwrap();
         let eu0 = EdgeuseId::from_index(0);
@@ -1101,6 +1109,7 @@ mod tests {
                     ..Vertexuse::default()
                 })
                 .unwrap();
+            br.vertex_mut(v).unwrap().vertexuses.push(vu);
             br.add_edgeuse_record(Edgeuse {
                 edge: Some(e),
                 owner: EdgeuseOwner::Shell(Some(s)),

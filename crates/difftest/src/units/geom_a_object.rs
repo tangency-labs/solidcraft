@@ -134,7 +134,9 @@ fn f64s<const N: usize>(v: Option<&Value>, what: &str) -> Result<[f64; N], Harne
     }
     let mut out = [0.0; N];
     for (o, x) in out.iter_mut().zip(a) {
-        *o = x.as_f64().ok_or_else(|| h(format!("{what}: not a number")))?;
+        *o = x
+            .as_f64()
+            .ok_or_else(|| h(format!("{what}: not a number")))?;
     }
     Ok(out)
 }
@@ -147,7 +149,12 @@ fn types_rust(ts: &[i64]) -> Vec<i64> {
         res.push(i64::from(a_object::is_kind_of(t)));
         res.push(i64::from(a_object::sag_is_kind_of(t)));
     }
-    res.extend([a_object::TYPE, a_object::TYPE, a_object::SAG_TYPE, a_object::SAG_TYPE]);
+    res.extend([
+        a_object::TYPE,
+        a_object::TYPE,
+        a_object::SAG_TYPE,
+        a_object::SAG_TYPE,
+    ]);
     res.push(i64::from(a_object::assert_valid(false)));
     res.push(i64::from(a_object::assert_valid(true)));
     for s in [
@@ -205,8 +212,20 @@ fn nli_output(r: [f64; 7]) -> Output {
     Output::new()
         .values("euclid", r.get(..3).unwrap_or_default().to_vec())
         .values("blend", r.get(3..).unwrap_or_default().to_vec())
-        .ints("euclid_bits", r.iter().take(3).map(|x| x.to_bits() as i64).collect::<Vec<_>>())
-        .ints("blend_bits", r.iter().skip(3).map(|x| x.to_bits() as i64).collect::<Vec<_>>())
+        .ints(
+            "euclid_bits",
+            r.iter()
+                .take(3)
+                .map(|x| x.to_bits() as i64)
+                .collect::<Vec<_>>(),
+        )
+        .ints(
+            "blend_bits",
+            r.iter()
+                .skip(3)
+                .map(|x| x.to_bits() as i64)
+                .collect::<Vec<_>>(),
+        )
 }
 
 fn cpt(a: [f64; 4]) -> CPoint {
@@ -289,7 +308,9 @@ fn to_output(n_ops: usize, ints: &[i64], dbls: &[f64]) -> Result<Output, Harness
     let mut it = ints.iter().copied();
     let mut next = || it.next().ok_or_else(|| h("truncated output"));
     let take = |n: i64, next: &mut dyn FnMut() -> Result<i64, HarnessError>| {
-        (0..n.max(0)).map(|_| next()).collect::<Result<Vec<i64>, _>>()
+        (0..n.max(0))
+            .map(|_| next())
+            .collect::<Result<Vec<i64>, _>>()
     };
     let mut status = Vec::new();
     let mut outs = Vec::new();
@@ -411,6 +432,7 @@ struct Obj {
 
 struct RustRun {
     store: AttributeStore,
+    regions: crate::fixtures::regions::RegionScene,
     objs: Vec<Obj>,
     handles: Vec<AttributeHandle>,
     consumed: Vec<bool>,
@@ -543,7 +565,12 @@ impl RustRun {
         Ok(false)
     }
 
-    fn notify_is_safe(&self, op: NotifyOperation, caller: i64, d: [i64; 3]) -> Result<bool, HarnessError> {
+    fn notify_is_safe(
+        &self,
+        op: NotifyOperation,
+        caller: i64,
+        d: [i64; 3],
+    ) -> Result<bool, HarnessError> {
         use NotifyOperation as N;
         let [d1, d2, d3] = d;
         Ok(match op {
@@ -631,7 +658,11 @@ impl RustRun {
             };
         }
         match code {
-            op::NEW_PLAIN | op::NEW_LONG | op::NEW_VECTOR3D | op::NEW_COLOR | op::NEW_MERGE_REGION => {
+            op::NEW_PLAIN
+            | op::NEW_LONG
+            | op::NEW_VECTOR3D
+            | op::NEW_COLOR
+            | op::NEW_MERGE_REGION => {
                 let at = match code {
                     op::NEW_PLAIN => Attribute::new(a1 as u64, behavior(a2)?),
                     op::NEW_LONG => Attribute::long(a1 as u64, a2, behavior(a3)?),
@@ -664,7 +695,11 @@ impl RustRun {
                 let Some(at) = self.resolve(a1) else {
                     return Ok(Step::Status(ST_INVALID));
                 };
-                let Some(d) = self.store.get_mut(at).and_then(Attribute::merge_region_data_mut) else {
+                let Some(d) = self
+                    .store
+                    .get_mut(at)
+                    .and_then(Attribute::merge_region_data_mut)
+                else {
                     return Ok(Step::Status(ST_SKIP));
                 };
                 d.set_operation(a2 as i32);
@@ -676,7 +711,10 @@ impl RustRun {
                     return Ok(Step::Status(ST_INVALID));
                 };
                 if code == op::ADD {
-                    if let Some(c) = usize::try_from(a2).ok().and_then(|i| self.consumed.get_mut(i)) {
+                    if let Some(c) = usize::try_from(a2)
+                        .ok()
+                        .and_then(|i| self.consumed.get_mut(i))
+                    {
                         *c = true;
                     }
                     tryr!(self.store.add_attribute(key, at));
@@ -694,7 +732,10 @@ impl RustRun {
                 let key = self.obj(a1)?.r.key;
                 let f = self.store.find_attribute(key, a2 as u64);
                 let l = self.store.attributes(key);
-                out.push(f.and_then(|f| l.iter().position(|&x| x == f)).map_or(-1, |p| p as i64));
+                out.push(
+                    f.and_then(|f| l.iter().position(|&x| x == f))
+                        .map_or(-1, |p| p as i64),
+                );
                 Ok(Step::Status(0))
             }
             op::NOTIFY | op::SAG_NOTIFY => {
@@ -721,7 +762,7 @@ impl RustRun {
                         ObjectKey,
                         solidcore::topology::topology::Topology,
                     >::new();
-                    tryr!(a_object::sag_notify(
+                    tryr!(a_object::sag_notify_with_regions(
                         &mut records,
                         &mut self.store,
                         Some(&mut self.ctx),
@@ -729,20 +770,22 @@ impl RustRun {
                         this,
                         d1,
                         d2,
-                        d3
+                        d3,
+                        Some(&self.regions)
                     ));
                 } else {
                     if !self.notify_is_safe(opn, a2, [a3, a4, a5])? {
                         return Ok(Step::Status(ST_SKIP));
                     }
-                    tryr!(a_object::notify(
+                    tryr!(a_object::notify_with_regions(
                         &mut self.store,
                         Some(&mut self.ctx),
                         opn,
                         this,
                         d1,
                         d2,
-                        d3
+                        d3,
+                        Some(&self.regions)
                     ));
                 }
                 let rec = self.records();
@@ -789,7 +832,11 @@ impl RustRun {
             }
             op::GET_CACHE => {
                 let ct = cache_type(a2)?;
-                let o = if a1 == -1 { None } else { Some(self.obj(a1)?.a) };
+                let o = if a1 == -1 {
+                    None
+                } else {
+                    Some(self.obj(a1)?.a)
+                };
                 out.push(self.cache_index(a_object::get_object_cache(ct, o.as_ref())));
                 Ok(Step::Status(0))
             }
@@ -908,7 +955,8 @@ impl RustRun {
                 see(&mut canon, *hd);
             }
         }
-        let index = |a: AttributeHandle| canon.iter().position(|&x| x == a).map_or(-1, |p| p as i64);
+        let index =
+            |a: AttributeHandle| canon.iter().position(|&x| x == a).map_or(-1, |p| p as i64);
         ints.push(self.objs.len() as i64);
         for (o, l) in self.objs.iter().zip(&lists) {
             ints.push(o.r.type_code);
@@ -922,10 +970,7 @@ impl RustRun {
             ints.push(kind_of(at));
             ints.push(at.attribute_id() as i64);
             ints.push(i64::from(at.behavior().code()));
-            let users = self
-                .store
-                .users(a)
-                .map_err(|e| h(e.to_string()))?;
+            let users = self.store.users(a).map_err(|e| h(e.to_string()))?;
             ints.push(users.len() as i64);
             ints.extend(users.iter().map(|u| u.0 as i64));
             let mut v = Vec::new();
@@ -997,8 +1042,17 @@ fn run_rust_script(v: &Value) -> Result<Output, HarnessError> {
             a: AObject::new(),
         })
         .collect();
+    let regions = crate::fixtures::regions::RegionScene::orphan_objects(
+        s.objects
+            .iter()
+            .enumerate()
+            .filter(|(_, kind)| **kind == O_REGION)
+            .map(|(index, _)| ObjectKey(index as u64)),
+    )
+    .map_err(|e| h(e.to_string()))?;
     let mut run = RustRun {
         store: AttributeStore::new(),
+        regions,
         objs,
         handles: Vec::new(),
         consumed: Vec::new(),
@@ -1096,7 +1150,11 @@ impl Gen<'_> {
                 self.push(json!(["new_plain", id, b]));
             }
             3..=4 => {
-                let (id, val, b) = (self.pick(PLAIN_IDS), self.rng.range_i64(-50, 50), self.beh());
+                let (id, val, b) = (
+                    self.pick(PLAIN_IDS),
+                    self.rng.range_i64(-50, 50),
+                    self.beh(),
+                );
                 self.push(json!(["new_long", id, val, b]));
             }
             5..=6 => {
@@ -1154,7 +1212,11 @@ impl Gen<'_> {
                 self.push(json!(["add", o, r]));
             }
             30..=33 => {
-                let (o, r, d) = (self.obj(), self.reference(), i64::from(self.rng.chance(0.3)));
+                let (o, r, d) = (
+                    self.obj(),
+                    self.reference(),
+                    i64::from(self.rng.chance(0.3)),
+                );
                 self.push(json!(["remove", o, r, d]));
             }
             34..=35 => {
@@ -1194,7 +1256,13 @@ impl Gen<'_> {
                 self.push(json!(["get_cache", o, t]));
             }
             79..=88 => {
-                let names = ["check_out", "check_in", "soft_delete", "guard_open", "guard_close"];
+                let names = [
+                    "check_out",
+                    "check_in",
+                    "soft_delete",
+                    "guard_open",
+                    "guard_close",
+                ];
                 let n = *self.rng.choose(&names).unwrap_or(&"check_out");
                 if n == "guard_close" {
                     self.push(json!(["guard_close"]));
@@ -1210,7 +1278,11 @@ impl Gen<'_> {
                 }
             }
             89..=92 => {
-                let (o, v, t) = (self.obj(), self.rng.range_i64(0, 1), self.rng.range_i64(0, 3));
+                let (o, v, t) = (
+                    self.obj(),
+                    self.rng.range_i64(0, 1),
+                    self.rng.range_i64(0, 3),
+                );
                 self.push(json!(["delete_objects_cache", o, v, t]));
             }
             93..=95 => {
@@ -1246,7 +1318,15 @@ impl Gen<'_> {
 /// attributes, a Boolean operation, then `SM_NO_REG_PROPAGATION` on the result region.
 fn reg_prop_case(rng: &mut Rng) -> Value {
     let n = 2 + rng.below(3) as i64;
-    let objects: Vec<i64> = (0..n).map(|i| if i < 2 || rng.chance(0.7) { O_REGION } else { O_AOBJECT }).collect();
+    let objects: Vec<i64> = (0..n)
+        .map(|i| {
+            if i < 2 || rng.chance(0.7) {
+                O_REGION
+            } else {
+                O_AOBJECT
+            }
+        })
+        .collect();
     let mut ops: Vec<Value> = Vec::new();
     let mut handles = 0i64;
     let mut new_handle = |ops: &mut Vec<Value>, v: Value| {
@@ -1257,7 +1337,10 @@ fn reg_prop_case(rng: &mut Rng) -> Value {
     let (this, other) = if rng.chance(0.8) { (0, 1) } else { (1, 0) };
     if rng.chance(0.9) {
         let t = rng.range_i64(0, 3);
-        let mr = new_handle(&mut ops, json!(["new_merge_region", this, rng.range_i64(0, 3), other, t]));
+        let mr = new_handle(
+            &mut ops,
+            json!(["new_merge_region", this, rng.range_i64(0, 3), other, t]),
+        );
         let opn = rng.range_i64(0, 10);
         ops.push(json!(["mr_set_operation", mr, opn]));
         ops.push(json!(["add", this, mr]));
@@ -1269,13 +1352,22 @@ fn reg_prop_case(rng: &mut Rng) -> Value {
         let v = match rng.below(4) {
             0 => json!(["new_color", 100, b, [p[0], p[1], p[2]]]),
             1 => json!(["new_vector3d", 7, b, [p[0], p[1], p[2]]]),
-            2 => json!(["new_long", *rng.choose(&[5, 6, 106]).unwrap_or(&5), rng.range_i64(-9, 9), b]),
+            2 => json!([
+                "new_long",
+                *rng.choose(&[5, 6, 106]).unwrap_or(&5),
+                rng.range_i64(-9, 9),
+                b
+            ]),
             _ => json!(["new_plain", *rng.choose(&[5, 116]).unwrap_or(&5), b]),
         };
         let hd = new_handle(&mut ops, v);
         ops.push(json!(["add", target, hd]));
     }
-    let caller = if rng.chance(0.9) { this } else { rng.range_i64(0, n - 1) };
+    let caller = if rng.chance(0.9) {
+        this
+    } else {
+        rng.range_i64(0, n - 1)
+    };
     ops.push(json!(["notify", 14, caller, -1, -1, -1]));
     if rng.chance(0.3) {
         ops.push(json!(["notify", 14, caller, -1, -1, -1]));
@@ -1288,7 +1380,9 @@ fn generate_case(rng: &mut Rng) -> Value {
         4 => reg_prop_case(rng),
         0 => {
             let n = 1 + rng.below(12) as usize;
-            let pool = [0, 11001, 12060, 16050, 16011, 16012, 12000, 12040, 16000, 18001, -1, 999_999];
+            let pool = [
+                0, 11001, 12060, 16050, 16011, 16012, 12000, 12040, 16000, 18001, -1, 999_999,
+            ];
             let ts: Vec<i64> = (0..n)
                 .map(|_| {
                     if rng.chance(0.7) {
@@ -1323,8 +1417,12 @@ fn generate_case(rng: &mut Rng) -> Value {
                     _ => O_BREP,
                 })
                 .collect();
-            let regions = (0..n).filter(|&i| objects.get(i as usize) == Some(&O_REGION)).collect();
-            let breps = (0..n).filter(|&i| objects.get(i as usize) == Some(&O_BREP)).collect();
+            let regions = (0..n)
+                .filter(|&i| objects.get(i as usize) == Some(&O_REGION))
+                .collect();
+            let breps = (0..n)
+                .filter(|&i| objects.get(i as usize) == Some(&O_BREP))
+                .collect();
             let user_cb = rng.chance(0.6);
             let sys_cb = rng.chance(0.4);
             let n_steps = 4 + rng.below(36);
@@ -1346,7 +1444,9 @@ fn generate_case(rng: &mut Rng) -> Value {
 }
 
 fn kind_str(v: &Value) -> Result<&str, HarnessError> {
-    v.get("kind").and_then(Value::as_str).ok_or_else(|| h("kind"))
+    v.get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| h("kind"))
 }
 
 impl UnitDiff for Runner {
@@ -1376,7 +1476,8 @@ impl UnitDiff for Runner {
             }
             "nli" => {
                 let n = nli_inputs(v)?;
-                let r = ffi::nli(n.noz, n.now, n.pw, n.alpha, n.aw, n.bw).map_err(|e| h(e.to_string()))?;
+                let r = ffi::nli(n.noz, n.now, n.pw, n.alpha, n.aw, n.bw)
+                    .map_err(|e| h(e.to_string()))?;
                 Ok(nli_output(r))
             }
             "script" => run_cpp_script(v),
