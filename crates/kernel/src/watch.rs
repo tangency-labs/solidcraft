@@ -10,7 +10,7 @@ use std::sync::Arc;
 pub trait Watch: Send + Sync {
     /// Stop at the next check.
     fn cancelled(&self) -> bool;
-    /// `done` of `total` units of the current step (`stage`, such as "reading" or "converting").
+    /// `done` of `total` units of the current step (`stage`, such as "parsing" or "converting").
     fn progress(&self, stage: &'static str, done: usize, total: usize);
 }
 

@@ -1,0 +1,7 @@
+{
+  "en": {
+    "file_load.parsing": "Parsing STEP... {percent}%",
+    "file_load.preparing_assembly": "Preparing the assembly...",
+    "file_load.reading_bytes": "Reading the file... {percent}% ({done} / {total} MB)"
+  }
+}
