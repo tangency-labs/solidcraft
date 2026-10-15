@@ -2534,7 +2534,7 @@ tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:
 status = "todo"
 claimed_by = ""
 claimed_at = ""
-notes = "60 fns; largest: SmEdge::IsTopological, SmEdge::FindRadialSector, SmEdge::GetBlendEdgeuse, SmEdge::OrientEdgeSequence; cycle back-edges (call into later units; stub or co-port): heal.gap(12), topology.edgeuse_p3(3), query.edge(2), topology.brep_p2(2), blend.fillet_geom_p1(1), topology.brep_p1(1), topology.face_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmEdge members m_pList (edge use list, primary first), m_vInterval, m_sZoneTol3d, m_pCurve -> topology::Edge::{edgeuses, interval, tolerance, curve}; SmEdge::GetPrimaryEdgeuse, IsLamina, GetBrep -> topology::edgeuse::p1::{primary_edgeuse, edge_is_lamina, edge_brep}; CO-PORTED in topology.vertexuse (PR #88): SmEdge::IsWire -> topology::vertexuse::edge_is_wire"
+notes = "60 fns; largest: SmEdge::IsTopological, SmEdge::FindRadialSector, SmEdge::GetBlendEdgeuse, SmEdge::OrientEdgeSequence; cycle back-edges (call into later units; stub or co-port): heal.gap(12), topology.edgeuse_p3(3), query.edge(2), topology.brep_p2(2), blend.fillet_geom_p1(1), topology.brep_p1(1), topology.face_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.edgeuse_p1 (PR #55): SmEdge members m_pList (edge use list, primary first), m_vInterval, m_sZoneTol3d, m_pCurve -> topology::Edge::{edgeuses, interval, tolerance, curve}; SmEdge::GetPrimaryEdgeuse, IsLamina, GetBrep -> topology::edgeuse::p1::{primary_edgeuse, edge_is_lamina, edge_brep}; CO-PORTED in topology.vertexuse (PR #88): SmEdge::IsWire -> topology::vertexuse::edge_is_wire; CO-PORTED in query.edge (PR #89): SmEdge::GetVertices(SmTArray&, ULONG*) (no attribute filter), SmEdge::GetFaces (no attribute filter) -> query::edge::{edge_vertices, edge_faces}"
 
 [[unit]]
 id = "blend.fillet_custom_solver"
@@ -2559,10 +2559,10 @@ soft_depends_on = ["curve.curve_p1", "curve.curve_p6", "curve.curve_p9", "geom.p
 est_lines = 1025
 layer = 41
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "5 fns; largest: SmEdge::RadialSectorClassify, SmEdge::RadialSectorOfCurveClassify, SmEdge::CalculateBoundingBox, SmEdge::CalculateTightBoundingBox; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "5 fns; largest: SmEdge::RadialSectorClassify, SmEdge::RadialSectorOfCurveClassify, SmEdge::CalculateBoundingBox, SmEdge::CalculateTightBoundingBox; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PORTED (PR #89): difftest 1368 cases (768 fixtures + 600 generated), 1190 pass, 178 deferred (topology.edgeuse_p2 SmEdgeuse::EvaluateBinormalStepOff 178), 0 fail, max_rel_err 0; curve.curve_p9 CalculateTightBoundingBox wired at merge; the radial sector classifications stay deferred: the query::edge step-off stub keeps upstream's in-place out-params on failure, and topology::edgeuse::p2::evaluate_binormal_step_off still defers to topology.edgeuse_p3 (EvaluateBinormal)"
 
 [[unit]]
 id = "topology.edgeuse_p3"
