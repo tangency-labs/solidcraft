@@ -50,6 +50,11 @@
 //!   (`geom::grid`), so surface leaves enter the grid through
 //!   [`Grid::add_surface_element`] with their data filled in
 //!   ([`SurfaceGridElement`] is co-ported by this unit).
+//! - **`SE` in `SmSurfaceGridElement::Init`.** Upstream signals an error and carries
+//!   on. [`surface_leaf`] retries a failed `Evaluate` without `non_zero_tangents`
+//!   (the failure comes after the plain NLib derivatives are in `sEval`, before the
+//!   fixed-up tangents are written back) and keeps the cross product when
+//!   `EvaluateNormal` fails; [`SolidError::Unported`] is always propagated.
 //! - **Polygon elements.** `sm_FindPolyHit` walks the `SmBrepCache` tree of a
 //!   polygon grid element and tests `SmPolyFace`s: neither exists yet, so a polygon
 //!   element in the ray's path is [`SolidError::Unported`], as is
@@ -64,11 +69,10 @@
 //!   passes as the skip element is `m_apNodes[0]`, which `FireRay` always clears, so
 //!   no element is skipped; unsigned products wrap as upstream's `ULONG`.
 //! - **Unported callees.** `SmSurface::LocalLineIntersect` (`surface.surface_p8`),
-//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`), `SmSurface::GetFace`
-//!   (`surface.surface_p1`), `SmFace::PointClassify` (`query.face_p2`), the surface
-//!   cache of `smsurf_GetSurfaceCache` (`surface.surface_p1`,
-//!   `surface.surface_cache_p3`) and the poly types return
-//!   [`SolidError::Unported`] (see the `UNPORTED` markers).
+//!   `SmSurface::EvaluateNormalSection` (`surface.surface_p3`),
+//!   `SmFace::PointClassify` (`query.face_p2`), `Grid::expand_hierarchy` and the poly
+//!   types return [`SolidError::Unported`] (see the `UNPORTED` markers). The surface
+//!   cache and its tree (`smsurf_GetSurfaceCache`, `GetTree`) are ported.
 //! - `SM_ERR` results the upstream ignores or `SER`s keep their behaviour; the
 //!   `SM_DEBUG_CODE` blocks are not ported. No recursion depends on input here
 //!   (`sm_FindPolyHit`, which recurses up a tree, is unported).
@@ -86,17 +90,19 @@ use crate::geom::geom_utility::p1::{
     line_plane_intersect_uv, CircleCircle,
 };
 use crate::geom::grid::{ElementId, Grid, GridItem, HierarchyElement, SurfaceGridElement};
+use crate::geom::object::ObjectRef;
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
 use crate::geom::tree::NodeId;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::surface::surface::p1::evaluate_1st_derivatives;
 use crate::surface::surface::p2::surface_cache;
-use crate::surface::surface::p7::evaluate_1st_derivatives;
 use crate::surface::surface::Surface;
 use crate::topology::{EdgeId, FaceId, VertexId};
 
@@ -205,12 +211,8 @@ fn surface_evaluate_normal_section(
 }
 
 /// `SmSurface::GetFace`: the face owning the surface, if any.
-fn surface_face(_surface: &Surface) -> Result<Option<FaceId>> {
-    // UNPORTED(surface.surface_p1): SmSurface::GetFace
-    Err(SolidError::unported(
-        "SmSurface::GetFace",
-        "surface.surface_p1",
-    ))
+fn surface_face(surface: &Surface) -> Result<Option<ObjectRef>> {
+    surface.face()
 }
 
 /// The leaf data `SmSurfaceGridElement::Init` derives from the surface once it has the
@@ -220,8 +222,8 @@ fn surface_face(_surface: &Surface) -> Result<Option<FaceId>> {
 ///
 /// # Errors
 ///
-/// Those of the surface's `Evaluate` and `EvaluateNormal` (upstream signals them with
-/// `SE` and carries on with unset values).
+/// Only [`SolidError::Unported`], or an `Evaluate` that also fails without
+/// `non_zero_tangents`: upstream signals those with `SE` and carries on.
 pub fn surface_leaf(
     surface_index: usize,
     surface: &Surface,
@@ -232,17 +234,22 @@ pub fn surface_leaf(
 ) -> Result<SurfaceGridElement<usize>> {
     // Precomputation of derivative information for this little patch
     let uv_mid = uv_domain.evaluate(0.5, 0.5);
-    let eval = surface.evaluate(
-        uv_mid,
-        1,
-        1,
-        EvaluateFlags {
-            u_side: Side::Left,
-            v_side: Side::Left,
-            only_upper_half: true,
-            non_zero_tangents: true,
-        },
-    )?;
+    let eval_flags = |non_zero_tangents: bool| EvaluateFlags {
+        u_side: Side::Left,
+        v_side: Side::Left,
+        only_upper_half: true,
+        non_zero_tangents,
+    };
+    // `SE(Evaluate)` signals the error and carries on. Asking for (1,1) derivatives
+    // makes `SmBSplineSurface::Evaluate` take its "not enough derivatives" branch,
+    // `SER(Evaluate(crUV, 2, 2, ...))` (SmBSplineSurfaceNLib.cpp:8335), which returns
+    // before the fixed-up tangents are written back: `sEval` keeps the plain NLib
+    // derivatives, which is what `non_zero_tangents: false` gives.
+    let eval = match surface.evaluate(uv_mid, 1, 1, eval_flags(true)) {
+        Ok(eval) => eval,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => surface.evaluate(uv_mid, 1, 1, eval_flags(false))?,
+    };
     let at = |i: usize, j: usize| -> Result<Vec3> {
         eval.get(i)
             .and_then(|r| r.get(j))
@@ -256,7 +263,13 @@ pub fn surface_leaf(
     if mid_normal.length_squared() > EFF_ZERO {
         mid_normal = mid_normal.unitize()?;
     } else {
-        mid_normal = surface.evaluate_normal(uv_mid, Side::Left, Side::Left)?;
+        // `SE(EvaluateNormal)`: on failure keep the cross product (the unit's
+        // `m_sMidNormal` is whatever the call left in it; see findings.md)
+        mid_normal = match surface.evaluate_normal(uv_mid, Side::Left, Side::Left) {
+            Ok(n) => n,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => mid_normal,
+        };
     }
     Ok(SurfaceGridElement {
         surface: surface_index,
@@ -1131,18 +1144,18 @@ impl<'s> RayTracer<'s> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: the surface cache and its subdivision tree
-    /// (`smsurf_GetSurfaceCache`, `SmSurfaceCache::GetTree`) are not ported; see
-    /// [`RayTracer::add_surface_with_bbox`] for the rest of the function.
-    pub fn add_surface_to_grid(&mut self, surface: &'s Surface) -> Result<()> {
+    /// `SM_ERR` when the surface cache or its tree is missing (or has no top node),
+    /// and those of the cache and tree builds and of
+    /// [`RayTracer::add_surface_with_bbox`] (its [`Grid::expand_hierarchy`] is
+    /// [`SolidError::Unported`] today).
+    pub fn add_surface_to_grid(&mut self, k: &Kernel, surface: &'s Surface) -> Result<()> {
+        const OP: &str = "intersect::ray_tracer::add_surface_to_grid";
         // build the surface spatial decomposition by building the surface cache
-        // (the cache's absence is `SM_ERR` upstream)
-        let _cache = surface_cache(surface)?;
-        // UNPORTED(surface.surface_cache_p3): SmSurfaceCache::GetTree
-        Err(SolidError::unported(
-            "SmSurfaceCache::GetTree",
-            "surface.surface_cache_p3",
-        ))
+        let mut cache = surface_cache::<usize>(k, surface, None)?;
+        let tree = cache.get_tree(k)?;
+        let top = tree.top_node().ok_or(SolidError::sm_err(OP))?;
+        let bbox = tree.node(top)?.bbox;
+        self.add_surface_with_bbox(surface, &bbox)
     }
 
     /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`).
@@ -1563,7 +1576,7 @@ mod tests {
         ));
         let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
         assert!(matches!(
-            t.add_surface_to_grid(&plane),
+            t.add_surface_to_grid(&Kernel::default(), &plane),
             Err(SolidError::Unported { .. })
         ));
     }

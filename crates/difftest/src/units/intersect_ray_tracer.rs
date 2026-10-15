@@ -13,8 +13,8 @@
 //! produce the flat record documented in the ffi module, reported as the values `rec`.
 //!
 //! Deferred cases: every ray or solve that gets past the leaf's pseudo box test reaches
-//! `SmSurface::LocalLineIntersect` (`surface.surface_p8`); `add_surface` needs the surface cache
-//! (`surface.surface_p1`). The generator makes mostly cases whose rays are rejected before
+//! `SmSurface::LocalLineIntersect` (`surface.surface_p8`); `add_surface` builds the surface cache and
+//! then needs `SmSurface::CalculateContinuities` (`surface.surface_p6`). The generator makes mostly cases whose rays are rejected before
 //! that (grid miss, element box rejection by parameter, skipped element, pseudo box miss) and
 //! checks that with the Rust side, plus free cases that defer.
 
@@ -34,6 +34,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::intersect::ray_tracer::{
     surface_leaf, LightSource, Lsi3LocalSolver, RayObject, RayRenderer, RayTracer,
 };
+use solidcore::kernel::Kernel;
 use solidcore::math::BIG_DOUBLE;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::knots::Side;
@@ -102,6 +103,9 @@ enum OpIn {
         uv: [f64; 4],
         bbox: E6,
         pseudo: E6,
+        /// Orthonormal basis of a rotated pseudo box (`pseudo` then holds its intervals).
+        #[serde(default)]
+        pseudo_basis: Option<[P3; 3]>,
         polar: Vec<P3>,
         elem_box: E6,
     },
@@ -207,6 +211,7 @@ fn ffi_program(i: &Inputs) -> ffi::Program {
                     uv,
                     bbox,
                     pseudo,
+                    pseudo_basis,
                     polar,
                     elem_box,
                 } => ffi::Op::AddLeaf(ffi::LeafIn {
@@ -214,6 +219,7 @@ fn ffi_program(i: &Inputs) -> ffi::Program {
                     uv_domain: *uv,
                     bbox: *bbox,
                     pseudo_box: *pseudo,
+                    pseudo_basis: *pseudo_basis,
                     polar: polar.clone(),
                     elem_box: *elem_box,
                 }),
@@ -453,6 +459,7 @@ fn run_rust(i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64>> {
                 uv,
                 bbox,
                 pseudo,
+                pseudo_basis,
                 polar,
                 elem_box,
             } => {
@@ -468,7 +475,17 @@ fn run_rust(i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64>> {
                     surf,
                     &ext2(*uv),
                     &ext3(*bbox),
-                    &PseudoBox::from_extent3d(&ext3(*pseudo)),
+                    &match pseudo_basis {
+                        Some([x, y, z]) => PseudoBox::from_basis_intervals(
+                            [v3(*x), v3(*y), v3(*z)],
+                            [
+                                Extent1d::from_min_max(pseudo[0], pseudo[3]),
+                                Extent1d::from_min_max(pseudo[1], pseudo[4]),
+                                Extent1d::from_min_max(pseudo[2], pseudo[5]),
+                            ],
+                        ),
+                        None => PseudoBox::from_extent3d(&ext3(*pseudo)),
+                    },
                     &polar_box,
                 )?;
                 tracer!()
@@ -530,7 +547,7 @@ fn run_rust(i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64>> {
                 let surf = surfaces
                     .get(leaf.surface)
                     .ok_or_else(|| bad_index("surface"))?;
-                let ivl = interval.map(|[a, b]| Extent1d::from_raw(a, b));
+                let ivl = interval.map(|[a, b]| Extent1d::from_min_max(a, b));
                 let mut solver = Lsi3LocalSolver::new(
                     &leaf.uv_domain,
                     v3(*p),
@@ -556,7 +573,7 @@ fn run_rust(i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64>> {
             }
             OpIn::AddSurface { surface } => {
                 let surf = surfaces.get(*surface).ok_or_else(|| bad_index("surface"))?;
-                tracer!().add_surface_to_grid(surf)?;
+                tracer!().add_surface_to_grid(&Kernel::default(), surf)?;
             }
             OpIn::Renderer {
                 origin,
@@ -630,6 +647,29 @@ fn unit3(a: P3) -> P3 {
         [0.0, 0.0, 1.0]
     } else {
         scale3(a, 1.0 / l)
+    }
+}
+
+fn dot3(a: P3, b: P3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// A random right-handed orthonormal basis (Gram-Schmidt on random directions).
+fn rotation_basis(rng: &mut Rng) -> [P3; 3] {
+    let x = unit_dir(rng);
+    loop {
+        let t = unit_dir(rng);
+        let k = dot3(t, x);
+        let y = [t[0] - k * x[0], t[1] - k * x[1], t[2] - k * x[2]];
+        if len3(y) > 0.1 {
+            let y = unit3(y);
+            let z = [
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            ];
+            return [x, y, z];
+        }
     }
 }
 
@@ -802,11 +842,32 @@ fn gen_leaves(
             // like AddSurfaceToGrid: the element box is the box grown by the tolerance, here
             // by more so that rays can pass between the boxes
             let elem_box = grow(bbox, ray_tol + rng.uniform(0.0, 0.3) * size.max(scale * 0.1));
+            // a rotated pseudo box (its intervals along an orthonormal basis), or an
+            // inverted one: both are defined `LocalSolve` / `FireRay` paths
+            let (pseudo, pseudo_basis) = if rng.chance(0.15) {
+                let b = rotation_basis(rng);
+                let r = 0.5 * size.max(scale * 0.1);
+                let c = [(bbox[0] + bbox[3]) * 0.5, (bbox[1] + bbox[4]) * 0.5, (bbox[2] + bbox[5]) * 0.5];
+                let cc = [dot3(c, b[0]), dot3(c, b[1]), dot3(c, b[2])];
+                let h = r * rng.uniform(0.3, 1.2);
+                (
+                    [cc[0] - h, cc[1] - h, cc[2] - h, cc[0] + h, cc[1] + h, cc[2] + h],
+                    Some(b),
+                )
+            } else if rng.chance(0.05) {
+                (
+                    [pseudo[3], pseudo[4], pseudo[5], pseudo[0], pseudo[1], pseudo[2]],
+                    None,
+                )
+            } else {
+                (pseudo, None)
+            };
             ops.push(OpIn::AddLeaf {
                 surface: index,
                 uv: [u0, v0, u1, v1],
                 bbox,
                 pseudo,
+                pseudo_basis,
                 polar,
                 elem_box,
             });
@@ -965,7 +1026,8 @@ fn gen_case(rng: &mut Rng, safe: bool) -> Inputs {
             } else {
                 unit_dir(rng)
             };
-            let d = unit3(dir);
+            // a zero ray vector is a defined path (`LocalSolve` returns early)
+            let d = if rng.chance(0.05) { [0.0; 3] } else { unit3(dir) };
             ops.push(OpIn::Local {
                 leaf,
                 p: start,

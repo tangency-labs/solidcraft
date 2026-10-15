@@ -222,7 +222,19 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
                 SmSurface* surf = surfs.at((size_t)rd.idx(0, nsurf - 1));
                 SmExtent2d dom = rd.dom4();
                 SmExtent3d bbox = rd.ext6();
-                SmPseudoBox pseudo(rd.ext6());
+                SmExtent3d pseudoExt = rd.ext6();
+                bool rotated = rd.flag();
+                SmPseudoBox pseudo(pseudoExt);
+                if (rotated)
+                {
+                    SmVector3d bx = rd.vec();
+                    SmVector3d by = rd.vec();
+                    SmVector3d bz = rd.vec();
+                    SmExtent1d ix(pseudoExt.GetMin(0), pseudoExt.GetMax(0));
+                    SmExtent1d iy(pseudoExt.GetMin(1), pseudoExt.GetMax(1));
+                    SmExtent1d iz(pseudoExt.GetMin(2), pseudoExt.GetMax(2));
+                    pseudo = SmPseudoBox(bx, by, bz, ix, iy, iz);
+                }
                 int64_t np = rd.idx(1, 8);
                 SmPolarBox polar(rd.vec());
                 for (int64_t i = 1; i < np; i++)

@@ -27,8 +27,8 @@
 //! tolerances: any finite value); planes with independent axes and positive scales; Bezier
 //! B-spline patches of degree 1..=3 with positive weights or none; grids of positive size with
 //! at most [`MAX_AXIS`] voxels per axis; leaf domains of positive extent inside the surface's
-//! natural domain with non-inverted boxes and non-zero polar vectors; ray vectors of `Local`
-//! ops of at least [`MIN_LOCAL_VECTOR`] (the Newton iteration divides by it); at most
+//! natural domain with non-inverted bounding boxes (a pseudo box may be inverted) and non-zero polar vectors; ray vectors of `Local`
+//! ops that are zero or at least [`MIN_LOCAL_VECTOR`] (the Newton iteration divides by it); at most
 //! [`MAX_OPS`] ops, [`MAX_LEAVES`] leaves, [`MAX_SURFACES`] surfaces and [`MAX_POLAR`] polar
 //! vectors per leaf.
 
@@ -58,7 +58,7 @@ pub const MAX_LEAVES: usize = 64;
 pub const MAX_SURFACES: usize = 4;
 /// Most polar vectors per leaf.
 pub const MAX_POLAR: usize = 8;
-/// Shortest ray vector of a `Local` op.
+/// Shortest non-zero ray vector of a `Local` op (a zero vector is allowed: `LocalSolve` handles it).
 pub const MIN_LOCAL_VECTOR: f64 = 1e-6;
 /// `NL_NOW`: the weight of a non-rational control point.
 pub const NOW: f64 = -f64::MAX;
@@ -114,8 +114,13 @@ pub struct LeafIn {
     pub uv_domain: [f64; 4],
     /// The leaf's bounding box (`SmSurfaceGridElement::m_sBBox`).
     pub bbox: [f64; 6],
-    /// The leaf's pseudo box, `SmPseudoBox(SmExtent3d)`.
+    /// The leaf's pseudo box, `SmPseudoBox(SmExtent3d)` (may be inverted); with
+    /// `pseudo_basis` set, the intervals along the basis directions instead
+    /// (`xmin ymin zmin xmax ymax zmax` read as one interval per axis).
     pub pseudo_box: [f64; 6],
+    /// An orthonormal basis for a rotated pseudo box, `SmPseudoBox(x, y, z, xIvl, yIvl,
+    /// zIvl)`; `None` for the axis-aligned `SmPseudoBox(SmExtent3d)`.
+    pub pseudo_basis: Option<[[f64; 3]; 3]>,
     /// The polar box vectors: the first is the constructor's, the others `AddVector`.
     pub polar: Vec<[f64; 3]>,
     /// The box the element is registered with in the grid voxels.
@@ -436,7 +441,33 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
                 e.int(l.surface);
                 e.nums(d)?;
                 e.bbox(&l.bbox)?;
-                e.bbox(&l.pseudo_box)?;
+                e.nums(&l.pseudo_box)?;
+                match &l.pseudo_basis {
+                    Some(b) => {
+                        if axes(&l.pseudo_box).iter().any(|&(lo, hi)| lo > hi) {
+                            return Err(bad("inverted rotated pseudo box"));
+                        }
+                        let dot = |a: [f64; 3], c: [f64; 3]| a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+                        for (i, v) in b.iter().enumerate() {
+                            if (norm(*v) - 1.0).abs() > 1e-9 {
+                                return Err(bad("pseudo basis must be orthonormal"));
+                            }
+                            if let Some(w) = b.get(i + 1..) {
+                                if w.iter().any(|w| dot(*v, *w).abs() > 1e-9) {
+                                    return Err(bad("pseudo basis must be orthonormal"));
+                                }
+                            }
+                        }
+                        if dot(cross(b[0], b[1]), b[2]) <= 0.0 {
+                            return Err(bad("pseudo basis must be right-handed"));
+                        }
+                        e.flag(true);
+                        for v in b {
+                            e.nums(v)?;
+                        }
+                    }
+                    None => e.flag(false),
+                }
                 e.int(l.polar.len());
                 for v in &l.polar {
                     e.nums(v)?;
@@ -463,7 +494,8 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
                 if l.leaf >= leaves {
                     return Err(bad("leaf index"));
                 }
-                if norm(l.vector) < MIN_LOCAL_VECTOR {
+                let len = norm(l.vector);
+                if len != 0.0 && len < MIN_LOCAL_VECTOR {
                     return Err(bad("ray vector too short"));
                 }
                 e.int(4);
