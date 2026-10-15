@@ -21,7 +21,7 @@
 //!
 //! Deviations:
 //! - Topology pointers are adapter handles. [`TopologyTrees`] borrows cache trees;
-//!   the default B-rep cache lookup is explicitly unported. Shape topology keys
+//!   the default B-rep cache lookup uses the adapter's `BrepCache`. Shape topology keys
 //!   resolve to vertices, edge curves and face surfaces before tree traversal.
 //! - The local solver is taken from its parent and restored even on error.
 //!   The existing global solver and object-list walks supply traversal bounds;

@@ -27,17 +27,19 @@
 //! - **Edge and vertex queries** are those of `topology::edge` and `topology::vertex`.
 //! - **Unported callees.** Curve evaluation of the opaque target
 //!   curve, point drops, curve/curve distance,
-//!   `SmBrep::GetEdges`, `SmBrep::GetTolerance` and the B-rep cache tree adapter
-//!   needed by the ported `SmTopologySolver::BrepPointSolve`
+//!   `SmBrep::GetEdges`, `SmBrep::GetTolerance` and exact B-rep cache dependencies
 //!   belong to units not ported yet; those calls return [`SolidError::Unported`]
 //!   (see the `UNPORTED` markers). The target curve of [`find_coincident_edge`] is
 //!   an opaque `C` until the curve units land (`curve.curve_p2`).
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::object::ObjectRef;
 use crate::geom::vector3d::sqrt;
+use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
-use crate::topology::{Brep, EdgeId, FaceId, VertexId};
+use crate::topology::brep_cache::CacheObject;
+use crate::topology::{Brep, BrepId, EdgeId, FaceId, VertexId};
 
 /// `rlFoundIndex` of [`find_first_vertex_within_tol_to_pnt`] when no vertex is
 /// within tolerance (upstream `99999`).
@@ -330,13 +332,22 @@ pub fn find_edge(brep: &Brep, point: Point3) -> Result<Option<EdgePick>> {
 /// face among the B-rep point-solve solutions (tolerance `100 *` B-rep tolerance).
 ///
 /// Returns `None` when no solution is a face (upstream `SM_ERR`).
+/// The caller supplies its kernel, B-rep id, object keys and intermediate owners;
+/// owner keys must use the same mapping that assigned the geometry's owner links.
 ///
 /// # Errors
 /// [`SolidError::Unported`] while the B-rep tolerance and `BrepPointSolve` are not
 /// ported.
-pub fn find_face(brep: &Brep, point: Point3) -> Result<Option<FaceId>> {
+pub fn find_face(
+    kernel: &Kernel,
+    brep: &Brep,
+    brep_id: BrepId,
+    point: Point3,
+    keys: &dyn Fn(CacheObject) -> ObjectRef,
+    owner_of: &dyn Fn(ObjectRef) -> Option<ObjectRef>,
+) -> Result<Option<FaceId>> {
     let tol = brep_tolerance(brep)? * 100.0;
-    let solution_faces = brep_point_solve_faces(brep, point, tol)?;
+    let solution_faces = brep_point_solve_faces(kernel, brep, brep_id, point, tol, keys, owner_of)?;
     Ok(solution_faces.into_iter().flatten().next())
 }
 
@@ -475,13 +486,48 @@ fn brep_tolerance(_brep: &Brep) -> Result<f64> {
 
 /// `SmTopologySolver::BrepPointSolve(brep, pt, SM_SO_MINIMIZE, SM_SR_ALL, tol,
 /// SM_BIG_DOUBLE, NULL, solutions)`: per solution, its first object if it is a face.
-fn brep_point_solve_faces(_brep: &Brep, _pt: Point3, _tol: f64) -> Result<Vec<Option<FaceId>>> {
-    // UNPORTED(topology.brep_cache): SmBrepCache::GetVertexTree
-    // The point solver is ported; this Brep still lacks its TopologyObjects/cache adapter.
-    Err(SolidError::Unported {
-        upstream: "SmBrepCache::GetVertexTree",
-        unit: "topology.brep_cache",
-    })
+fn brep_point_solve_faces(
+    kernel: &Kernel,
+    brep: &Brep,
+    brep_id: BrepId,
+    pt: Point3,
+    tol: f64,
+    keys: &dyn Fn(CacheObject) -> ObjectRef,
+    owner_of: &dyn Fn(ObjectRef) -> Option<ObjectRef>,
+) -> Result<Vec<Option<FaceId>>> {
+    use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+    use crate::intersect::topology_solver::p1::TopologySolver;
+    use crate::intersect::topology_solver::p2::TopologySolveOptions;
+    use crate::topology::brep_cache::{make_brep_cache, BrepObjects, CacheSource};
+    let cache = make_brep_cache(kernel, CacheSource::Brep(brep), keys)?;
+    let objects = BrepObjects {
+        brep,
+        brep_id,
+        cache: &cache,
+        keys,
+        owner_of,
+    };
+    let solutions = TopologySolver::brep_point_solve(
+        kernel,
+        &objects,
+        Some(CacheObject::Brep),
+        pt,
+        TopologySolveOptions {
+            operation: SolverOperation::Minimize,
+            requested: SolutionRequested::All,
+            tolerance_3d: tol,
+            best_answer_so_far_sq: BIG_DOUBLE,
+            opt_vectors: &[],
+        },
+    )?;
+    Ok(solutions
+        .as_slice()
+        .iter()
+        .map(|s| match s.objects.first().copied().flatten() {
+            Some(CacheObject::Face(f)) => Some(f),
+            _ => None,
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -565,7 +611,14 @@ mod tests {
             Err(SolidError::Unported { .. })
         ));
         assert!(matches!(
-            find_face(&brep, p(0.0, 0.0, 0.0)),
+            find_face(
+                &Kernel::default(),
+                &brep,
+                BrepId::from_index(7),
+                p(0.0, 0.0, 0.0),
+                &crate::topology::brep_cache::arena_identity,
+                &|_| None,
+            ),
             Err(SolidError::Unported { .. })
         ));
     }

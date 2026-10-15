@@ -239,7 +239,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             Ok(None) => Ok(status_only(SM_ERR)),
             Err(e) => Ok(rust_err(&e)),
         },
-        Inputs::Face { pnt, .. } => match tools::find_face(&Brep::new(), p3(*pnt)) {
+        Inputs::Face { pnt, .. } => match tools::find_face(
+            &solidcore::kernel::Kernel::default(),
+            &Brep::new(),
+            solidcore::topology::BrepId::from_index(0),
+            p3(*pnt),
+            &solidcore::topology::brep_cache::arena_identity,
+            &|_| None,
+        ) {
             Ok(Some(f)) => Ok(status_only(0).int("face", i64::from(f.index()))),
             Ok(None) => Ok(status_only(SM_ERR)),
             Err(e) => Ok(rust_err(&e)),

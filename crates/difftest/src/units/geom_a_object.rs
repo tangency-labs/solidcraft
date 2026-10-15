@@ -514,6 +514,15 @@ impl RustRun {
             .ok_or_else(|| h(format!("cache {c}")))
     }
 
+    fn new_brep_cache(&mut self) -> solidcore::Result<CacheId> {
+        use solidcore::topology::brep_cache::{arena_identity, make_brep_cache, CacheSource};
+        let brep = solidcore::topology::Brep::new();
+        let _cache = make_brep_cache(&solidcore::kernel::Kernel::default(), CacheSource::Brep(&brep), &arena_identity)?;
+        // This runner compares cache lifetime metadata only; geometry is covered
+        // by topology.brep_cache. Fresh native caches are not in cache_ids either.
+        self.caches.insert(())
+    }
+
     fn cache_index(&self, c: Option<CacheId>) -> i64 {
         match c {
             None => -1,
@@ -834,13 +843,22 @@ impl RustRun {
                 } else {
                     CacheMaker::AObject
                 };
-                let c = tryr!(a_object::get_or_create_object_cache(
-                    ct,
-                    Some(&self.ctx),
-                    maker,
-                    o.r.type_code,
-                    &o.a
-                ));
+                let needs_build = o.kind == O_BREP && o.a.cache_obj().is_none();
+                let c = if needs_build {
+                    let c = tryr!(self.new_brep_cache());
+                    if let Some(o) = self.objs.get_mut(a1 as usize) {
+                        o.a.set_cache_obj(Some(c));
+                    }
+                    Some(c)
+                } else {
+                    tryr!(a_object::get_or_create_object_cache(
+                        ct,
+                        Some(&self.ctx),
+                        maker,
+                        o.r.type_code,
+                        &o.a
+                    ))
+                };
                 out.push(self.cache_index(c));
                 Ok(Step::Status(0))
             }
@@ -851,7 +869,12 @@ impl RustRun {
                 }
                 let target = self.obj(a2)?.r.type_code;
                 let old = self.cache_arg(a3)?;
-                match a_object::sag_cache_make_or_validate(ct, target, old) {
+                let made = if target == a_object::BREP_TYPE && old.is_none() {
+                    self.new_brep_cache().map(Some)
+                } else {
+                    a_object::sag_cache_make_or_validate(ct, target, old)
+                };
+                match made {
                     Ok(c) => {
                         out.push(self.cache_index(c));
                         Ok(Step::Status(0))

@@ -1,6 +1,6 @@
 # solidcore status
 
-Last updated: 2026-10-13, PR workflow (`curve.curve_p9` green in PR #13). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml`.
+Last updated: 2026-10-15, PR #115 (`topology.brep_cache` partial). Per-unit state and evidence are in `plan/modules.toml` and `reports/difftest/`.
 
 ## Handoff (2026-10-13): from one local swarm to pull requests
 
@@ -889,3 +889,15 @@ license/source checks. Sensitivity detects 2,384/2,384 part-2 cases,
 3,248/3,248 part-1 cases 611/611 tree cases and 721/721 tools cases. Full differential validation:
 142 units, 89 green, 53 partial, zero failed. The four default reports match
 the full-validation reports byte for byte.
+
+## B-rep spatial caches (2026-10-15, PR #115)
+
+`topology.brep_cache` is partial: 663 cases, 662 bit-identical passes, zero
+failures and one explicit `query.brep` deferral, with no absolute floors.
+Polygon trees and exact vertex/line-edge resizing are compared against C++;
+exact tree construction and face resizing await the dependencies documented
+in `plan/findings.md`, including native B-rep list traversal. Cache factories
+and topology-solver back-edges are wired; face picking uses caller-supplied
+kernel, B-rep identity and owner mappings.
+The four affected units keep their existing pass/deferred counts; 131
+`geom.a_object` deferrals now correctly name `query.brep` instead of the cache.

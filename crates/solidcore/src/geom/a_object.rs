@@ -58,14 +58,12 @@
 //! - **Caches.** Cache objects live in a [`CacheStore`] (append-only slots addressed
 //!   by [`CacheId`]); `delete pCache` frees the slot. The no-context check of
 //!   `GetOrCreateObjectCache` reads the `context` argument.
-//! - **Unported.** `SmAObject::Notify(SM_NO_REG_PROPAGATION)` asks each "other"
-//!   source region whether it is void (`SmRegion::IsVoid`, unit `topology.shell`);
-//!   building a new `SmBrepCache` needs unit
-//!   `topology.brep_cache`; the surface `CacheMakeOrValidate` override belongs to
-//!   `surface.surface_p1`. These return [`SolidError::Unported`]. The curve override
-//!   (unit `curve.curve_p5`) checks the type and reuses an existing cache; a new curve
-//!   cache is built from the curve ([`crate::curve::curve::p5::make_curve_cache`]),
-//!   which this object-level call does not have: `InvalidInput`.
+//! - **Cache factories.** A new B-rep, curve or surface cache requires its source
+//!   geometry. The object-level validators reuse existing caches; callers building
+//!   new ones use `make_brep_cache`, `make_curve_cache` or the surface factories.
+//!   Calling without that geometry returns [`SolidError::InvalidInput`].
+//!   `SmAObject::Notify(SM_NO_REG_PROPAGATION)` still calls the unported
+//!   `SmRegion::IsVoid` (`topology.shell`).
 //! - **Graphics and debug.** The display list of `SmSAGObject` (reset on edits and
 //!   destruction), `SE_MSG` / `SM_ASSERT*` (compiled out of the release reference
 //!   build) and `Dump` are not ported. `SmAObject::AssertValid`'s two checks (the
@@ -931,7 +929,7 @@ pub const fn cache_make_or_validate(
 /// # Errors
 ///
 /// `SM_ERR` ([`SolidError::Upstream`]) when the target is neither a B-rep nor a poly
-/// B-rep; [`SolidError::Unported`] (`topology.brep_cache`) when a new cache is needed.
+/// B-rep; [`SolidError::InvalidInput`] when a new cache needs source geometry.
 pub fn sag_cache_make_or_validate(
     _cache_type: ObjectCacheType,
     target_type: i64,
@@ -947,11 +945,10 @@ pub fn sag_cache_make_or_validate(
     if let Some(old) = old {
         return Ok(Some(old));
     }
-    // UNPORTED(topology.brep_cache): SmBrepCache::SmBrepCache (then SmBrepCache::BuildTrees)
-    Err(SolidError::Unported {
-        upstream: "SmBrepCache::SmBrepCache",
-        unit: "topology.brep_cache",
-    })
+    Err(SolidError::invalid_input(
+        "geom::a_object::sag_cache_make_or_validate",
+        "new B-rep cache requires its geometry (make_brep_cache)",
+    ))
 }
 
 /// `SmCacheMgr::GetOrCreateObjectCache`: the object's cache, validated or built by its
@@ -976,7 +973,11 @@ pub fn get_or_create_object_cache(
     let old = object.cache_obj();
     let made = match maker {
         CacheMaker::AObject => Ok(cache_make_or_validate(cache_type, old)),
-        CacheMaker::SagObject => sag_cache_make_or_validate(cache_type, object_type, old),
+        CacheMaker::SagObject => match sag_cache_make_or_validate(cache_type, object_type, old) {
+            // Like curve/surface factories, construction needs source geometry.
+            Err(e @ SolidError::InvalidInput { .. }) => return Err(e),
+            made => made,
+        },
         CacheMaker::Curve => match crate::curve::curve::p5::validate_curve_cache(cache_type, old) {
             Ok(Some(old)) => Ok(Some(old)),
             // a new curve cache needs the curve: built with `make_curve_cache`
@@ -1380,10 +1381,7 @@ mod tests {
                 &AObject::new(),
                 Some(&ctx)
             ),
-            Err(SolidError::Unported {
-                unit: "topology.brep_cache",
-                ..
-            })
+            Err(SolidError::InvalidInput { .. })
         ));
         // a curve cache of the wrong type: SM_ERR, so no cache
         assert_eq!(get(CacheMaker::Curve, 0, &o, Some(&ctx)).unwrap(), None);

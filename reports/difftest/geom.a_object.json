@@ -239,8 +239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "sag_make_builds_brep_cache",
@@ -251,8 +251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "get_or_create_brep_without_cache",
@@ -347,8 +347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0001",
@@ -515,8 +515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0021",
@@ -551,8 +551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -759,8 +759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -803,8 +803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0055",
@@ -959,8 +959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0073",
@@ -1091,8 +1091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0089",
@@ -1223,8 +1223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0105",
@@ -1395,8 +1395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0126",
@@ -1439,8 +1439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0131",
@@ -1587,8 +1587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0149",
@@ -1687,8 +1687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0161",
@@ -1723,8 +1723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0165",
@@ -1811,8 +1811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0175",
@@ -1999,8 +1999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0198",
@@ -2091,8 +2091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0209",
@@ -2631,8 +2631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0276",
@@ -2751,8 +2751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0290",
@@ -2879,8 +2879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0305",
@@ -3211,8 +3211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0345",
@@ -3271,8 +3271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0352",
@@ -3419,8 +3419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0370",
@@ -3795,8 +3795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0415",
@@ -3847,8 +3847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0421",
@@ -3939,8 +3939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0432",
@@ -4207,8 +4207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0465",
@@ -4235,8 +4235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0468",
@@ -4331,8 +4331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0479",
@@ -4447,8 +4447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0493",
@@ -4459,8 +4459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0494",
@@ -4567,8 +4567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0507",
@@ -4691,8 +4691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0522",
@@ -4919,8 +4919,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0550",
@@ -5139,8 +5139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0577",
@@ -5215,8 +5215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0586",
@@ -5539,8 +5539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0626",
@@ -5735,8 +5735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0650",
@@ -6499,8 +6499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0744",
@@ -6619,8 +6619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0758",
@@ -6679,8 +6679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0765",
@@ -6863,8 +6863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0787",
@@ -6939,8 +6939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0796",
@@ -7127,8 +7127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0819",
@@ -7339,8 +7339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0845",
@@ -7443,8 +7443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0857",
@@ -7463,8 +7463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0859",
@@ -7735,8 +7735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0892",
@@ -7991,8 +7991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0923",
@@ -8011,8 +8011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0925",
@@ -8063,8 +8063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0931",
@@ -8099,8 +8099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0935",
@@ -8355,8 +8355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0966",
@@ -8375,8 +8375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0968",
@@ -8435,8 +8435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0975",
@@ -8591,8 +8591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0994",
@@ -8707,8 +8707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1008",
@@ -8991,8 +8991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1043",
@@ -9331,8 +9331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1084",
@@ -9423,8 +9423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1095",
@@ -9475,8 +9475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1101",
@@ -9591,8 +9591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1115",
@@ -9667,8 +9667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1124",
@@ -9687,8 +9687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1126",
@@ -9931,8 +9931,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1156",
@@ -9975,8 +9975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1161",
@@ -9987,8 +9987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1162",
@@ -10007,8 +10007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1164",
@@ -10035,8 +10035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1167",
@@ -10151,8 +10151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1181",
@@ -10243,8 +10243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1192",
@@ -10359,8 +10359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1206",
@@ -10443,8 +10443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1216",
@@ -10615,8 +10615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1237",
@@ -10907,8 +10907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1272",
@@ -10975,8 +10975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1280",
@@ -11203,8 +11203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1308",
@@ -11215,8 +11215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1309",
@@ -11235,8 +11235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1311",
@@ -11391,8 +11391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1330",
@@ -11411,8 +11411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1332",
@@ -11631,8 +11631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1359",
@@ -11715,8 +11715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1369",
@@ -11727,8 +11727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1370",
@@ -11851,8 +11851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1385",
@@ -11887,8 +11887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1389",
@@ -11955,8 +11955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1397",
@@ -12047,8 +12047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1408",
@@ -12067,8 +12067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1410",
@@ -12279,8 +12279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1436",
@@ -12419,8 +12419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1453",
@@ -12447,8 +12447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1456",
@@ -12539,8 +12539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1467",
@@ -12679,8 +12679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1484",
@@ -12747,8 +12747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1492",
@@ -12967,8 +12967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1519",
@@ -13199,8 +13199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1547",
@@ -13495,8 +13495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1583",
@@ -13579,8 +13579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1593",
@@ -13663,8 +13663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1603",
@@ -13747,8 +13747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1613",
@@ -13927,8 +13927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1635",
@@ -13971,8 +13971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1640",
@@ -14031,8 +14031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1647",
@@ -14131,8 +14131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1659",
@@ -14207,8 +14207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1668",
@@ -14259,8 +14259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1674",
@@ -14423,8 +14423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1694",
@@ -14627,8 +14627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1719",
@@ -15007,8 +15007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1765",
@@ -15027,8 +15027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1767",
@@ -15039,8 +15039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1768",
@@ -15051,8 +15051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1769",
@@ -15167,8 +15167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1783",
@@ -15219,8 +15219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1789",
@@ -15375,8 +15375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1808",
@@ -15491,8 +15491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1822",
@@ -15511,8 +15511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1824",
@@ -15735,8 +15735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1851",
@@ -15755,8 +15755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1853",
@@ -15783,8 +15783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1856",
@@ -16067,8 +16067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1890",
@@ -16203,8 +16203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1906",
@@ -16239,8 +16239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1910",
@@ -16475,8 +16475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1938",
@@ -16591,8 +16591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1952",
@@ -16667,8 +16667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1961",
@@ -16807,8 +16807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1978",
@@ -16827,8 +16827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1980",
@@ -16967,8 +16967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrepCache::SmBrepCache",
-        "unit": "topology.brep_cache"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen1997",
@@ -17000,7 +17000,7 @@
   "cases_passed": 1872,
   "cases_total": 2040,
   "deferred_by_unit": {
-    "topology.brep_cache": 131,
+    "query.brep": 131,
     "topology.shell": 37
   },
   "max_rel_err": 0.0,
