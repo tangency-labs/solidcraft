@@ -930,11 +930,10 @@ pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), Harne
     for (f, (surface, uv_domain, tolerance)) in surfaces.into_iter().enumerate() {
         let shell = face_shells.get(f).copied().unwrap_or(ShellId::from_index(0));
         b.add_face_record(Face {
-            shell,
-            loops: Vec::new(),
             surface,
             uv_domain,
             tolerance,
+            ..Face::new(shell)
         })
         .map_err(|e| harness(e.to_string()))?;
     }

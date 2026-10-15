@@ -60,8 +60,7 @@
 //! - **Notify.** The vertex use part (clearing the cached gaps) is applied to the
 //!   record; the `SmTopology::Notify` step runs on the caller's topology records as
 //!   [`topo::notify`] does.
-//! - **Unported callees.** `SmFace::GetUVDomain` / `GetTolerance`
-//!   (`topology.face_p2`), `SmEdgeuse::NormalizedEvaluate` (`topology.edgeuse_p3`),
+//! - **Unported callees.** `SmEdgeuse::NormalizedEvaluate` (`topology.edgeuse_p3`),
 //!   `SmLoopuse::GetOrientation` (`topology.loopuse`), `SmSurface::LocalPointSolve` /
 //!   `IsSingularity` (`surface.surface_p5`), `GlobalPointSolve` / `IsOnSeam`
 //!   (`surface.surface_p4`; a plane's overrides are ported), `GetSingularities`
@@ -712,22 +711,14 @@ pub fn init_vertex_face_gap(b: &mut Brep, vu: VertexuseId) -> Result<()> {
 
 // ---- unported callees -------------------------------------------------------------------
 
-/// `pFace->GetUVDomain()`.
-fn face_uv_domain(_b: &Brep, _f: FaceId) -> Result<Extent2d> {
-    // UNPORTED(topology.face_p2): SmFace::GetUVDomain
-    Err(SolidError::unported(
-        "SmFace::GetUVDomain",
-        "topology.face_p2",
-    ))
+/// `pFace->GetUVDomain()` (unit `topology.face_p2`).
+fn face_uv_domain(b: &Brep, f: FaceId) -> Result<Extent2d> {
+    crate::topology::face::p2::uv_domain(b, f)
 }
 
-/// `pFace->GetTolerance()`.
-fn face_tolerance(_b: &Brep, _f: FaceId) -> Result<f64> {
-    // UNPORTED(topology.face_p2): SmFace::GetTolerance
-    Err(SolidError::unported(
-        "SmFace::GetTolerance",
-        "topology.face_p2",
-    ))
+/// `pFace->GetTolerance()` (unit `topology.face_p2`).
+fn face_tolerance(b: &Brep, f: FaceId) -> Result<f64> {
+    crate::topology::face::p2::tolerance(b, f)
 }
 
 /// `pLoopuse->GetOrientation()`.

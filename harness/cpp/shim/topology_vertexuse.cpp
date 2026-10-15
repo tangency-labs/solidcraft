@@ -7,7 +7,9 @@
 // Layouts are documented in crates/solidcore-ffi/src/units/topology_vertexuse.rs, which
 // validates every input. The B-rep construction, traversal and export are those of the
 // `topology.edgeuse_p1` shim (harness/cpp/shim/topology_edgeuse_p1.cpp), with each vertex
-// use's vertex/edge gap state and UV point added to the export. Every B-rep op starts with
+// use's vertex/edge gap state and UV point, each face's raw members (face use, UV domain,
+// rectangular-trim flag, tolerance, whether its surface is owned by it; unit
+// `topology.face_p2`) and SmPlane surfaces as planes added to the export. Every B-rep op starts with
 // a B-rep block:
 //   `0 rebuild validate_only init_gaps`         SmBrep::ReadFromFile(path) (ASCII .smb)
 //   `1 curve t0 t1 validate_only init_gaps`     CreateWireEdgeFromCurve(curve, [t0, t1])
@@ -24,6 +26,7 @@
 
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
@@ -200,6 +203,14 @@ struct VuPeek : SmVertexuse
     static SmVertexFaceGap SmVertexuse::*face_gap() { return &VuPeek::m_sVertexFaceGap3d; }
     static SmVertexEdgeGap SmVertexuse::*edge_gap() { return &VuPeek::m_sVertexEdgeGap3d; }
     static SmPoint2d SmVertexuse::*uv() { return &VuPeek::m_sUVPoint; }
+};
+struct FPeek : SmFace
+{
+    static SmFaceuse* SmFace::*fu() { return &FPeek::m_pFU; }
+    static SmExtent2d SmFace::*dom() { return &FPeek::m_vUVDomain; }
+    static SmBoolean SmFace::*rect() { return &FPeek::m_bRectangularTrim; }
+    static SmSurface* SmFace::*srf() { return &FPeek::m_pSurface; }
+    static SmZoneTol3d SmFace::*tol() { return &FPeek::m_sZoneTol3d; }
 };
 struct ShPeek : SmShell
 {
@@ -470,9 +481,31 @@ void put_surface(std::vector<double>& o, const SmSurface* s)
         o.push_back(s == nullptr ? -1.0 : -2.0);
         return;
     }
+    if (s->GetType() == SmPlane_TYPE)
+    {
+        // `1 O[3] X[3] Y[3] scale[2] anal_domain(u0 v0 u1 v1)`
+        const SmPlane* pl = (const SmPlane*)s;
+        const SmAxis2Placement& pos = pl->GetPosition();
+        o.push_back(1.0);
+        put_vec(o, pos.GetOrigin());
+        put_vec(o, pos.GetXAxis());
+        put_vec(o, pos.GetYAxis());
+        SmVector2d sc = pl->GetUVScale();
+        o.push_back(sc.x);
+        o.push_back(sc.y);
+        SmExtent2d d = pl->GetSTEPUVDomain();
+        o.push_back(d.GetMin().x);
+        o.push_back(d.GetMin().y);
+        o.push_back(d.GetMax().x);
+        o.push_back(d.GetMax().y);
+        return;
+    }
     const SmBSplineSurface* b = (const SmBSplineSurface*)s;
     gw_SURFACE* sur = b->GetGwNurbPointer();
     o.push_back(0.0);
+    // the surface's own type: an SmBSplineSurface subclass other than SmPlane is
+    // exported as its B-spline part only
+    o.push_back((double)s->GetType());
     o.push_back(flg(((SmBSplineSurface*)b)->GetOutOfBoundsEnabled()));
     o.push_back((double)b->GetBSplineSurfaceForm());
     o.push_back((double)sur->net->n);
@@ -540,7 +573,19 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         put_list(o, v);
     }
     for (SmFace* p : g.faces)
-        put_surface(o, p->GetSurface());
+    {
+        SmSurface* s = p->*FPeek::srf();
+        put_surface(o, s);
+        o.push_back((double)g.find(2, p->*FPeek::fu()));
+        SmExtent2d d = p->*FPeek::dom();
+        o.push_back(d.GetMin().x);
+        o.push_back(d.GetMin().y);
+        o.push_back(d.GetMax().x);
+        o.push_back(d.GetMax().y);
+        o.push_back((double)(p->*FPeek::rect()));
+        o.push_back((double)(p->*FPeek::tol()));
+        o.push_back(s && s->GetOwner() == (SmObject*)p ? 1.0 : 0.0);
+    }
     for (SmLoopuse* p : g.loopuses)
     {
         o.push_back((double)g.find(2, p->GetOwner()));
