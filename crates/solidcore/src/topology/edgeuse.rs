@@ -7,3 +7,4 @@
 //! `source/SMLib/src/SmFaceuse.cpp`, `source/SMLib/inc/SmFaceuse.h`.
 
 pub mod p1;
+pub mod p2;

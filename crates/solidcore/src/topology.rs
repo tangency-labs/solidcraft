@@ -50,6 +50,7 @@ use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector2d::Point2;
@@ -290,6 +291,12 @@ pub struct Face {
     pub loops: Vec<LoopId>,
     /// `m_pSurface` (CO-PORTED): the face's surface (`GetSurface`).
     pub surface: Option<Surface>,
+    /// `m_vUVDomain` (CO-PORTED by `topology.edgeuse_p2`): the face's parameter domain
+    /// (`GetUVDomain`); [`Extent2d::new`] (empty) for a new face, as `SmFace()`.
+    pub uv_domain: Extent2d,
+    /// `m_sZoneTol3d` (CO-PORTED by `topology.edgeuse_p2`): the face's tolerance
+    /// (`GetTolerance`, `SM_USE_OLDTOL`); `0` for a new face, as `SmFace()`.
+    pub tolerance: f64,
 }
 
 /// A shell (`SmShell`): a connected set of faces.
@@ -470,6 +477,8 @@ pub struct Brep {
     vertexuses: Arena<VertexuseId, Vertexuse>,
     /// `m_bValidateOnly`.
     validate_only: bool,
+    /// `m_sThisZoneTol3d` (CO-PORTED by `topology.edgeuse_p2`): the B-rep's tolerance.
+    tolerance: f64,
     /// The identity the B-rep is attributed and notified under (`SmBrep*`).
     key: ObjectKey,
 }
@@ -488,6 +497,7 @@ impl Default for Brep {
             edgeuses: Arena::default(),
             vertexuses: Arena::default(),
             validate_only: false,
+            tolerance: ZONE_TOL_3D,
             key: ObjectKey(0),
         }
     }
@@ -718,6 +728,20 @@ impl Brep {
         self.validate_only = validate_only;
     }
 
+    /// `SmBrep::GetTolerance` (`SM_USE_OLDTOL`, CO-PORTED by `topology.edgeuse_p2`):
+    /// `m_sThisZoneTol3d`, [`ZONE_TOL_3D`] for a new B-rep (`SmTol::GetZoneTol3d` of
+    /// the default context, as `SmBrep()`).
+    #[must_use]
+    pub const fn tolerance(&self) -> f64 {
+        self.tolerance
+    }
+
+    /// Sets `m_sThisZoneTol3d` (the raw member write; `SmBrep::SetTolerance`, which
+    /// also updates the entities, is unit `topology.brep_*`).
+    pub fn set_tolerance(&mut self, tolerance: f64) {
+        self.tolerance = tolerance;
+    }
+
     /// The identity the B-rep is attributed and notified under (an `SmBrep*`).
     #[must_use]
     pub const fn key(&self) -> ObjectKey {
@@ -821,6 +845,8 @@ impl Brep {
             shell,
             loops: Vec::new(),
             surface: None,
+            uv_domain: Extent2d::new(),
+            tolerance: 0.0,
         })?;
         self.shells
             .get_mut(shell)

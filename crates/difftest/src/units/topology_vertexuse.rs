@@ -23,6 +23,7 @@ use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::object::{NotifyOperation, ObjectRef};
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
@@ -594,6 +595,10 @@ fn import(ex: &[f64]) -> Result<Brep, HarnessError> {
             shell,
             loops: Vec::new(),
             surface,
+            // Not exported by this shim: `SmFace()` defaults. The Rust side never reads
+            // them here (`GetUVDomain` / `GetTolerance` are `topology.face_p2` stubs).
+            uv_domain: Extent2d::new(),
+            tolerance: 0.0,
         })
         .map_err(|e| harness(e.to_string()))?;
     }

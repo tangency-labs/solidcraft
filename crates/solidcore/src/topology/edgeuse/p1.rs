@@ -716,7 +716,7 @@ fn drop_curve_fail_slot(
 }
 
 /// The handle a drop-curve record keeps for the edge use's B-rep (`GetBrep()`).
-fn brep_handle(b: &Brep, eu: EdgeuseId) -> Result<Option<ObjectHandle>> {
+pub(crate) fn brep_handle(b: &Brep, eu: EdgeuseId) -> Result<Option<ObjectHandle>> {
     Ok(brep(b, eu)?.map(|x| ObjectHandle {
         kind: ObjectKind::Other,
         key: x.key(),
@@ -1568,6 +1568,8 @@ mod tests {
             shell: ShellId::from_index(0),
             loops: vec![LoopId::from_index(0)],
             surface: Some(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z))),
+            uv_domain: crate::geom::extent2d::Extent2d::new(),
+            tolerance: 0.0,
         })
         .unwrap();
         b.add_loop_record(Loop {

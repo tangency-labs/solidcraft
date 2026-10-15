@@ -103,18 +103,18 @@ mod sys {
     }
 }
 
-fn bad(msg: impl Into<String>) -> FfiError {
+pub(crate) fn bad(msg: impl Into<String>) -> FfiError {
     FfiError::InvalidArgument(msg.into())
 }
 
-/// Sequential reader over the input.
-struct Reader<'a> {
-    input: &'a [f64],
-    at: usize,
+/// Sequential reader over the input (shared with unit `topology.edgeuse_p2`).
+pub(crate) struct Reader<'a> {
+    pub(crate) input: &'a [f64],
+    pub(crate) at: usize,
 }
 
 impl Reader<'_> {
-    fn num(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn num(&mut self) -> Result<f64, FfiError> {
         let v = self
             .input
             .get(self.at)
@@ -124,7 +124,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finite(&mut self) -> Result<f64, FfiError> {
+    pub(crate) fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
         if !v.is_finite() || v.abs() > MAX_COORD {
             return Err(bad("non-finite or huge value"));
@@ -132,15 +132,15 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
+    pub(crate) fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
         (0..k).map(|_| self.finite()).collect()
     }
 
-    fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
+    pub(crate) fn vec3(&mut self) -> Result<[f64; 3], FfiError> {
         Ok([self.finite()?, self.finite()?, self.finite()?])
     }
 
-    fn nonzero3(&mut self) -> Result<[f64; 3], FfiError> {
+    pub(crate) fn nonzero3(&mut self) -> Result<[f64; 3], FfiError> {
         let v = self.vec3()?;
         if v.iter().map(|c| c * c).sum::<f64>() < 1e-12 {
             return Err(bad("zero vector"));
@@ -148,7 +148,7 @@ impl Reader<'_> {
         Ok(v)
     }
 
-    fn index(&mut self, max: usize) -> Result<usize, FfiError> {
+    pub(crate) fn index(&mut self, max: usize) -> Result<usize, FfiError> {
         let v = self.num()?;
         if v.fract() != 0.0 || v < 0.0 || v > max as f64 {
             return Err(bad(format!("bad index/count {v} (max {max})")));
@@ -157,7 +157,7 @@ impl Reader<'_> {
     }
 
     /// An index below `count`.
-    fn below(&mut self, count: usize) -> Result<usize, FfiError> {
+    pub(crate) fn below(&mut self, count: usize) -> Result<usize, FfiError> {
         let i = self.index(usize::MAX >> 12)?;
         if i >= count {
             return Err(bad(format!("index {i} out of range ({count})")));
@@ -166,7 +166,7 @@ impl Reader<'_> {
     }
 
     /// An index below `count` or `-1`.
-    fn below_or_none(&mut self, count: usize) -> Result<(), FfiError> {
+    pub(crate) fn below_or_none(&mut self, count: usize) -> Result<(), FfiError> {
         let v = self.num()?;
         if v == -1.0 {
             return Ok(());
@@ -175,11 +175,11 @@ impl Reader<'_> {
         self.below(count).map(|_| ())
     }
 
-    fn flag(&mut self) -> Result<bool, FfiError> {
+    pub(crate) fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
     }
 
-    fn done(&self) -> Result<(), FfiError> {
+    pub(crate) fn done(&self) -> Result<(), FfiError> {
         if self.at != self.input.len() {
             return Err(bad("trailing input"));
         }
@@ -285,14 +285,20 @@ fn surface(rd: &mut Reader<'_>) -> Result<Domain, FfiError> {
 }
 
 /// A B-spline curve block; returns its parameter range.
-fn curve(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
+pub(crate) fn curve(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
+    curve_up_to(rd, MAX_INDEX)
+}
+
+/// A B-spline curve block with at most `max_index + 1` control points; returns its
+/// parameter range.
+pub(crate) fn curve_up_to(rd: &mut Reader<'_>, max_index: usize) -> Result<(f64, f64), FfiError> {
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve: dimension must be 2 or 3"));
     }
-    let n = rd.index(MAX_INDEX)?;
+    let n = rd.index(max_index)?;
     let p = rd.index(MAX_DEGREE)?;
-    let m = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
+    let m = rd.index(max_index + MAX_DEGREE + 1)?;
     if p == 0 || p > n || m != n + p + 1 {
         return Err(bad("curve: need 1 <= p <= n and m = n + p + 1"));
     }
@@ -317,7 +323,7 @@ fn uv(rd: &mut Reader<'_>, dom: Domain) -> Result<(), FfiError> {
 }
 
 /// A B-rep block.
-fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
+pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
     match rd.index(3)? {
         0 => {
             let p = Path::new(path);
