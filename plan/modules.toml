@@ -2279,10 +2279,10 @@ soft_depends_on = ["curve.curve_p6", "geom.geom_utility_p1"]
 est_lines = 1986
 layer = 34
 tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
-status = "todo"
+status = "partial"
 claimed_by = ""
 claimed_at = ""
-notes = "9 fns; largest: SmCurveClassification::InsertPointClass, SmCurveClassification::FindInterval, SmCurveClassification::MergePointClass, sm_ChangeEdgePointClassToNearVertex; cycle back-edges (call into later units; stub or co-port): topology.edge(8), topology.vertex(2); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
+notes = "PARTIAL (PR #123): difftest 3292 cases (292 hand-written edge scripts over curve kinds, tolerance limits and per-op boundaries + 3000 generated scripts), 2064 pass bit-identical (max_rel_err 0), 0 failed, 1228 deferred (intersect.curve_class_p2 886: InsertAt 783, ConnectIntervals 103; intersect.curve_class_p7 232: GetPointClassByIndex 219, AreCoincidentMaybe 13; topology.vertex 41 / topology.edge 31 / topology.face_p2 38: the zone tolerance lookups SmVertex/SmEdge/SmFace::GetTolerance of opaque handles); --perturb SENSITIVE 2064/2064. Stubs: UNPORTED(intersect.curve_class_p2) (PR #85) and UNPORTED(intersect.curve_class_p7) (PR #65) are the maintainer's open PRs, not merged here; UNPORTED(topology.edge)/UNPORTED(topology.vertex) stay because the opaque handle O cannot reach a Brep (see plan/findings.md). sm_FixProblemsBySqueezing tail recursion is a restart loop with the same visit order, bounded by interval count + 1 (header Deviations). Upstream defects UB-109, UB-110 (plan/upstream-issues.md). 9 fns; largest: SmCurveClassification::InsertPointClass, SmCurveClassification::FindInterval, SmCurveClassification::MergePointClass, sm_ChangeEdgePointClassToNearVertex; cycle back-edges (call into later units; stub or co-port): topology.edge(8), topology.vertex(2); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
 
 [[unit]]
 id = "intersect.curve_class_p4"

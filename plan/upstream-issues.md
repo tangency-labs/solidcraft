@@ -1108,6 +1108,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes; affected native processes terminated with SIGSEGV. After the FFI guards were expanded, 396 isolated probes completed without a crash or timeout (192 guarded, 204 native calls completed). Regression tests preserve defined missing-curve edge queries and null top-level inputs.
 - **Severity:** crash.
 
+#### UB-109. `SmCurveClassification::FindInterval` / `InsertPointClass` / `sm_FixProblemsBySqueezing` read the first interval of an empty classification
+- **Location:** `source/SMLib/src/SmCurveClass.cpp:5839` (`FindInterval`: `(*this)[0]` is read before any size check; the next test at `:5899` does check `GetSize() > 0`). Reached from `IsCoincident` (`:6995`, `:7007`), `InsertPointClass` (`:7304`) and, for the other classification, `sm_FixProblemsBySqueezing` (`:3593`, `:3602`).
+- **What happens:** with `GetSize() == 0` the first test reads `m_pData[0]` of an array without intervals (null or past the allocation).
+- **Trigger:** a classification whose intervals were all removed or never set, searched for a parameter (a curve with no classified interval, or the empty `rCurveClassOther` of a squeeze).
+- **How found:** read during porting (unit `intersect.curve_class_p3`).
+- **Confirmed:** no (the difftest shim rejects these scripts).
+- **Severity:** crash/UB.
+- **Rust port:** `SolidError::InvalidInput`.
+
+#### UB-110. `SmCurveClassification::IsCoincident` walks past the intervals when its end index wraps or a search failed
+- **Location:** `source/SMLib/src/SmCurveClass.cpp:7016` (`lIndex2--` of an unsigned `ULONG`) and `:7020`-`7022` (`m_pData[ii]` for `ii <= lIndex2`).
+- **What happens:** when the end parameter classifies to the start of interval 0 (`ePosition2 == SM_IP_START`, `lIndex2 == 0`) the decrement wraps to the largest `ULONG` and the loop reads `m_pData[ii]` for every `ii` until it finds a mid classification that is not an edge: when all the intervals classify to edges it reads past the array. The same loop runs with `lIndex == 999999` (the value `FindInterval` leaves when it fails; both statuses are ignored) after a failed search.
+- **Trigger:** `IsCoincident(rInterval, tol)` with `rInterval.GetMax()` equal (within tolerance) to the start of the curve classification, or with a parameter off either end of the classification that does not snap, and every interval mid classified to an edge.
+- **How found:** read during porting (unit `intersect.curve_class_p3`).
+- **Confirmed:** no (the difftest shim replays the walk and rejects scripts that leave the intervals).
+- **Severity:** crash/UB (out-of-bounds read).
+- **Rust port:** `SolidError::InvalidInput` when the walk leaves the intervals; otherwise identical (the wrap is kept as an unbounded end).
+
 ## Hang
 
 #### HANG-1. `SmExtent1d::PeriodicWrap` steps one period per iteration

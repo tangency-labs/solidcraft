@@ -8,6 +8,7 @@
 //! free functions).
 
 pub mod p1;
+pub mod p3;
 
 pub use p1::{
     apply_point_solution, compute_face_point_class, cull_or_refine_cci_in_3d, get_cci_geometry,
@@ -17,4 +18,9 @@ pub use p1::{
     xsect_tol_2d_or_3d_for_classify_pair, ApplyPointSolution, ApplyPointSolutionInput, CciGeometry,
     CciSurfaceGaps, CrvDirOnFaceType, CurveClassification, CurveInterval, IntervalPosition,
     TouchData, XSectThroughPoint, CURVE_CLASSIFICATION_TYPE_STRING, MAX_INTERVALS,
+};
+
+pub use p3::{
+    change_edge_point_class_to_near_vertex, curve_is_degenerate, fix_problems_by_squeezing,
+    FoundInterval, NO_INTERVAL,
 };
