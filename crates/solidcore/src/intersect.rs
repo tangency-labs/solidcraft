@@ -9,6 +9,7 @@ pub mod adv_surface_intersector;
 pub mod curve_class;
 pub mod point_class;
 pub mod ray_tracer;
+pub mod surface_drop_lib;
 pub mod surface_intersector;
 pub mod surface_silhouette;
 pub mod surface_tracer;

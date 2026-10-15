@@ -69,6 +69,7 @@ use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::topology::ObjectHandle;
 
 const OP_LSI: &str = "surface::surface::p10::LsiGlobalSolver::local_solve_branch";
 const OP_COMBINE: &str = "surface::surface::p10::global_curve_intersect_combine_solutions";
@@ -208,18 +209,19 @@ struct DropAndTrim {
 /// `SmSurface::DropAndTrimCurve(context, domain, curve, interval, tol, ..., TRUE,
 /// TRUE)` (upstream requires an `SmBSplineCurve`).
 fn drop_and_trim_curve(
-    _k: &Kernel,
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
 ) -> Result<DropAndTrim> {
-    // UNPORTED(intersect.surface_drop_lib_p1): SmSurface::DropAndTrimCurve
-    Err(SolidError::unported(
-        "SmSurface::DropAndTrimCurve",
-        "intersect.surface_drop_lib_p1",
-    ))
+    let r = surface
+        .drop_and_trim_curve::<ObjectHandle>(k, domain, curve, interval, tol, true, true, None)?;
+    Ok(DropAndTrim {
+        dist_to_surface: r.max_drop_to_surf,
+        uv_curves: r.uv_curves.into_iter().map(Curve::from).collect(),
+    })
 }
 
 // ---- helpers -----------------------------------------------------------------------------------

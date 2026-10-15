@@ -287,8 +287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "combine_leading_point_classifies",
@@ -311,8 +311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "combine_long_range_coincidence",
@@ -779,8 +779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -859,8 +859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0024",
@@ -871,8 +871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -895,8 +895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0027",
@@ -1167,8 +1167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0056",
@@ -1203,8 +1203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0060",
@@ -1247,8 +1247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0065",
@@ -1271,8 +1271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0067",
@@ -1323,8 +1323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0072",
@@ -1363,8 +1363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -1375,8 +1375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0077",
@@ -1403,8 +1403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0080",
@@ -1563,8 +1563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0097",
@@ -1583,8 +1583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0099",
@@ -1623,8 +1623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0103",
@@ -1667,8 +1667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0107",
@@ -1715,8 +1715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0112",
@@ -1727,8 +1727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0113",
@@ -1871,8 +1871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0128",
@@ -1967,8 +1967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0138",
@@ -2067,8 +2067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -2191,8 +2191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0161",
@@ -2295,8 +2295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0172",
@@ -2347,8 +2347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0177",
@@ -2383,8 +2383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0180",
@@ -2435,8 +2435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0185",
@@ -2487,8 +2487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0191",
@@ -2831,8 +2831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0228",
@@ -3111,8 +3111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0258",
@@ -3175,8 +3175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0265",
@@ -3243,8 +3243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0272",
@@ -3427,8 +3427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0290",
@@ -3467,8 +3467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0294",
@@ -3511,8 +3511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0298",
@@ -3595,8 +3595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0307",
@@ -3643,8 +3643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0312",
@@ -3663,8 +3663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0314",
@@ -3891,8 +3891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0339",
@@ -4035,8 +4035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0354",
@@ -4119,8 +4119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0363",
@@ -4223,8 +4223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0373",
@@ -4359,8 +4359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0387",
@@ -4487,8 +4487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0400",
@@ -4547,8 +4547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0406",
@@ -4607,8 +4607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0412",
@@ -4779,8 +4779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0429",
@@ -4799,8 +4799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0431",
@@ -4831,8 +4831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0434",
@@ -4995,8 +4995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0453",
@@ -5215,8 +5215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0476",
@@ -5319,8 +5319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0488",
@@ -5531,8 +5531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0510",
@@ -5583,8 +5583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0515",
@@ -5763,8 +5763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0533",
@@ -5967,8 +5967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0554",
@@ -6007,8 +6007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0558",
@@ -6059,8 +6059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0563",
@@ -6095,8 +6095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0567",
@@ -6443,8 +6443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0605",
@@ -6575,8 +6575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0619",
@@ -6595,8 +6595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0621",
@@ -6647,8 +6647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0627",
@@ -6927,8 +6927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0657",
@@ -6939,8 +6939,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0658",
@@ -7027,8 +7027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0667",
@@ -7047,8 +7047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0669",
@@ -7139,8 +7139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0679",
@@ -7335,8 +7335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0699",
@@ -7367,8 +7367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0702",
@@ -7387,8 +7387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0704",
@@ -7415,8 +7415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0707",
@@ -7455,8 +7455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0711",
@@ -7535,8 +7535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0719",
@@ -7591,8 +7591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0725",
@@ -7803,8 +7803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0747",
@@ -7879,8 +7879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0755",
@@ -7891,8 +7891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0756",
@@ -7971,8 +7971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0765",
@@ -7983,8 +7983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0766",
@@ -8035,8 +8035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0771",
@@ -8215,8 +8215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0790",
@@ -8255,8 +8255,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0794",
@@ -8267,8 +8267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurface::DropAndTrimCurve",
-        "unit": "intersect.surface_drop_lib_p1"
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
       },
       "max_rel_err": 0.0,
       "name": "gen0795",
@@ -8320,7 +8320,7 @@
   "cases_passed": 523,
   "cases_total": 867,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p1": 85,
+    "intersect.surface_drop_curve": 85,
     "surface.surface_p5": 139,
     "surface.surface_p6": 120
   },

@@ -58,7 +58,8 @@
 //!   previous point's first UV position, which the callee may read as the array
 //!   `m_vUVCurvePV` (`[uv0, duv0, uv1, duv1]`); that array is passed.
 //! - **Unported callees.** `SmSurface::GlobalCurveIntersect` (`surface.surface_p8`),
-//!   `SmSurface::DropAndTrimCurve` (`intersect.surface_drop_lib_p1`) and
+//!   `SmSurface::DropAndTrimCurve`'s trace (`intersect.surface_drop_curve`, through
+//!   [`Surface::drop_and_trim_curve`]) and
 //!   `SmSurface::IsSingularity` of a surface that is not a plane (`surface.surface_p5`)
 //!   return [`SolidError::Unported`], which always propagates (also where upstream
 //!   ignores the status).
@@ -85,6 +86,7 @@ use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::SurfaceCache;
+use crate::topology::ObjectHandle;
 
 use super::p1::{
     compute_curve_type, is_point_on_tsect_curve, IntersectionPointType, SrfIndex,
@@ -1361,18 +1363,19 @@ struct DropAndTrim {
 /// `surface.DropAndTrimCurve(ctx, domain, curve, interval, tol, dist, deviation,
 /// uv_curves, TRUE, TRUE)`.
 fn surface_drop_and_trim_curve(
-    _k: &Kernel,
-    _surface: &Surface,
-    _domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
 ) -> Result<DropAndTrim> {
-    // UNPORTED(intersect.surface_drop_lib_p1): SmSurface::DropAndTrimCurve
-    Err(SolidError::unported(
-        "SmSurface::DropAndTrimCurve",
-        "intersect.surface_drop_lib_p1",
-    ))
+    let r = surface
+        .drop_and_trim_curve::<ObjectHandle>(k, domain, curve, interval, tol, true, true, None)?;
+    Ok(DropAndTrim {
+        dist_to_surf: r.max_drop_to_surf,
+        uv_curves: r.uv_curves.into_iter().map(Curve::from).collect(),
+    })
 }
 
 #[cfg(test)]
