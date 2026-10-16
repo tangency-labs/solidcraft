@@ -4251,8 +4251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "curve_ellips_ts2_2d",
@@ -4263,8 +4263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "curve_ellips_ts2_3d",
@@ -4275,8 +4275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "curve_plane_square_2d",
@@ -4287,8 +4287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "curve_plane_square_3d",
@@ -4299,8 +4299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "curve_box_with_large_fillet_2d",
@@ -4311,8 +4311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "curve_box_with_large_fillet_3d",
@@ -8436,8 +8436,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0007",
@@ -8595,16 +8595,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0026",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634845428934323707",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
       "max_rel_err": 0.0,
@@ -8720,8 +8716,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0041",
@@ -8732,8 +8728,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0042",
@@ -8912,8 +8908,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0064",
@@ -9225,8 +9221,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -9501,8 +9497,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0133",
@@ -9583,8 +9579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0142",
@@ -9627,8 +9623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0146",
@@ -9866,8 +9862,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0174",
@@ -10182,8 +10178,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0212",
@@ -10238,8 +10234,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0218",
@@ -10494,8 +10490,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0249",
@@ -10674,8 +10670,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurveClassification::ReSet",
-        "unit": "intersect.curve_class_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "gen0270",
@@ -10922,13 +10918,15 @@
     }
   ],
   "cases_both_errored": 27,
-  "cases_deferred": 35,
+  "cases_deferred": 34,
   "cases_failed": 0,
-  "cases_passed": 1309,
+  "cases_passed": 1310,
   "cases_total": 1344,
   "deferred_by_unit": {
-    "intersect.curve_class_p2": 20,
-    "intersect.surface_drop_lib_p3": 15
+    "curve.crv_on_surf": 5,
+    "intersect.surface_drop_lib_p3": 17,
+    "topology.face_p2": 2,
+    "topology.face_p4": 10
   },
   "max_rel_err": 0.0,
   "pass": true,

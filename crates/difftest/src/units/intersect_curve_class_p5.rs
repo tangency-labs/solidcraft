@@ -476,7 +476,7 @@ fn rust(i: &Input) -> ScResult<Output> {
                     b.vertices.len() as f64,
                 ]);
             }),
-        5 => cc.merge_intervals(i.flag1).map(|a| {
+        5 => cc.merge_intervals(&k, &pool, i.flag1).map(|a| {
             out.extend([
                 a.faces.len() as f64,
                 a.edges.len() as f64,

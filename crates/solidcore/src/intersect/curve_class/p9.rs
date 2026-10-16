@@ -607,13 +607,16 @@ mod tests {
         let error = cc
             .intersect_edges(&k, &geometry, &[edge], &surface, options)
             .unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Unported {
-                unit: "intersect.curve_class_p2",
-                ..
-            }
-        ));
+        assert!(
+            matches!(
+                error,
+                SolidError::Unported {
+                    upstream: "SmEdge::GetCurve",
+                    unit: "topology.edge",
+                }
+            ),
+            "{error:?}"
+        );
         assert_eq!(cc.intervals(), original);
     }
     #[test]

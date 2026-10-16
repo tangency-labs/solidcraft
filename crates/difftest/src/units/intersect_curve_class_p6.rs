@@ -347,7 +347,7 @@ impl UnitDiff for Runner {
                 .fix_end_point_class(&k, &g, i.index, Vec3::new(x, y, z))
                 .map(|changed| (Some(changed), None)),
             _ => a
-                .merge_interval(i.index, i.flags & 1 != 0)
+                .merge_interval(&k, &g, i.index, i.flags & 1 != 0)
                 .map(|merged| (None, Some(merged))),
         };
         match result {

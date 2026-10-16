@@ -1011,6 +1011,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB.
 - **Rust port:** Treats a point like any other non-topology object (system zone tolerance, not connected, not mergeable).
 
+#### UB-158. `SmCurveClassification::InsertAt(0, ..)` into a non-empty classification never ends its shift loop
+- **Location:** `SmCurveClass.cpp:5349` (`InsertAt`: `for(i1=m_lSize-1,ii=i1-nCount;ii>=nIndex;ii--,i1--)`).
+- **What happens:** `ii` and `nIndex` are `ULONG`. With `nIndex == 0` the test `ii >= 0` is always true: after `ii = 0` the loop decrements `ii` to `ULONG_MAX` and copies `m_pData[ULONG_MAX]` into `m_pData[0]`, then keeps walking down memory.
+- **Trigger:** `InsertAt(0, interval)` on a classification with at least one interval.
+- **How found:** read during porting.
+- **Confirmed:** no (the harness keeps this call away from the C++).
+- **Severity:** crash/UB.
+- **Rust port:** `CurveClassification::insert_at` returns `InvalidInput`.
+
 #### UB-93. `SmSurfOfExtrusion::IntersectWithCylinder` makes the iso circle of an unbounded cylinder from unset values
 - **Location:** `source/SMLib/src/SmSurfOfExtrusion.cpp:3223` `SmSurfOfExtrusion::IntersectWithCylinder` (def. `:3164`), then `:3255` `sm_IntersectGenerators(*this, dTol, *pOtherGenCurve, ...)`.
 - **What happens:** The other generator is `CreateIsoCircleFromPoint` at the bottom of the cylinder's height interval, whose status is ignored. For an unbounded cylinder that point lies at `-SM_INFINITE_PARAMETER` on the axis, where the cone's STEP inversion leaves its outputs unset and `CreateIsoCircleFromPoint` reads them (UB-80); a tolerance of `0` does the same for bounded cylinders. When the circle stays `NULL` and the extrusion is parallel to the axis, `sm_IntersectGenerators` dereferences it.

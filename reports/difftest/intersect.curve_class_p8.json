@@ -18,16 +18,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_2d_s0_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#2 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -62,16 +58,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_2d_s1_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#7 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -106,16 +98,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_2d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#12 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -150,16 +138,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_3d_s0_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#17 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -202,16 +186,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_3d_s1_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#23 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -254,16 +234,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_3d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#29 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -410,16 +386,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_2d_s0_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#48 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -454,16 +426,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_2d_s1_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#53 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -498,16 +466,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_2d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#58 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -542,16 +506,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_3d_s0_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#63 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -594,16 +554,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_3d_s1_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#69 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -646,16 +602,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_3d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#75 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -802,16 +754,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op2_2d_s0_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#94 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -846,16 +794,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op2_2d_s1_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#99 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -890,16 +834,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op2_2d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#104 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -1266,16 +1206,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op3_2d_s0_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#140 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -1310,16 +1246,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op3_2d_s1_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#145 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -1354,16 +1286,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op3_2d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#150 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -1930,16 +1858,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op4_3d_s2_inside",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#211 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -1950,16 +1874,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op4_3d_s2_cross",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#213 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -1970,28 +1890,20 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op4_3d_s2_pierce",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#215 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op4_3d_s2_preclassified",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#216 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly))",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -2242,16 +2154,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_geometry_scale_1e-09",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#248 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -2270,16 +2178,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op0_circle_radius_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#251 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe))",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2298,16 +2202,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_geometry_scale_1e-09",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#254 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -2326,16 +2226,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op1_circle_radius_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#257 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe))",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2386,16 +2282,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op2_circle_radius_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#263 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe))",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2446,16 +2338,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "op3_circle_radius_0.5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/boundaries.json#269 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe))",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -2578,40 +2466,28 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op0_span_uv_1e-8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#9 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op0_kind0_outside_natural_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#10 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op0_kind1_outside_natural_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#11 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -2694,40 +2570,28 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op1_span_uv_1e-8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#22 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op1_kind0_outside_natural_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#23 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op1_kind1_outside_natural_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#24 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -2802,52 +2666,36 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op2_span_v_1e-8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#34 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op2_span_uv_1e-8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#35 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op2_kind0_outside_natural_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#36 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "guard_op2_kind1_outside_natural_domain",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#37 (upstream source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression))",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -2858,148 +2706,100 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_param_vertical_both_w_planes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#39 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_param_vertical_bottom_only",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#40 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_param_vertical_top_only",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#41 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_param_downward_both_w_planes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#42 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_param_slanted_both_w_planes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#43 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_param_vertical_preclassified",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#44 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_space_vertical_both_w_planes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#45 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_space_vertical_bottom_only",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#46 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_space_vertical_top_only",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#47 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_space_downward_both_w_planes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#48 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_space_slanted_both_w_planes",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#49 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "wr155_space_vertical_preclassified",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/intersect.curve_class_p8/review_guards.json#50 (upstream source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration))",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -3650,16 +3450,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0073",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562408978",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -4338,16 +4134,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0149",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409054",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -4442,16 +4234,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0161",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409066",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -4558,16 +4346,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0174",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409079",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -5038,16 +4822,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0227",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409132",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -6082,16 +5862,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0344",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409249",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -7626,16 +7402,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0518",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409423",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -7838,16 +7610,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0541",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409446",
-      "values_compared": 0
+      "values_compared": 48
     },
     {
       "max_rel_err": 0.0,
@@ -7886,16 +7654,12 @@
       "values_compared": 24
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0546",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409451",
-      "values_compared": 0
+      "values_compared": 24
     },
     {
       "max_rel_err": 0.0,
@@ -10022,16 +9786,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmCurveClassification::InsertAt",
-        "unit": "intersect.curve_class_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0789",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816343790562409694",
-      "values_compared": 0
+      "values_compared": 40
     },
     {
       "max_rel_err": 0.0,
@@ -10115,13 +9875,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 274,
+  "cases_deferred": 214,
   "cases_failed": 0,
-  "cases_passed": 853,
+  "cases_passed": 913,
   "cases_total": 1127,
   "deferred_by_unit": {
     "curve.crv_on_surf": 52,
-    "intersect.curve_class_p2": 60,
     "intersect.curve_class_p4": 162
   },
   "max_rel_err": 0.0,

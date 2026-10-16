@@ -444,45 +444,45 @@ impl<O> ScaledZero for CurveInterval<O> {
 #[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean members
 pub struct CurveClassification<O> {
     /// `m_bIsCurveOwned`.
-    is_curve_owned: bool,
+    pub(super) is_curve_owned: bool,
     /// `m_cpCurve`: the curve being classified.
-    curve: Option<O>,
+    pub(super) curve: Option<O>,
     /// `m_sSrcZoneTol3d`: the zone tolerance of the curve's source.
-    src_zone_tol_3d: f64,
+    pub(super) src_zone_tol_3d: f64,
     /// `m_cpUVCurve1`.
-    uv_curve1: Option<O>,
+    pub(super) uv_curve1: Option<O>,
     /// `m_bIsCurveCurrent`.
-    is_curve_current: bool,
+    pub(super) is_curve_current: bool,
     /// `m_cpSurface1`.
-    surface1: Option<O>,
+    pub(super) surface1: Option<O>,
     /// `m_cpSurface2`.
-    surface2: Option<O>,
+    pub(super) surface2: Option<O>,
     /// `m_bDoingCrossHatch`.
-    doing_cross_hatch: bool,
+    pub(super) doing_cross_hatch: bool,
     /// `m_bDoingFillets`.
-    doing_fillets: bool,
+    pub(super) doing_fillets: bool,
     /// `m_bOKToSetTolerance`.
-    ok_to_set_tolerance: bool,
+    pub(super) ok_to_set_tolerance: bool,
     /// `m_bTgtLoopsOnly`.
-    tgt_loops_only: bool,
+    pub(super) tgt_loops_only: bool,
     /// `m_sTgtLoops`.
-    tgt_loops: Vec<O>,
+    pub(super) tgt_loops: Vec<O>,
     /// `m_cpOtherClassification`.
-    other_classification: Option<O>,
+    pub(super) other_classification: Option<O>,
     /// `m_cpFace`.
-    face: Option<O>,
+    pub(super) face: Option<O>,
     /// `m_cpUVCurve2`.
-    uv_curve2: Option<O>,
+    pub(super) uv_curve2: Option<O>,
     /// `m_cpTI`.
-    ti: Option<O>,
+    pub(super) ti: Option<O>,
     /// `m_vInterval`: the whole interval classified.
-    interval: Extent1d,
+    pub(super) interval: Extent1d,
     /// `m_pData[0 .. m_lSize]`.
-    data: Vec<CurveInterval<O>>,
+    pub(super) data: Vec<CurveInterval<O>>,
     /// `m_pData != NULL`: whether upstream's interval array is allocated.
-    allocated: bool,
+    pub(super) allocated: bool,
     /// `m_bIgnoreTangency`.
-    ignore_tangency: bool,
+    pub(super) ignore_tangency: bool,
 }
 
 impl<O: ClassObject> CurveClassification<O> {

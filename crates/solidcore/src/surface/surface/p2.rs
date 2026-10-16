@@ -103,8 +103,7 @@
 //! - **Unported callees.** `GlobalSurfaceIntersect` runs
 //!   `SmSurfaceIntersector::DoIntersection` (unit `intersect.surface_intersector_p5`);
 //!   `PointBasedSurfaceIntersect` builds the `SmAdvSurfaceIntersector` and then needs
-//!   `DoPointIntersection` (`intersect.surface_intersector_p4`); `CurveOnClassify` needs
-//!   `SmCurveClassification` (`intersect.curve_class_p*`); `CreatePlaneWith3DCurves`
+//!   `DoPointIntersection` (`intersect.surface_intersector_p4`); `CreatePlaneWith3DCurves`
 //!   needs `SmTrimmingTools` (`topology.trimming_tools`); `smsurf_GetSurfaceCache`
 //!   needs the cache store to make surface caches (`SmSurface::CacheMakeOrValidate`,
 //!   `surface.surface_p1`); the polar box test of `sm_CsArePerpenDisjoint` needs the
@@ -174,6 +173,8 @@ use crate::geom::tree::{AuxDataType, Tree, TreeNode, TreeOwner};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::intersect::adv_surface_intersector::{AdvSurfaceIntersector, NoSurfaceHandle};
+use crate::intersect::curve_class::{CurveClassification, ResetOptions};
+use crate::intersect::point_class::{ClassGeometry, ClassObject, PointClassType};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
@@ -246,6 +247,7 @@ const OP_DERIV: &str = "surface::surface::p2::DerivSurfDefinition";
 const OP_GEOM: &str = "surface::surface::p2::evaluate_geometric";
 const OP_DROP: &str = "surface::surface::p2::drop_vectors";
 const OP_BREAKS: &str = "surface::surface::p2::set_up_breaks";
+const OP_CURVE_ON_CLASSIFY: &str = "surface::surface::p2::Surface::curve_on_classify";
 
 /// `SM_ERR` of a base-class default.
 const fn base_err() -> SolidError {
@@ -1416,21 +1418,50 @@ impl Surface {
     // ---- intersections and classification -------------------------------------------
 
     /// Splits the curve of `classification` at this surface's natural boundaries and
-    /// classifies the pieces (`CurveOnClassify`). `C` stands for
-    /// `SmCurveClassification` until that type is ported.
+    /// classifies the pieces (`CurveOnClassify`): the classification is reset to one
+    /// interval, its face cleared and its surfaces set to `this` (the handle naming
+    /// this surface) and none, then intersected with the natural bounds; an unknown
+    /// first start or last end takes its interval's mid classification.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmCurveClassification` (units
-    /// `intersect.curve_class_*`).
-    pub fn curve_on_classify<C: ?Sized>(&self, _classification: &mut C) -> Result<()> {
-        // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
-        // (then SetFace, SetSurface1, SetSurface2, IntersectNaturalBounds
-        // (intersect.curve_class_p8) and the end interval classifications)
-        Err(SolidError::unported(
-            "SmCurveClassification::ReSet",
-            "intersect.curve_class_p2",
-        ))
+    /// Those of the reset and of
+    /// [`CurveClassification::intersect_natural_bounds`] (`geometry` resolves the
+    /// classification's handles); `SM_ERR` for a classification left without
+    /// intervals (upstream indexes interval 0 unchecked).
+    pub fn curve_on_classify<O: ClassObject>(
+        &self,
+        k: &Kernel,
+        this: O,
+        geometry: &impl ClassGeometry<O>,
+        classification: &mut CurveClassification<O>,
+    ) -> Result<()> {
+        // init output
+        classification.reset(k, &ResetOptions::default())?;
+        classification.set_face(None);
+        classification.set_surface1(Some(this));
+        classification.set_surface2(None);
+
+        // 1. split the ClassificationCurve into classified intervals at natural boundary
+        // curve intersections
+        classification.intersect_natural_bounds(k, geometry, self, this)?;
+
+        // classify the first Start and the last End from their Mids
+        let num_ivls = classification.size();
+        if num_ivls == 0 {
+            return Err(SolidError::sm_err(OP_CURVE_ON_CLASSIFY));
+        }
+        let start_ivl = classification.at_mut(0)?;
+        if start_ivl.start.point_class() == PointClassType::Unknown {
+            let (pc, obj) = (start_ivl.mid.point_class(), start_ivl.mid.object());
+            start_ivl.start.set_class_object(pc, obj);
+        }
+        let end_ivl = classification.at_mut(num_ivls - 1)?;
+        if end_ivl.end.point_class() == PointClassType::Unknown {
+            let (pc, obj) = (end_ivl.mid.point_class(), end_ivl.mid.object());
+            end_ivl.end.set_class_object(pc, obj);
+        }
+        Ok(())
     }
 
     /// The intersection curves of this surface over `uv_domain` with `other` over
@@ -4884,5 +4915,81 @@ mod tests {
         fn kind(&self) -> crate::geom::solution_array::ObjectKind {
             crate::geom::solution_array::ObjectKind::Surface
         }
+    }
+}
+
+#[cfg(test)]
+mod curve_on_classify_tests {
+    use super::*;
+    use crate::intersect::point_class::ClassObjectKind;
+    use crate::surface::volume::Volume;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum H {
+        Curve,
+        Surface,
+        Temporary(usize, ClassObjectKind),
+    }
+    impl ClassObject for H {
+        fn class_kind(&self) -> ClassObjectKind {
+            match self {
+                Self::Curve => ClassObjectKind::Curve,
+                Self::Surface => ClassObjectKind::Surface,
+                Self::Temporary(_, kind) => *kind,
+            }
+        }
+        fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+            Some(Self::Temporary(index, kind))
+        }
+    }
+    struct G(Curve);
+    impl ClassGeometry<H> for G {
+        fn curve(&self, o: H) -> Option<&Curve> {
+            (o == H::Curve).then_some(&self.0)
+        }
+        fn surface(&self, _: H) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _: H) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _: H) -> Option<Point3> {
+            None
+        }
+    }
+
+    fn classify(from: Vec3, to: Vec3) -> CurveClassification<H> {
+        let k = Kernel::default();
+        let g = G(Line::create_line_segment(3, from, to, None).unwrap().into());
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(H::Curve), false);
+        cc.set_size(&k, 1).unwrap();
+        cc.at_mut(0)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0., 1.));
+        cc.set_src_zone_tol_3d(1e-7);
+        let plane = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1., 1.),
+            &Extent2d::from_bounds(0., 0., 1., 1.),
+        ));
+        plane
+            .curve_on_classify(&k, H::Surface, &g, &mut cc)
+            .unwrap();
+        cc
+    }
+
+    #[test]
+    fn inside_curve_ends_take_the_mid_classification() {
+        let cc = classify(Vec3::new(0.2, 0.2, 0.), Vec3::new(0.8, 0.8, 0.));
+        assert_eq!(cc.size(), 1);
+        assert_eq!(cc.surface1(), Some(H::Surface));
+        let ivl = cc.at(0).unwrap();
+        assert_eq!(ivl.mid.point_class(), PointClassType::Surface);
+        assert_eq!(ivl.start.point_class(), PointClassType::Surface);
+        assert_eq!(ivl.end.point_class(), PointClassType::Surface);
+        assert_eq!(ivl.start.object(), Some(H::Surface));
     }
 }

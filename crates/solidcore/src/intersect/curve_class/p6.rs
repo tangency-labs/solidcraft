@@ -17,8 +17,9 @@
 //! order, bounded by the initial interval count plus one (every restart removes one).
 //! Homogenization's final squeezes must reduce the count. Nonempty boundary lookups
 //! await p2, as does interval splicing/squeezing.
-//! `MergeInterval` ports its early exits and defers at `GetPointObjZoneTol3d` (p2):
-//! the subsequent topology mutation is not implemented or certified here.
+//! `MergeInterval` ports its early exits and the boundary zone tolerances
+//! (`GetPointObjZoneTol3d`, p2); the topology mutation after them is not implemented
+//! or certified here and returns `Unported` naming this unit.
 
 use super::p3::{
     are_coincident_maybe, classify_crv_loc_by_index, connect_intervals, point_class_loc_by_index,
@@ -308,13 +309,17 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// Merges an interval's classifications into topology (`MergeInterval`).
-    /// The unknown-interior and vertex/edge/vertex early exits are implemented;
-    /// topology creation awaits p2's boundary tolerance accessor.
+    /// The unknown-interior and vertex/edge/vertex early exits and the boundary zone
+    /// tolerances (`GetPointObjZoneTol3d`) are implemented; the vertex and edge
+    /// imprinting after them is not ported yet.
     ///
     /// # Errors
-    /// Invalid interval indices, or [`SolidError::Unported`] for p2 tolerance lookup or p7 fillet handling.
+    /// Invalid interval indices, or [`SolidError::Unported`] for topology tolerances of
+    /// opaque handles, p7 fillet handling or the imprinting.
     pub fn merge_interval(
         &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
         index: usize,
         vertices_only: bool,
     ) -> Result<MergeIntervalOutput<O>> {
@@ -335,10 +340,16 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             return Ok(MergeIntervalOutput::default());
         }
-        // UNPORTED(intersect.curve_class_p2): SmCurveClassification::GetPointObjZoneTol3d
+        // Get the interval start and stop tols.
+        let start_obj_zone_tol_3d = self.point_obj_zone_tol_3d(k, geometry, index)?;
+        let end_obj_zone_tol_3d = self.point_obj_zone_tol_3d(k, geometry, index + 1)?;
+        let _ = (start_obj_zone_tol_3d, end_obj_zone_tol_3d);
+        // The rest of MergeInterval (end points, closed / degenerate test, vertex and
+        // edge imprinting through MergePointClass and the B-rep) is not ported in this
+        // part yet; see plan/findings.md (intersect.curve_class_p2).
         Err(SolidError::unported(
-            "SmCurveClassification::GetPointObjZoneTol3d",
-            "intersect.curve_class_p2",
+            "SmCurveClassification::MergeInterval (imprinting)",
+            "intersect.curve_class_p6",
         ))
     }
 }
@@ -393,7 +404,7 @@ fn homogenize_boundaries<O: ClassObject>(
         } else {
             ivl.max()
         };
-        let point = classify_crv_loc_by_index(src, index)?;
+        let point = classify_crv_loc_by_index(geometry, src, index)?;
         let tol = pc.obj_zone_tol_3d(k, geometry)?;
         let found = dst.find_interval(k, geometry, param, last, tol)?;
         let mut pos = found.position;
@@ -432,7 +443,7 @@ fn homogenize_boundaries<O: ClassObject>(
             new_pc.set_pre_snap_param(param);
             new_pc.copy_sss_point(pc);
             if matches!(new_pc.point_class(), Pc::Face | Pc::Edge) {
-                let point = classify_crv_loc_by_index(src, index)?;
+                let point = classify_crv_loc_by_index(geometry, src, index)?;
                 // Ordinary projection failures turn the classification into UNKNOWN.
                 match new_pc.compute_point_parameters(k, geometry, point) {
                     Ok(()) => {}
@@ -544,7 +555,7 @@ mod tests {
         cc.set_curve(None, false);
         let input = CurveInterval::with_interval(&k, &Extent1d::from_min_max(0.25, 0.75), None);
         assert!(cc.insert_curve_interval(&k, &g, &input).is_err());
-        assert!(cc.merge_interval(usize::MAX, false).is_err());
+        assert!(cc.merge_interval(&k, &g, usize::MAX, false).is_err());
         assert!(matches!(
             cc.fix_end_point_class(&k, &g, usize::MAX, Vec3::ZERO),
             Err(SolidError::InvalidInput { .. })
@@ -553,7 +564,7 @@ mod tests {
     #[test]
     fn unclassified_merge_and_empty_homogenization_use_real_api() {
         let (k, g, mut cc) = setup();
-        assert!(cc.merge_interval(0, false).is_ok());
+        assert!(cc.merge_interval(&k, &g, 0, false).is_ok());
         let mut a = CurveClassification::<H>::new(&k);
         let mut b = CurveClassification::<H>::new(&k);
         assert!(a.homogenize(&k, &g, &mut b).is_ok());

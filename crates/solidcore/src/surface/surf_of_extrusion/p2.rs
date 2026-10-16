@@ -63,8 +63,8 @@
 //!   intersects the generator's plane with the plane (`SmPlane::IntersectWithPlane`,
 //!   both planes taken as without owner, as [`Plane::intersect_with_plane`]) and, when
 //!   that gives a line, classifies it on this surface (`SmSurface::CurveOnClassify`,
-//!   whose `SmCurveClassification::ReSet` is unit `intersect.curve_class_p2`): that
-//!   returns [`SolidError::Unported`], and the trimming below it is ported with the
+//!   which stops at `SmCurveClassification::IntersectNaturalBounds`, unit
+//!   `intersect.curve_class_p8`): that returns [`SolidError::Unported`], and the trimming below it is ported with the
 //!   classification. The general intersection `GlobalSurfaceIntersect` falls back to
 //!   needs `SmAdvSurfaceIntersector` on this surface, which is not a [`Surface`] (see
 //!   **Not a `SurfaceKind`** above), so it stays [`SolidError::Unported`] under
@@ -315,7 +315,8 @@ impl SurfOfExtrusion {
     /// `SM_ERR_NULL_POINTER` without generator; those of the generator's plane
     /// intersection, evaluations, closed and degenerate tests;
     /// [`SolidError::Unported`]: the first case when the planes meet in a line
-    /// (`SmSurface::CurveOnClassify`, unit `intersect.curve_class_p2`); the status of
+    /// (`SmSurface::CurveOnClassify` up to `IntersectNaturalBounds`, unit
+    /// `intersect.curve_class_p8`); the status of
     /// the plane/plane intersection is ignored as upstream (a failure gives no
     /// curves).
     #[allow(clippy::too_many_lines)] // one upstream function
@@ -395,13 +396,13 @@ impl SurfOfExtrusion {
             // with an SmCurveClassification over the line's natural interval at
             // dTol, then add the intervals inside it (the whole line, or a trimmed
             // copy), crossing
-            // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
-            // (SmSurface::CurveOnClassify, then IntersectNaturalBounds
-            // (intersect.curve_class_p8); a surface of extrusion is not a Surface
+            // UNPORTED(intersect.curve_class_p8): SmCurveClassification::IntersectNaturalBounds
+            // (SmSurface::CurveOnClassify resets the classification, then classifies
+            // against the natural bounds; a surface of extrusion is not a Surface
             // the classification can take yet, see the module docs)
             return Err(SolidError::unported(
-                "SmCurveClassification::ReSet",
-                "intersect.curve_class_p2",
+                "SmCurveClassification::IntersectNaturalBounds",
+                "intersect.curve_class_p8",
             ));
         }
         // When GenCurve is planar with an independent sweep direction

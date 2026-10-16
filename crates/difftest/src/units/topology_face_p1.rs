@@ -836,7 +836,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
                 return Err(merge_deferred());
             }
             let fp = face_props(*props)?;
-            let r = fp1::split_at_seam(&k, &mut b, f, &mut cu, &mut cv, problem, fp.as_ref(), &|_| None);
+            let r = fp1::split_at_seam(&k, &mut b, f, &mut cu, &mut cv, problem, fp.as_ref(), &NoGeometry, &|_| None);
             o.push(status(&r)?);
             let r = r.unwrap_or_default();
             o.extend([

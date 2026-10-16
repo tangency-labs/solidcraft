@@ -1000,7 +1000,7 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// The resolved surface 1, if any.
-    fn surface1_geometry<'g>(
+    pub(super) fn surface1_geometry<'g>(
         &self,
         geometry: &'g impl ClassGeometry<O>,
     ) -> Result<Option<&'g Surface>> {

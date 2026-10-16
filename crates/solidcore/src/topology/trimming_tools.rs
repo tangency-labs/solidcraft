@@ -366,6 +366,25 @@ impl crate::heal::face_props::LoopObject for SeamObject {
     }
 }
 
+/// Classification geometry for [`SeamObject`]s: loops and vertices name no curve,
+/// surface, volume or point here (their zone tolerances come from the topology).
+struct SeamGeometry;
+
+impl crate::intersect::point_class::ClassGeometry<SeamObject> for SeamGeometry {
+    fn curve(&self, _: SeamObject) -> Option<&Curve> {
+        None
+    }
+    fn surface(&self, _: SeamObject) -> Option<&Surface> {
+        None
+    }
+    fn volume(&self, _: SeamObject) -> Option<&crate::surface::volume::Volume> {
+        None
+    }
+    fn point(&self, _: SeamObject) -> Option<Point3> {
+        None
+    }
+}
+
 /// `SmFace::HasSeamProblem(rCrvClassU, rCrvClassV, eCrossed, eMissing, eNearMiss)` (unit
 /// `topology.face_p4`).
 fn face_has_seam_problem(
@@ -400,6 +419,7 @@ fn face_split_at_seam_problem(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec
         &mut cv,
         problem,
         None,
+        &SeamGeometry,
         &|o: SeamObject| match o {
             SeamObject::Vertex(v) => Some(EntityRef::Vertex(v)),
             SeamObject::Loop(_) => None,
