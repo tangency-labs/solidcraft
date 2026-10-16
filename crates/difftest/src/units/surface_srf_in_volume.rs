@@ -692,7 +692,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Info { uv, types } => {
             let c = siv_of(&s)?;
             let step = s.step_uv_domain();
-            let max = tri!(o, s.max_analytic_domain());
+            let max = tri!(o, s.max_analytic_domain(&k, ));
             o.push(0.0);
             o.extend([
                 s.type_code() as f64,
@@ -726,7 +726,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 only_upper_half: *oh,
                 non_zero_tangents: *nz,
             };
-            let d = tri!(o, s.evaluate(pt(*uv), *hu, *hv, flags));
+            let d = tri!(o, s.evaluate(&k, pt(*uv), *hu, *hv, flags));
             o.push(0.0);
             put_derivs(&mut o, &d, *hu, *hv, *oh);
         }
@@ -740,18 +740,18 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let d = tri!(
                 o,
-                siv_of(&s)?.evaluate_simple(pt(*uv), *hu, *hv, side(*ul), side(*vl), *oh)
+                siv_of(&s)?.evaluate_simple(&k, pt(*uv), *hu, *hv, side(*ul), side(*vl), *oh)
             );
             o.push(0.0);
             put_derivs(&mut o, &d, *hu, *hv, *oh);
         }
         OpIn::EvalPoint { uv } => {
-            let p = tri!(o, s.evaluate_point(pt(*uv)));
+            let p = tri!(o, s.evaluate_point(&k, pt(*uv)));
             o.push(0.0);
             pv(&mut o, p);
         }
         OpIn::Normal { uv, ul, vl } => {
-            let n = tri!(o, s.evaluate_normal(pt(*uv), side(*ul), side(*vl)));
+            let n = tri!(o, s.evaluate_normal(&k, pt(*uv), side(*ul), side(*vl)));
             o.push(0.0);
             pv(&mut o, n);
         }
@@ -810,8 +810,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Equal { other } => {
             let c = siv_of(&s)?;
             let eq = match other {
-                None => tri!(o, c.approx_eq(c)),
-                Some(oc) => tri!(o, c.approx_eq(&build(&k, oc)?)),
+                None => tri!(o, c.approx_eq(&k, c)),
+                Some(oc) => tri!(o, c.approx_eq(&k, &build(oc)?)),
             };
             o.extend([0.0, b(eq)]);
         }

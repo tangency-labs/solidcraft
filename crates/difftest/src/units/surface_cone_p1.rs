@@ -374,7 +374,9 @@ fn ffi_curve(c: &CurveIn) -> ffi::CurveIn {
     }
 }
 
-fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
+fn cpp(i: &Inputs) -> Result<Output, HarnessError> { cpp_with_roundtrip(i, None, false) }
+
+fn cpp_with_roundtrip(i: &Inputs, roundtrip: Option<bool>, subdomain: bool) -> Result<Output, HarnessError> {
     let flat = if let OpIn::Coincidence {
         a,
         a_dom,
@@ -459,7 +461,9 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             OpIn::Copy {} => ffi::Op::Copy,
             OpIn::Coincidence { .. } => return Err(harness("unreachable")),
         };
-        ffi::cone_op(&ffi_cone(c), &op)
+        if subdomain { ffi::inversion_subdomain(&ffi_cone(c), &op) }
+        else if let Some(binary) = roundtrip { ffi::roundtrip_op(&ffi_cone(c), &op, binary) }
+        else { ffi::cone_op(&ffi_cone(c), &op) }
     }
     .map_err(|e| harness(e.to_string()))?;
     to_output(i, &flat)
@@ -788,7 +792,7 @@ fn iso_circle_inversion_fails(k: &Kernel, s: &Cone, p: Vec3, tol: f64) -> solidc
             };
             Ok(s.rev()
                 .polar_converter()
-                .convert_to_nurbs_parameter_or_written(circle, inv.uv.x, 0.0)?
+                .convert_to_nurbs_parameter_or_written(k, circle, inv.uv.x, 0.0)?
                 .is_none())
         }
     }
@@ -1044,6 +1048,220 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
     }
     to_output(i, &o)
+}
+
+// Issue #76 integration coverage reuses the exact constructor inputs and native guards.
+// The numerical implementation remains cone_p1; these calls traverse Surface instead.
+pub(super) fn common_cases(ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+    let mut cases = Runner.cases(ctx)?;
+    cases.retain(|c| matches!(c.inputs.get("op").and_then(Value::as_str),
+        Some("eval" | "eval_point" | "eval_step" | "to_step" | "to_nurbs" | "iso" | "inversion" | "adjust" | "transform" | "copy")));
+    let mut numerical = Vec::new();
+    for case in cases {
+        let input: Inputs = case.parse()?;
+        let native = cpp(&input)?;
+        if native.values.get("status").is_some_and(|v| v == &[SC_ERR_ARG]) { continue; }
+        numerical.push(case);
+    }
+    let mut cases = numerical;
+    for c in &mut cases {
+        c.unit = "surface.surface_p2".into();
+        c.name = format!("common_cone_{}", c.name);
+        c.inputs = serde_json::json!({ "common_cone": c.inputs });
+    }
+    let subdomains = cases.iter()
+        .filter(|c| c.inputs.get("common_cone").and_then(|v| v.get("op")).and_then(Value::as_str) == Some("inversion"))
+        .cloned().map(|mut c| {
+            c.name.push_str("_subdomain");
+            c.inputs.as_object_mut().ok_or_else(|| harness("common input object"))?
+                .insert("common_subdomain".into(), Value::Bool(true));
+            Ok(c)
+        }).collect::<Result<Vec<_>, HarnessError>>()?;
+    cases.extend(subdomains);
+    let mut database_cases = Vec::new();
+    for (class, mode) in [
+        ("cone", serde_json::json!({"kind":"canonical", "bot":2.0,"top":4.0,"height":3.0})),
+        ("cylinder", serde_json::json!({"kind":"cyl_canonical", "radius":2.0})),
+    ] {
+        for binary in [false, true] {
+            for op in [serde_json::json!({"op":"eval_point","u":0.25,"v":0.5}),
+                serde_json::json!({"op":"eval_step","u":90.0,"v":1.0,"hu":1,"hv":1,"point":true}),
+                serde_json::json!({"op":"to_step","u":0.25,"v":0.5}),
+                serde_json::json!({"op":"copy"})] {
+                let mut value = op;
+                value.as_object_mut().ok_or_else(|| harness("database operation object"))?.insert("cone".into(), serde_json::json!({"mode":mode,"origin":[0.0,0.0,0.0],"x":[1.0,0.0,0.0],"y":[0.0,1.0,0.0]}));
+                let i: Inputs = serde_json::from_value(value.clone()).map_err(|e| harness(e.to_string()))?;
+                let data = ffi::serialize_cone(&ffi_cone(i.cone.as_ref().ok_or_else(|| harness("missing cone"))?), binary)
+                    .map_err(|e| harness(e.to_string()))?;
+                if data.first() != Some(&SUCCESS) || data.get(1) != Some(&SUCCESS) {
+                    return Err(harness("database fixture constructor/writer failed"));
+                }
+                let bytes: Vec<u8> = data.into_iter().skip(2).map(|v| v as u8).collect();
+                database_cases.push(Case { unit:"surface.surface_p2".into(),
+                    name:format!("common_db_{class}_{binary}_{}", database_cases.len()),
+                    source: crate::case::CaseSource::Generated { seed: 76 },
+                    inputs:serde_json::json!({"common_cone":value,"common_db":{"binary":binary,"bytes":bytes}}), });
+            }
+        }
+    }
+    for class in ["cone", "cylinder"] {
+        for swap in [false, true] {
+            for inside in [false, true] {
+                for u in [0.0, 0.25, 0.5, 1.0] {
+                    let mode = if class == "cone" { serde_json::json!({"kind":"canonical", "bot":2.0,"top":4.0,"height":3.0,"swap":swap,"inside":inside}) }
+                        else { serde_json::json!({"kind":"cyl_bounded", "radius":2.0,"start":0.0,"end":360.0,"height":3.0,"swap":swap,"inside":inside}) };
+                    database_cases.push(Case {unit:"surface.surface_p2".into(),
+                        name:format!("common_lazy_{class}_{swap}_{inside}_{u}"),
+                        source:crate::case::CaseSource::Generated {seed:76},
+                        inputs:serde_json::json!({"common_lazy":true,"common_cone":{"op":"eval_point","u":u,"v":0.5,
+                            "cone":{"mode":mode,"origin":[0.0,0.0,0.0],"x":[1.0,0.0,0.0],"y":[0.0,1.0,0.0]}}}), });
+                }
+            }
+        }
+    }
+    let mut queries = Vec::new();
+    for case in &database_cases {
+        if !case.name.starts_with("common_lazy_") || !case.name.ends_with("_0.25") { continue; }
+        for subdomain in [false, true] {
+            let mut case = case.clone();
+            case.name = format!("{}_queries_{subdomain}", case.name);
+            case.inputs.as_object_mut().ok_or_else(|| harness("query input object"))?.remove("common_lazy");
+            case.inputs.as_object_mut().ok_or_else(|| harness("query input object"))?.insert("common_queries".into(), Value::Bool(true));
+            case.inputs.as_object_mut().ok_or_else(|| harness("query input object"))?.insert("common_subdomain".into(), Value::Bool(subdomain));
+            queries.push(case);
+        }
+    }
+    database_cases.extend(queries);
+    cases.extend(database_cases);
+    Ok(cases)
+}
+
+pub(super) fn common_cpp(value: Value, database: Option<&Value>, lazy: bool, subdomain: bool, queries: bool) -> Result<Output, HarnessError> {
+    let i: Inputs = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
+    if queries {
+        let build = ffi_cone(i.cone.as_ref().ok_or_else(|| harness("missing cone"))?);
+        return to_output(&i, &ffi::common_queries(&build, subdomain).map_err(|e| harness(e.to_string()))?);
+    }
+    if lazy {
+        let OpIn::EvalPoint {u, v} = i.op else { return Err(harness("lazy parameters")); };
+        let build = ffi_cone(i.cone.as_ref().ok_or_else(|| harness("missing cone"))?);
+        return to_output(&i, &ffi::lazy_cone(&build, [u, v]).map_err(|e| harness(e.to_string()))?);
+    }
+    let mut output = cpp_with_roundtrip(&i, database.and_then(|v| v.get("binary")).and_then(Value::as_bool), subdomain)?;
+    // Surface's fallible inversion API exposes UV/location only on success. Direct
+    // cone_p1 cases separately compare the native outputs retained on failure.
+    if matches!(i.op, OpIn::Inversion { .. }) && output.values.get("status").is_some_and(|v| v != &[SUCCESS]) {
+        output.values.insert("out".into(), Vec::new());
+    }
+    Ok(output)
+}
+
+pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, subdomain: bool, queries: bool) -> Result<Output, HarnessError> {
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    let i: Inputs = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
+    let k = Kernel::default();
+    let cone = i.cone.as_ref().ok_or_else(|| harness("missing cone"))?;
+    let mut out = vec![SUCCESS];
+    let built = if let Some(database) = database {
+        use solidcore::topology::database_io::{DatabaseReader, FileType};
+        let bytes: Vec<u8> = serde_json::from_value(database.get("bytes").ok_or_else(|| harness("database bytes"))?.clone()).map_err(|e| harness(e.to_string()))?;
+        let mut reader = DatabaseReader::new();
+        reader.open_for_read(bytes, if database.get("binary").and_then(Value::as_bool).unwrap_or(false) { FileType::Binary } else { FileType::Ascii });
+        let ty = if matches!(cone.mode, ModeIn::CylCanonical { .. }) { CYLINDER_TYPE } else { CONE_TYPE };
+        Surface::read_from_db(&k, ty, &mut reader, 30)
+    } else { rust_cone(&k, cone).map(Surface::from) };
+    let mut surface = match built {
+        Ok(c) => c,
+        Err(e) => return to_output(&i, &[status(&e)]),
+    };
+    if queries {
+        let natural = surface.natural_uv_domain();
+        let low = natural.evaluate(0.2, 0.2); let high = natural.evaluate(0.8, 0.8);
+        let domain = if subdomain { Extent2d::from_bounds(low.x, low.y, high.x, high.y) } else { natural };
+        let result = (|| -> solidcore::Result<()> {
+            out.push(SUCCESS);
+            let tolerance = k.tolerances.zone_tol_3d / 10.0;
+            out.push(flag(surface.is_degenerate_point(&k, tolerance, Some(&domain))?));
+            out.push(flag(surface.is_degenerate_curve(&k, solidcore::math::EFF_ZERO_DEG, Some(&domain), tolerance)?));
+            match surface.evaluate_normal(&k, domain.mid(), Side::Left, Side::Left) {
+                Ok(n) => { out.push(SUCCESS); push_v(&mut out, n); }
+                Err(e) if e.is_unported() => return Err(e),
+                Err(e) => out.push(status(&e)),
+            }
+            match surface.calculate_bounding_box(&k, &domain, [true,false,false], false) {
+                Ok(b) => { out.push(SUCCESS); let b = b.normal_box.ok_or_else(|| SolidError::invalid_input("common_queries", "missing box"))?;
+                    push_v(&mut out, b.min()); push_v(&mut out, b.max()); }
+                Err(e) if e.is_unported() => return Err(e),
+                Err(e) => out.push(status(&e)),
+            }
+            Ok(())
+        })();
+        if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))); }
+        return to_output(&i, &out);
+    }
+    if lazy {
+        use solidcore::surface::surface::p2::SurfaceEval;
+        let OpIn::EvalPoint {u, v} = i.op else { return Err(harness("lazy parameters")); };
+        let mut eval = SurfaceEval::with_uv(&k, Some(&surface), u, v);
+        out.push(SUCCESS);
+        for p in [eval.pos(), eval.su(), eval.sv(), eval.suu(), eval.suv(), eval.svv()] {
+            push_v(&mut out, p.map_err(|e| harness(e.to_string()))?);
+        }
+        return to_output(&i, &out);
+    }
+    let uv = |u, v| Point2::new(u, v);
+    let r = match &i.op {
+        OpIn::Eval { u, v, hu, hv, u_left, v_left, upper, non_zero } => {
+            surface.evaluate(&k, uv(*u, *v), *hu, *hv, EvaluateFlags {
+                u_side: side(*u_left), v_side: side(*v_left), only_upper_half: *upper,
+                non_zero_tangents: *non_zero,
+            }).map(|d| { out.push(SUCCESS); for p in d.into_iter().flatten() { push_v(&mut out, p); } })
+        }
+        OpIn::EvalPoint { u, v } => surface.evaluate_point(&k, uv(*u, *v))
+            .map(|p| { out.push(SUCCESS); push_v(&mut out, p); }),
+        OpIn::EvalStep { u, v, hu, hv, point } => {
+            if *point { surface.evaluate_step_point(&k, uv(*u, *v))
+                .map(|p| { out.push(SUCCESS); push_v(&mut out, p); }) }
+            else { surface.evaluate_step(&k, uv(*u, *v), *hu, *hv, EvaluateFlags::default())
+                .map(|d| { out.push(SUCCESS); for p in d.into_iter().flatten() { push_v(&mut out, p); } }) }
+        }
+        OpIn::ToStep { u, v } => surface.convert_uv_from_nurbs_to_step(&k, uv(*u, *v))
+            .map(|p| out.extend([SUCCESS, p.x, p.y])),
+        OpIn::ToNurbs { u, v } => {
+            let no_polar = matches!(surface.kind(), SurfaceKind::Cone(c) if c.rev().polar_curve().is_none());
+            if no_polar { out.push(SC_ERR_ARG); Ok(()) }
+            else { surface.convert_uv_from_step_to_nurbs(&k, uv(*u, *v))
+                .map(|p| out.extend([SUCCESS, p.x, p.y])) }
+        }
+        OpIn::Iso { param, iso, dom, uv } => {
+            let domain = dom.map(|[a,b,c,d]| Extent2d::from_bounds(a,b,c,d));
+            surface.create_iso_parametric_curve(&k, param_of(*param), *iso, 0.0, domain.as_ref(), *uv)
+                .map(|c| { out.extend([SUCCESS, c.max_gap_3d]); put_curve(&mut out, Some(&c.curve)); put_curve(&mut out, c.uv_iso_curve.as_ref()); })
+        }
+        OpIn::Inversion { p, tol, guess } => {
+            let natural = surface.step_uv_domain();
+            let domain = if subdomain { { let low = natural.evaluate(0.2, 0.2); let high = natural.evaluate(0.8, 0.8); Extent2d::from_bounds(low.x,low.y,high.x,high.y) } } else { natural };
+            surface.step_inversion(&k, &domain, v3(*p), *tol, guess.map(|[u,v]| Point2::new(u,v)))
+                .map(|(uv,location)| out.extend([SUCCESS,uv.x,uv.y,f64::from(location as u8)]))
+        }
+        OpIn::Copy {} => surface.copy().and_then(|copy| {
+            out.extend([SUCCESS, flag(copy.approx_eq(&k, &surface)?)]);
+            match copy.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c),
+                _ => Err(SolidError::invalid_input("difftest::common_cone", "copy erased cone class")) }
+        }),
+        // Edits are still exercised through the common API. Failed dependencies remain deferrals.
+        OpIn::Adjust { dom } => surface.adjust_step_uv_domain(&k, &Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]))
+            .and_then(|()| { out.push(SUCCESS); match surface.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c), _ => unreachable!() } }),
+        OpIn::Transform { origin, x, y, scale } => surface.transform(&k,
+            &Axis2Placement::new(v3(*origin), v3(*x), v3(*y)), scale.map(v3))
+            .and_then(|()| { out.push(SUCCESS); match surface.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c), _ => unreachable!() } }),
+        _ => return Err(harness("unsupported common surface operation")),
+    };
+    if let Err(e) = r {
+        if let Some(out) = Output::unported(&e) { return Ok(out); }
+        out.truncate(1); out.push(status(&e));
+    }
+    to_output(&i, &out)
 }
 
 // ---- generation -----------------------------------------------------------------------

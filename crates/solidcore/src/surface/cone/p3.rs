@@ -12,10 +12,8 @@
 //! Deviations: output arrays are returned together and always requested; unused
 //! edge/angle arguments of the analytic routines are omitted. Ignored statuses
 //! propagate Unported; errors which would leave an uninitialised output propagate.
-//! A default `SmPoint2d` is `SM_UNDEF_DOUBLE`, not uninitialised, so an ignored
-//! `ConvertUVFromSTEPToNURBS` failure keeps the converter-written U and that V.
-//! The general intersection is supplied as a callback until `SurfaceKind` can hold
-//! cones (without erasing their virtual methods). It receives every original
+//! The general intersection is supplied as a callback until the common Surface intersection
+//! adapters retain cone virtual methods. It receives every original
 //! argument. Sphere dispatch awaits the sphere type. Bounding boxes are those of
 //! bare geometry (no face owner), with upstream's zone-tolerance expansion.
 //! A generator solve with no solution explicitly writes EXTERIOR upstream:
@@ -164,19 +162,20 @@ fn boundary_intersections(
     _other_domain: &Extent2d,
     _approx_tol: Option<f64>,
 ) -> Result<SurfaceIntersection> {
-    // The boundary algorithm is ported, but requires Surface operands. Preserve
-    // Cone/Cylinder virtual dispatch rather than wrapping their B-spline base.
-    // UNPORTED(surface.surface_p2): SurfaceKind::Cone (issue #76 / PR #133)
+    // SurfaceKind retains cones; the shared boundary path still needs its
+    // analytic iso/evaluation adapters. Keep this integration with its owner.
+    // UNPORTED(surface.surface_p2): common cone boundary dispatch adapter
     Err(SolidError::unported(
-        "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "SmCone common boundary dispatch adapter",
         "surface.surface_p2",
     ))
 }
 
-fn bbox(cone: &Cone, domain: &Extent2d) -> Result<Extent3d> {
+fn bbox(k: &Kernel, cone: &Cone, domain: &Extent2d) -> Result<Extent3d> {
     cone.rev()
         .base()
         .calculate_bounding_box(
+            k,
             domain,
             &BoundingBoxRequest {
                 normal: true,
@@ -231,9 +230,9 @@ fn add_plane_line(
     Ok(())
 }
 
-fn add_plane_ellipses(out: &mut SurfaceIntersection, curves: Vec<Curve>) -> Result<()> {
+fn add_plane_ellipses(k: &Kernel, out: &mut SurfaceIntersection, curves: Vec<Curve>) -> Result<()> {
     for curve in curves {
-        let kind = if curve.is_degenerate(EFF_ZERO, None)? {
+        let kind = if curve.is_degenerate(k, EFF_ZERO, None)? {
             TsectCurveType::Touching
         } else {
             TsectCurveType::Crossing
@@ -289,10 +288,11 @@ impl Cone {
     ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
         let tol = approx_tol.map_or(EFF_ZERO_SQRT, |t| approx_tol3d(k, t));
-        let box1 = bbox(self, domain)?;
+        let box1 = bbox(k, self, domain)?;
         let mut box2 = plane
             .base_with_nurb()?
             .calculate_bounding_box(
+                k,
                 other_domain,
                 &BoundingBoxRequest {
                     normal: true,
@@ -423,7 +423,7 @@ impl Cone {
                 &step.u_interval(),
                 tol,
             )?;
-            add_plane_ellipses(&mut out, curves)?;
+            add_plane_ellipses(k, &mut out, curves)?;
         } else {
             let cone_angle = (self.semi_angle_deg() * (PI / 180.0)).abs();
             let plane_angle = PI / 2.0 - angle.abs();
@@ -499,7 +499,7 @@ impl Cone {
                     &interval,
                     tol,
                 )?;
-                add_plane_ellipses(&mut out, curves)?;
+                add_plane_ellipses(k, &mut out, curves)?;
             }
         }
         Ok((false, out))
@@ -522,8 +522,8 @@ impl Cone {
         if core::ptr::eq(self, other) {
             return Ok((false, out));
         }
-        let box1 = bbox(self, domain)?;
-        let mut box2 = bbox(other, other_domain)?;
+        let box1 = bbox(k, self, domain)?;
+        let mut box2 = bbox(k, other, other_domain)?;
         let size = box2.size();
         let tol = approx_tol.map_or(EFF_ZERO_SQRT * (1.0 + size.length()), |t| {
             approx_tol3d(k, t)
@@ -717,7 +717,7 @@ impl Cone {
             }
             let count = out.curves_3d.len();
             for curve in degenerate {
-                let point = curve.evaluate_point(curve.natural_interval().min())?;
+                let point = curve.evaluate_point(k, curve.natural_interval().min())?;
                 let mut unique = true;
                 for existing in out.curves_3d.iter().take(count) {
                     if ellipse_contains(k, existing, point)? {
@@ -820,7 +820,7 @@ fn add_ellipse_intervals_trimmed_to_two_cones(
                     let point = center + rx * cos * x + y * sin * ry;
                     let mut unique = true;
                     for existing in degenerate.iter() {
-                        let old = existing.evaluate_point(existing.natural_interval().min())?;
+                        let old = existing.evaluate_point(k, existing.natural_interval().min())?;
                         let zero = EFF_ZERO * 100.0 * (1.0 * point.max_dimension());
                         if old.distance(point) < zero {
                             unique = false;

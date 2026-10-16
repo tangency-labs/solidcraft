@@ -379,7 +379,7 @@ fn push_string(o: &mut Vec<f64>, s: &str) {
     o.extend(s.bytes().map(f64::from));
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let op = op_of(&i.op)?;
     let srf = stand_in(i.surface.unwrap_or(UNIT_SQUARE))?;
     if op == Op::ReadDb {
@@ -413,12 +413,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             opposite: c.end.opposite,
         };
         return Ok(
-            match TangentField::create(c.tol, &base3d, &base_uv, &srf, start, end) {
+            match TangentField::create(k, c.tol, &base3d, &base_uv, &srf, start, end) {
                 Ok(f) => {
                     let ivl = f.natural_interval();
                     let mut o = vec![0.0];
-                    let a = f.evaluate_point(ivl.min());
-                    let b = f.evaluate_point(ivl.max());
+                    let a = f.evaluate_point(k, ivl.min());
+                    let b = f.evaluate_point(k, ivl.max());
                     match (a, b) {
                         (Ok(a), Ok(b)) => {
                             push3(&mut o, a);
@@ -458,7 +458,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             push_string(&mut o, a.type_string());
             push_string(&mut o, a.class_string());
         }
-        Op::Eval => match a.evaluate(i.t, i.n) {
+        Op::Eval => match a.evaluate(k, i.t, i.n) {
             Ok(v) => {
                 for p in v {
                     push3(&mut o, p);
@@ -466,7 +466,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             Err(e) => return Ok(fail(&e)),
         },
-        Op::EvalPoint => match a.evaluate_point(i.t) {
+        Op::EvalPoint => match a.evaluate_point(k, i.t) {
             Ok(p) => push3(&mut o, p),
             Err(e) => return Ok(fail(&e)),
         },
@@ -488,9 +488,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(e) => return Ok(fail(&e)),
             };
             let eq = if i.flags & 4 != 0 {
-                a.approx_eq(&a)
+                a.approx_eq(k, &a)
             } else {
-                a.approx_eq(&b)
+                a.approx_eq(k, &b)
             };
             match eq {
                 Ok(eq) => o.push(if eq { 1.0 } else { 0.0 }),
@@ -789,6 +789,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &solidcore::Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

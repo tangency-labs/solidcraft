@@ -562,14 +562,14 @@ enum Resolved {
 
 /// The edge curve's point at normalised edge parameter `nt` (`None` without curve or
 /// when it cannot be evaluated) and the parameter.
-fn edge_point(br: &Brep, e: EdgeId, nt: f64) -> Option<(f64, Vec3)> {
+fn edge_point(k: &Kernel, br: &Brep, e: EdgeId, nt: f64) -> Option<(f64, Vec3)> {
     let edge = br.edge(e).ok()?;
     let t = edge.interval.evaluate(nt);
-    let p = edge.curve.as_ref()?.evaluate_point(t).ok()?;
+    let p = edge.curve.as_ref()?.evaluate_point(k, t).ok()?;
     Some((t, p))
 }
 
-fn resolve(s: &Scene, op: &OpIn) -> Option<Resolved> {
+fn resolve(k: &Kernel, s: &Scene, op: &OpIn) -> Option<Resolved> {
     let n_e = s.brep.edges().len();
     let n_l = s.loop_eus.len();
     let eid = |i: usize| EdgeId::from_index(i as u32);
@@ -594,7 +594,7 @@ fn resolve(s: &Scene, op: &OpIn) -> Option<Resolved> {
         },
         OpIn::Closest { edge, nt, offset } => {
             let e = sel(edge, n_e)?;
-            let base = edge_point(&s.brep, eid(e), nt).map_or(Vec3::ZERO, |(_, p)| p);
+            let base = edge_point(k, &s.brep, eid(e), nt).map_or(Vec3::ZERO, |(_, p)| p);
             Resolved::Closest {
                 edge: e,
                 point: base + v3(offset),
@@ -619,7 +619,7 @@ fn resolve(s: &Scene, op: &OpIn) -> Option<Resolved> {
         } => {
             let id = *s.loop_eus.get(sel(eu, n_l)?)?;
             let e = s.brep.edgeuse(id).ok()?.edge?;
-            let (t, p) = edge_point(&s.brep, e, nt)?;
+            let (t, p) = edge_point(k, &s.brep, e, nt)?;
             Resolved::RadialCurve {
                 eu: id.index() as usize,
                 t,
@@ -701,7 +701,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    let Some(r) = resolve(&s, &i.op) else {
+    let Some(r) = resolve(&k, &s, &i.op) else {
         return Ok(no_entity());
     };
     let (op, args) = op_args(&r);
@@ -818,7 +818,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    let Some(r) = resolve(&s, &i.op) else {
+    let Some(r) = resolve(&k, &s, &i.op) else {
         return Ok(no_entity());
     };
     let br = &mut s.brep;

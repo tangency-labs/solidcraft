@@ -390,14 +390,14 @@ impl CrvInVolume {
     ///
     /// [`SolidError::Unported`] from the curve comparison or from comparing an
     /// unported volume kind (reached only when the flags and curves agree).
-    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
+    pub fn approx_eq(&self, k: &Kernel, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
             return Ok(true);
         }
         // check equivalence of these objects
         Ok(self.in_param_space == other.in_param_space
-            && self.curve.approx_eq(&other.curve)?
+            && self.curve.approx_eq(k, &other.curve)?
             && self.volume.approx_eq(&other.volume)?)
     }
 
@@ -445,6 +445,7 @@ impl CrvInVolume {
     /// [`SolidError::Unported`] from the volume.
     pub fn evaluate(
         &self,
+        k: &Kernel,
         t: f64,
         num_derivs: usize,
         from_left: bool,
@@ -456,7 +457,7 @@ impl CrvInVolume {
         // Curve eval - get param point
         let crv = self
             .curve
-            .evaluate(t, n_eval, from_left, non_zero_tangents)?;
+            .evaluate(k, t, n_eval, from_left, non_zero_tangents)?;
 
         // Volume Evaluate / Map - with fewer derivatives while the volume can't
         let mut vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
@@ -541,9 +542,9 @@ impl CrvInVolume {
     /// # Errors
     ///
     /// Those of the base curve's evaluation; [`SolidError::Unported`] from the volume.
-    pub fn evaluate_point(&self, t: f64) -> Result<Point3> {
+    pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
         // Curve eval - Get ParamSpace point
-        let p = self.curve.evaluate_point(t)?;
+        let p = self.curve.evaluate_point(k, t)?;
 
         // volume eval
         self.volume.map_point(p, true)?;
@@ -879,6 +880,7 @@ impl CrvInVolume {
     /// interior (`CInfinity` without interior breaks).
     fn continuities_at(
         &self,
+        k: &Kernel,
         breaks: &[f64],
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
@@ -899,7 +901,7 @@ impl CrvInVolume {
                 .get(ii)
                 .ok_or_else(|| SolidError::invalid_input(OP_CONTS, "no breaks"))?;
             // evaluate geometric continuities
-            let c = evaluate_continuity(self, t, true, self, t, false, angle_tol)?.continuity;
+            let c = evaluate_continuity(k, self, t, true, self, t, false, angle_tol)?.continuity;
             if let Some(d) = conts.get_mut(ii) {
                 *d = c;
             }
@@ -920,10 +922,11 @@ impl CrvInVolume {
     /// [`SolidError::InvalidInput`] without breaks.
     pub fn calculate_continuities(
         &mut self,
+        k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         let (breaks, _) = self.knots(None)?;
-        self.continuities_at(&breaks, angle_tol)
+        self.continuities_at(k, &breaks, angle_tol)
     }
 
     /// [`Self::calculate_continuities`] without storing the cache.
@@ -933,10 +936,11 @@ impl CrvInVolume {
     /// As [`Self::calculate_continuities`].
     pub fn calculate_continuities_ref(
         &self,
+        k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         let (breaks, _) = self.knots_ref(None)?;
-        self.continuities_at(&breaks, angle_tol)
+        self.continuities_at(k, &breaks, angle_tol)
     }
 
     // ---- editing --------------------------------------------------------------------
@@ -1169,16 +1173,17 @@ impl CurveEvaluate for CrvInVolume {
 
     fn evaluate(
         &self,
+        k: &Kernel,
         t: f64,
         num_derivs: usize,
         from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
-        Self::evaluate(self, t, num_derivs, from_left, non_zero_tangents)
+        Self::evaluate(self, k, t, num_derivs, from_left, non_zero_tangents)
     }
 
-    fn evaluate_point(&self, t: f64) -> Result<Point3> {
-        Self::evaluate_point(self, t)
+    fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
+        Self::evaluate_point(self, k, t)
     }
 }
 
@@ -1278,12 +1283,13 @@ mod tests {
 
     #[test]
     fn uncached_knots_are_unported() {
+        let k = &Kernel::default();
         let mut c = civ(3);
         assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
         // the bend volume evaluates (a default bend divides by its zero neutral
         // distance)
-        assert_eq!(c.evaluate(0.5, 2, true, true).unwrap().len(), 3);
-        assert!(c.evaluate_point(0.5).is_ok());
+        assert_eq!(c.evaluate(k, 0.5, 2, true, true).unwrap().len(), 3);
+        assert!(c.evaluate_point(k, 0.5).is_ok());
     }
 
     #[test]
@@ -1299,7 +1305,7 @@ mod tests {
         let mut d = cached(0);
         assert!(d.trim(&k, &mut ivl, TrimMode::Notify).is_err());
         assert!(d.reverse_parameterization(&k, &ivl).is_err());
-        let (min, conts) = cached(3).continuities_at(&[0.0, 1.0], 0.5).unwrap();
+        let (min, conts) = cached(3).continuities_at(&k, &[0.0, 1.0], 0.5).unwrap();
         assert_eq!(min, ContinuityType::CInfinity);
         assert_eq!(conts.len(), 2);
     }

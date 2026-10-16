@@ -1789,6 +1789,7 @@ impl<O: LoopObject> FaceProps<O> {
         // Closed pFace->Surface classification: m_bClosedU, m_bClosedV, m_eClosedValU,
         // m_eClosedValV
         let (closed_u, val_u) = surface.is_closed(
+            k,
             &self.natural_uv_domain,
             SurfParamType::U,
             Some(xsect_tol_3d),
@@ -1799,6 +1800,7 @@ impl<O: LoopObject> FaceProps<O> {
             self.closed_val_u = c;
         }
         let (closed_v, val_v) = surface.is_closed(
+            k,
             &self.natural_uv_domain,
             SurfParamType::V,
             Some(xsect_tol_3d),

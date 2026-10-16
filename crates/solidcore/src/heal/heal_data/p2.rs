@@ -545,12 +545,14 @@ impl EdgeProps {
         let curve = edge::curve(b, edge_id)?
             .ok_or_else(|| SolidError::invalid_input(OP_EDGE, "edge without curve"))?;
         self.has_curve = true;
-        self.approx_edge_length_3d = curve.approximate_length(&self.edge_interval, 5, false)?.0;
+        self.approx_edge_length_3d = curve
+            .approximate_length(k, &self.edge_interval, 5, false)?
+            .0;
         self.natural_interval = curve.natural_interval();
 
         // Bad Degen Edge
         self.bad_degen_edge =
-            Tri::from(curve.is_degenerate(approx_tol_3d, Some(&self.edge_interval))?);
+            Tri::from(curve.is_degenerate(k, approx_tol_3d, Some(&self.edge_interval))?);
 
         // Bad UnContained Edge
         self.bad_uncontained_edge = Tri::from(

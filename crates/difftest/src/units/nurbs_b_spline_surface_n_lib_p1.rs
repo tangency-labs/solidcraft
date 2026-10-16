@@ -873,7 +873,7 @@ fn fail(e: &SolidError) -> Fail {
 }
 
 /// Runs a member op; returns the flat record.
-fn rust_member(this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
+fn rust_member(k: &solidcore::kernel::Kernel, this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
     let mut o = vec![0.0];
     let new = |o: &mut Vec<f64>, r: solidcore::Result<BSplineSurface>| match r {
         Ok(s) => {
@@ -896,9 +896,9 @@ fn rust_member(this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, 
         } => {
             let cont = continuity_of(*cont)?;
             let r = if *dir_overload {
-                this.create_extended_surface_dir(param_of(*dir)?, *dist, cont)
+                this.create_extended_surface_dir(k, param_of(*dir)?, *dist, cont)
             } else {
-                this.create_extended_surface(*dist, cont)
+                this.create_extended_surface(k, *dist, cont)
             };
             new(&mut o, r)
         }
@@ -1167,11 +1167,11 @@ fn rust_static(op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
     Ok(res.map(|()| o))
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let res = match &i.this {
         Some(t) => {
             let mut this = this_of(t)?;
-            rust_member(&mut this, &i.op)?
+            rust_member(k, &mut this, &i.op)?
         }
         None => rust_static(&i.op)?,
     };
@@ -1812,6 +1812,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &solidcore::Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

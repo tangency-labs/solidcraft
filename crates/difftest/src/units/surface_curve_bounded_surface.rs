@@ -685,7 +685,7 @@ fn dump_bss(o: &mut Vec<f64>, s: &Surface) {
 }
 
 /// `put_curve`: type, dimension, interval, five points, then the B-spline data.
-fn dump_curve(o: &mut Vec<f64>, c: &SmCurve) {
+fn dump_curve(k: &Kernel, o: &mut Vec<f64>, c: &SmCurve) {
     o.push(c.type_code() as f64);
     o.push(c.dim() as f64);
     let ivl = c.natural_interval();
@@ -693,7 +693,7 @@ fn dump_curve(o: &mut Vec<f64>, c: &SmCurve) {
     o.extend([a, b]);
     for i in 0..=4 {
         let t = a + (b - a) * (f64::from(i) / 4.0);
-        match c.evaluate_point(t) {
+        match c.evaluate_point(k, t) {
             Ok(p) => {
                 o.push(0.0);
                 push3(o, p);
@@ -718,7 +718,7 @@ fn dump_curve(o: &mut Vec<f64>, c: &SmCurve) {
 }
 
 /// `put_state`: the type, then for a curve bounded surface its members.
-fn dump_state(o: &mut Vec<f64>, s: &Surface) {
+fn dump_state(k: &Kernel, o: &mut Vec<f64>, s: &Surface) {
     o.push(s.type_code() as f64);
     let SurfaceKind::CurveBounded(c) = s.kind() else {
         return;
@@ -728,7 +728,7 @@ fn dump_state(o: &mut Vec<f64>, s: &Surface) {
     for cs in [c.boundaries_3d(), c.boundaries_uv()] {
         o.push(cs.len() as f64);
         for x in cs {
-            dump_curve(o, x);
+            dump_curve(k, o, x);
         }
     }
 }
@@ -780,6 +780,7 @@ fn the_cbs(s: &Surface) -> solidcore::Result<&CurveBoundedSurface> {
         SurfaceKind::CurveBounded(c) => Ok(c),
         SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
+        | SurfaceKind::Cone(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -789,11 +790,11 @@ fn the_cbs(s: &Surface) -> solidcore::Result<&CurveBoundedSurface> {
     }
 }
 
-fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
+fn rust_surface_op(k: &Kernel, op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
     let mut s = cbs_of(this)?;
     let run = match op {
         OpIn::State => record(|o| {
-            dump_state(o, &s);
+            dump_state(k, o, &s);
             Ok(())
         }),
         OpIn::Eval {
@@ -811,11 +812,11 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
                 only_upper_half: *upper,
                 non_zero_tangents: *nzt,
             };
-            let d = s.evaluate(p2(*uv), *hu, *hv, flags)?;
+            let d = s.evaluate(k, p2(*uv), *hu, *hv, flags)?;
             push_matrix(o, &d, *hu, *hv, *upper)
         }),
         OpIn::EvalPt { uv } => record(|o| {
-            push3(o, s.evaluate_point(p2(*uv))?);
+            push3(o, s.evaluate_point(k, p2(*uv))?);
             Ok(())
         }),
         OpIn::Queries { types } => record(|o| {
@@ -840,32 +841,32 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
             let r = (|| -> solidcore::Result<()> {
                 o.push(st(s.knots(SurfParamType::U, None))?);
                 o.push(flag(s.is_parallel_to_vector(v)?));
-                push_dom(&mut o, &s.max_analytic_domain()?);
-                o.push(st(s.copy(&Kernel::default()))?);
-                o.push(st(s.copy_and_add_analytics(&Kernel::default()))?);
-                o.push(st(s.split_at(&Kernel::default(), 0.5, SurfParamType::U))?);
+                push_dom(&mut o, &s.max_analytic_domain(k)?);
+                o.push(st(s.copy())?);
+                o.push(st(s.copy_and_add_analytics(k))?);
+                o.push(st(s.split_at(0.5, SurfParamType::U))?);
                 o.push(st(s.reverse(&Kernel::default(), SurfParamType::U))?);
                 o.push(st(s.swap_uv(&Kernel::default()))?);
-                dump_state(&mut o, &s);
+                dump_state(k, &mut o, &s);
                 Ok(())
             })();
             r.map(|()| o)
         }
         OpIn::EqSelf => record(|o| {
-            o.push(flag(the_cbs(&s)?.approx_eq(&s)?));
+            o.push(flag(the_cbs(&s)?.approx_eq(k, &s)?));
             Ok(())
         }),
         OpIn::EqOther { other } => {
             let other = cbs_of(other)?;
             record(|o| {
-                o.push(flag(the_cbs(&s)?.approx_eq(&other)?));
+                o.push(flag(the_cbs(&s)?.approx_eq(k, &other)?));
                 Ok(())
             })
         }
         OpIn::Normal { uv, u_left, v_left } => record(|o| {
             push3(
                 o,
-                the_cbs(&s)?.evaluate_normal(p2(*uv), side(*u_left), side(*v_left))?,
+                the_cbs(&s)?.evaluate_normal(k, p2(*uv), side(*u_left), side(*v_left))?,
             );
             Ok(())
         }),
@@ -878,7 +879,7 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
             upper,
         } => record(|o| {
             let d = the_cbs(&s)?.evaluate_simple(
-                p2(*uv),
+                k, p2(*uv),
                 *hu,
                 *hv,
                 side(*u_left),
@@ -896,7 +897,7 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
             upper,
         } => record(|o| {
             let d = the_cbs(&s)?.evaluate_step(
-                p2(*uv),
+                k, p2(*uv),
                 *hu,
                 *hv,
                 side(*u_left),
@@ -913,7 +914,7 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
             Ok(())
         }),
         OpIn::Geometric { uv, u_left, v_left } => record(|o| {
-            let g = the_cbs(&s)?.evaluate_geometric(p2(*uv), side(*u_left), side(*v_left))?;
+            let g = the_cbs(&s)?.evaluate_geometric(k, p2(*uv), side(*u_left), side(*v_left))?;
             o.extend([
                 g.gaussian_curvature,
                 g.normal_curvature,
@@ -933,7 +934,7 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
             dir,
         } => record(|o| {
             let n = the_cbs(&s)?.evaluate_normal_section(
-                p2(*uv),
+                k, p2(*uv),
                 side(*u_left),
                 side(*v_left),
                 Vec3::new(dir[0], dir[1], dir[2]),
@@ -944,12 +945,12 @@ fn rust_surface_op(op: &OpIn, this: &CbsIn) -> Result<Run, HarnessError> {
             Ok(())
         }),
         OpIn::StepPt { uv } => record(|o| {
-            push3(o, the_cbs(&s)?.evaluate_step_point(p2(*uv))?);
+            push3(o, the_cbs(&s)?.evaluate_step_point(k, p2(*uv))?);
             Ok(())
         }),
         OpIn::SetContext => record(|o| {
             the_cbs(&s)?.set_context();
-            dump_state(o, &s);
+            dump_state(k, o, &s);
             Ok(())
         }),
         OpIn::ReadDb { .. } => return Err(harness("read_db is static")),
@@ -967,15 +968,15 @@ fn rust_read(op: &OpIn) -> Result<Run, HarnessError> {
     let k = Kernel::default();
     Ok(record(|o| {
         let s = Surface::read_from_db(&k, cbs::TYPE, &mut db, *version)?;
-        dump_state(o, &s);
+        dump_state(&k, o, &s);
         Ok(())
     }))
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let run = match (&i.op, &i.this) {
         (OpIn::ReadDb { .. }, _) => rust_read(&i.op)?,
-        (op, Some(t)) => rust_surface_op(op, t)?,
+        (op, Some(t)) => rust_surface_op(k, op, t)?,
         (_, None) => return Err(harness("surface op without this")),
     };
     Ok(match run {
@@ -1245,7 +1246,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }
 
@@ -1257,6 +1259,7 @@ mod tests {
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
+let k = &Kernel::default();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..1000u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);
@@ -1265,7 +1268,7 @@ mod tests {
                 continue;
             }
             let name = format!("{:?}", i.op.ffi());
-            let out = rust(&i).expect("harness");
+            let out = rust(k, &i).expect("harness");
             let kind = if let Some(d) = &out.deferred {
                 format!("deferred:{}", d.unit)
             } else {

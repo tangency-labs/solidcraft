@@ -168,7 +168,7 @@ fn index_i64(i: usize) -> Result<i64, HarnessError> {
     i64::try_from(i).map_err(|e| harness(&e))
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     match i {
         Inputs::Point { pts, target, tol } => {
             let pts: Vec<Point3> = pts.iter().copied().map(p3).collect();
@@ -223,7 +223,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 interval: Extent1d::from_min_max(0.0, 1.0),
                 tolerance: *tol,
             };
-            match tools::find_coincident_edge(&brep, &query, &edges, *start) {
+            match tools::find_coincident_edge(k, &brep, &query, &edges, *start) {
                 Ok(Some(m)) => Ok(coincident_out(
                     true,
                     m.same_orientation,
@@ -377,6 +377,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &solidcore::Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

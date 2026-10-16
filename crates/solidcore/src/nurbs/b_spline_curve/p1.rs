@@ -363,6 +363,7 @@ pub fn split_cubic_bezier(cp1: CPoint, cp2: CPoint, cp3: CPoint, cp4: CPoint) ->
 /// `SmCurve::EvaluateContinuity` of `this` at `this_param` against `other` at
 /// `other_param`.
 fn evaluate_continuity(
+    k: &crate::kernel::Kernel,
     this: &BSplineCurve,
     this_param: f64,
     this_from_left: bool,
@@ -372,6 +373,7 @@ fn evaluate_continuity(
     angle_tol: f64,
 ) -> Result<ContinuityType> {
     Ok(crate::curve::curve::p2::evaluate_continuity(
+        k,
         this,
         this_param,
         this_from_left,
@@ -384,13 +386,19 @@ fn evaluate_continuity(
 }
 
 /// `SmCurve::ApproximateLength` of `curve` over `interval` with `samples` samples.
-fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize) -> Result<f64> {
-    Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
+fn approximate_length(
+    k: &crate::kernel::Kernel,
+    curve: &BSplineCurve,
+    interval: &Extent1d,
+    samples: usize,
+) -> Result<f64> {
+    Ok(crate::curve::curve::p2::approximate_length(k, curve, interval, samples, false)?.0)
 }
 
 /// `SmCurve::TessellateByBisection` of `curve` (through the [`crate::curve::curve::Curve`]
 /// dispatch of its virtual queries, all B-spline overrides).
 fn tessellate_by_bisection(
+    k: &crate::kernel::Kernel,
     curve: &BSplineCurve,
     interval: &Extent1d,
     chord_height_tol: f64,
@@ -398,6 +406,7 @@ fn tessellate_by_bisection(
     max_length: f64,
 ) -> Result<Tessellation> {
     crate::curve::curve::Curve::from(curve.clone()).tessellate_by_bisection(
+        k,
         interval,
         chord_height_tol,
         angle_tol_deg,
@@ -860,21 +869,22 @@ impl BSplineCurve {
     /// `SM_ERR` without a NURB; those of `SmCurve::EvaluateContinuity`.
     pub fn calculate_continuities(
         &self,
+        k: &crate::kernel::Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         let (knots, _) = self.knots(None)?;
-        let k = knots.len();
-        if k == 0 {
+        let knot_count = knots.len();
+        if knot_count == 0 {
             return Err(invalid(OP_CONT, "no knots"));
         }
 
         // init output - 1 continuity for each knot, end continuity values discontinuous
-        let mut continuities = vec![ContinuityType::Discontinuous; k];
+        let mut continuities = vec![ContinuityType::Discontinuous; knot_count];
         let mut min_continuity = ContinuityType::CInfinity;
 
         // for every internal knot
-        for (i, &knot_val) in knots.iter().enumerate().take(k - 1).skip(1) {
-            let c = evaluate_continuity(self, knot_val, true, self, knot_val, false, angle_tol)?;
+        for (i, &knot_val) in knots.iter().enumerate().take(knot_count - 1).skip(1) {
+            let c = evaluate_continuity(k, self, knot_val, true, self, knot_val, false, angle_tol)?;
             if let Some(slot) = continuities.get_mut(i) {
                 *slot = c;
             }
@@ -1015,6 +1025,7 @@ impl BSplineCurve {
     /// ([`crate::curve::curve::Curve::tessellate_by_bisection`]).
     pub fn tessellate(
         &self,
+        k: &crate::kernel::Kernel,
         interval: &Extent1d,
         chord_height_tol: f64,
         angle_tol_deg: f64,
@@ -1022,13 +1033,20 @@ impl BSplineCurve {
     ) -> Result<Tessellation> {
         // init MaxLength control parameter
         let max_length = if min_segments > 1 {
-            approximate_length(self, interval, 5)? / (min_segments as f64)
+            approximate_length(k, self, interval, 5)? / (min_segments as f64)
         } else {
             0.0
         };
 
         // pass the call along
-        tessellate_by_bisection(self, interval, chord_height_tol, angle_tol_deg, max_length)
+        tessellate_by_bisection(
+            k,
+            self,
+            interval,
+            chord_height_tol,
+            angle_tol_deg,
+            max_length,
+        )
     }
 
     // ---- editing ----------------------------------------------------------------------
@@ -1727,6 +1745,7 @@ fn matrix_of(m: &[[f64; 4]; 4]) -> Result<RealMatrix> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Kernel;
 
     fn cubic() -> BSplineCurve {
         let pw = vec![
@@ -1821,11 +1840,13 @@ mod tests {
         let (k, m) = c.knots(None).unwrap();
         assert_eq!(k, vec![0.0, 0.5, 1.0]);
         assert_eq!(m, vec![4, 1, 4]);
-        let (min_c, conts) = c.calculate_continuities(1.0).unwrap();
+        let (min_c, conts) = c.calculate_continuities(&Kernel::default(), 1.0).unwrap();
         assert_eq!(conts.len(), 3);
         assert_eq!(conts[0], ContinuityType::Discontinuous);
         assert_eq!(conts[1], min_c);
-        let t = c.tessellate(&c.natural_interval(), 0.1, 10.0, 0).unwrap();
+        let t = c
+            .tessellate(&Kernel::default(), &c.natural_interval(), 0.1, 10.0, 0)
+            .unwrap();
         assert_eq!(t.parameters.first().copied(), Some(0.0));
         assert_eq!(t.parameters.last().copied(), Some(1.0));
     }

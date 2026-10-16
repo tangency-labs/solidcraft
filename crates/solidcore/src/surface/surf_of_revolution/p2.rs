@@ -349,7 +349,7 @@ impl SurfOfRevolution {
         let mut gen = self.gen()?.clone();
         let mut ivl = gen_step_interval(&gen)?;
         if self.is_out_of_bounds_enabled() {
-            ivl = gen_max_analytic_domain(&gen)?;
+            ivl = gen_max_analytic_domain(k, &gen)?;
             if let Some(b) = gen_base_mut(&mut gen) {
                 b.set_out_of_bounds_enabled(true);
             }
@@ -377,7 +377,7 @@ impl SurfOfRevolution {
 
         // for points on closed genCurve seams - update point classification
         if solutions.len() > 1
-            && gen.is_closed(&ivl, tol_3d)?
+            && gen.is_closed(k, &ivl, tol_3d)?
             && ivl.is_value_on_boundary(v, EFF_ZERO).0
         {
             location = match location {
@@ -603,6 +603,13 @@ impl SurfOfRevolution {
                 need_nurb_intersection = more;
                 out = found;
             }
+            SurfaceKind::Cone(_) => {
+                // DISPATCH GAP (#76): preserve SmCone/SmCylinder for the #131 adapter.
+                return Err(SolidError::unported(
+                    "SmSurfOfRevolution::IntersectWithCone dispatch",
+                    "surface.cone_p3",
+                ));
+            }
             SurfaceKind::SurfOfRevolution(o) => {
                 let (more, found) = self.intersect_with_surf_of_revolution(
                     k,
@@ -681,7 +688,9 @@ impl SurfOfRevolution {
                 plane_base = p.base_for_query();
                 &plane_base
             }
-            SurfaceKind::SurfOfRevolution(_)
+
+            SurfaceKind::Cone(_)
+            | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
@@ -767,7 +776,7 @@ impl SurfOfRevolution {
             .curve;
 
         // no work - GenCurve is degenerate
-        if iso_crv.is_degenerate(scaled_zero, None)? {
+        if iso_crv.is_degenerate(k, scaled_zero, None)? {
             return Ok(None);
         }
 
@@ -776,7 +785,7 @@ impl SurfOfRevolution {
         let linear_tol =
             EFF_ZERO * (1.0 + crate::math::max2(min_pnt.max_dimension(), max_pnt.max_dimension()));
         let planar = iso_curve.is_planar(k, scaled_zero)?;
-        let linear = iso_curve.is_linear(linear_tol, false)?;
+        let linear = iso_curve.is_linear(k, linear_tol, false)?;
         let is_linear = linear.linear;
 
         // verify that plane containing genCurve also contains refFrame Z axis

@@ -966,7 +966,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
             st(o, a.notify(k, n))?;
         }
         OpJ::IsArc => {
-            if let Some(arc) = st(o, a.is_arc(5, 1e-6))? {
+            if let Some(arc) = st(o, a.is_arc(k, 5, 1e-6))? {
                 let (f, r, s0, s1) = arc.ok_or_else(|| harness("circle without arc"))?;
                 o.push(1.0);
                 put_vec(o, f.origin());

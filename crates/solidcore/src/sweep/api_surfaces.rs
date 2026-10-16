@@ -293,7 +293,7 @@ pub fn create_surface_revolution(
 ///
 /// `InvalidInput` for fewer than two profiles; those of
 /// [`BSplineSurface::create_skinned_surface`].
-pub fn create_skin(profiles: &[BSplineCurve]) -> Result<BSplineSurface> {
+pub fn create_skin(k: &Kernel, profiles: &[BSplineCurve]) -> Result<BSplineSurface> {
     if profiles.len() < 2 {
         return Err(SolidError::invalid_input(
             OP_SKIN,
@@ -302,6 +302,7 @@ pub fn create_skin(profiles: &[BSplineCurve]) -> Result<BSplineSurface> {
     }
 
     BSplineSurface::create_skinned_surface(
+        k,
         profiles,
         SkinnedSurfaceOptions {
             synchronized: false,
@@ -348,15 +349,16 @@ mod tests {
 
     #[test]
     fn skin_needs_two_profiles() {
+        let k = &Kernel::default();
         let one = [api_curves::create_circle(Point3::new(0.0, 0.0, 0.0), 5.0).expect("c")];
         assert!(matches!(
-            create_skin(&one),
+            create_skin(k, &one),
             Err(SolidError::InvalidInput { .. })
         ));
         let three = [0.0, 5.0, 10.0].map(|z| {
             api_curves::create_circle(Point3::new(0.0, 0.0, z), 5.0 - z / 5.0).expect("c")
         });
-        assert!(create_skin(&three).is_ok());
+        assert!(create_skin(k, &three).is_ok());
     }
 
     #[test]

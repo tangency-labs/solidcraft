@@ -103,14 +103,19 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 /// `Evaluate(uv, 2, 2, TRUE, TRUE, TRUE, ..)` into the upper half of `eval`; the
 /// other entries are left as they are.
-fn evaluate_upper_2(surface: &Surface, uv: Point2, eval: &mut [[Vec3; 3]; 3]) -> Result<()> {
+fn evaluate_upper_2(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    eval: &mut [[Vec3; 3]; 3],
+) -> Result<()> {
     let flags = EvaluateFlags {
         u_side: Side::Left,
         v_side: Side::Left,
         only_upper_half: true,
         non_zero_tangents: true,
     };
-    let d = surface.evaluate(uv, 2, 2, flags)?;
+    let d = surface.evaluate(k, uv, 2, 2, flags)?;
     for (i, row) in eval.iter_mut().enumerate() {
         for (j, slot) in row.iter_mut().enumerate() {
             if i + j <= 2 {
@@ -124,41 +129,45 @@ fn evaluate_upper_2(surface: &Surface, uv: Point2, eval: &mut [[Vec3; 3]; 3]) ->
 }
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, ..)` (virtual).
-fn evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
-    surface.evaluate_normal(uv, Side::Left, Side::Left)
+fn evaluate_normal(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(k, uv, Side::Left, Side::Left)
 }
 
 /// `SmSurface::EvaluateGeometric(uv, TRUE, TRUE, ..)` (no plane override).
-fn evaluate_geometric_at(surface: &Surface, uv: Point2) -> Result<GeometricProperties> {
+fn evaluate_geometric_at(k: &Kernel, surface: &Surface, uv: Point2) -> Result<GeometricProperties> {
     match surface.kind() {
-        SurfaceKind::CurveBounded(s) => s.evaluate_geometric(uv, Side::Left, Side::Left),
-        SurfaceKind::BSpline(_)
+        SurfaceKind::CurveBounded(s) => s.evaluate_geometric(k, uv, Side::Left, Side::Left),
+
+        SurfaceKind::Cone(_)
+        | SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
-        | SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::SrfInVolume(_) => surface.evaluate_geometric(uv, Side::Left, Side::Left),
+        | SurfaceKind::SrfInVolume(_) => surface.evaluate_geometric(k, uv, Side::Left, Side::Left),
     }
 }
 
 /// `SmSurface::EvaluateNormalSection(uv, TRUE, TRUE, direction, ..)` (no plane
 /// override).
 fn evaluate_normal_section(
+    k: &Kernel,
     surface: &Surface,
     uv: Point2,
     direction: Vec3,
 ) -> Result<NormalSection> {
     match surface.kind() {
         SurfaceKind::CurveBounded(s) => {
-            s.evaluate_normal_section(uv, Side::Left, Side::Left, direction)
+            s.evaluate_normal_section(k, uv, Side::Left, Side::Left, direction)
         }
-        SurfaceKind::BSpline(_)
+
+        SurfaceKind::Cone(_)
+        | SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
-            let n = surface.evaluate_normal_section(uv, Side::Left, Side::Left, direction)?;
+            let n = surface.evaluate_normal_section(k, uv, Side::Left, Side::Left, direction)?;
             Ok(NormalSection {
                 tangent_plane_direction: n.tangent,
                 curvature: n.curvature,
@@ -169,8 +178,8 @@ fn evaluate_normal_section(
 }
 
 /// `SmSurface::DropVectors(uv, TRUE, TRUE, 1, &vector, &uv_vector)` (no override).
-fn surface_drop_vector(surface: &Surface, uv: Point2, vector: Vec3) -> Result<Vec2> {
-    drop_vectors_at(surface, uv, Side::Left, Side::Left, &[vector])?
+fn surface_drop_vector(k: &Kernel, surface: &Surface, uv: Point2, vector: Vec3) -> Result<Vec2> {
+    drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &[vector])?
         .first()
         .copied()
         .ok_or(SolidError::sm_err(OP_DROP))
@@ -190,6 +199,9 @@ fn fold_angle(a: f64) -> f64 {
 /// line to the eye point (perspective projection).
 #[derive(Debug, Clone)]
 pub struct SurfaceSilhouette<'s> {
+    /// Caller context for virtual evaluations.
+    pub kernel: &'s Kernel,
+
     /// The `SmSurfaceTracer` base members.
     pub base: SurfaceTracer<'s>,
     /// `m_bPerspective`: `eye` is an eye point (else a view direction).
@@ -207,17 +219,19 @@ impl<'s> SurfaceSilhouette<'s> {
     ///
     /// Those of [`SurfaceTracer::new`].
     pub fn new(
+        k: &'s Kernel,
         surface: &'s Surface,
         uv_domain: &Extent2d,
         perspective: bool,
         eye: Vec3,
     ) -> Result<Self> {
-        let base = SurfaceTracer::new(surface, uv_domain)?;
+        let base = SurfaceTracer::new(k, surface, uv_domain)?;
         let mut eye = eye;
         if !perspective {
             eye = eye.unitize_or_z();
         }
         Ok(Self {
+            kernel: k,
             base,
             perspective,
             eye,
@@ -245,13 +259,13 @@ impl<'s> SurfaceSilhouette<'s> {
         refine: bool,
     ) -> Result<bool> {
         let surface = self.surface();
-        let normal = match evaluate_normal(surface, *uv) {
+        let normal = match evaluate_normal(k, surface, *uv) {
             Ok(n) => n,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => return Ok(true),
         };
         let vec = if self.perspective {
-            let pnt = match surface.evaluate_point(*uv) {
+            let pnt = match surface.evaluate_point(k, *uv) {
                 Ok(p) => p,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) => return Ok(true),
@@ -269,13 +283,13 @@ impl<'s> SurfaceSilhouette<'s> {
         let pnt1 = TracePoint::new();
         let found = ignored(self.local_point_solve(k, &pnt1, *uv))?.flatten();
         if let Some(found_uv) = found {
-            let normal2 = match evaluate_normal(surface, found_uv) {
+            let normal2 = match evaluate_normal(k, surface, found_uv) {
                 Ok(n) => n,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) => return Ok(true),
             };
             if self.perspective {
-                let pnt = match surface.evaluate_point(found_uv) {
+                let pnt = match surface.evaluate_point(k, found_uv) {
                     Ok(p) => p,
                     Err(e) if e.is_unported() => return Err(e),
                     Err(_) => return Ok(true),
@@ -348,6 +362,7 @@ impl<'s> SurfaceSilhouette<'s> {
     /// `smsurf_EvaluateGeometric`, `AngleBetween` and `smsurf_DropVectors`.
     pub fn compute_point_values(
         &self,
+        k: &Kernel,
         uv: Point2,
         pnt: &mut TracePoint,
         prev: Option<&TracePoint>,
@@ -356,12 +371,12 @@ impl<'s> SurfaceSilhouette<'s> {
         let ang_tol = self.base.ang_tol_rad;
 
         // Evaluate the surface, 2 derivs, into the surface matrix.
-        evaluate_upper_2(surface, uv, &mut pnt.surface)?;
+        evaluate_upper_2(k, surface, uv, &mut pnt.surface)?;
 
         // Store a unitized surface normal in [2][2].
         let mut norm = pnt.surface[1][0].cross(pnt.surface[0][1]);
         if norm.length_squared() < EFF_ZERO_SQ {
-            norm = evaluate_normal(surface, uv)?;
+            norm = evaluate_normal(k, surface, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
                 return Err(SolidError::sm_err(OP_CPV));
             }
@@ -439,8 +454,15 @@ impl<'s> SurfaceSilhouette<'s> {
                 {
                     // Here we need to minimize GAUSS between surface points.
                     let prev_uv = prev.curve_uv[0];
-                    let mut efo =
-                        FindSilSingEfo::new(surface, prev_uv, uv, true, self.perspective, self.eye);
+                    let mut efo = FindSilSingEfo::new(
+                        k,
+                        surface,
+                        prev_uv,
+                        uv,
+                        true,
+                        self.perspective,
+                        self.eye,
+                    );
                     let ivl = Extent1d::from_min_max(0.0, 1.0);
                     let mut ls = LocalSolve1d::with_interval(ivl, false);
                     match ls.solve_it(&mut efo, 0.5, 1.0e-8) {
@@ -450,11 +472,11 @@ impl<'s> SurfaceSilhouette<'s> {
                             // Found an answer in the solver -- use that new parameter
                             // and recompute the point values.
                             let s_uv = prev_uv + outcome.t * (uv - prev_uv);
-                            let g2 = evaluate_geometric_at(surface, s_uv)?;
+                            let g2 = evaluate_geometric_at(k, surface, s_uv)?;
 
                             let mut r2 = r;
                             if self.perspective {
-                                let srf_pnt = surface.evaluate_point(s_uv)?;
+                                let srf_pnt = surface.evaluate_point(k, s_uv)?;
                                 r2 = srf_pnt - self.eye;
                             }
 
@@ -469,7 +491,7 @@ impl<'s> SurfaceSilhouette<'s> {
                             if angle1 < ang_tol / 100.0 || angle2 < ang_tol / 100.0 {
                                 pnt.curve_3d[1] = prev.curve_3d[1];
                                 pnt.point_type = TracePointType::Singularity;
-                                self.compute_point_values(s_uv, pnt, None)?;
+                                self.compute_point_values(k, s_uv, pnt, None)?;
                                 return Ok(());
                             }
                         }
@@ -503,7 +525,7 @@ impl<'s> SurfaceSilhouette<'s> {
                         pnt.point_type = TracePointType::Singularity;
                         pnt.curve_3d[1] = prev.curve_3d[1];
                         // simple evaluation without singularity checking
-                        self.compute_point_values(uv, pnt, None)?;
+                        self.compute_point_values(k, uv, pnt, None)?;
                         return Ok(());
                     }
 
@@ -512,6 +534,7 @@ impl<'s> SurfaceSilhouette<'s> {
                     // convergence outside of [0,1].
                     let prev_uv = prev.curve_uv[0];
                     let mut efo = FindSilSingEfo::new(
+                        k,
                         surface,
                         prev_uv,
                         uv,
@@ -545,7 +568,7 @@ impl<'s> SurfaceSilhouette<'s> {
                                 // tangent in the recursive evaluation.
                                 pnt.point_type = TracePointType::Singularity;
                                 pnt.curve_3d[1] = prev.curve_3d[1];
-                                self.compute_point_values(uv, pnt, None)?;
+                                self.compute_point_values(k, uv, pnt, None)?;
                                 pnt.point_type = TracePointType::Normal;
                             } else {
                                 // Found the singular point: interpolate from the
@@ -572,7 +595,7 @@ impl<'s> SurfaceSilhouette<'s> {
                                 } else if dot < -0.995 {
                                     pnt.curve_3d[1] = -r * tan_mag;
                                 }
-                                self.compute_point_values(s_uv, pnt, None)?;
+                                self.compute_point_values(k, s_uv, pnt, None)?;
                             }
                             return Ok(());
                         }
@@ -666,13 +689,13 @@ impl<'s> SurfaceSilhouette<'s> {
         // First check serendipity: evaluate the function at the guess (clamped), with
         // the two derivatives the main algorithm needs.
         let mut eval = [[Vec3::ZERO; 3]; 3];
-        evaluate_upper_2(surface, s_uv, &mut eval)?;
+        evaluate_upper_2(k, surface, s_uv, &mut eval)?;
         let mut normal = eval[1][0].cross(eval[0][1]);
 
         // If cross product is zero, try to get the normal another way, and then use
         // that to make sure that the derivatives are not zero.
         if normal.length_squared() < EFF_ZERO_SQ {
-            normal = evaluate_normal(surface, s_uv)?;
+            normal = evaluate_normal(k, surface, s_uv)?;
             if normal.length_squared() < EFF_ZERO_SQ {
                 return Err(SolidError::sm_err(OP));
             }
@@ -731,7 +754,7 @@ impl<'s> SurfaceSilhouette<'s> {
         let pnt = eval[0][0];
 
         let mut normal_plane_vec = tan_vec.cross(normal);
-        let section = evaluate_normal_section(surface, s_uv, normal_plane_vec)?;
+        let section = evaluate_normal_section(k, surface, s_uv, normal_plane_vec)?;
         let tangent_plane_dir = section.tangent_plane_direction;
         let mut curvature = section.curvature;
         normal = section.normal;
@@ -775,7 +798,7 @@ impl<'s> SurfaceSilhouette<'s> {
             step_3d = step_3d.unitize()?;
             step_3d *= approx_tol;
         }
-        let mut uv_step = surface_drop_vector(surface, s_uv, step_3d)?;
+        let mut uv_step = surface_drop_vector(k, surface, s_uv, step_3d)?;
         if clamp_u {
             uv_step.x = 0.0;
         }
@@ -821,9 +844,9 @@ impl<'s> SurfaceSilhouette<'s> {
         }
         uv_new1 = domain.clamp_point(uv_new1);
         uv_new2 = domain.clamp_point(uv_new2);
-        let normal1 = evaluate_normal(surface, uv_new1)?;
+        let normal1 = evaluate_normal(k, surface, uv_new1)?;
         let mut fb = r.dot(normal1);
-        let normal2 = evaluate_normal(surface, uv_new2)?;
+        let normal2 = evaluate_normal(k, surface, uv_new2)?;
         let mut fc = r.dot(normal2);
 
         // First check to see if we found answer without any iteration.
@@ -869,9 +892,9 @@ impl<'s> SurfaceSilhouette<'s> {
                 uv_new = s_uv + uv_step * x;
             }
             uv_new = domain.clamp_point(uv_new);
-            let norm = evaluate_normal(surface, uv_new)?;
+            let norm = evaluate_normal(k, surface, uv_new)?;
             if self.perspective {
-                let pt = surface.evaluate_point(uv_new)?;
+                let pt = surface.evaluate_point(k, uv_new)?;
                 r = pt - self.eye;
             }
             let fx = r.dot(norm);
@@ -953,6 +976,7 @@ impl<'s> SurfaceSilhouette<'s> {
     /// Those of the branch lookup; [`SolidError::Unported`] from the polar box build.
     pub fn branch_may_contain_answers<O: SolutionObject>(
         &self,
+        k: &Kernel,
         solver: &GlobalSolver<'_, O>,
         cache: &SurfaceCache<O>,
         branch: &Branch,
@@ -966,7 +990,7 @@ impl<'s> SurfaceSilhouette<'s> {
                 return Ok(None);
             };
             let pseudo_box = *cache.patch(id)?.pseudo_box();
-            let polar_box = cache.polar_box_unstored(id)?;
+            let polar_box = cache.polar_box_unstored(k, id)?;
             Ok(Some((polar_box, pseudo_box)))
         })
     }
@@ -991,7 +1015,7 @@ impl<'s> SurfaceTrace<'s> for SurfaceSilhouette<'s> {
     ) -> Result<()> {
         let _ = step_size;
         let _ = k;
-        SurfaceSilhouette::compute_point_values(self, uv, pnt, prev)
+        SurfaceSilhouette::compute_point_values(self, k, uv, pnt, prev)
     }
 
     fn local_point_solve(
@@ -1027,7 +1051,7 @@ impl<'s> SurfaceTrace<'s> for SurfaceSilhouette<'s> {
         cache: &SurfaceCache<O>,
         branch: &Branch,
     ) -> Result<bool> {
-        SurfaceSilhouette::branch_may_contain_answers(self, solver, cache, branch)
+        SurfaceSilhouette::branch_may_contain_answers(self, self.kernel, solver, cache, branch)
     }
 }
 
@@ -1037,6 +1061,9 @@ impl<'s> SurfaceTrace<'s> for SurfaceSilhouette<'s> {
 /// direction; the derivative is a forward difference with step `1e-8`.
 #[derive(Debug, Clone, Copy)]
 pub struct FindSilSingEfo<'a> {
+    /// Caller context for virtual evaluations.
+    pub kernel: &'a Kernel,
+
     /// `m_crSurface`.
     pub surface: &'a Surface,
     /// `m_crUVStart`.
@@ -1055,6 +1082,7 @@ impl<'a> FindSilSingEfo<'a> {
     /// `SmFindSilSingEFO(crSurface, crUVStart, crUVEnd, bZeroGauss, bPerspective, crEye)`.
     #[must_use]
     pub const fn new(
+        k: &'a Kernel,
         surface: &'a Surface,
         uv_start: Point2,
         uv_end: Point2,
@@ -1063,6 +1091,7 @@ impl<'a> FindSilSingEfo<'a> {
         eye: Point3,
     ) -> Self {
         Self {
+            kernel: k,
             surface,
             uv_start,
             uv_end,
@@ -1078,19 +1107,19 @@ impl<'a> FindSilSingEfo<'a> {
     /// # Errors
     ///
     /// `SM_ERR` for an eye point on the surface; those of the evaluations.
-    pub fn evaluate_into(&self, t: f64, out: &mut FunctionValue) -> Result<()> {
+    pub fn evaluate_into(&self, k: &Kernel, t: f64, out: &mut FunctionValue) -> Result<()> {
         // init output
         out.f = 0.0;
         out.f_prime = 0.0;
         out.found_answer = false;
 
         let uv = self.uv_start + t * (self.uv_end - self.uv_start);
-        let g1 = evaluate_geometric_at(self.surface, uv)?;
+        let g1 = evaluate_geometric_at(k, self.surface, uv)?;
 
         if self.zero_gauss {
             out.f = g1.gaussian_curvature;
             let uv2 = self.uv_start + (t + 1.0e-8) * (self.uv_end - self.uv_start);
-            let g2 = evaluate_geometric_at(self.surface, uv2)?;
+            let g2 = evaluate_geometric_at(k, self.surface, uv2)?;
             out.f_prime = (g2.gaussian_curvature - g1.gaussian_curvature) / 1.0e-8;
             if out.f.abs() < EFF_ZERO_SQ {
                 out.found_answer = true;
@@ -1098,7 +1127,7 @@ impl<'a> FindSilSingEfo<'a> {
         } else {
             let mut r = self.eye;
             if self.perspective {
-                let pnt = self.surface.evaluate_point(uv)?;
+                let pnt = self.surface.evaluate_point(k, uv)?;
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
@@ -1110,9 +1139,9 @@ impl<'a> FindSilSingEfo<'a> {
             }
             out.f = dot1;
             let uv2 = self.uv_start + (t + 1.0e-8) * (self.uv_end - self.uv_start);
-            let g2 = evaluate_geometric_at(self.surface, uv2)?;
+            let g2 = evaluate_geometric_at(k, self.surface, uv2)?;
             if self.perspective {
-                let pnt = self.surface.evaluate_point(uv2)?;
+                let pnt = self.surface.evaluate_point(k, uv2)?;
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
@@ -1134,8 +1163,9 @@ impl<'a> FindSilSingEfo<'a> {
 
 impl EvalFunction for FindSilSingEfo<'_> {
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, signal_errors: bool) -> Result<()> {
+        let k = self.kernel;
         let _ = signal_errors;
-        self.evaluate_into(t, out)
+        self.evaluate_into(k, t, out)
     }
 }
 
@@ -1156,13 +1186,14 @@ mod tests {
 
     #[test]
     fn constructor_unitizes_view_direction() {
+        let k = &Kernel::default();
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(0.0, 3.0, 4.0)).unwrap();
+        let t = SurfaceSilhouette::new(k, &s, &d, false, Vec3::new(0.0, 3.0, 4.0)).unwrap();
         assert!((t.eye.length() - 1.0).abs() < 1e-15);
-        let z = SurfaceSilhouette::new(&s, &d, false, Vec3::ZERO).unwrap();
+        let z = SurfaceSilhouette::new(k, &s, &d, false, Vec3::ZERO).unwrap();
         assert_eq!(z.eye, Vec3::Z);
-        let p = SurfaceSilhouette::new(&s, &d, true, Vec3::new(0.0, 3.0, 4.0)).unwrap();
+        let p = SurfaceSilhouette::new(k, &s, &d, true, Vec3::new(0.0, 3.0, 4.0)).unwrap();
         assert_eq!(p.eye, Vec3::new(0.0, 3.0, 4.0));
         assert!(is_kind_of(TYPE));
         assert!(is_kind_of(crate::intersect::surface_tracer::TYPE));
@@ -1175,30 +1206,31 @@ mod tests {
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
         let k = Kernel::default();
         // viewed edge-on: every point is a silhouette point
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let t = SurfaceSilhouette::new(&k, &s, &d, false, Vec3::new(1.0, 0.0, 0.0)).unwrap();
         let mut uv = Vec2::new(2.0, 3.0);
         assert!(t.does_point_lie_on_curve(&k, &mut uv, false).unwrap());
         // viewed from above: none is
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(0.0, 0.0, 1.0)).unwrap();
+        let t = SurfaceSilhouette::new(&k, &s, &d, false, Vec3::new(0.0, 0.0, 1.0)).unwrap();
         assert!(!t.does_point_lie_on_curve(&k, &mut uv, false).unwrap());
         // perspective eye on the plane's line of sight
-        let t = SurfaceSilhouette::new(&s, &d, true, Vec3::new(2.0, 3.0, 5.0)).unwrap();
+        let t = SurfaceSilhouette::new(&k, &s, &d, true, Vec3::new(2.0, 3.0, 5.0)).unwrap();
         assert!(!t.does_point_lie_on_curve(&k, &mut uv, false).unwrap());
     }
 
     #[test]
     fn plane_point_values_without_tangent_fail() {
+        let k = &Kernel::default();
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
         // the silhouette function is constant: no direction, no previous point
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(0.3, 0.2, 1.0)).unwrap();
+        let t = SurfaceSilhouette::new(k, &s, &d, false, Vec3::new(0.3, 0.2, 1.0)).unwrap();
         let mut p = TracePoint::new();
-        let r = t.compute_point_values(Vec2::new(1.0, 1.0), &mut p, None);
+        let r = t.compute_point_values(k, Vec2::new(1.0, 1.0), &mut p, None);
         assert!(r.is_err());
         // eye point on the surface
-        let t = SurfaceSilhouette::new(&s, &d, true, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        let t = SurfaceSilhouette::new(k, &s, &d, true, Vec3::new(1.0, 1.0, 0.0)).unwrap();
         let mut p = TracePoint::new();
-        let r = t.compute_point_values(Vec2::new(1.0, 1.0), &mut p, None);
+        let r = t.compute_point_values(k, Vec2::new(1.0, 1.0), &mut p, None);
         assert!(r.is_err());
     }
 
@@ -1207,13 +1239,13 @@ mod tests {
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
         let k = Kernel::default();
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        let t = SurfaceSilhouette::new(&k, &s, &d, false, Vec3::new(0.0, 1.0, 0.0)).unwrap();
         let r = t
             .local_point_solve(&k, &TracePoint::new(), Vec2::new(12.0, -1.0))
             .unwrap();
         assert_eq!(r, Some(Vec2::new(10.0, 0.0)));
         // off the silhouette: the uv direction vanishes on a plane
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(0.0, 1.0, 1.0)).unwrap();
+        let t = SurfaceSilhouette::new(&k, &s, &d, false, Vec3::new(0.0, 1.0, 1.0)).unwrap();
         let r = t
             .local_point_solve(&k, &TracePoint::new(), Vec2::new(1.0, 1.0))
             .unwrap();
@@ -1222,9 +1254,10 @@ mod tests {
 
     #[test]
     fn patch_culling() {
+        let k = &Kernel::default();
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
-        let t = SurfaceSilhouette::new(&s, &d, false, Vec3::new(0.0, 0.0, 1.0)).unwrap();
+        let t = SurfaceSilhouette::new(k, &s, &d, false, Vec3::new(0.0, 0.0, 1.0)).unwrap();
         let mut pb = PolarBox::new();
         pb.add_vector(Vec3::new(0.0, 0.0, 1.0), None);
         let ps = PseudoBox::new();
@@ -1248,11 +1281,12 @@ mod tests {
 
     #[test]
     fn wired_callees_do_not_defer() {
+        let k = &Kernel::default();
         let s = plane();
-        let efo = FindSilSingEfo::new(&s, Vec2::ZERO, Vec2::new(1.0, 1.0), true, false, Vec3::Z);
+        let efo = FindSilSingEfo::new(k, &s, Vec2::ZERO, Vec2::new(1.0, 1.0), true, false, Vec3::Z);
         let mut out = FunctionValue::default();
         assert!(!efo
-            .evaluate_into(0.5, &mut out)
+            .evaluate_into(k, 0.5, &mut out)
             .err()
             .is_some_and(|e| e.is_unported()));
     }

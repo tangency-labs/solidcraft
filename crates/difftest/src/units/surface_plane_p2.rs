@@ -760,14 +760,14 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
     match i {
         Inputs::Offset { a, dist } => {
             let a = rust_plane(a)?;
-            if let Some(p) = st(o, a.create_offset_surface(*dist))? {
+            if let Some(p) = st(o, a.create_offset_surface(k, *dist))? {
                 put_state(o, &p);
             }
         }
         Inputs::Transform { a, frame, scale } => {
             let mut a = rust_plane(a)?;
             let f = Axis2Placement::new(v3(frame[0]), v3(frame[1]), v3(frame[2]));
-            st(o, a.transform(&f, scale.map(v3)))?;
+            st(o, a.transform(k, &f, scale.map(v3)))?;
             put_state(o, &a);
         }
         Inputs::TrimDomain { a, dom } => {
@@ -778,7 +778,7 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
         Inputs::IsNurbPlane { s, scale } => {
             let s = rust_surface(s)?;
             o.push(0.0);
-            match defer(Plane::is_nurb_surface_plane(&s, *scale))? {
+            match defer(Plane::is_nurb_surface_plane(k, &s, *scale))? {
                 Ok(Some(p)) => {
                     o.extend([1.0, 1.0]);
                     put_state(o, &p);
@@ -828,7 +828,7 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                     }
                 };
                 let other_ref = other.as_ref().unwrap_or(&a);
-                let r = a.intersect_with_plane(&ext(*da), other_ref, &ext(*db), tol);
+                let r = a.intersect_with_plane(k, &ext(*da), other_ref, &ext(*db), tol);
                 if let Some((more, x)) = st(o, r)? {
                     o.push(fl(more));
                     put_intersection(o, &x)?;

@@ -132,8 +132,8 @@ fn has_dup<T: PartialEq>(v: &[T]) -> bool {
 }
 
 /// Whether the mid tangent of the proto edge evaluates (the shim's `pe_tangent_ok`).
-fn pe_tangent_ok(r: &ProtoRun, pe: ProtoEdgeId) -> Result<bool, Fail> {
-    match r.mgr.proto_edge_evaluate_mid(&r.pool, pe, false, true) {
+fn pe_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, pe: ProtoEdgeId) -> Result<bool, Fail> {
+    match r.mgr.proto_edge_evaluate_mid(k, &r.pool, pe, false, true) {
         Ok(_) => Ok(true),
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
@@ -143,11 +143,11 @@ fn pe_tangent_ok(r: &ProtoRun, pe: ProtoEdgeId) -> Result<bool, Fail> {
 }
 
 /// Whether the mid tangent of the definition evaluates (the shim's `ed_tangent_ok`).
-fn ed_tangent_ok(r: &ProtoRun, ed: solidcore::topology::proto_topology::p1::EdgeDefId) -> Result<bool, Fail> {
+fn ed_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, ed: solidcore::topology::proto_topology::p1::EdgeDefId) -> Result<bool, Fail> {
     let Some(d) = r.mgr.edge_def(ed) else {
         return Ok(false);
     };
-    match d.evaluate_mid(&r.pool, false, true) {
+    match d.evaluate_mid(k, &r.pool, false, true) {
         Ok(_) => Ok(true),
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
@@ -314,12 +314,12 @@ pub(super) fn run_op(
                     .unwrap_or_default();
                 let no = others.len();
                 if no >= 1 && (ne > 0 || no >= 2) {
-                    if ne > 0 && (zero_len(&ivl) || !pe_tangent_ok(r, e)?) {
+                    if ne > 0 && (zero_len(&ivl) || !pe_tangent_ok(&r.k, r, e)?) {
                         *skip = true;
                     }
                     for d in others {
                         let short = r.mgr.edge_def(d).is_some_and(|x| zero_len(&x.xsect_interval()));
-                        if short || !ed_tangent_ok(r, d)? {
+                        if short || !ed_tangent_ok(&r.k, r, d)? {
                             *skip = true;
                         }
                     }

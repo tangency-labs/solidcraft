@@ -311,8 +311,8 @@ pub fn check_bow_ties(
     };
     let start_ivl = start_curve.natural_interval();
     let end_ivl = end_curve.natural_interval();
-    let start_pt = ignored(start_curve.evaluate_point(start_ivl.min()))?.unwrap_or(Vec3::UNDEF);
-    let end_pt = ignored(end_curve.evaluate_point(end_ivl.max()))?.unwrap_or(Vec3::UNDEF);
+    let start_pt = ignored(start_curve.evaluate_point(k, start_ivl.min()))?.unwrap_or(Vec3::UNDEF);
+    let end_pt = ignored(end_curve.evaluate_point(k, end_ivl.max()))?.unwrap_or(Vec3::UNDEF);
 
     // no work - composite curve is closed
     if start_pt.distance(end_pt) < xsect_tol_3d {
@@ -327,7 +327,7 @@ pub fn check_bow_ties(
         SolidError::invalid_input(OP_BOW, "no offsets (upstream reads crOffsets[0])")
     })?;
     let start_offset_pt =
-        ignored(first.evaluate_point(first.natural_interval().min()))?.unwrap_or(Vec3::UNDEF);
+        ignored(first.evaluate_point(k, first.natural_interval().min()))?.unwrap_or(Vec3::UNDEF);
 
     // for every original curve - check for curves closer than the cutoff to the point
     for (ii, orig) in orig_curves.iter().enumerate() {
@@ -350,7 +350,7 @@ pub fn check_bow_ties(
             )
         })?;
     let end_offset_pt =
-        ignored(last.evaluate_point(last.natural_interval().max()))?.unwrap_or(Vec3::UNDEF);
+        ignored(last.evaluate_point(k, last.natural_interval().max()))?.unwrap_or(Vec3::UNDEF);
 
     for (ii, orig) in orig_curves.iter().enumerate() {
         if let Some(d) = closest_distance(k, orig, ii, end_offset_pt, xsect_tol_3d)? {
@@ -544,8 +544,8 @@ fn add_corner(
     ));
 
     // get offset curveEnd positions and tangents
-    let pv1 = prev_off.evaluate(site.prev_ivl.max(), 1, true, true)?;
-    let pv2 = curr_off.evaluate(site.this_ivl.min(), 1, true, true)?;
+    let pv1 = prev_off.evaluate(k, site.prev_ivl.max(), 1, true, true)?;
+    let pv2 = curr_off.evaluate(k, site.this_ivl.min(), 1, true, true)?;
     let p1 = pv1.first().copied().unwrap_or(Vec3::UNDEF);
     let v1 = pv1.get(1).copied().unwrap_or(Vec3::UNDEF);
     let p2 = pv2.first().copied().unwrap_or(Vec3::UNDEF);
@@ -561,7 +561,7 @@ fn add_corner(
     let degenerate = |c: &Option<Curve>| -> Result<bool> {
         match c {
             None => Ok(true),
-            Some(c) => Ok(c.approximate_length(&c.natural_interval(), 3, false)?.0 < tol),
+            Some(c) => Ok(c.approximate_length(k, &c.natural_interval(), 3, false)?.0 < tol),
         }
     };
     let c1_degenerate = degenerate(&cc.curve1)?;
@@ -637,6 +637,7 @@ fn add_corner(
 /// `None` when it is degenerate and degenerate offsets are discarded.
 #[allow(clippy::too_many_arguments)]
 fn raw_offset(
+    k: &Kernel,
     base: &Curve,
     ivl: Extent1d,
     p: &OffsetParams,
@@ -656,7 +657,7 @@ fn raw_offset(
     ));
 
     // discard degenerate offsets
-    if off.is_degenerate(EFF_ZERO, None)? && p.trim_results {
+    if off.is_degenerate(k, EFF_ZERO, None)? && p.trim_results {
         return Ok(None);
     }
 
@@ -906,10 +907,10 @@ impl CompositeCurve {
 
                 // Check for closed loop: start point of 1st curve, end point of last.
                 if jj == 0 {
-                    start_pt = parent_copy.evaluate_point(ivl.min())?;
+                    start_pt = parent_copy.evaluate_point(k, ivl.min())?;
                 }
                 if jj + 1 == n {
-                    let end_pt = parent_copy.evaluate_point(ivl.max())?;
+                    let end_pt = parent_copy.evaluate_point(k, ivl.max())?;
 
                     // when distance between start/end points is less than scaled tolerance
                     let scale = 1.0 + start_pt.max_dimension();
@@ -930,18 +931,34 @@ impl CompositeCurve {
 
                 // Offset to the Right if appropriate.
                 if right {
-                    if let Some(o) =
-                        raw_offset(&parent_copy, ivl, &p, distance, false, ii, jj, originator)?
-                    {
+                    if let Some(o) = raw_offset(
+                        k,
+                        &parent_copy,
+                        ivl,
+                        &p,
+                        distance,
+                        false,
+                        ii,
+                        jj,
+                        originator,
+                    )? {
                         offsets.push(o);
                     }
                 }
 
                 // Offset to the Left if appropriate.
                 if left {
-                    if let Some(o) =
-                        raw_offset(&parent_copy, ivl, &p, -distance, true, ii, jj, originator)?
-                    {
+                    if let Some(o) = raw_offset(
+                        k,
+                        &parent_copy,
+                        ivl,
+                        &p,
+                        -distance,
+                        true,
+                        ii,
+                        jj,
+                        originator,
+                    )? {
                         offsets.push(o);
                     }
                 }
@@ -969,8 +986,8 @@ impl CompositeCurve {
                 };
                 let prev_ivl = prev.natural_interval();
                 let this_ivl = this.natural_interval();
-                let pv1 = prev.evaluate(prev_ivl.max(), 1, true, true)?;
-                let pv2 = this.evaluate(this_ivl.min(), 1, true, true)?;
+                let pv1 = prev.evaluate(k, prev_ivl.max(), 1, true, true)?;
+                let pv2 = this.evaluate(k, this_ivl.min(), 1, true, true)?;
                 let d1 = pv1.get(1).copied().unwrap_or(Vec3::UNDEF);
                 let d2 = pv2.get(1).copied().unwrap_or(Vec3::UNDEF);
 
@@ -1236,7 +1253,7 @@ impl CompositeCurve {
                 piece.curve.trim(k, &mut trim_ivl, TrimMode::Notify)?;
 
                 // Filter out really small curves.
-                let length = piece.curve.approximate_length(&trim_ivl, 5, false)?.0;
+                let length = piece.curve.approximate_length(k, &trim_ivl, 5, false)?.0;
                 if length < xsect_tol_3d / 100.0 {
                     drop(piece);
                 } else {

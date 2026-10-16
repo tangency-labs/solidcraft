@@ -206,16 +206,17 @@ fn curve_is_line(
 
 /// `SmCurve::IsDegenerate` of `curve` over `interval`.
 fn curve_is_degenerate(
+    k: &Kernel,
     curve: &BSplineCurve,
     tol: f64,
     interval: Option<&Extent1d>,
 ) -> Result<bool> {
-    crate::curve::curve::p4::is_degenerate_base(curve, tol, interval)
+    crate::curve::curve::p4::is_degenerate_base(k, curve, tol, interval)
 }
 
 /// `SmCurve::IsClosed(crInterval, dTolerance = 0.0)` of `curve`.
-fn curve_is_closed(curve: &BSplineCurve, interval: &Extent1d) -> Result<bool> {
-    crate::curve::curve::p4::is_closed_base(curve, interval, 0.0)
+fn curve_is_closed(k: &Kernel, curve: &BSplineCurve, interval: &Extent1d) -> Result<bool> {
+    crate::curve::curve::p4::is_closed_base(k, curve, interval, 0.0)
 }
 
 /// A circular arc found by `SmCurve::IsArc`: frame, radius, start and end angle
@@ -228,10 +229,16 @@ pub(crate) type IsArcFn<'a> = dyn Fn(&BSplineCurve, u64, f64) -> Result<Option<A
 
 /// `SmCurve::IsArc(lNumberOfSamplePoints, dTol, ...)` of `curve` (its virtual
 /// `IsDegenerate` is [`BSplineCurve::is_degenerate`]).
-fn curve_is_arc(curve: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+fn curve_is_arc(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    num_samples: u64,
+    tol: f64,
+) -> Result<Option<ArcData>> {
     crate::curve::curve::p5::is_arc_base(
+        k,
         curve,
-        |c, tol| c.is_degenerate(tol, None),
+        |c, tol| c.is_degenerate(k, tol, None),
         num_samples,
         tol,
     )
@@ -688,7 +695,7 @@ impl BSplineCurve {
         } else if self.degree()? == 2 && self.is_rational()? {
             // check for circular arcs
             if let Some((frame, radius, mut start_angle, mut end_angle)) =
-                curve_is_arc(self, 20, scaled_zero)?
+                curve_is_arc(k, self, 20, scaled_zero)?
             {
                 // whole curve is circular arc
                 let nurb_ivl = self.natural_interval();
@@ -1070,7 +1077,7 @@ impl BSplineCurve {
             offset_plane_normal,
             offset_distance,
             match_parameterization,
-            &|c, n, tol| curve_is_arc(c, n, tol),
+            &|c, n, tol| curve_is_arc(k, c, n, tol),
         )
     }
 
@@ -1097,7 +1104,7 @@ impl BSplineCurve {
         }
 
         // return SM_ERR_INVALID_INPUT when curve's internal continuities are less than C0
-        let (min_continuity, _) = self.calculate_continuities(ANG_TOL_DEG)?;
+        let (min_continuity, _) = self.calculate_continuities(k, ANG_TOL_DEG)?;
         if (min_continuity as i32) <= (ContinuityType::C0 as i32) {
             return Err(invalid(OP_OFFSET, "curve continuity C0 or less"));
         }
@@ -1160,14 +1167,14 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from [`BSplineCurve::is_degenerate`].
-    pub fn has_repeated_end_control_points(&self, tol: f64) -> Result<bool> {
+    pub fn has_repeated_end_control_points(&self, k: &Kernel, tol: f64) -> Result<bool> {
         // no work - no BSplineCurve representation
         let Some(cur) = self.nurb.as_ref() else {
             return Ok(false);
         };
 
         // no work - degenerate curve
-        if self.is_degenerate(EFF_ZERO, None)? {
+        if self.is_degenerate(k, EFF_ZERO, None)? {
             return Ok(false);
         }
 
@@ -1333,12 +1340,17 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` without a NURB (natural interval).
-    pub fn is_degenerate(&self, tol3d: f64, interval: Option<&Extent1d>) -> Result<bool> {
+    pub fn is_degenerate(
+        &self,
+        k: &Kernel,
+        tol3d: f64,
+        interval: Option<&Extent1d>,
+    ) -> Result<bool> {
         // low work - for nonNaturalInterval intervals pass the call along to the
         // general SmCurve::IsDegenerate
         let other_interval = interval.is_some_and(|i| !i.are_equal(&self.natural_interval(), 0.0));
         if other_interval || self.is_kind_of(CRV_ON_SURF_TYPE)? {
-            return curve_is_degenerate(self, tol3d, interval);
+            return curve_is_degenerate(k, self, tol3d, interval);
         }
 
         // ensure existence of m_pNurb (a plain B-spline cannot make one)
@@ -1443,11 +1455,11 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` without a NURB.
-    pub fn max_analytic_domain(&self) -> Result<Extent1d> {
+    pub fn max_analytic_domain(&self, k: &Kernel) -> Result<Extent1d> {
         let mut dom = self.natural_interval();
 
         // Do not extend closed curves.
-        if curve_is_closed(self, &dom)? {
+        if curve_is_closed(k, self, &dom)? {
             return Ok(dom);
         }
 

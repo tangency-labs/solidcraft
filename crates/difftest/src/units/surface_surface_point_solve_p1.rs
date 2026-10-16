@@ -316,15 +316,15 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::Closed => {
                 let mut g = global()?;
                 o.push(0.0);
-                o.push(flag(g.closed_surface(SurfParamType::U)?));
-                o.push(flag(g.closed_surface(SurfParamType::V)?));
-                o.push(flag(g.closed_surface(SurfParamType::U)?));
-                o.push(flag(g.closed_surface(SurfParamType::Both)?));
+                o.push(flag(g.closed_surface(&k, SurfParamType::U)?));
+                o.push(flag(g.closed_surface(&k, SurfParamType::V)?));
+                o.push(flag(g.closed_surface(&k, SurfParamType::U)?));
+                o.push(flag(g.closed_surface(&k, SurfParamType::Both)?));
             }
             OpIn::Func { uv } => {
                 let g = global()?;
                 o.push(0.0);
-                o.push(g.calc_func_val(p2(*uv))?);
+                o.push(g.calc_func_val(&k, p2(*uv))?);
             }
             OpIn::TriGuess { iu, iv } => {
                 let g = global()?;
@@ -342,9 +342,9 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             }
             OpIn::Stride { uv } => {
                 let g = global()?;
-                let mut pt0 = SurfaceEval::new(Some(&surface));
+                let mut pt0 = SurfaceEval::new(&k, Some(&surface));
                 pt0.set_uv(p2(*uv));
-                let r = g.check_bad_guess_stride(&mut pt0)?;
+                let r = g.check_bad_guess_stride(&k, &mut pt0)?;
                 o.push(0.0);
                 o.push(flag(r.is_some()));
                 if let Some((npt, f)) = r {
@@ -378,13 +378,13 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::Local { uv, ltol } => {
                 let g = global()?;
                 o.push(0.0);
-                let mut e = SurfaceEval::new(Some(&surface));
+                let mut e = SurfaceEval::new(&k, Some(&surface));
                 e.set_uv(p2(*uv));
                 o.push(flag(g.is_local_min(&mut e, *ltol)?));
-                let mut e = SurfaceEval::new(Some(&surface));
+                let mut e = SurfaceEval::new(&k, Some(&surface));
                 e.set_uv(p2(*uv));
                 o.push(flag(g.is_local_max(&mut e, *ltol)?));
-                let mut e = SurfaceEval::new(Some(&surface));
+                let mut e = SurfaceEval::new(&k, Some(&surface));
                 e.set_uv(p2(*uv));
                 let (b, which) = g.pushing_boundary(&mut e, *ltol)?;
                 o.push(flag(b));
@@ -422,7 +422,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 push3(&mut o, s.suu()?);
                 push3(&mut o, s.suv()?);
                 push3(&mut o, s.svv()?);
-                let c = SurfPtSolveStepper::copy_of(&s);
+                let c = SurfPtSolveStepper::copy_of(&k, &s);
                 o.push(flag(c.is_set()));
                 push2(&mut o, c.uv());
                 let mut a = stepper(*uv2, *tight)?;
@@ -514,9 +514,9 @@ pub(crate) fn gen_uv_any(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
 
 /// A test point for the surface: on it, slightly or well off it along its normal, or
 /// anywhere around it.
-pub(crate) fn gen_test(rng: &mut Rng, s: &Surface, d: [f64; 4], size: f64) -> [f64; 3] {
+pub(crate) fn gen_test(k: &Kernel, rng: &mut Rng, s: &Surface, d: [f64; 4], size: f64) -> [f64; 3] {
     let uv = gen_uv(rng, d);
-    let Ok((p, su, sv)) = s.evaluate_1st_derivatives(p2(uv), false, false) else {
+    let Ok((p, su, sv)) = s.evaluate_1st_derivatives(k, p2(uv), false, false) else {
         return gvec(rng, size * 2.0);
     };
     let n = su.cross(sv).unitize_or_z();
@@ -539,8 +539,8 @@ pub(crate) fn gen_test(rng: &mut Rng, s: &Surface, d: [f64; 4], size: f64) -> [f
 
 /// A test point on the surface normal at `uv`: on the surface, or off it on either
 /// side by a small to large distance.
-pub(crate) fn test_on_normal(rng: &mut Rng, s: &Surface, uv: [f64; 2], size: f64) -> [f64; 3] {
-    let Ok((p, su, sv)) = s.evaluate_1st_derivatives(p2(uv), false, false) else {
+pub(crate) fn test_on_normal(k: &Kernel, rng: &mut Rng, s: &Surface, uv: [f64; 2], size: f64) -> [f64; 3] {
+    let Ok((p, su, sv)) = s.evaluate_1st_derivatives(k, p2(uv), false, false) else {
         return gvec(rng, size);
     };
     let n = su.cross(sv).unitize_or_z();
@@ -800,7 +800,7 @@ fn gen_op(rng: &mut Rng, s: &SurfIn, d: [f64; 4], sd: [f64; 4], size: f64) -> Re
     })
 }
 
-fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> Result<Inputs, HarnessError> {
     let surf = gen_surface(rng);
     let wrap = rng.chance(0.15);
     let d = surf_domain(&surf)?;
@@ -815,7 +815,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             _ => gvec(rng, 1.0),
         }
     } else {
-        gen_test(rng, &s, sd, size)
+        gen_test(k, rng, &s, sd, size)
     };
     let tol = match rng.below(4) {
         0 => 1e-6,
@@ -827,7 +827,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     let mut test = test;
     if let OpIn::Local { uv, .. } = &mut op {
         if solver != 10 && rng.chance(0.7) {
-            test = test_on_normal(rng, &s, *uv, size);
+            test = test_on_normal(k, rng, &s, *uv, size);
         }
     }
     Ok(Inputs {
@@ -937,8 +937,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..64 {
-            let Ok(i) = gen_case(rng) else {
+            let Ok(i) = gen_case(k, rng) else {
                 continue;
             };
             let Ok((op, input)) = cpp_input(&i) else {

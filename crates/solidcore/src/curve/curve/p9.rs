@@ -139,8 +139,8 @@ const fn ord(c: ContinuityType) -> i32 {
 
 /// `EvaluatePoint` whose status upstream ignores into a reused point: `pt` keeps its
 /// previous value on failure; [`SolidError::Unported`] is propagated.
-fn eval_keep(curve: &Curve, t: f64, pt: &mut Point3) -> Result<()> {
-    if let Some(p) = ignored(curve.evaluate_point(t))? {
+fn eval_keep(k: &Kernel, curve: &Curve, t: f64, pt: &mut Point3) -> Result<()> {
+    if let Some(p) = ignored(curve.evaluate_point(k, t))? {
         *pt = p;
     }
     Ok(())
@@ -213,6 +213,7 @@ impl EndSolve<'_> {
     /// (statuses ignored upstream, which initialises the answer to `FALSE`).
     fn solve<O: Copy>(
         &self,
+        k: &Kernel,
         curve: &Curve,
         ivl: &Extent1d,
         point: Point3,
@@ -230,6 +231,7 @@ impl EndSolve<'_> {
                 -vectors[0].dot(point)
             };
             match local_property_analysis(
+                k,
                 curve,
                 ivl,
                 self.curve_prop,
@@ -248,7 +250,7 @@ impl EndSolve<'_> {
                 target_distance: None,
                 vectors: self.opt_vectors,
             };
-            match curve.local_point_solve::<O>(ivl, self.op, point, &opts, ivl.evaluate(0.5)) {
+            match curve.local_point_solve::<O>(k, ivl, self.op, point, &opts, ivl.evaluate(0.5)) {
                 Ok((f, s)) => {
                     merge_point_solution(solution, f, &s, self.op);
                     Ok(f)
@@ -371,13 +373,13 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         }
 
         // get node1 span endPoints and endPoint chords (statuses ignored)
-        let start1 = point_or_undef(curve1, ivl1.min())?;
-        let mut end1 = point_or_undef(curve1, ivl1.max())?;
+        let start1 = point_or_undef(k, curve1, ivl1.min())?;
+        let mut end1 = point_or_undef(k, curve1, ivl1.max())?;
         let line_vec1 = end1 - start1;
 
         // get node2 span endPoints and endPoint chords (statuses ignored)
-        let mut start2 = point_or_undef(curve2, ivl2.min())?;
-        let mut end2 = point_or_undef(curve2, ivl2.max())?;
+        let mut start2 = point_or_undef(k, curve2, ivl2.min())?;
+        let mut end2 = point_or_undef(k, curve2, ivl2.max())?;
         let line_vec2 = end2 - start2;
 
         let turn1 = bez_span1.aux.max_turning_angle_deg;
@@ -432,7 +434,8 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                 let guess2 = ivl2.evaluate(norm_ivl.clamp_value(t2));
 
                 // look for a nodeSpan/nodeSpan intersection
-                let hit = local_curve_intersect(curve1, &ivl1, curve2, &ivl2, tol, guess1, guess2)?;
+                let hit =
+                    local_curve_intersect(k, curve1, &ivl1, curve2, &ivl2, tol, guess1, guess2)?;
 
                 // save solutions
                 if let Some(h) = hit {
@@ -704,6 +707,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         continue;
                     }
                     let mut found_answer = end_solve.solve(
+                        k,
                         other_curve,
                         &other_ivl,
                         end_point,
@@ -718,9 +722,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         // get the OtherSolvePoint
                         let mut point_reciprocal_solution: Solution<O> = Solution::new();
                         let sol_pt =
-                            other_curve.evaluate_point(point_solution.start.parameters[0])?;
+                            other_curve.evaluate_point(k, point_solution.start.parameters[0])?;
 
                         let found_reciprocal_answer = end_solve.solve(
+                            k,
                             this_curve,
                             &this_ivl,
                             sol_pt,
@@ -734,7 +739,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         // If the curve is degenerate, though, we can't trust
                         // the return parameter, it's just the same as the input.
                         found_answer = found_reciprocal_answer;
-                        if !this_curve.is_degenerate(EFF_ZERO, None)? {
+                        if !this_curve.is_degenerate(k, EFF_ZERO, None)? {
                             let reciprocal_param = point_reciprocal_solution.start.parameters[0];
                             found_answer &= are_same(reciprocal_param, ivl_bound);
                         }
@@ -750,8 +755,8 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                                 point_solution.start.solution_value
                             };
                         if op == Op::SignedPivotMinimize {
-                            let sol_pt =
-                                other_curve.evaluate_point(point_solution.start.parameters[0])?;
+                            let sol_pt = other_curve
+                                .evaluate_point(k, point_solution.start.parameters[0])?;
                             solution.start.solution_value = proj_signed_angle(
                                 if ii == 0 { end_point } else { sol_pt },
                                 if ii == 0 { sol_pt } else { end_point },
@@ -761,6 +766,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                             )?;
                         } else if self.base.projected_operation {
                             solution.start.solution_value = match proj_dist(
+                                k,
                                 other_curve,
                                 point_solution.start.parameters[0],
                                 end_point,
@@ -896,6 +902,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         for (&g1, &g2) in guesses1.iter().zip(&guesses2) {
             // call LocalCurveSolve (status ignored)
             let found = match curve1.local_curve_solve::<O>(
+                k,
                 &ivl1,
                 curve2,
                 &ivl2,
@@ -1041,7 +1048,7 @@ fn min_signed_angle_into<O: SolutionObject>(
             if !disc_ivl.contains_value(knot, 0.0) {
                 continue;
             }
-            let pnt = disc_curve.evaluate_point(knot)?;
+            let pnt = disc_curve.evaluate_point(k, knot)?;
             let dir_norm = [pnt, opt(0)?, opt(1)?];
 
             // look for solutions
@@ -1106,8 +1113,8 @@ fn min_signed_angle_into<O: SolutionObject>(
         s.start.parameters[0] = r.start.parameters[0];
         s.start.parameters[1] = r.start.parameters[1];
 
-        let pnt1 = ops.curve.evaluate_point(s.start.parameters[0])?;
-        let pnt2 = ops.other.evaluate_point(s.start.parameters[1])?;
+        let pnt1 = ops.curve.evaluate_point(k, s.start.parameters[0])?;
+        let pnt2 = ops.other.evaluate_point(k, s.start.parameters[1])?;
         let mut vec = pnt2 - pnt1;
         vec = opt(0)?.cross(vec).cross(opt(0)?);
         // If the point is at the origin of rotation just ignore it
@@ -1271,10 +1278,10 @@ impl Curve {
                         && matches!(a2.kind(), CurveKind::Line(_))
                     {
                         // get Line start and stop endPoints
-                        let start1 = a1.evaluate_point(interval.min())?;
-                        let end1 = a1.evaluate_point(interval.max())?;
-                        let start2 = a2.evaluate_point(other_interval.min())?;
-                        let end2 = a2.evaluate_point(other_interval.max())?;
+                        let start1 = a1.evaluate_point(k, interval.min())?;
+                        let end1 = a1.evaluate_point(k, interval.max())?;
+                        let start2 = a2.evaluate_point(k, other_interval.min())?;
+                        let end2 = a2.evaluate_point(k, other_interval.max())?;
 
                         let hits = if op == Op::ProjectedIntersect {
                             // Intersect two projected segments
@@ -1483,7 +1490,7 @@ impl Curve {
             )?
             .solutions;
         for s in sols.as_slice() {
-            eval_keep(self, s.start.parameters[0], pt)?;
+            eval_keep(k, self, s.start.parameters[0], pt)?;
             add(*pt);
         }
         Ok(())
@@ -1512,15 +1519,15 @@ impl Curve {
 
         // First put in the end points.
         let mut pt = Vec3::UNDEF;
-        eval_keep(self, interval.min(), &mut pt)?;
+        eval_keep(k, self, interval.min(), &mut pt)?;
         tight_box.add_point(pt);
-        eval_keep(self, interval.max(), &mut pt)?;
+        eval_keep(k, self, interval.max(), &mut pt)?;
         tight_box.add_point(pt);
 
         // Now add all tangent discontinuous points
         if self.is_kind_of(BSPLINE_CURVE_TYPE) {
             let (knots, _) = self.knots(None)?;
-            let (_, continuities) = self.calculate_continuities(2.0)?;
+            let (_, continuities) = self.calculate_continuities(k, 2.0)?;
 
             let n = knots.len();
             for (i, &knot) in knots.iter().enumerate().skip(1) {
@@ -1528,7 +1535,7 @@ impl Curve {
                     .get(i)
                     .is_some_and(|&c| ord(c) <= ord(ContinuityType::C1));
                 if i == n - 1 || low {
-                    eval_keep(self, knot, &mut pt)?;
+                    eval_keep(k, self, knot, &mut pt)?;
                     tight_box.add_point(pt);
                 }
             }
@@ -1571,9 +1578,9 @@ impl Curve {
 
         // First put in the end points.
         let mut pt = Vec3::UNDEF;
-        eval_keep(self, interval.min(), &mut pt)?;
+        eval_keep(k, self, interval.min(), &mut pt)?;
         pseudo_box.add_point(pt);
-        eval_keep(self, interval.max(), &mut pt)?;
+        eval_keep(k, self, interval.max(), &mut pt)?;
         pseudo_box.add_point(pt);
 
         // Now solve along curve.
@@ -1626,17 +1633,17 @@ impl Curve {
         match self.kind() {
             CurveKind::BSpline(c) => c.is_on_plane(plane_point, plane_normal, tol, interval),
             CurveKind::Hyperbola(c) => {
-                bspline_is_on_plane(self, c.base(), plane_point, plane_normal, tol, interval)
+                bspline_is_on_plane(k, self, c.base(), plane_point, plane_normal, tol, interval)
             }
             CurveKind::Ellipse(c) => {
-                bspline_is_on_plane(self, c.base(), plane_point, plane_normal, tol, interval)
+                bspline_is_on_plane(k, self, c.base(), plane_point, plane_normal, tol, interval)
             }
             CurveKind::Parabola(c) => {
-                bspline_is_on_plane(self, c.base(), plane_point, plane_normal, tol, interval)
+                bspline_is_on_plane(k, self, c.base(), plane_point, plane_normal, tol, interval)
             }
             CurveKind::Line(c) => {
                 let base = c.base_with_nurb()?;
-                bspline_is_on_plane(self, &base, plane_point, plane_normal, tol, interval)
+                bspline_is_on_plane(k, self, &base, plane_point, plane_normal, tol, interval)
             }
             _ => is_on_plane_base(self, k, plane_point, plane_normal, tol, interval),
         }
@@ -1718,6 +1725,7 @@ impl Curve {
 /// evaluation) within `tol` of the plane, then (unless the curve is a line) the
 /// control points of the spans covering the interval.
 fn bspline_is_on_plane(
+    k: &Kernel,
     curve: &Curve,
     base: &BSplineCurve,
     plane_point: Point3,
@@ -1731,9 +1739,9 @@ fn bspline_is_on_plane(
     };
 
     // get Curve start, mid, end points
-    let start_pt = curve.evaluate_point(iv.min())?;
-    let end_pt = curve.evaluate_point(iv.max())?;
-    let mid_pt = curve.evaluate_point(iv.evaluate(0.5))?;
+    let start_pt = curve.evaluate_point(k, iv.min())?;
+    let end_pt = curve.evaluate_point(k, iv.max())?;
+    let mid_pt = curve.evaluate_point(k, iv.evaluate(0.5))?;
 
     // project points to plane
     let proj_start_pt = point_project_to_plane(start_pt, plane_point, plane_normal);

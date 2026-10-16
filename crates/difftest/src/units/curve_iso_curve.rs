@@ -459,7 +459,7 @@ impl From<HarnessError> for Fail {
     }
 }
 
-fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
+fn rust_op(k: &solidcore::kernel::Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
     if let OpIn::ReadDb {
         binary,
         version,
@@ -507,33 +507,33 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             from_left,
             non_zero,
         } => {
-            let v = c.evaluate(*t, *n, *from_left, *non_zero)?;
+            let v = c.evaluate(k, *t, *n, *from_left, *non_zero)?;
             o.push(0.0);
             for p in v.iter().take(n + 1) {
                 push3(o, p.x, p.y, p.z);
             }
         }
         OpIn::EvaluatePoint { t } => {
-            let p = c.evaluate_point(*t)?;
+            let p = c.evaluate_point(k, *t)?;
             o.push(0.0);
             push3(o, p.x, p.y, p.z);
         }
         OpIn::Continuities { tol } => {
-            let (min, conts) = c.calculate_continuities(*tol)?;
+            let (min, conts) = c.calculate_continuities(k, *tol)?;
             o.push(0.0);
             o.push(f64::from(min as u8));
             o.push(conts.len() as f64);
             o.extend(conts.iter().map(|&x| f64::from(x as u8)));
         }
         OpIn::Eq { other } => match other {
-            OtherIn::Itself => o.push(flag(c.approx_eq(&c)?)),
+            OtherIn::Itself => o.push(flag(c.approx_eq(k, &c)?)),
             OtherIn::Own(b) => {
                 let b = Curve::from(build(b)?);
-                o.extend([flag(c.approx_eq(&b)?), flag(b.approx_eq(&c)?)]);
+                o.extend([flag(c.approx_eq(k, &b)?), flag(b.approx_eq(k, &c)?)]);
             }
             OtherIn::SameSurface(p) => {
                 let b = Curve::from(make(iso.surface().clone(), p)?);
-                o.extend([flag(c.approx_eq(&b)?), flag(b.approx_eq(&c)?)]);
+                o.extend([flag(c.approx_eq(k, &b)?), flag(b.approx_eq(k, &c)?)]);
             }
         },
         OpIn::IsKindOf { t } => o.push(flag(c.is_kind_of(*t))),
@@ -550,7 +550,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let ivl = line.natural_interval();
             o.extend([ivl.min(), ivl.max()]);
             for t in [ivl.min(), ivl.max()] {
-                let p = line.evaluate_point(t)?;
+                let p = line.evaluate_point(k, t)?;
                 o.push(0.0);
                 push3(o, p.x, p.y, p.z);
             }
@@ -560,9 +560,9 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
     Ok(())
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
-    match rust_op(i, &mut o) {
+    match rust_op(k, i, &mut o) {
         Ok(()) => Ok(Output::new().values("out", o)),
         Err(Fail::Harness(h)) => Err(h),
         Err(Fail::Solid(e)) => {
@@ -865,6 +865,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &solidcore::Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

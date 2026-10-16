@@ -654,7 +654,7 @@ impl<O: ClassObject> PointClassification<O> {
         // else - in surface gaps
         // Get Object Point
         let uv_domain = surface.natural_uv_domain();
-        let obj_pt_3d = ignored(self.find_obj_point_3d(geometry))?.unwrap_or(Vec3::UNDEF);
+        let obj_pt_3d = ignored(self.find_obj_point_3d(k, geometry))?.unwrap_or(Vec3::UNDEF);
         let obj_zone_tol_3d = self.obj_zone_tol_3d(k, geometry)?;
 
         // find SurfaceDropPt for ObjPt
@@ -687,8 +687,8 @@ impl<O: ClassObject> PointClassification<O> {
 
         let first = solutions.first().ok_or_else(|| unresolved(OP_GAP))?;
         let uv = Point2::new(first.param(0)?, first.param(1)?);
-        let surf_pt_3d = ignored(surface.evaluate_point(uv))?.unwrap_or(Vec3::UNDEF);
-        let surf_norm = ignored(surface_evaluate_normal(surface, uv))?.unwrap_or(Vec3::UNDEF);
+        let surf_pt_3d = ignored(surface.evaluate_point(k, uv))?.unwrap_or(Vec3::UNDEF);
+        let surf_norm = ignored(surface_evaluate_normal(k, surface, uv))?.unwrap_or(Vec3::UNDEF);
 
         let gap_3d = obj_pt_3d - surf_pt_3d;
         let in_surf_gap_3d = gap_3d - gap_3d.dot(surf_norm) * surf_norm;
@@ -1165,9 +1165,12 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// `SM_ERR` when the parameters are not set or the classification has no point
     /// (unknown, nothing, region); the errors of the evaluations;
-    /// [`SolidError::Unported`] for edge uses, faces and vertex or edge handles
-    /// `geometry` cannot resolve to its B-rep.
-    pub fn find_obj_point_3d(&self, geometry: &impl ClassGeometry<O>) -> Result<Point3> {
+    /// [`SolidError::Unported`] for topology objects.
+    pub fn find_obj_point_3d(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+    ) -> Result<Point3> {
         if !self.are_parameters_set() {
             return Err(SolidError::sm_err(OP_FIND));
         }
@@ -1182,12 +1185,12 @@ impl<O: ClassObject> PointClassification<O> {
             PointClassType::Curve => {
                 let o = self.cast(ClassObjectKind::Curve)?;
                 let curve = geometry.curve(o).ok_or_else(|| unresolved(OP_FIND))?;
-                curve.evaluate_point(self.t_param)
+                curve.evaluate_point(k, self.t_param)
             }
             PointClassType::Surface => {
                 let o = self.cast(ClassObjectKind::Surface)?;
                 let surface = geometry.surface(o).ok_or_else(|| unresolved(OP_FIND))?;
-                surface.evaluate_point(self.uv_param)
+                surface.evaluate_point(k, self.uv_param)
             }
             PointClassType::Volume => {
                 let o = self.cast(ClassObjectKind::Volume)?;
@@ -1677,8 +1680,8 @@ fn merge_vertex_neighborhood(
 }
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)` (virtual).
-fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
-    surface.evaluate_normal(uv, Side::Left, Side::Left)
+fn surface_evaluate_normal(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(k, uv, Side::Left, Side::Left)
 }
 
 // ---- callees in units not ported yet --------------------------------------------
@@ -1962,11 +1965,12 @@ mod tests {
 
     #[test]
     fn find_point_and_errors() {
+        let k = &Kernel::default();
         let mut p = pc();
-        assert!(p.find_obj_point_3d(&NoGeometry).is_err());
+        assert!(p.find_obj_point_3d(k, &NoGeometry).is_err());
         p.set_class_object(PointClassType::Point, Some(H(ClassObjectKind::Point, 3)));
         assert_eq!(
-            p.find_obj_point_3d(&NoGeometry).ok(),
+            p.find_obj_point_3d(k, &NoGeometry).ok(),
             Some(Point3::new(1.0, 2.0, 3.0))
         );
     }

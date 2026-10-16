@@ -163,11 +163,12 @@ pub struct NormalSection {
 
 /// `SmSurface::EvaluateNormalSection` (`bUFromLeft`, `bVFromLeft` both true).
 fn surface_evaluate_normal_section(
+    k: &Kernel,
     surface: &Surface,
     uv: Point2,
     direction: Vec3,
 ) -> Result<NormalSection> {
-    let s = surface.evaluate_normal_section(uv, Side::Left, Side::Left, direction)?;
+    let s = surface.evaluate_normal_section(k, uv, Side::Left, Side::Left, direction)?;
     Ok(NormalSection {
         tangent_plane_direction: s.tangent,
         curvature: s.curvature,
@@ -190,6 +191,7 @@ fn surface_face(surface: &Surface) -> Result<Option<ObjectRef>> {
 /// Only [`SolidError::Unported`], or an `Evaluate` that also fails without
 /// `non_zero_tangents`: upstream signals those with `SE` and carries on.
 pub fn surface_leaf(
+    k: &Kernel,
     surface_index: usize,
     surface: &Surface,
     uv_domain: &Extent2d,
@@ -210,10 +212,10 @@ pub fn surface_leaf(
     // `SER(Evaluate(crUV, 2, 2, ...))` (SmBSplineSurfaceNLib.cpp:8335), which returns
     // before the fixed-up tangents are written back: `sEval` keeps the plain NLib
     // derivatives, which is what `non_zero_tangents: false` gives.
-    let eval = match surface.evaluate(uv_mid, 1, 1, eval_flags(true)) {
+    let eval = match surface.evaluate(k, uv_mid, 1, 1, eval_flags(true)) {
         Ok(eval) => eval,
         Err(e) if e.is_unported() => return Err(e),
-        Err(_) => surface.evaluate(uv_mid, 1, 1, eval_flags(false))?,
+        Err(_) => surface.evaluate(k, uv_mid, 1, 1, eval_flags(false))?,
     };
     let at = |i: usize, j: usize| -> Result<Vec3> {
         eval.get(i)
@@ -230,7 +232,7 @@ pub fn surface_leaf(
     } else {
         // `SE(EvaluateNormal)`: on failure keep the cross product (the unit's
         // `m_sMidNormal` is whatever the call left in it; see findings.md)
-        mid_normal = match surface.evaluate_normal(uv_mid, Side::Left, Side::Left) {
+        mid_normal = match surface.evaluate_normal(k, uv_mid, Side::Left, Side::Left) {
             Ok(n) => n,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => mid_normal,
@@ -311,6 +313,7 @@ struct TangentGuess {
 /// `sm_FindAdditionalTangentGuess`: near a tangential ray/surface contact, a second
 /// intersection guess from the circles of the surface normal section and the curve.
 fn find_additional_tangent_guess(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     curve: &Curve,
@@ -325,8 +328,8 @@ fn find_additional_tangent_guess(
     };
     let no_guess = guess;
 
-    let mut normal = surface.evaluate_normal(current_uv, Side::Left, Side::Left)?;
-    let pv = curve.evaluate(current_t, 1, true, true)?;
+    let mut normal = surface.evaluate_normal(k, current_uv, Side::Left, Side::Left)?;
+    let pv = curve.evaluate(k, current_t, 1, true, true)?;
     let (pv0, pv1) = match pv.as_slice() {
         [a, b, ..] => (*a, *b),
         _ => return Err(SolidError::sm_err("intersect::ray_tracer")),
@@ -340,16 +343,16 @@ fn find_additional_tangent_guess(
     // Lets take a normal section on the surface along the direction of the tangent
     // of the curve.  This should give us two circles or a line and a circle to
     // intersect.
-    let section = surface_evaluate_normal_section(surface, current_uv, pv1)?;
+    let section = surface_evaluate_normal_section(k, surface, current_uv, pv1)?;
     let tan_plane_proj = section.tangent_plane_direction;
     let normal_curvature = section.curvature;
     normal = section.normal;
 
     // First compute the projected tangent vector.
-    let surf_point = surface.evaluate_point(current_uv)?;
+    let surf_point = surface.evaluate_point(k, current_uv)?;
 
     // Get the geometric properties of the curve at the intersection
-    let geom_vec = evaluate_geometric(curve, current_t, 2, true)?;
+    let geom_vec = evaluate_geometric(k, curve, current_t, 2, true)?;
     let mut curvature_vector = *geom_vec
         .get(2)
         .ok_or_else(|| SolidError::sm_err("intersect::ray_tracer"))?;
@@ -482,7 +485,8 @@ fn find_additional_tangent_guess(
 
     // Use the found vector to compute an approximate step in the curve and surface
     // parameters.
-    let (_point, du, dv) = evaluate_1st_derivatives(surface, current_uv, Side::Left, Side::Left)?;
+    let (_point, du, dv) =
+        evaluate_1st_derivatives(k, surface, current_uv, Side::Left, Side::Left)?;
 
     guess.found = true;
     guess.t = current_t + convert_to_parameter_delta(pv1, found_vector);
@@ -603,6 +607,7 @@ impl Lsi3LocalSolver {
     #[must_use]
     pub fn local_solve(
         &self,
+        k: &Kernel,
         surface: &Surface,
         element: &SurfaceGridElement<usize>,
     ) -> LocalSolveResult {
@@ -612,12 +617,13 @@ impl Lsi3LocalSolver {
             found_intersection: false,
             solution: Solution::new(),
         };
-        out.status = self.local_solve_into(surface, element, &mut out);
+        out.status = self.local_solve_into(k, surface, element, &mut out);
         out
     }
 
     fn local_solve_into(
         &self,
+        k: &Kernel,
         surface: &Surface,
         element: &SurfaceGridElement<usize>,
         out: &mut LocalSolveResult,
@@ -804,7 +810,7 @@ impl Lsi3LocalSolver {
                 let tmp_line =
                     Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false));
                 let guess = find_additional_tangent_guess(
-                    surface, uv_domain, &tmp_line, &tmp_ivl, hit.uv, hit.t,
+                    k, surface, uv_domain, &tmp_line, &tmp_ivl, hit.uv, hit.t,
                 )?;
                 if guess.found {
                     total_points += 1;
@@ -944,6 +950,7 @@ impl<'s> RayTracer<'s> {
     /// surface nor a polygon element or whose surface is not registered.
     pub fn fire_ray(
         &mut self,
+        k: &Kernel,
         ray_point: Point3,
         ray_vector: Vec3,
         max_ray_parameter: f64,
@@ -1047,7 +1054,7 @@ impl<'s> RayTracer<'s> {
                         operation: OP,
                         reason: "surface grid element refers to an unregistered surface",
                     })?;
-                let solved = self.solver.local_solve(surface, &leaf);
+                let solved = self.solver.local_solve(k, surface, &leaf);
                 // (the status is ignored; Unported always propagates)
                 if let Err(e) = &solved.status {
                     if e.is_unported() {
@@ -1270,6 +1277,7 @@ impl<'s> RayRenderer<'s> {
     /// Those of [`RayRenderer::render_pixel`].
     pub fn do_render(
         &mut self,
+        k: &Kernel,
         do_shadows: bool,
         background_color: Vec3,
         default_object_color: Vec3,
@@ -1284,7 +1292,7 @@ impl<'s> RayRenderer<'s> {
             for ix in 0..self.num_x_pixels {
                 // Here we are working on pixel ix,iy as measured from the upper left
                 // hand corner.
-                image.push(self.render_pixel(ix, iy)?);
+                image.push(self.render_pixel(k, ix, iy)?);
             }
         }
         Ok(image)
@@ -1296,7 +1304,7 @@ impl<'s> RayRenderer<'s> {
     /// # Errors
     ///
     /// Those of [`RayRenderer::render_ray`].
-    pub fn render_pixel(&mut self, pixel_x: u64, pixel_y: u64) -> Result<Vec3> {
+    pub fn render_pixel(&mut self, k: &Kernel, pixel_x: u64, pixel_y: u64) -> Result<Vec3> {
         // init output
         let mut pixel_color = Vec3::new(0.0, 0.0, 0.0);
 
@@ -1321,7 +1329,7 @@ impl<'s> RayRenderer<'s> {
                 let ray_point = self.view_volume.evaluate(eval_x, eval_y, 1.0);
 
                 // fire ray into model and pick an associated color
-                let ray_color = self.render_ray(ray_point, ray_vector)?;
+                let ray_color = self.render_ray(k, ray_point, ray_vector)?;
 
                 // accumulate sample point color values
                 pixel_color += ray_color;
@@ -1339,7 +1347,7 @@ impl<'s> RayRenderer<'s> {
     /// # Errors
     ///
     /// Those of [`RayTracer::fire_ray`].
-    pub fn render_ray(&mut self, ray_point: Point3, ray_vector: Vec3) -> Result<Vec3> {
+    pub fn render_ray(&mut self, k: &Kernel, ray_point: Point3, ray_vector: Vec3) -> Result<Vec3> {
         // init state for upcoming Ray intersection
         self.ray_tracer.hit_any_thing = false; // Only take closest hit
         self.ray_tracer.skip_element = None;
@@ -1347,7 +1355,7 @@ impl<'s> RayRenderer<'s> {
         // intersect ray with shapes stored within m_pRayTracer
         let hit = self
             .ray_tracer
-            .fire_ray(ray_point, ray_vector, BIG_DOUBLE)?;
+            .fire_ray(k, ray_point, ray_vector, BIG_DOUBLE)?;
 
         // when nothing was hit - set output color to Background color
         if !hit.hits_something {
@@ -1389,7 +1397,7 @@ impl<'s> RayRenderer<'s> {
                 // shoot the ray to the light - see if anything else is hit
                 let shadow = self
                     .ray_tracer
-                    .fire_ray(shadow_point, shadow_vec, BIG_DOUBLE)?;
+                    .fire_ray(k, shadow_point, shadow_vec, BIG_DOUBLE)?;
 
                 // something was hit - set dDot to zero to remember this point is in
                 // shadow
@@ -1473,9 +1481,11 @@ mod tests {
 
     #[test]
     fn a_ray_that_misses_the_grid_hits_nothing() {
+        let k = &Kernel::default();
         let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
         let r = t
             .fire_ray(
+                k,
                 Vec3::new(-5.0, 20.0, 5.0),
                 Vec3::new(1.0, 0.0, 0.0),
                 BIG_DOUBLE,
@@ -1487,9 +1497,11 @@ mod tests {
 
     #[test]
     fn a_ray_through_an_empty_grid_walks_out() {
+        let k = &Kernel::default();
         let mut t = RayTracer::new(grid(), 1e-4, 1e-8);
         let r = t
             .fire_ray(
+                k,
                 Vec3::new(-5.0, 5.0, 5.0),
                 Vec3::new(1.0, 0.0, 0.0),
                 BIG_DOUBLE,
@@ -1500,6 +1512,7 @@ mod tests {
 
     #[test]
     fn a_leaf_the_ray_cannot_reach_is_rejected_before_the_solver() {
+        let k = &Kernel::default();
         let plane = Surface::from(crate::surface::plane::Plane::new(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(1.0, 0.0, 0.0),
@@ -1525,6 +1538,7 @@ mod tests {
         t.grid_mut().add_surface_element(leaf, &far).unwrap();
         let r = t
             .fire_ray(
+                k,
                 Vec3::new(-5.0, 5.0, 1.0),
                 Vec3::new(1.0, 0.0, 0.0),
                 BIG_DOUBLE,

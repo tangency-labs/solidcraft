@@ -673,7 +673,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             if d.contains_point(a.uv_pd[0], zu.max(zv))
                 && !(a.on_boundary != Some(false) && a.leaving_domain != Some(false))
                 && st(s.evaluate_2nd_derivatives(
-                    a.uv_pd[0],
+                    k, a.uv_pd[0],
                     a.from_left_u != Some(false),
                     a.from_left_v != Some(false),
                 ))?
@@ -1103,13 +1103,13 @@ fn gen_uv_tol(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
     [f * (1.0 + (d[2] - d[0]).abs()), f * (1.0 + (d[3] - d[1]).abs())]
 }
 /// A curve near the surface: through surface points (perhaps offset).
-fn gen_curve_near(rng: &mut Rng, srf: &Surface, d: [f64; 4], s: f64) -> Option<CurveIn> {
+fn gen_curve_near(k: &Kernel, rng: &mut Rng, srf: &Surface, d: [f64; 4], s: f64) -> Option<CurveIn> {
     let n = 2 + rng.below(4) as usize;
     let off = pick(rng, &[0.0, 0.0, 1.0e-9, 1.0e-6, 1.0e-3, 0.1], 0.0) * s;
     let mut cpts = Vec::new();
     for _ in 0..n {
         let uv = uv_in(rng, d);
-        let p = srf.evaluate_point(Point2::new(uv[0], uv[1])).ok()?;
+        let p = srf.evaluate_point(k, Point2::new(uv[0], uv[1])).ok()?;
         let p = add3(arr3(p), scale3(unit_dir(rng), off));
         cpts.push([p[0], p[1], p[2], NOW]);
     }
@@ -1191,8 +1191,8 @@ fn gen_set(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
         _ => uv_on_boundary(rng, nat, utol),
     };
     let u = Point2::new(uv[0], uv[1]);
-    let (p, su, sv) = srf.evaluate_1st_derivatives(u, true, true).ok()?;
-    let n = srf.evaluate_normal(u, Side::Left, Side::Left).ok()?;
+    let (p, su, sv) = srf.evaluate_1st_derivatives(k, u, true, true).ok()?;
+    let n = srf.evaluate_normal(k, u, Side::Left, Side::Left).ok()?;
     let (p, su, sv, n) = (arr3(p), arr3(su), arr3(sv), arr3(n));
     let c0 = near_point(rng, p, n, su, s);
     let c1 = tangent(rng, su, sv, n, s);
@@ -1229,7 +1229,7 @@ fn gen_next(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
     let (srf, nat) = surface_with_domain(k, &surface)?;
     let domain = gen_domain(rng, nat);
     let curve = if rng.chance(0.7) {
-        gen_curve_near(rng, &srf, domain, s)?
+        gen_curve_near(k, rng, &srf, domain, s)?
     } else {
         CurveIn::Line {
             a: scale3(rng.point3(-1.0, 1.0), s),
@@ -1249,7 +1249,7 @@ fn gen_next(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
         _ => uv_in(rng, domain),
     };
     let t0 = rng.uniform(ivl.min(), ivl.max());
-    let crv = c.evaluate(t0, 2, true, true).ok()?;
+    let crv = c.evaluate(k, t0, 2, true, true).ok()?;
     let g = |i: usize| crv.get(i).map_or([0.0; 3], |v| arr3(*v));
     let duv = [rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)];
     let mut start = gen_pt(rng, uv, duv, [g(0), g(1), g(2)], t0);

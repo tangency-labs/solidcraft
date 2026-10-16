@@ -412,8 +412,8 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         }
 
         // get sIvl1 endPoints and the chord between them
-        let line_pt1 = point_or_undef(curve1, ivl1.min())?;
-        let end1 = point_or_undef(curve1, ivl1.max())?;
+        let line_pt1 = point_or_undef(k, curve1, ivl1.min())?;
+        let end1 = point_or_undef(k, curve1, ivl1.max())?;
         let line_vec1 = end1 - line_pt1;
 
         // trim sIvl2 to m_crInterval2 - set trimmed endContinuities = SM_CT_DISCONTINUOUS
@@ -432,8 +432,8 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         }
 
         // get sIvl2 EndPoints and the chord between them
-        let line_pt2 = point_or_undef(curve2, ivl2.min())?;
-        let end2 = point_or_undef(curve2, ivl2.max())?;
+        let line_pt2 = point_or_undef(k, curve2, ivl2.min())?;
+        let end2 = point_or_undef(k, curve2, ivl2.max())?;
         let line_vec2 = end2 - line_pt2;
 
         // adjust continuity for boundary endSpans on closed curves
@@ -449,10 +449,11 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
             if (is_zero(ivl.min() - parent_ivl.min()) || is_zero(ivl.max() - parent_ivl.max()))
                 && (is_zero(crv_ivl.min() - parent_ivl.min())
                     && is_zero(crv_ivl.max() - parent_ivl.max()))
-                && parent.is_closed(&parent_ivl, 0.0)?
+                && parent.is_closed(k, &parent_ivl, 0.0)?
             {
                 // get the curve's end continuity (status ignored)
                 let continuity = ignored(evaluate_continuity(
+                    k,
                     parent,
                     parent_ivl.min(),
                     false,
@@ -568,8 +569,8 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                             // where the curves are tangent to each other at the points.
 
                             // get span endPoint positions and tangents
-                            let pv1: [Vec3; 2] = eval_n(curve1, t1, 1, true, true)?; // nonZeroTangent values
-                            let pv2: [Vec3; 2] = eval_n(curve2, t2, 1, true, true)?; // nonZeroTangent values
+                            let pv1: [Vec3; 2] = eval_n(k, curve1, t1, 1, true, true)?; // nonZeroTangent values
+                            let pv2: [Vec3; 2] = eval_n(k, curve2, t2, 1, true, true)?; // nonZeroTangent values
                             let tan1 = pv1[1].unitize()?;
                             let tan2 = pv2[1].unitize()?;
 
@@ -672,6 +673,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                     if sol.start.solution_value > tol / 100.0 {
                         // just rule out really tight ones.
                         let found = local_curve_intersect(
+                            k,
                             curve1,
                             &ivl1,
                             curve2,
@@ -691,7 +693,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
 
                     // Now check the refined solution.
                     let keep = filter_solution(
-                        curve1, &ivl1, curve2, &ivl2, conts1, conts2, adjacency, sol,
+                        k, curve1, &ivl1, curve2, &ivl2, conts1, conts2, adjacency, sol,
                     )?;
 
                     // save aSolutions, which should be kept, to m_pSolutions
@@ -794,6 +796,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
             // (status ignored)
             let (found_answer, point_solution): (bool, Solution<O>) =
                 ignored(other_curve.local_point_solve(
+                    k,
                     &other_ivl,
                     SolverOperation::Minimize,
                     end_pt,
@@ -841,7 +844,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
 
             // look for exit conditions
             if only_one_intersection_possible {
-                let crv_pnt = other_curve.evaluate_point(other_t)?;
+                let crv_pnt = other_curve.evaluate_point(k, other_t)?;
                 if line_vec.length_squared() < EFF_ZERO_SQ {
                     self.add_sorted_solution(&solution2, SortKey::ByAllParameters, true)?;
                     return Ok(needs_more_subdivision);
@@ -879,7 +882,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         }
 
         // exit condition: when either curve is degenerate
-        if curve1.is_degenerate(EFF_ZERO, None)? || curve2.is_degenerate(EFF_ZERO, None)? {
+        if curve1.is_degenerate(k, EFF_ZERO, None)? || curve2.is_degenerate(k, EFF_ZERO, None)? {
             // to preserve previous behavior - add in all accumulated EndPointSolutions
             // (upstream adds the last one built, once per accumulated solution)
             for _ in 0..end_point_solutions.len() {
@@ -894,7 +897,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         let mut i = 0;
         while let (Some(&g1), Some(&g2)) = (guess1.get(i), guess2.get(i)) {
             // execute span/span NewtonRaphson Intersection
-            let found = local_curve_intersect(curve1, &ivl1, curve2, &ivl2, tol, g1, g2)?;
+            let found = local_curve_intersect(k, curve1, &ivl1, curve2, &ivl2, tol, g1, g2)?;
 
             // when a solution was found
             if let Some(isect) = found {
@@ -911,7 +914,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                 // Filter out intersections which are actually outside of the boundary
                 // of the curve and are not of the tangent sort
                 let keep = filter_solution(
-                    curve1, &ivl1, curve2, &ivl2, conts1, conts2, adjacency, &solution,
+                    k, curve1, &ivl1, curve2, &ivl2, conts1, conts2, adjacency, &solution,
                 )?;
 
                 // Filter out the nasty end case where the intersection converges to
@@ -930,6 +933,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                     if i < 5 && !only_one_intersection_possible {
                         // see if additional tangent guessPoints can be generated
                         if let Some((new_my, new_other)) = find_additional_cc_tangent_guess(
+                            k,
                             curve1,
                             &ivl1,
                             curve2,
@@ -965,9 +969,9 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
 /// `smgu_FrenetFromDerivatives` wrote before failing (position and tangent, then the
 /// curvature vector, else zero, and a zero torsion vector); [`Vec3::UNDEF`] (the
 /// uninitialised array) when the evaluation itself fails.
-fn evaluate_geometric_partial(curve: &Curve, t: f64) -> Result<[Vec3; 4]> {
+fn evaluate_geometric_partial(k: &Kernel, curve: &Curve, t: f64) -> Result<[Vec3; 4]> {
     let mut geom = [Vec3::UNDEF; 4];
-    let Some(vals) = ignored(curve.evaluate(t, 3, true, false))? else {
+    let Some(vals) = ignored(curve.evaluate(k, t, 3, true, false))? else {
         return Ok(geom);
     };
     let fill = |geom: &mut [Vec3; 4], v: Vec<Vec3>| {
@@ -1100,8 +1104,8 @@ impl Curve {
         // quit when curve is a line or when curve is in plane perp to target vector
         if property == P::PerpendicularToVector {
             // For a line, either every point or no point is a solution.
-            if self.is_linear(EFF_ZERO, false)?.linear {
-                return Ok(());
+            if self.is_linear(k, EFF_ZERO, false)?.linear {
+                return Ok(out);
             }
 
             let planar = self.is_planar(k, EFF_ZERO)?;
@@ -1145,7 +1149,7 @@ impl Curve {
                 };
 
                 let t_mid = (t1 + t2) / 2.0;
-                let mid_pnt = self.evaluate_point(t_mid)?;
+                let mid_pnt = self.evaluate_point(k, t_mid)?;
                 let val = mid_pnt.dot(plane_abc) + plane_d;
                 if val > dist_tol {
                     let mut sol: Solution<O> = Solution::new();
@@ -1158,6 +1162,7 @@ impl Curve {
         } else {
             // Set up global solver to solve single variable.
             let mut gs = CurvePropertyGs::new(
+                k,
                 curve_tree,
                 *interval,
                 property,
@@ -1210,8 +1215,8 @@ impl Curve {
                         | P::MaximizeRadiusOfCurvature
                 );
                 let mut pv: [Vec3; 3] =
-                    ignored(eval_n(self, t, 2, true, !exact))?.unwrap_or([Vec3::UNDEF; 3]);
-                let geom = evaluate_geometric_partial(self, t)?;
+                    ignored(eval_n(k, self, t, 2, true, !exact))?.unwrap_or([Vec3::UNDEF; 3]);
+                let geom = evaluate_geometric_partial(k, self, t)?;
                 out.comb_points.push(pv[0]);
 
                 let speed = pv[1].length();
@@ -1592,7 +1597,7 @@ mod tests {
             Ok(r) => {
                 assert_eq!(r.solutions.len(), 2);
                 for s in r.solutions.as_slice() {
-                    let p = c.evaluate_point(s.start.parameters[0]).unwrap();
+                    let p = c.evaluate_point(&k, s.start.parameters[0]).unwrap();
                     assert!((p.y - 0.25).abs() < 1e-6);
                 }
                 assert_eq!(r.comb_points.len(), COMB_COUNT);

@@ -342,9 +342,9 @@ fn revolution(s: &Surface) -> solidcore::Result<&SurfOfRevolution> {
 }
 
 /// Pushes `0` and the state of `s`.
-fn ok_state(o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Result<()> {
+fn ok_state(k: &Kernel, o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Result<()> {
     o.push(0.0);
-    put_state(o, s)
+    put_state(k, o, s)
 }
 
 /// Runs the op on the Rust surface, appending its status and outputs (for
@@ -358,7 +358,7 @@ fn rust_op(
     let r: solidcore::Result<()> = match op {
         OpIn::Copy {} => {
             let c = s.copy();
-            ok_state(o, &c).and_then(|()| {
+            ok_state(k, o, &c).and_then(|()| {
                 o.push(flag(c.approx_eq(k, s)?));
                 Ok(())
             })
@@ -367,7 +367,7 @@ fn rust_op(
             let mut c = s.clone();
             let [a, b, cc, d] = *dom;
             c.reparameterize(k, &Extent2d::from_bounds(a, b, cc, d))
-                .and_then(|()| ok_state(o, &c))
+                .and_then(|()| ok_state(k, o, &c))
         }
         OpIn::ToNurbs { u, v } => s
             .convert_uv_from_step_to_nurbs(k, Point2::new(*u, *v))
@@ -522,27 +522,27 @@ fn rust_op(
                 }
             }
             c.rebuild_step_from_nurb_parameters(k)
-                .and_then(|()| ok_state(o, &c))
+                .and_then(|()| ok_state(k, o, &c))
         }
         OpIn::Transform { frame } => {
             let mut c = s.clone();
             let (rf, scale) = frame_of(frame);
-            c.transform(k, &rf, scale).and_then(|()| ok_state(o, &c))
+            c.transform(k, &rf, scale).and_then(|()| ok_state(k, o, &c))
         }
         OpIn::Update { dom } => {
             let mut c = s.clone();
             let d = dom_of(&c, *dom);
             c.update_analytical_domain(k, &d)
-                .and_then(|()| ok_state(o, &c))
+                .and_then(|()| ok_state(k, o, &c))
         }
         OpIn::Reverse { param } => {
             let mut c = Surface::from(s.clone());
             c.reverse(k, param_of(*param))
-                .and_then(|()| ok_state(o, revolution(&c)?))
+                .and_then(|()| ok_state(k, o, revolution(&c)?))
         }
         OpIn::Swap {} => {
             let mut c = Surface::from(s.clone());
-            c.swap_uv(k).and_then(|()| ok_state(o, revolution(&c)?))
+            c.swap_uv(k).and_then(|()| ok_state(k, o, revolution(&c)?))
         }
         OpIn::ReadDb { .. } => return Err(harness("unreachable")),
     };
@@ -565,7 +565,7 @@ fn rust_read(k: &Kernel, binary: bool, version: u32, bytes: &[u8]) -> Result<Out
             o.push(status(&e));
         }
         Ok(s) => {
-            if let Err(e) = ok_state(&mut o, &s) {
+            if let Err(e) = ok_state(k, &mut o, &s) {
                 if let Some(out) = Output::unported(&e) {
                     return Ok(out);
                 }

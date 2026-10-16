@@ -1125,9 +1125,9 @@ fn rust_err(e: &SolidError) -> Result<Output, HarnessError> {
     }
 }
 
-fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     if !is_brep_op(&i.op) {
-        return match run_rust_geom(&i.op) {
+        return match run_rust_geom(k, &i.op) {
             Ok(o) => Ok(o),
             Err(Fail::Solid(e)) => rust_err(&e),
             Err(Fail::Harness(h)) => Err(h),
@@ -1144,7 +1144,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if let Some(o) = inexact_geometry(&b, &types, &op) {
         return Ok(o);
     }
-    match run_rust_brep(&mut b, &op) {
+    match run_rust_brep(k, &mut b, &op) {
         Ok(o) => Ok(o),
         Err(Fail::Solid(e)) => rust_err(&e),
         Err(Fail::Harness(h)) => Err(h),
@@ -1243,7 +1243,7 @@ fn eid(i: i64) -> EdgeuseId {
 }
 
 /// The state of an edge use after `SetUVTrimCurve`, as the shim's `put_eu_state`.
-fn eu_state(b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> Result<(), SolidError> {
+fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> Result<(), SolidError> {
     let Some(eu) = eu else {
         out.push(-1.0);
         return Ok(());
@@ -1257,7 +1257,7 @@ fn eu_state(b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> Result<(), S
             let ivl = c.natural_interval();
             out.extend([ivl.min(), ivl.max()]);
             for t in [ivl.min(), ivl.mid(), ivl.max()] {
-                let p = c.evaluate_point(t).unwrap_or(Vec3::UNDEF);
+                let p = c.evaluate_point(k, t).unwrap_or(Vec3::UNDEF);
                 out.extend([p.x, p.y, p.z]);
             }
         }
@@ -1282,7 +1282,7 @@ fn status_of(e: &SolidError) -> f64 {
     }
 }
 
-fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
+fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
     match op {
         OpIn::EuQuery { eu, vertex } => {
             let e = eid(*eu);
@@ -1421,8 +1421,8 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 Err(x) => return Err(x.into()),
             }
             let mut out = vec![0.0];
-            eu_state(b, Some(e), &mut out)?;
-            eu_state(b, mate, &mut out)?;
+            eu_state(k, b, Some(e), &mut out)?;
+            eu_state(k, b, mate, &mut out)?;
             out.push(match eu1::edge(b, e)? {
                 Some(x) => b.edge(x)?.tolerance,
                 None => -1.0,
@@ -1443,7 +1443,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let mut vals: Vec<f64> = Vec::new();
             match which {
                 0 => out.push(flag(eu1::max_edge_face_gap(&Kernel::default(), b, e, *f)?.is_some())),
-                1 => out.push(flag(eu1::edge_ccw_edge_gap(&Kernel::default(), b, e, *f)?.is_some())),
+                1 => out.push(flag(eu1::edge_ccw_edge_gap(k, b, e, *f)?.is_some())),
                 2 => match eu1::calc_max_edge_face_gap(&Kernel::default(), b, e, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(*want_out && g.is_init())]);
@@ -1454,7 +1454,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),
                 },
-                _ => match eu1::calc_edge_ccw_edge_gap(&Kernel::default(), b, e, *want_out, *f) {
+                _ => match eu1::calc_edge_ccw_edge_gap(k, b, e, *want_out, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
                         if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {
@@ -1563,7 +1563,7 @@ impl solidcore::geom::solution_array::SolutionObject for Obj {
     }
 }
 
-fn run_rust_geom(op: &OpIn) -> Result<Output, Fail> {
+fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Output, Fail> {
     match op {
         OpIn::StepOff {
             surface,
@@ -1574,7 +1574,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Output, Fail> {
             jac,
         } => {
             let s = surface_of(surface)?;
-            let mut e = eu1::FindStepOff::new(*dist, Vec3::from_array(*p), Vec3::from_array(*n), &s);
+            let mut e = eu1::FindStepOff::new(k, *dist, Vec3::from_array(*p), Vec3::from_array(*n), &s);
             let mut f = [UNDEF_DOUBLE; 2];
             let mut m = Matrix::new(2, 2);
             for r in 0..2 {
@@ -1615,7 +1615,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Output, Fail> {
                 _ => None,
             };
             let (dist, dev) =
-                eu1::calc_dist_and_dev(Vec3::from_array(*p), &sol, |_| Some(&s), *want_dev)?;
+                eu1::calc_dist_and_dev(k, Vec3::from_array(*p), &sol, |_| Some(&s), *want_dev)?;
             Ok(Output::new().values("dist_dev", vec![dist, dev.unwrap_or(UNDEF_DOUBLE)]))
         }
         OpIn::Seam {
@@ -1896,7 +1896,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        run_rust(&case.parse::<Inputs>()?)
+let k = &Kernel::default();
+        run_rust(k, &case.parse::<Inputs>()?)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

@@ -343,10 +343,11 @@ struct SectionTracer<'s> {
 impl SectionTracer<'_> {
     /// `[S, S_u, S_v]` (`Evaluate(uv, 1, 1, TRUE, TRUE, FALSE, D)`).
     fn eval(&self, uv: Point2) -> solidcore::Result<(Vec3, Vec3, Vec3)> {
+let k = &Kernel::default();
         let d = self
             .base
             .surface
-            .evaluate(uv, 1, 1, EvaluateFlags::default())?;
+            .evaluate(k, uv, 1, 1, EvaluateFlags::default())?;
         let at = |i: usize, j: usize| {
             d.get(i)
                 .and_then(|r| r.get(j))
@@ -623,7 +624,7 @@ fn trace_from(
         Ok(None) => return Ok((1, 0.0)),
         Err(s) => return Ok((1, s)),
     };
-    let surf_pnt = match st(t.base.surface.evaluate_point(found_uv))? {
+    let surf_pnt = match st(t.base.surface.evaluate_point(k, found_uv))? {
         Ok(p) => p,
         Err(s) => return Ok((2, s)),
     };
@@ -650,7 +651,7 @@ fn trace_from(
         .point_type;
     if !t.base.curve_is_closed && start_type != TracePointType::Singularity {
         if let Err(s) = st(t.reverse_curve_direction())? {
-            ign(flush_curve(&mut t.base, acc, None))?;
+            ign(flush_curve(k, &mut t.base, acc, None))?;
             return Ok((6, s));
         }
         t.base.curve_trace_direction = -1.0;
@@ -663,7 +664,7 @@ fn trace_from(
         ign(t.reverse_curve_direction())?;
         t.base.curve_trace_direction = 1.0;
     }
-    ign(flush_curve(&mut t.base, acc, None))?;
+    ign(flush_curve(k, &mut t.base, acc, None))?;
     t.base.start_point = None;
     Ok((0, 0.0))
 }
@@ -695,7 +696,7 @@ fn run_op(
                 t.base.curve_points.push(id);
             }
             let c = curve.as_ref().map(rust_curve).transpose()?;
-            match st(flush_curve(&mut t.base, acc, c.as_ref()))? {
+            match st(flush_curve(k, &mut t.base, acc, c.as_ref()))? {
                 Ok(()) => o.push(0.0),
                 Err(s) => o.push(s),
             }
@@ -774,7 +775,7 @@ fn run_op(
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let surface = rust_surface(&i.surface)?;
-    let base = match SurfaceTracer::new(&surface, &ext(i.domain)) {
+    let base = match SurfaceTracer::new(&k, &surface, &ext(i.domain)) {
         Ok(b) => b,
         Err(e) => {
             return Output::unported(&e)
@@ -1121,14 +1122,14 @@ fn gen_phase1_op(rng: &mut Rng, domain: [f64; 4], scale: f64) -> OpIn {
     }
 }
 
-fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
+fn gen_inputs(k: &Kernel, rng: &mut Rng) -> Option<Inputs> {
     let scale = pick(rng, &[1.0, 1.0, 1.0, 1.0, 1e-3, 1e3, 1e-6, 1e5], 1.0);
     let surface = gen_surface(rng, scale);
     let nat = natural(&surface);
     let domain = gen_domain(rng, nat);
     let s = rust_surface(&surface).ok()?;
     let uv0 = uv_in(rng, domain);
-    let p0 = s.evaluate_point(p2(uv0)).ok()?;
+    let p0 = s.evaluate_point(k, p2(uv0)).ok()?;
     let mut p0 = [p0.x, p0.y, p0.z];
     if rng.chance(0.1) {
         // a plane missing the surface (or touching it far away)
@@ -1162,7 +1163,7 @@ fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
         });
         if rng.chance(0.3) {
             let uv = uv_in(rng, domain);
-            if let Ok(p) = s.evaluate_point(p2(uv)) {
+            if let Ok(p) = s.evaluate_point(k, p2(uv)) {
                 ops.push(OpIn::OnCurve { p: [p.x, p.y, p.z] });
             }
         }
@@ -1214,8 +1215,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..8 {
-            if let Some(i) = gen_inputs(rng) {
+            if let Some(i) = gen_inputs(k, rng) {
                 return serde_json::to_value(i).ok();
             }
         }

@@ -511,7 +511,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .iter()
                 .map(|c| need(bspline(c)?))
                 .collect::<Result<Vec<_>, _>>()?;
-            surface_result(&mut o, api::create_skin(&ps))
+            surface_result(&mut o, api::create_skin(&k, &ps))
         }
         Inputs::SkinPrimitive {
             counts,

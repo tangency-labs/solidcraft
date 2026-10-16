@@ -109,7 +109,6 @@ enum CurveIn {
     Line(LineIn),
 }
 
-
 // ---- C++ input --------------------------------------------------------------------
 
 /// `c` with a circle replaced by its inline B-spline.
@@ -174,7 +173,6 @@ fn curve_block(v: &mut Vec<f64>, c: &CurveIn) -> Result<(), HarnessError> {
     Ok(())
 }
 
-
 fn to_output(flat: &[f64]) -> Output {
     let status = flat.first().copied().unwrap_or(f64::NAN);
     let rest = flat.get(1..).unwrap_or(&[]).to_vec();
@@ -182,7 +180,6 @@ fn to_output(flat: &[f64]) -> Output {
         .ints("status", vec![status as i64])
         .values("out", rest)
 }
-
 
 // ---- Rust side --------------------------------------------------------------------
 
@@ -237,7 +234,6 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
         CurveIn::Circle(_) => Err(harness("unresolved circle")),
     }
 }
-
 
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
@@ -330,12 +326,9 @@ fn put_sol<O: Copy>(o: &mut Vec<f64>, s: &Solution<O>, id: impl Fn(Option<O>) ->
     }
 }
 
-
-
 fn ivl_of(i: [f64; 2]) -> Extent1d {
     Extent1d::from_min_max(i[0], i[1])
 }
-
 
 // ---- generation -------------------------------------------------------------------
 
@@ -457,7 +450,6 @@ fn gen_curve(rng: &mut Rng) -> CurveIn {
     resolve(&c).unwrap_or(c)
 }
 
-
 /// A curve that is closed (or nearly) over its natural interval.
 fn gen_closed_curve(rng: &mut Rng) -> CurveIn {
     match rng.below(3) {
@@ -506,7 +498,6 @@ fn range_of(c: &CurveIn) -> (f64, f64) {
     }
 }
 
-
 /// An increasing interval of `c`: mostly its natural one or a sub-interval.
 fn gen_ivl(rng: &mut Rng, c: &CurveIn) -> [f64; 2] {
     let (a, bb) = range_of(c);
@@ -542,10 +533,10 @@ fn scale3(a: [f64; 3], s: f64) -> [f64; 3] {
 }
 
 /// The point of `c` at `t` (Rust evaluation, used only to place test points).
-fn point_at(c: &CurveIn, t: f64) -> [f64; 3] {
+fn point_at(k: &Kernel, c: &CurveIn, t: f64) -> [f64; 3] {
     build(c)
         .ok()
-        .and_then(|cc| cc.evaluate_point(t).ok())
+        .and_then(|cc| cc.evaluate_point(k, t).ok())
         .map_or([0.0; 3], |p| [p.x, p.y, p.z])
 }
 
@@ -589,7 +580,7 @@ fn translated(c: &CurveIn, d: [f64; 3]) -> CurveIn {
 
 /// A second curve near `c`: an identical copy, a slightly moved copy, the same line
 /// reparameterised, or an unrelated curve.
-fn gen_partner(rng: &mut Rng, c: &CurveIn) -> CurveIn {
+fn gen_partner(k: &Kernel, rng: &mut Rng, c: &CurveIn) -> CurveIn {
     match rng.below(8) {
         0..=2 => c.clone(),
         3 | 4 => {
@@ -599,8 +590,8 @@ fn gen_partner(rng: &mut Rng, c: &CurveIn) -> CurveIn {
         5 => {
             // a line on the same carrier with another parameterisation
             let (a, bb) = range_of(c);
-            let p = point_at(c, a);
-            let q = point_at(c, bb);
+            let p = point_at(k, c, a);
+            let q = point_at(k, c, bb);
             let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
             if rng.chance(0.5) {
                 CurveIn::Line(LineIn {
@@ -638,7 +629,6 @@ fn gen_tol(rng: &mut Rng) -> f64 {
     *rng.choose(&[1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 0.5])
         .unwrap_or(&1e-5)
 }
-
 
 // ---- the op -----------------------------------------------------------------------
 
@@ -741,24 +731,24 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
 
 /// A curve through the point of `c` at `t` (a random curve moved so that one of its
 /// points lands there, optionally a little off).
-fn gen_crossing(rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
+fn gen_crossing(k: &Kernel, rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
     let other = gen_curve(rng);
     let (a, bb) = range_of(&other);
     let s = a + (bb - a) * rng.uniform(0.05, 0.95);
-    let p = point_at(c, t);
-    let q = point_at(&other, s);
+    let p = point_at(k, c, t);
+    let q = point_at(k, &other, s);
     let off = *rng.choose(&[0.0, 0.0, 1e-9, 1e-7, 1e-5]).unwrap_or(&0.0);
     let d = add([p[0] - q[0], p[1] - q[1], p[2] - q[2]], scale3(gen_dir(rng), off));
     translated(&other, d)
 }
 
 /// A line tangent to `c` at `t` (along the chord to a nearby point), possibly offset.
-fn gen_tangent_line(rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
+fn gen_tangent_line(k: &Kernel, rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
     let (a, bb) = range_of(c);
     let h = 1e-4 * (bb - a);
-    let p0 = point_at(c, t - h);
-    let p1 = point_at(c, t + h);
-    let p = point_at(c, t);
+    let p0 = point_at(k, c, t - h);
+    let p1 = point_at(k, c, t + h);
+    let p = point_at(k, c, t);
     let dir = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
     let off = *rng.choose(&[0.0, 1e-8, 1e-6, 1e-3]).unwrap_or(&0.0);
     let p = add(p, scale3(gen_dir(rng), off));
@@ -806,7 +796,7 @@ fn gen_looping(rng: &mut Rng) -> CurveIn {
     }
 }
 
-fn gen_case(rng: &mut Rng) -> OpIn {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     let c1 = match rng.below(10) {
         0 => gen_closed_curve(rng),
         1 => gen_looping(rng),
@@ -817,9 +807,9 @@ fn gen_case(rng: &mut Rng) -> OpIn {
     let t = a + (bb - a) * rng.uniform(0.0, 1.0);
     let c2 = match rng.below(20) {
         0 | 1 => None,
-        2..=6 => Some(gen_crossing(rng, &c1, t)),
-        7 | 8 => Some(gen_tangent_line(rng, &c1, t)),
-        9..=13 => Some(gen_partner(rng, &c1)),
+        2..=6 => Some(gen_crossing(k, rng, &c1, t)),
+        7 | 8 => Some(gen_tangent_line(k, rng, &c1, t)),
+        9..=13 => Some(gen_partner(k, rng, &c1)),
         14 => Some(translated(&gen_curve(rng), [300.0, -200.0, 50.0])),
         15 => Some(CurveIn::Line(gen_line(rng))),
         _ => Some(gen_curve(rng)),
@@ -854,8 +844,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let op = gen_case(rng);
+            let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
@@ -891,10 +882,11 @@ mod tests {
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
     fn generated_cases_run() {
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats = [0usize; 4];
         for _ in 0..300 {
-            let op = gen_case(&mut rng);
+            let op = gen_case(k, &mut rng);
             stats[0] += 1;
             match rust(&op) {
                 Err(_) => stats[3] += 1,
@@ -902,7 +894,10 @@ mod tests {
                 Ok(_) => stats[1] += 1,
             }
         }
-        eprintln!("total {} ran {} deferred {} harness {}", stats[0], stats[1], stats[2], stats[3]);
+        eprintln!(
+            "total {} ran {} deferred {} harness {}",
+            stats[0], stats[1], stats[2], stats[3]
+        );
         assert!(stats[1] > 0);
     }
 }

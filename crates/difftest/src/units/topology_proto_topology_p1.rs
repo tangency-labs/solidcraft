@@ -638,11 +638,11 @@ pub(super) fn put_vec(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
-pub(super) fn put_curve(o: &mut Vec<f64>, c: &Curve) {
+pub(super) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     for i in 0..=4 {
-        match c.evaluate_point(ivl.evaluate(f64::from(i) / 4.0)) {
+        match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => {
                 o.push(0.0);
                 put_vec(o, p);
@@ -652,7 +652,7 @@ pub(super) fn put_curve(o: &mut Vec<f64>, c: &Curve) {
     }
 }
 
-fn put_surface(o: &mut Vec<f64>, s: &Surface) {
+fn put_surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) {
     let d = s.natural_uv_domain();
     o.extend([d.u_min(), d.u_max(), d.v_min(), d.v_max()]);
     for i in 0..=2 {
@@ -661,7 +661,7 @@ fn put_surface(o: &mut Vec<f64>, s: &Surface) {
                 d.u_min() + (d.u_max() - d.u_min()) * (f64::from(i) / 2.0),
                 d.v_min() + (d.v_max() - d.v_min()) * (f64::from(j) / 2.0),
             );
-            match s.evaluate_point(uv) {
+            match s.evaluate_point(k, uv) {
                 Ok(p) => {
                     o.push(0.0);
                     put_vec(o, p);
@@ -1950,7 +1950,7 @@ impl ProtoRun {
             o.push(b(alive));
             if alive {
                 if let PObj::Curve(c) = obj {
-                    put_curve(o, c);
+                    put_curve(k, o, c);
                 }
             }
         }
@@ -2940,9 +2940,9 @@ fn run_proto(
                             && (mode == 0 || e.xsect_curve_3d().is_some()) =>
                     {
                         let res = if op == p::ED_EVAL {
-                            e.evaluate(&r.pool, t, mode & 1 != 0, mode & 2 != 0)
+                            e.evaluate(k, &r.pool, t, mode & 1 != 0, mode & 2 != 0)
                         } else {
-                            e.evaluate_mid(&r.pool, mode & 1 != 0, mode & 2 != 0)
+                            e.evaluate_mid(k, &r.pool, mode & 1 != 0, mode & 2 != 0)
                         };
                         put_eval(&mut out, st(res)?, mode);
                     }
@@ -2955,7 +2955,7 @@ fn run_proto(
                 let e = d.and_then(|d| r.mgr.edge_def(d));
                 match e {
                     Some(e) if !skip && e.xsect_curve_3d().is_some() => {
-                        match st(e.end_position(&r.pool, at_start))? {
+                        match st(e.end_position(k, &r.pool, at_start))? {
                             Ok(pt) => put_vec(&mut out, pt),
                             Err(s) => {
                                 status = s;
@@ -2980,7 +2980,7 @@ fn run_proto(
                         {
                             skip = true;
                         } else {
-                            match st(r.mgr.edge_def_end_position_at(&r.pool, d, v))? {
+                            match st(r.mgr.edge_def_end_position_at(k, &r.pool, d, v))? {
                                 Ok(pt) => put_vec(&mut out, pt),
                                 Err(s) => status = s,
                             }
@@ -3198,9 +3198,9 @@ fn run_proto(
                         }
                         if !skip {
                             let res = if op == p::PE_END_POS {
-                                r.mgr.proto_edge_end_position(&r.pool, eid, at_start)
+                                r.mgr.proto_edge_end_position(k, &r.pool, eid, at_start)
                             } else {
-                                r.mgr.proto_edge_end_position_at(&r.pool, eid, v)
+                                r.mgr.proto_edge_end_position_at(k, &r.pool, eid, v)
                             };
                             match st(res)? {
                                 Ok(pt) => put_vec(&mut out, pt),
@@ -3227,20 +3227,9 @@ fn run_proto(
                             skip = true;
                         } else {
                             let res = if op == p::PE_EVAL {
-                                r.mgr.proto_edge_evaluate(
-                                    &r.pool,
-                                    eid,
-                                    t,
-                                    mode & 1 != 0,
-                                    mode & 2 != 0,
-                                )
+                                r.mgr.proto_edge_evaluate(k, &r.pool, eid, t, mode & 1 != 0, mode & 2 != 0)
                             } else {
-                                r.mgr.proto_edge_evaluate_mid(
-                                    &r.pool,
-                                    eid,
-                                    mode & 1 != 0,
-                                    mode & 2 != 0,
-                                )
+                                r.mgr.proto_edge_evaluate_mid(k, &r.pool, eid, mode & 1 != 0, mode & 2 != 0)
                             };
                             put_eval(&mut out, st(res)?, mode);
                         }
@@ -3314,10 +3303,7 @@ fn run_proto(
                             }
                         }
                         if !skip {
-                            match st(r
-                                .mgr
-                                .proto_vertex_final_vertex(&r.pool, v, w as i32, d, at_start))?
-                            {
+                            match st(r.mgr.proto_vertex_final_vertex(k, &r.pool, v, w as i32, d, at_start))? {
                                 Ok(x) => out.push(r.pool.id(x)),
                                 Err(s) => status = s,
                             }
@@ -3557,7 +3543,7 @@ fn run_proto(
                             }
                         }
                         if !skip {
-                            match st(r.mgr.which_pv_to_combine(&r.pool, eid, t, sv))? {
+                            match st(r.mgr.which_pv_to_combine(k, &r.pool, eid, t, sv))? {
                                 Ok(x) => out.push(r.pv_id(x)),
                                 Err(s) => status = s,
                             }
@@ -3617,13 +3603,7 @@ fn run_proto(
                     skip = true;
                 } else {
                     let dom = Extent1d::from_min_max(a, bb);
-                    match st(proto_mod::is_interior(
-                        &r.pool,
-                        c,
-                        &dom,
-                        t,
-                        zone_tol3d(k, tol),
-                    ))? {
+                    match st(proto_mod::is_interior(k, &r.pool, c, &dom, t, zone_tol3d(k, tol)))? {
                         Ok(f) => out.push(b(f)),
                         Err(s) => status = s,
                     }
@@ -4296,10 +4276,10 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
     };
     let mut o = vec![s];
     if let Some(c) = &curve {
-        put_curve(&mut o, c);
+        put_curve(&k, &mut o, c);
     }
     if let Some(sf) = &surface {
-        put_surface(&mut o, sf);
+        put_surface(&k, &mut o, sf);
     }
     if let Some(b) = &poly {
         // the poly B-rep's tolerance, then each vertex's point and tolerance

@@ -481,33 +481,33 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             };
             let mut o = Vec::new();
             let r = (|| -> Result<(), SolidError> {
-                sub(&mut o, s.evaluate_1st_derivatives(uv, *ul, *vl), |o, (p, du, dv)| {
+                sub(&mut o, s.evaluate_1st_derivatives(&k, uv, *ul, *vl), |o, (p, du, dv)| {
                     push3(o, p);
                     push3(o, du);
                     push3(o, dv);
                 })?;
-                sub(&mut o, s.evaluate_2nd_derivatives(uv, *ul, *vl), |o, d| {
+                sub(&mut o, s.evaluate_2nd_derivatives(&k, uv, *ul, *vl), |o, d| {
                     for v in d {
                         push3(o, v);
                     }
                 })?;
-                sub(&mut o, s.evaluate_step(uv, 2, 2, fl), |o, m| push_upper(o, &m))?;
-                sub(&mut o, s.evaluate_step_point(uv), push3)?;
-                sub(&mut o, s.evaluate_simple(uv, 2, 2, fl), |o, m| push_upper(o, &m))
+                sub(&mut o, s.evaluate_step(&k, uv, 2, 2, fl), |o, m| push_upper(o, &m))?;
+                sub(&mut o, s.evaluate_step_point(&k, uv), push3)?;
+                sub(&mut o, s.evaluate_simple(&k, uv, 2, 2, fl), |o, m| push_upper(o, &m))
             })();
             r.map(|()| o)
         }
         OpIn::Periodic { dom, v } => {
             let s = run()?;
-            flags(s.is_periodic(&dom_of(*dom), dir_of(*v)).map(|b| vec![b]))
+            flags(s.is_periodic(&k, &dom_of(*dom), dir_of(*v)).map(|b| vec![b]))
         }
         OpIn::DegenPoint { tol, dom } => {
             let s = run()?;
             let d = dom.map(dom_of);
             flags((|| {
                 Ok(vec![
-                    base_is_degenerate_point(&s, *tol, d.as_ref())?,
-                    s.is_degenerate_point(*tol, d.as_ref())?,
+                    base_is_degenerate_point(&k, &s, *tol, d.as_ref())?,
+                    s.is_degenerate_point(&k, *tol, d.as_ref())?,
                 ])
             })())
         }
@@ -516,8 +516,8 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let d = dom.map(dom_of);
             flags((|| {
                 Ok(vec![
-                    base_is_degenerate_curve(&s, *ang, d.as_ref(), *tol)?,
-                    s.is_degenerate_curve(*ang, d.as_ref(), *tol)?,
+                    base_is_degenerate_curve(&k, &s, *ang, d.as_ref(), *tol)?,
+                    s.is_degenerate_curve(&k, *ang, d.as_ref(), *tol)?,
                 ])
             })())
         }
@@ -546,7 +546,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         OpIn::Misc { other_wrap, other } => {
             let a = run()?;
             let b = wrapped_of(*other_wrap, other)?;
-            match (a.approx_eq(&b), a.is_analytic(), a.face()) {
+            match (a.approx_eq(&k, &b), a.is_analytic(), a.face()) {
                 (Ok(eq), Ok(an), Ok(face)) => Ok(vec![
                     0.0,
                     flag(eq),
@@ -598,7 +598,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         OpIn::ParamDir { uv, vec } => {
             let s = run()?;
             let mut o = Vec::new();
-            sub(&mut o, s.compute_param_direction(p2(*uv), v3(*vec)), |o, d| {
+            sub(&mut o, s.compute_param_direction(&k, p2(*uv), v3(*vec)), |o, d| {
                 o.extend([d.x, d.y]);
             })
             .map(|()| o)
@@ -610,7 +610,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let s = run()?;
             let mut o = Vec::new();
             let r = s.evaluate_directional_derivs(
-                p2(*uv),
+                &k, p2(*uv),
                 Vec2::new(dir[0], dir[1]),
                 *h,
                 *ul,
@@ -642,7 +642,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let s = run()?;
             let d = dom.map(dom_of);
             let mut o = Vec::new();
-            sub(&mut o, s.approximate_size(d.as_ref()), |o, v| {
+            sub(&mut o, s.approximate_size(&k, d.as_ref()), |o, v| {
                 o.extend([v.x, v.y]);
             })
             .map(|()| o)
@@ -666,7 +666,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         }
         OpIn::Sing { uv, dir, v, tol, s: t } => {
             let s = run()?;
-            let f = FindSingularParamWithGivenTangentDir::new(&s, p2(*uv), v3(*dir), dir_of(*v), *tol);
+            let f = FindSingularParamWithGivenTangentDir::new(&k, &s, p2(*uv), v3(*dir), dir_of(*v), *tol);
             let mut o = Vec::new();
             sub(&mut o, f.evaluate(*t), |o, (a, b, found)| {
                 o.extend([a, b, flag(found)]);
@@ -683,7 +683,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         OpIn::IsoLen { u, t } => {
             let s = run()?;
             let mut o = Vec::new();
-            sub(&mut o, IsoCurveLengthIntegrand::new(&s, *u).evaluate(*t), |o, v| {
+            sub(&mut o, IsoCurveLengthIntegrand::new(&s, *u).evaluate(&k, *t), |o, v| {
                 o.push(v);
             })
             .map(|()| o)

@@ -90,7 +90,7 @@ impl SurfPtSolveStepper<'_> {
     /// # Errors
     ///
     /// Missing dependencies and surface evaluation failures.
-    pub fn find_boundary_solution(&mut self) -> Result<bool> {
+    pub fn find_boundary_solution(&mut self, k: &Kernel) -> Result<bool> {
         let tight = self.base.tight_tol();
         let loose = self.base.loose_tol();
         let (pushing, mut bound) = self.pushing_boundary(-tight)?;
@@ -153,6 +153,7 @@ impl SurfPtSolveStepper<'_> {
         let mut sol: Solution<()> = Solution::new();
         let found = if self.base.solver_op() == SolverOperation::Signed3dDirectedMaximize {
             boundary_or_false(local_property_analysis(
+                k,
                 &curve,
                 &iso_domain,
                 CurvePropertyType::PerpendicularToVector,
@@ -163,6 +164,7 @@ impl SurfPtSolveStepper<'_> {
             ))?
         } else {
             match curve.local_point_solve(
+                k,
                 &iso_domain,
                 SolverOperation::Minimize,
                 self.base.test_point(),
@@ -182,7 +184,7 @@ impl SurfPtSolveStepper<'_> {
         }
         let new_param = sol.start.param(0)?;
         let mut new_uv = self.uv();
-        let mut boundary = Self::copy_of(self);
+        let mut boundary = Self::copy_of(k, self);
         if param == SurfParamType::U {
             new_uv.y = new_param;
         } else {
@@ -238,7 +240,7 @@ impl SurfPtSolveStepper<'_> {
             if bound == SurfParamType::Both {
                 return Ok(NextStep::success(OutOfBounds));
             }
-            if boundary_or_false(self.find_boundary_solution())? {
+            if boundary_or_false(self.find_boundary_solution(k))? {
                 return Ok(NextStep::success(if self.pushing_boundary(tight)?.0 {
                     OutOfBounds
                 } else {
@@ -247,17 +249,17 @@ impl SurfPtSolveStepper<'_> {
             }
         }
         self.set_nr_suspect(false);
-        let mut nr = Self::copy_of(previous);
-        let mut reason = nr.step(k, previous, false)?;
+        let mut nr = Self::copy_of(k, previous);
+        let mut reason = nr.step(previous, false)?;
         if reason == Converged {
             self.assign(&nr);
             return Ok(NextStep::success(reason));
         }
         let mut got_nr = reason == StillIterating;
         if got_nr {
-            match nr.adjust_step(previous) {
+            match nr.adjust_step(k, previous) {
                 Ok((adjusted, scale)) => {
-                    if nr.converged_with(true)? {
+                    if nr.converged_with(k, true)? {
                         self.assign(&nr);
                         return Ok(NextStep::success(reason));
                     }
@@ -298,8 +300,8 @@ impl SurfPtSolveStepper<'_> {
             return Ok(NextStep::success(reason));
         }
         self.set_nr_suspect(true);
-        let mut plane = Self::copy_of(previous);
-        reason = plane.step(k, previous, true)?;
+        let mut plane = Self::copy_of(k, previous);
+        reason = plane.step(previous, true)?;
         if reason == Converged {
             // Upstream deliberately assigns sNREval here, even after the plane step.
             self.assign(&nr);
@@ -307,9 +309,9 @@ impl SurfPtSolveStepper<'_> {
         }
         let mut got_plane = reason == StillIterating;
         if got_plane {
-            match plane.adjust_step(previous) {
+            match plane.adjust_step(k, previous) {
                 Ok(_) => {
-                    if plane.converged_with(true)? {
+                    if plane.converged_with(k, true)? {
                         self.assign(&plane);
                         return Ok(NextStep::success(reason));
                     }
@@ -332,7 +334,7 @@ impl SurfPtSolveStepper<'_> {
             ErrorNormType::Gap
         };
         if got_plane
-            && boundary_or_false(plane.find_boundary_solution())?
+            && boundary_or_false(plane.find_boundary_solution(k))?
             && plane.error_norm(norm)? <= previous.error_norm(norm)?
             && (!got_nr || plane.error_norm(norm)? <= nr.error_norm(norm)?)
         {
@@ -345,7 +347,7 @@ impl SurfPtSolveStepper<'_> {
         }
         // Both CheckCrease calls in upstream are disabled unconditionally.
         if got_nr
-            && boundary_or_false(nr.find_boundary_solution())?
+            && boundary_or_false(nr.find_boundary_solution(k))?
             && nr.error_norm(norm)? < previous.error_norm(norm)? + EFF_ZERO
             && (!got_plane || nr.error_norm(norm)? < plane.error_norm(norm)? + EFF_ZERO)
         {
@@ -357,13 +359,13 @@ impl SurfPtSolveStepper<'_> {
             });
         }
         if got_nr {
-            match nr.line_search(previous) {
+            match nr.line_search(k, previous) {
                 Err(e) if e.is_unported() => return Err(e),
                 _ => {}
             }
         }
         if got_plane {
-            match plane.line_search(previous) {
+            match plane.line_search(k, previous) {
                 Err(e) if e.is_unported() => return Err(e),
                 _ => {}
             }
@@ -476,7 +478,7 @@ impl Surface {
         *solution.start.param_mut(0)? = guess.x;
         *solution.start.param_mut(1)? = guess.y;
         solution.start.solution_value = curr.gap_length()?;
-        if curr.converged(EFF_ZERO / 1000.0)?
+        if curr.converged(k, EFF_ZERO / 1000.0)?
             && (!curr.is_singular()?.0 || curr.gap_length()? < tight)
         {
             return Ok(LocalPointSolve {
@@ -486,13 +488,13 @@ impl Surface {
                 iterations: 0,
             });
         }
-        let mut next = SurfPtSolveStepper::copy_of(&curr);
+        let mut next = SurfPtSolveStepper::copy_of(k, &curr);
         let mut reason = StillIterating;
         let mut iterations = 0;
         while iterations < 35 {
             let step = next.find_next_step(k, &mut curr)?;
             reason = step.reason;
-            if next.converged_with(true)? {
+            if next.converged_with(k, true)? {
                 reason = Converged;
                 break;
             }
@@ -556,7 +558,7 @@ impl Surface {
             } else {
                 ErrorNormType::Gap
             })?;
-        let mut found = next.converged_with(false)?;
+        let mut found = next.converged_with(k, false)?;
         if !found {
             if matches!(
                 op,

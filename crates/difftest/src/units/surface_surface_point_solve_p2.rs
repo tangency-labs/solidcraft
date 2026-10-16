@@ -38,18 +38,20 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::global_solver::SolutionRequested;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject};
 use solidcore::kernel::Kernel;
-use solidcore::surface::surface::Surface;
 use solidcore::surface::surface::p1::StepSurface;
+use solidcore::surface::surface::Surface;
 use solidcore::surface::surface_point_solve::p1::ErrorNormType;
 use solidcore::surface::surface_point_solve::{SurfPtGlobalSolver, SurfPtSolveStepper};
 use solidcore_ffi::units::surface_surface_point_solve_p2::{self as ffi, Op, MAX_GRID, MAX_HITS};
 
-use super::surface_surface_cache_p1::{dom_of, flag, gen_sub_dom, harness, srf, status, v3, BssIn, SrfIn};
-use super::surface_surface_cache_p3::{push_surf, surf_domain, surf_size, surface_in, SurfIn};
 use super::surface_surf_of_revolution_p1::{
     ffi_surf as rev_ffi_surf, gen_surf as rev_gen_surf, rust_surf as rev_rust_surf,
     SurfIn as RevSurfIn,
 };
+use super::surface_surface_cache_p1::{
+    dom_of, flag, gen_sub_dom, harness, srf, status, v3, BssIn, SrfIn,
+};
+use super::surface_surface_cache_p3::{push_surf, surf_domain, surf_size, surface_in, SurfIn};
 use super::surface_surface_point_solve_p1::{
     gen_surface, gen_test, gen_uv, gen_uv_any, net_counts, p2, push2, solver_op, test_on_normal,
     wrapped_of, SOLVERS, SURFACE_SMS_POINTS,
@@ -427,7 +429,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
         match &i.op {
             OpIn::Rough => {
                 let mut g = global()?;
-                match g.find_rough_guess() {
+                match g.find_rough_guess(&k) {
                     Ok(r) => {
                         o.push(0.0);
                         push2(&mut o, r.uv);
@@ -438,7 +440,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             }
             OpIn::Poly { iu, iv } => {
                 let g = global()?;
-                match g.find_polygon_guess((*iu, *iv)) {
+                match g.find_polygon_guess(&k, (*iu, *iv)) {
                     Ok(r) => {
                         o.push(0.0);
                         push2(&mut o, r.uv);
@@ -466,14 +468,14 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 let g = global()?;
                 let mut uv = p2(*uv);
                 let mut best = *best;
-                g.refine_patch_by_grid(&dom_of(*sub), *nu, *nv, &mut uv, &mut best)?;
+                g.refine_patch_by_grid(&k, &dom_of(*sub), *nu, *nv, &mut uv, &mut best)?;
                 o.push(0.0);
                 push2(&mut o, uv);
                 o.push(best);
             }
             OpIn::Grid { uv, iu, iv } => {
                 let g = global()?;
-                let r = g.refine_guess_by_grid(p2(*uv), *iu, *iv)?;
+                let r = g.refine_guess_by_grid(&k, p2(*uv), *iu, *iv)?;
                 o.push(0.0);
                 push2(&mut o, r);
             }
@@ -511,9 +513,9 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 let mut prev = stepper(*uv0, *tight)?;
                 hits(&mut prev, SurfParamType::U, *hu);
                 hits(&mut prev, SurfParamType::V, *hv);
-                let mut next = SurfPtSolveStepper::copy_of(&prev);
+                let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
                 next.set_uv(p2(*uv1));
-                match next.adjust_step(&prev) {
+                match next.adjust_step(&k, &prev) {
                     Ok((adjusted, scale)) => o.extend([0.0, flag(adjusted), scale]),
                     Err(e) => {
                         o = err_record(&e)?;
@@ -535,13 +537,13 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::Conv { uv0, tight, ctol } => {
                 let mut s = stepper(*uv0, *tight)?;
                 o.push(0.0);
-                o.push(flag(s.converged(*ctol)?));
-                o.push(flag(s.converged_with(true)?));
-                o.push(flag(s.converged_with(false)?));
+                o.push(flag(s.converged(&k, *ctol)?));
+                o.push(flag(s.converged_with(&k, true)?));
+                o.push(flag(s.converged_with(&k, false)?));
             }
             OpIn::Push { uv0, tight, ptol } => {
                 let mut s = stepper(*uv0, *tight)?;
-                let mut c = SurfPtSolveStepper::copy_of(&s);
+                let mut c = SurfPtSolveStepper::copy_of(&k, &s);
                 o.push(0.0);
                 let (b, which) = s.pushing_boundary(*ptol)?;
                 o.extend([flag(b), f64::from(which as u8)]);
@@ -556,16 +558,16 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             }
             OpIn::Step { uv0, tight, plane } => {
                 let mut prev = stepper(*uv0, *tight)?;
-                let mut next = SurfPtSolveStepper::copy_of(&prev);
-                let r = next.step(&Kernel::default(), &mut prev, *plane)?;
+                let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
+                let r = next.step(&mut prev, *plane)?;
                 o.extend([0.0, f64::from(r.code())]);
                 push_state(&mut o, &next);
             }
             OpIn::Line { uv0, tight, uv1 } => {
                 let mut prev = stepper(*uv0, *tight)?;
-                let mut next = SurfPtSolveStepper::copy_of(&prev);
+                let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
                 next.set_uv(p2(*uv1));
-                match next.line_search(&mut prev) {
+                match next.line_search(&k, &mut prev) {
                     Ok(()) => o.push(0.0),
                     Err(e) => o = err_record(&e)?,
                 }
@@ -578,9 +580,9 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 norm,
             } => {
                 let mut prev = stepper(*uv0, *tight)?;
-                let mut next = SurfPtSolveStepper::copy_of(&prev);
+                let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
                 next.set_uv(p2(*uv1));
-                match next.line_search_bracketted(&mut prev, norm_of(*norm)) {
+                match next.line_search_bracketted(&k, &mut prev, norm_of(*norm)) {
                     Ok(()) => o.push(0.0),
                     Err(e) => o = err_record(&e)?,
                 }
@@ -784,7 +786,7 @@ fn gen_op(rng: &mut Rng, (nu, nv): (usize, usize), d: [f64; 4], sd: [f64; 4], si
     }
 }
 
-fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> Result<Inputs, HarnessError> {
     let surf = gen_surface(rng);
     let wrap = rng.chance(0.15);
     let d = surf_domain(&surf)?;
@@ -792,7 +794,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     let sd = if rng.chance(0.5) { d } else { gen_sub_dom(rng, d) };
     let solver = *rng.choose(&SOLVERS).unwrap_or(&3);
     let s = surface_in(&surf)?;
-    let (op, test, tol) = gen_op_test(rng, &s, net_counts(&surf)?, d, sd, solver, size);
+    let (op, test, tol) = gen_op_test(k, rng, &s, net_counts(&surf)?, d, sd, solver, size);
     let surf = AnySurf::Base(surf);
     Ok(Inputs {
         wrap,
@@ -829,14 +831,14 @@ fn gen_rev_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
                 d[0] + (d[2] - d[0]) * f64::from(i) / 4.0,
                 d[1] + (d[3] - d[1]) * f64::from(j) / 4.0,
             ];
-            if let Ok(p) = s.evaluate_point(p2(uv)) {
+            if let Ok(p) = s.evaluate_point(&k, p2(uv)) {
                 size = size.max(p.x.abs()).max(p.y.abs()).max(p.z.abs());
             }
         }
     }
     let sd = if rng.chance(0.5) { d } else { gen_sub_dom(rng, d) };
     let solver = *rng.choose(&SOLVERS).unwrap_or(&3);
-    let (op, test, tol) = gen_op_test(rng, &s, counts, d, sd, solver, size);
+    let (op, test, tol) = gen_op_test(&k, rng, &s, counts, d, sd, solver, size);
     Ok(Inputs {
         wrap,
         surf,
@@ -860,7 +862,7 @@ fn gen_tol(rng: &mut Rng, size: f64) -> f64 {
 
 /// The op, the test point and the tolerance of a case over `s` (surface domain `d`, solver domain
 /// `sd`, control-net counts `counts`).
-fn gen_op_test(
+fn gen_op_test(k: &Kernel, 
     rng: &mut Rng,
     s: &Surface,
     counts: (usize, usize),
@@ -876,7 +878,7 @@ fn gen_op_test(
             _ => super::surface_surface_cache_p1::gvec(rng, 1.0),
         }
     } else {
-        gen_test(rng, s, sd, size)
+        gen_test(k, rng, s, sd, size)
     };
     let tol = gen_tol(rng, size);
     let op = gen_op(rng, counts, d, sd, size);
@@ -884,7 +886,7 @@ fn gen_op_test(
     // converged / boundary tests: test points on the normal at the stepper point
     if solver != 10 && rng.chance(0.5) {
         if let OpIn::Conv { uv0, .. } | OpIn::Push { uv0, .. } | OpIn::Seams { uv: uv0, .. } = &op {
-            test = test_on_normal(rng, s, *uv0, size);
+            test = test_on_normal(k, rng, s, *uv0, size);
         }
     }
     (op, test, tol)
@@ -996,8 +998,9 @@ fn upstream_cases(ctx: &CaseContext, id: &str) -> Result<Vec<Case>, HarnessError
 fn valid(i: &Inputs) -> bool {
     let (op, rest) = cpp_rest(i);
     match &i.surf {
-        AnySurf::Rev { rev } => rev_ffi_surf(rev)
-            .is_ok_and(|s| ffi::validate_rev(op, i.wrap, &s, &rest).is_ok()),
+        AnySurf::Rev { rev } => {
+            rev_ffi_surf(rev).is_ok_and(|s| ffi::validate_rev(op, i.wrap, &s, &rest).is_ok())
+        }
         AnySurf::Base(s) => cpp_head(i, s).is_ok_and(|mut input| {
             input.extend(rest);
             ffi::validate(op, &input).is_ok()
@@ -1035,8 +1038,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let Ok(i) = gen_case(rng) else {
+            let Ok(i) = gen_case(k, rng) else {
                 continue;
             };
             if valid(&i) {
@@ -1068,9 +1072,9 @@ impl UnitDiff for Runner {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::surface_surface_cache_p1::{default_form, InlineSrf};
     use super::super::surface_surface_point_solve_p1::gen_bilinear;
+    use super::*;
 
     #[test]
     fn op_codes_round_trip() {

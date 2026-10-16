@@ -150,6 +150,7 @@ fn bss_of(bezier: &NurbSurface) -> BSplineSurface {
 /// tolerance. The surface has no owner, so `GetFace()` and `GetBrep()` are NULL and the
 /// tolerance is `SM_ZONE_TOL_3D` (see the module deviations).
 fn patch_boxes(
+    k: &Kernel,
     bss: &BSplineSurface,
     pseudo_guess: Option<&crate::geom::pseudo_box::PseudoBox>,
     op: &'static str,
@@ -165,7 +166,7 @@ fn patch_boxes(
         polar_guess: None,
         expand_by_zone_tol: false,
     };
-    let boxes = bss.calculate_bounding_box(&bss.natural_uv_domain(), &req)?;
+    let boxes = bss.calculate_bounding_box(k, &bss.natural_uv_domain(), &req)?;
     let mut bbox = boxes.normal.ok_or_else(|| invalid(op, "no bounding box"))?;
     let mut pseudo = boxes.pseudo.ok_or_else(|| invalid(op, "no pseudo box"))?;
     bbox.expand_absolute(ZONE_TOL_3D);
@@ -581,14 +582,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 let surface = self.surface().clone();
                 let d1 = self.aux(node1)?.uv_domain;
                 let d2 = self.aux(node2)?.uv_domain;
-                ignore(compute_bezier_approximation(&surface, &d1, &mut b1))?;
-                ignore(compute_bezier_approximation(&surface, &d2, &mut b2))?;
+                ignore(compute_bezier_approximation(k, &surface, &d1, &mut b1))?;
+                ignore(compute_bezier_approximation(k, &surface, &d2, &mut b2))?;
                 (b1, b2)
             };
 
             // get and store child 1 and 2 bounding and pseudo boxes
             for (child, slot, bez) in [(node1, slot1, bez1), (node2, slot2, bez2)] {
-                let (bbox, pseudo) = patch_boxes(&bss_of(&bez), Some(&parent_pseudo), OP_NODE)?;
+                let (bbox, pseudo) = patch_boxes(k, &bss_of(&bez), Some(&parent_pseudo), OP_NODE)?;
                 self.tree_mut_or(OP_NODE)?.node_mut(child)?.bbox = bbox;
                 let p = self.patch_mut_slot(slot)?;
                 p.pseudo_box = pseudo;
@@ -677,14 +678,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // set the node bounding boxes from the halves
         let n = self.subdivision_surfaces_mut().len();
-        for (child, domain, k) in [(node1, d1, n - 2), (node2, d2, n - 1)] {
+        for (child, domain, half_index) in [(node1, d1, n - 2), (node2, d2, n - 1)] {
             let r = {
                 let half = &self
                     .subdivision_surfaces_mut()
-                    .get(k)
+                    .get(half_index)
                     .ok_or_else(|| invalid(OP_NODE, "subdivision surface missing"))?
                     .1;
-                half_box(half, &domain)
+                half_box(k, half, &domain)
             };
             let bbox = if direction == SurfParamType::U {
                 ignore(r)?
@@ -901,6 +902,15 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             SurfaceKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
             SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
             // GetOrCreateGwNurbPointer: SmSurfOfRevolution::MakeNurb when it has none
+            SurfaceKind::Cone(s) => {
+                if s.rev().base().gw_nurb().is_some() {
+                    Some(std::borrow::Cow::Borrowed(s.rev().base()))
+                } else {
+                    let mut tmp = s.as_ref().clone();
+                    tmp.make_nurb(k)?;
+                    Some(std::borrow::Cow::Owned(tmp.rev().base().clone()))
+                }
+            }
             SurfaceKind::SurfOfRevolution(s) => {
                 if s.base().gw_nurb().is_some() {
                     Some(std::borrow::Cow::Borrowed(s.base()))
@@ -922,7 +932,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             let block = create_bezier_patch_block(nurb)?;
             (block.num_u_spans, block.num_v_spans, block.beziers)
         } else {
-            let block = create_approximate_bezier_patch_block(self.surface())?;
+            let block = create_approximate_bezier_patch_block(k, self.surface())?;
             (block.num_u_spans, block.num_v_spans, block.beziers)
         };
         // the patch memory manager is initialised with the block
@@ -996,7 +1006,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 let domain = bss.natural_uv_domain();
 
                 // compute and store the node's bounding box and the patch's pseudo box
-                let (bbox, pseudo) = patch_boxes(&bss, None, OP_BASE)?;
+                let (bbox, pseudo) = patch_boxes(k, &bss, None, OP_BASE)?;
                 self.tree_mut_or(OP_BASE)?.node_mut(node)?.bbox = bbox;
 
                 let (vc0, uc0, vc1, uc1) = (
@@ -1128,10 +1138,15 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 /// `CalculateBoundingBox(domain, &box, NULL, NULL, NULL, NULL)` of a split half (the
 /// B-spline override, boxes expanded by the zone tolerance); the base body's `SM_ERR`
 /// for other kinds.
-fn half_box(half: &Surface, domain: &Extent2d) -> Result<crate::geom::extent3d::Extent3d> {
+fn half_box(
+    k: &Kernel,
+    half: &Surface,
+    domain: &Extent2d,
+) -> Result<crate::geom::extent3d::Extent3d> {
     match half.kind() {
         SurfaceKind::BSpline(b) => b
             .calculate_bounding_box(
+                k,
                 domain,
                 &BoundingBoxRequest {
                     normal: true,

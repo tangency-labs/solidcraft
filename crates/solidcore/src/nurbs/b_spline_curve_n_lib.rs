@@ -328,8 +328,13 @@ fn degree_elevate(curve: &mut BSplineCurve, new_degree: usize) -> Result<()> {
 }
 
 /// `SmCurve::ApproximateLength` of `curve` over `interval` with `samples` samples.
-fn approximate_length(curve: &BSplineCurve, interval: &Extent1d, samples: usize) -> Result<f64> {
-    Ok(crate::curve::curve::p2::approximate_length(curve, interval, samples, false)?.0)
+fn approximate_length(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    interval: &Extent1d,
+    samples: usize,
+) -> Result<f64> {
+    Ok(crate::curve::curve::p2::approximate_length(k, curve, interval, samples, false)?.0)
 }
 
 /// `SmSurface::LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, found, sol)`:
@@ -347,8 +352,13 @@ fn surface_local_point_solve<S: SurfaceEvaluate>(
 
 /// `SmSurface::Evaluate(uv, 1, 1, TRUE, TRUE, TRUE, vals)`: `vals[i][j]` is the
 /// derivative `i` times in `u` and `j` times in `v`.
-fn surface_evaluate<S: SurfaceEvaluate>(surface: &S, uv: Vec2) -> Result<[[Vec3; 2]; 2]> {
+fn surface_evaluate<S: SurfaceEvaluate>(
+    k: &Kernel,
+    surface: &S,
+    uv: Vec2,
+) -> Result<[[Vec3; 2]; 2]> {
     let d = surface.evaluate(
+        k,
         uv,
         1,
         1,
@@ -981,7 +991,7 @@ impl BSplineCurve {
         let disp_vec = through - near_knot_point[0];
 
         // get span distance and 3d distance from nearest knot to through point
-        let span_length = approximate_length(self, &span_interval, 5)?;
+        let span_length = approximate_length(k, self, &span_interval, 5)?;
         let proj_dist_3d = near_knot_point[1].dot(disp_vec);
 
         // Use existing knots when adding a new knot would create a too small internal segment
@@ -1225,7 +1235,7 @@ impl BSplineCurve {
                     .ok_or_else(|| invalid(OP, "uv index out of range"))? = uv_slot;
 
                 // get Surface values at UVpoints
-                let vals = surface_evaluate(surface, uv_slot)?;
+                let vals = surface_evaluate(k, surface, uv_slot)?;
 
                 // project unit 3D vector onto Surface plane
                 let dropped = surface_drop_vector(vals[1][0], vals[0][1], tan_jj)?;

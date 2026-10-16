@@ -866,7 +866,12 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// `InvalidInput` for a node without surface data; [`SolidError::Unported`]:
     /// `SmTol::MapTo2d` over a surface (`surface.surface_p1`).
-    pub fn implant_poly_edge(&mut self, input: PolyEdgeInput<'_, O>, node: NodeId) -> Result<()> {
+    pub fn implant_poly_edge(
+        &mut self,
+        k: &Kernel,
+        input: PolyEdgeInput<'_, O>,
+        node: NodeId,
+    ) -> Result<()> {
         // get segment endpoints
         let start = Point2::new(input.start.x, input.start.y);
         let end = Point2::new(input.end.x, input.end.y);
@@ -874,8 +879,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         // Tolerance: get uv space tols, expand the uv domain of the node by tols
         let tol_3d = input.tolerance;
         let mid_uv = (start + end) / 2.0;
-        let tol_u = map_to_2d(tol_3d, mid_uv, Vec2::new(1.0, 0.0), input.surface)?;
-        let tol_v = map_to_2d(tol_3d, mid_uv, Vec2::new(0.0, 1.0), input.surface)?;
+        let tol_u = map_to_2d(k, tol_3d, mid_uv, Vec2::new(1.0, 0.0), input.surface)?;
+        let tol_v = map_to_2d(k, tol_3d, mid_uv, Vec2::new(0.0, 1.0), input.surface)?;
         let tol_expansion = Vec2::new(tol_u, tol_v);
 
         let domain = self.base.aux(node)?.uv_domain;
@@ -932,7 +937,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         let _ = k;
         // locals: UVPoint, Vertex, 3D Surface Properties
         let uv = input.uv_point;
-        let (_pnt, du, dv) = evaluate_1st_derivatives(self.base.surface(), uv)?;
+        let (_pnt, du, dv) = evaluate_1st_derivatives(k, self.base.surface(), uv)?;
 
         // get surface u and v speeds
         let mut du_len = du.length();
@@ -1069,8 +1074,13 @@ fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u64> {
 ///
 /// When wiring, keep upstream's flag arguments exactly: `(uv, TRUE, TRUE, ..)`
 /// (`SmTrimSrfCache.cpp:856`).
-fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
+fn evaluate_1st_derivatives(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+) -> Result<(Point3, Vec3, Vec3)> {
     crate::surface::surface::p1::evaluate_1st_derivatives(
+        k,
         surface,
         uv,
         crate::nurbs::knots::Side::Left,
@@ -1079,8 +1089,8 @@ fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Ve
 }
 
 /// `SmTol::MapTo2d(tol, uv, dir, surface)`.
-fn map_to_2d(tol_3d: f64, uv: Point2, dir: Vec2, surface: &Surface) -> Result<f64> {
-    crate::surface::surface::p1::map_to_2d_dir(tol_3d, uv, dir, surface)
+fn map_to_2d(k: &Kernel, tol_3d: f64, uv: Point2, dir: Vec2, surface: &Surface) -> Result<f64> {
+    crate::surface::surface::p1::map_to_2d_dir(k, tol_3d, uv, dir, surface)
 }
 
 /// `SmTol::GetZoneTol3d(pFace)`.
@@ -1364,6 +1374,7 @@ mod tests {
 
     #[test]
     fn implant_poly_edge_marks_the_leaf() {
+        let k = &Kernel::default();
         let mut c = cache();
         let surface = plane();
         let edge = PolyEdgeInput {
@@ -1374,7 +1385,7 @@ mod tests {
             surface: &surface,
         };
         // (SmTol::MapTo2d is ported with surface.surface_p1)
-        c.implant_poly_edge(edge, NodeId(1)).unwrap();
+        c.implant_poly_edge(k, edge, NodeId(1)).unwrap();
         let aux = c.base().aux(NodeId(1)).unwrap();
         assert_eq!((aux.poly_edge_list.len(), aux.vertex_list.len()), (1, 0));
     }

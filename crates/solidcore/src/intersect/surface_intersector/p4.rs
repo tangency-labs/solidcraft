@@ -670,6 +670,7 @@ impl SurfaceIntersector<'_> {
 
             // an intersection curve start point
             let (found_answer, sol) = surface_local_surface_intersect(
+                k,
                 self.surface(SrfIndex::First),
                 &self.uv_domains[0],
                 self.surface(SrfIndex::Second),
@@ -686,7 +687,7 @@ impl SurfaceIntersector<'_> {
             }
             let [s0, s1, s2, s3] = sol;
             let uv = Point2::new(s0, s1);
-            let surf_pnt = self.surface(SrfIndex::First).evaluate_point(uv)?;
+            let surf_pnt = self.surface(SrfIndex::First).evaluate_point(k, uv)?;
 
             // a point on a curve already found
             if self.is_point_on_curve(k, surf_pnt, &out.curves_3d, None)? {
@@ -727,7 +728,7 @@ impl SurfaceIntersector<'_> {
             }
 
             // add the curve of the curve points (which are cleared)
-            self.flush_curve(out)?;
+            self.flush_curve(k, out)?;
             self.start_point = None;
         }
         Ok(())
@@ -847,7 +848,7 @@ impl SurfaceIntersector<'_> {
                 start.assign(&tsp);
                 let start_id = self.alloc_point(start);
                 // (status ignored)
-                ignored(self.add_start_point(start_id))?;
+                ignored(self.add_start_point(k, start_id))?;
                 self.point_mut(pid)?.curve_parameter = 0.0;
                 if !(opts.start_direction.is_some() && n > 1) {
                     self.start_point = Some(start_id);
@@ -915,7 +916,7 @@ impl SurfaceIntersector<'_> {
             final_tsp = self.curve_points.last().copied();
 
             // the curve points become curves
-            self.flush_curve(&mut out)?;
+            self.flush_curve(k, &mut out)?;
         }
 
         // a trace that stopped at a singular point before the last point
@@ -961,10 +962,10 @@ impl SurfaceIntersector<'_> {
         // the end point of the current curve
         let mut end_tsp = TsectPnt::new();
         let uv_curve0 = res.uv_curves[0].as_ref().ok_or_else(no_curve)?;
-        let pnt = uv_curve0.evaluate_point(ivl1.max())?;
+        let pnt = uv_curve0.evaluate_point(k, ivl1.max())?;
         *end_tsp.uv_pos_mut(SrfIndex::First) = Point2::new(pnt.x, pnt.y);
         let uv_curve1 = res.uv_curves[1].as_ref().ok_or_else(no_curve)?;
-        let pnt = uv_curve1.evaluate_point(ivl1.max())?;
+        let pnt = uv_curve1.evaluate_point(k, ivl1.max())?;
         *end_tsp.uv_pos_mut(SrfIndex::Second) = Point2::new(pnt.x, pnt.y);
         let end_id = self.alloc_point(end_tsp);
 
@@ -978,18 +979,18 @@ impl SurfaceIntersector<'_> {
 
         if let Some(mut c2) = second.curve_3d {
             let c1 = res.curve_3d.as_mut().ok_or_else(no_curve)?;
-            let crv1_pnt = c1.evaluate_point(ivl1.max())?;
+            let crv1_pnt = c1.evaluate_point(k, ivl1.max())?;
             let ivl2 = c2.natural_interval();
-            let crv2_pnt = c2.evaluate_point(ivl2.min())?;
+            let crv2_pnt = c2.evaluate_point(k, ivl2.min())?;
 
             // curve end points close enough: join the curves
             if crv1_pnt.closer_than(self.this_approx_tol_3d, crv2_pnt) {
-                join_curves(c1, &mut c2)?;
+                join_curves(k, c1, &mut c2)?;
                 let [u0, u1] = second.uv_curves;
                 let mut u0 = u0.ok_or_else(no_curve)?;
                 let mut u1 = u1.ok_or_else(no_curve)?;
-                join_curves(res.uv_curves[0].as_mut().ok_or_else(no_curve)?, &mut u0)?;
-                join_curves(res.uv_curves[1].as_mut().ok_or_else(no_curve)?, &mut u1)?;
+                join_curves(k, res.uv_curves[0].as_mut().ok_or_else(no_curve)?, &mut u0)?;
+                join_curves(k, res.uv_curves[1].as_mut().ok_or_else(no_curve)?, &mut u1)?;
             }
         }
         Ok(())
@@ -1013,6 +1014,7 @@ impl SurfaceIntersector<'_> {
     #[allow(clippy::too_many_lines)]
     pub fn do_law_intersection<L: ?Sized>(
         &mut self,
+        k: &Kernel,
         points: &[TsectId],
         opts: &LawIntersectionOptions<'_, L>,
     ) -> Result<IntersectionCurve> {
@@ -1063,6 +1065,7 @@ impl SurfaceIntersector<'_> {
         for (id, delta) in [(first, delta_step), (last, -delta_step)] {
             let mut p = self.point(id)?.clone();
             let r = self.compute_law_point_values(
+                k,
                 p.user_doubles[1],
                 p.uv_pos(SrfIndex::First),
                 p.uv_pos(SrfIndex::Second),
@@ -1102,9 +1105,9 @@ impl SurfaceIntersector<'_> {
             self.point_mut(next)?.curve_parameter = curr_param + curr_pos.distance(next_pos);
 
             // the new mid point
-            let new_tsp = self.split_span(curr, next, delta_step, &law)?;
+            let new_tsp = self.split_span(k, curr, next, delta_step, &law)?;
 
-            let acc = self.test_span_accuracy(curr, next)?;
+            let acc = self.test_span_accuracy(k, curr, next)?;
             if acc.found_good_point {
                 // accept the point
                 curve_pnts.push(next);
@@ -1152,7 +1155,7 @@ impl SurfaceIntersector<'_> {
                     }
                 }
                 if split {
-                    let new_tsect = self.split_span(curr, next, delta_step, &law)?;
+                    let new_tsect = self.split_span(k, curr, next, delta_step, &law)?;
                     curve_pnts.insert(ip, new_tsect);
                     done = false;
                 }
@@ -1173,7 +1176,7 @@ impl SurfaceIntersector<'_> {
         self.start_points.clear();
 
         let mut out = TsectCurves::default();
-        self.flush_curve(&mut out)?;
+        self.flush_curve(k, &mut out)?;
         Ok(IntersectionCurve::from_single(out))
     }
 }
@@ -1181,7 +1184,7 @@ impl SurfaceIntersector<'_> {
 // ---- callees ----------------------------------------------------------------------------------
 
 /// `rpCurve->JoinWith(1, pOther, 0)` of two flushed (B-spline) curves.
-fn join_curves(this: &mut Curve, other: &mut Curve) -> Result<()> {
+fn join_curves(k: &Kernel, this: &mut Curve, other: &mut Curve) -> Result<()> {
     let CurveKind::BSpline(other) = other.kind_mut() else {
         return Err(SolidError::invalid_input(
             OP_DPI,
@@ -1194,12 +1197,20 @@ fn join_curves(this: &mut Curve, other: &mut Curve) -> Result<()> {
             "flushed curve is not a B-spline",
         ));
     };
-    this.join_with(true, other, false, None)
+    this.join_with(k, true, other, false, None)
 }
 
 /// `SM_CAST_PTR(SmOffsetSurface, surface) != NULL`.
 const fn is_offset_surface(surface: &Surface) -> bool {
-    matches!(surface.kind(), SurfaceKind::OffsetSurface(_))
+    match surface.kind() {
+        SurfaceKind::Cone(_)
+        | SurfaceKind::BSpline(_)
+        | SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Plane(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::SrfInVolume(_) => false,
+    }
 }
 
 /// `surface.IsSingularity(uv, eWhichDir)` (default tolerance): the plane override
@@ -1207,6 +1218,7 @@ const fn is_offset_surface(surface: &Surface) -> bool {
 fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
+        SurfaceKind::Cone(_) => Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
@@ -1239,9 +1251,10 @@ mod tests {
 
     #[test]
     fn tangent_start_point_is_a_single_point_curve() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let mut si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let mut p = TsectPnt::new();
         p.point_type = IntersectionPointType::TangentPoint;
         p.curve_pv[0] = Vec3::new(0.5, 0.5, 0.0);
@@ -1255,9 +1268,10 @@ mod tests {
 
     #[test]
     fn unknown_start_point_traces_nothing_more() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let mut si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let mut p = TsectPnt::zeroed();
         p.point_type = IntersectionPointType::Unknown;
         *p.uv_pos_mut(SrfIndex::First) = Point2::new(0.5, 0.5);
@@ -1273,11 +1287,12 @@ mod tests {
 
     #[test]
     fn linked_start_point_is_rejected() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let mut si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let id = si.alloc_point(TsectPnt::zeroed());
-        si.add_start_point(id).unwrap();
+        si.add_start_point(k, id).unwrap();
         assert!(matches!(
             si.trace_curve(&Kernel::default(), id, &[]),
             Err(SolidError::InvalidInput { .. })
@@ -1286,9 +1301,10 @@ mod tests {
 
     #[test]
     fn point_intersection_needs_points_on_both_surfaces() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let mut si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let k = Kernel::default();
         let opts = PointIntersectionOptions::default();
         assert!(si.do_point_intersection(&k, &[], &opts).is_err());
@@ -1303,9 +1319,10 @@ mod tests {
 
     #[test]
     fn law_intersection_needs_two_offset_surfaces() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let mut si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let curve = Curve::from(
             crate::curve::line::Line::create_line_segment(
                 3,
@@ -1327,14 +1344,14 @@ mod tests {
         let p = si.alloc_point(TsectPnt::new());
         let q = si.alloc_point(TsectPnt::new());
         assert!(matches!(
-            si.do_law_intersection(&[p], &opts),
+            si.do_law_intersection(k, &[p], &opts),
             Err(SolidError::Upstream {
                 code: crate::error::SM_ERR,
                 ..
             })
         ));
         assert!(matches!(
-            si.do_law_intersection(&[p, q], &opts),
+            si.do_law_intersection(k, &[p, q], &opts),
             Err(SolidError::Upstream {
                 code: crate::error::SM_ERR_NULL_POINTER,
                 ..
@@ -1347,12 +1364,12 @@ mod tests {
     fn interior_curves_reject_self_intersection_and_skip_near_pairs() {
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let k = Kernel::default();
-        let mut si = SurfaceIntersector::new(&a, &unit(), &a, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(&k, &a, &unit(), &a, &unit(), false).unwrap();
         let mut out = TsectCurves::default();
         assert!(si.find_interior_curves(&k, &mut out).is_err());
 
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let mut si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let mut si = SurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
         assert!(matches!(
             si.find_interior_curves(&k, &mut out),
             Err(SolidError::Unported { .. })

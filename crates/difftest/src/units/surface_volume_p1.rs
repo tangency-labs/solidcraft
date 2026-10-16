@@ -704,7 +704,7 @@ fn opts(left: [bool; 3], nz: bool, comp: bool) -> EvalOptions {
 }
 
 #[allow(clippy::too_many_lines)]
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut o: Vec<f64> = Vec::new();
     match i {
         Inputs::Lift { form, order, vecs } => {
@@ -923,7 +923,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::HasDisc { .. } => {
             let mut d = Discontinuities3d::new();
             d.set_unaligned();
-            let r = tri!(o, v.has_discontinuities_simple(Some(&mut d), true));
+            let r = tri!(o, v.has_discontinuities_simple(k, Some(&mut d), true));
             o.extend([0.0, b(r)]);
             put_disc(&mut o, &d);
         }
@@ -1254,6 +1254,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

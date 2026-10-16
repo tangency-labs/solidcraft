@@ -699,7 +699,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let c = build(curve)?;
             let t = tri!(
                 o,
-                c.tessellate_by_bisection(&ivl_of(*ivl), *chord, *angle, *max3d)
+                c.tessellate_by_bisection(&k, &ivl_of(*ivl), *chord, *angle, *max3d)
             );
             put_tess(&mut o, &t);
         }
@@ -711,14 +711,14 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             minseg,
         } => {
             let c = build(curve)?;
-            let t = tri!(o, c.tessellate(&ivl_of(*ivl), *chord, *angle, *minseg));
+            let t = tri!(o, c.tessellate(&k, &ivl_of(*ivl), *chord, *angle, *minseg));
             put_tess(&mut o, &t);
         }
         OpIn::Classify { c1, c2, sol } => {
             let a = build(c1)?;
             let bb = build(c2)?;
             let s = solution_of(sol);
-            let (degen, pt) = tri!(o, a.classify_intersecting_range_solution(&bb, &s));
+            let (degen, pt) = tri!(o, a.classify_intersecting_range_solution(&k, &bb, &s));
             o.extend([0.0, b(degen), b(pt.is_some())]);
             if let Some(pt) = pt {
                 o.extend([pt.solution_value, pt.parameters[0], pt.parameters[1]]);
@@ -738,7 +738,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let c = build(curve)?;
             let r = tri!(
                 o,
-                test_span_accuracy(
+                test_span_accuracy(&k, 
                     &c,
                     *lt,
                     [v3(*lp), v3(*ld)],
@@ -757,7 +757,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             for s in sols {
                 arr.add(&solution_of(s));
             }
-            let r = refine_cc_solutions(&mut arr, |ob| match ob {
+            let r = refine_cc_solutions(&k, &mut arr, |ob| match ob {
                 Some(Obj(0, _)) => Some(&a),
                 Some(Obj(1, _)) => Some(&bb),
                 _ => None,
@@ -1019,12 +1019,12 @@ fn gen_curve_or_degenerate(rng: &mut Rng) -> CurveIn {
 }
 
 /// A point near the curve (or anywhere).
-fn gen_point_near(rng: &mut Rng, c: &CurveIn) -> [f64; 3] {
+fn gen_point_near(k: &Kernel, rng: &mut Rng, c: &CurveIn) -> [f64; 3] {
     let Ok(curve) = build(c) else {
         return rp(rng, 10.0);
     };
     let t = gen_t(rng, c);
-    let base = curve.evaluate_point(t).map_or([0.0; 3], |p| [p.x, p.y, p.z]);
+    let base = curve.evaluate_point(k, t).map_or([0.0; 3], |p| [p.x, p.y, p.z]);
     match rng.below(5) {
         0 => base,
         1 => rp(rng, 20.0),
@@ -1096,7 +1096,7 @@ fn gen_any(rng: &mut Rng) -> CurveIn {
     }
 }
 
-fn gen_gps(rng: &mut Rng) -> OpIn {
+fn gen_gps(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = gen_any(rng);
     let &(sop, need) = rng.choose(&GPS_OPS).unwrap_or(&(3, 0));
     // weight the operations the port runs without deferral
@@ -1112,13 +1112,13 @@ fn gen_gps(rng: &mut Rng) -> OpIn {
         build(&curve)
             .ok()
             .and_then(|c| {
-                let p0 = c.evaluate_point(a).ok()?;
-                let p1 = c.evaluate_point(0.5 * (a + bb)).ok()?;
+                let p0 = c.evaluate_point(k, a).ok()?;
+                let p1 = c.evaluate_point(k, 0.5 * (a + bb)).ok()?;
                 Some([(p0.x + p1.x) / 2.0, (p0.y + p1.y) / 2.0, (p0.z + p1.z) / 2.0])
             })
             .unwrap_or([0.0; 3])
     } else {
-        gen_point_near(rng, &curve)
+        gen_point_near(k, rng, &curve)
     };
     let ivl = if rng.chance(0.6) {
         let (a, bb) = range_of(&curve);
@@ -1258,7 +1258,7 @@ fn gen_classify(rng: &mut Rng) -> OpIn {
     OpIn::Classify { c1, c2, sol }
 }
 
-fn gen_span(rng: &mut Rng) -> OpIn {
+fn gen_span(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = gen_any(rng);
     let (a, bb) = range_of(&curve);
     let mut lt = a + (bb - a) * rng.unit();
@@ -1272,7 +1272,7 @@ fn gen_span(rng: &mut Rng) -> OpIn {
     let ev = |t: f64| -> ([f64; 3], [f64; 3]) {
         build(&curve)
             .ok()
-            .and_then(|c| c.evaluate(t, 1, true, true).ok())
+            .and_then(|c| c.evaluate(k, t, 1, true, true).ok())
             .map_or(([0.0; 3], [1.0, 0.0, 0.0]), |v| {
                 let p = v.first().copied().unwrap_or(Vec3::ZERO);
                 let d = v.get(1).copied().unwrap_or(Vec3::ZERO);
@@ -1302,14 +1302,14 @@ fn gen_refine(rng: &mut Rng) -> OpIn {
     OpIn::Refine { c1, c2, sols }
 }
 
-fn gen_case(rng: &mut Rng) -> OpIn {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     match rng.below(100) {
-        0..=39 => gen_gps(rng),
+        0..=39 => gen_gps(k, rng),
         40..=54 => gen_approx(rng),
         55..=69 => gen_bisect(rng),
         70..=79 => gen_tess(rng),
         80..=86 => gen_classify(rng),
-        87..=95 => gen_span(rng),
+        87..=95 => gen_span(k, rng),
         _ => gen_refine(rng),
     }
 }
@@ -1320,8 +1320,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..64 {
-            let op = gen_case(rng);
+            let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
@@ -1358,10 +1359,11 @@ mod tests {
     /// Generated cases cover every op, with passing (not deferred) cases.
     #[test]
     fn generated_cases_are_diverse() {
+let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         for _ in 0..600 {
-            let op = gen_case(&mut rng);
+            let op = gen_case(k, &mut rng);
             let name = serde_json::to_value(&op).unwrap()["op"].as_str().unwrap().to_string();
             let out = rust(&op);
             let e = stats.entry(name).or_default();

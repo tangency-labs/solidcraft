@@ -931,7 +931,7 @@ fn put_cc(o: &mut Vec<f64>, k: &Kernel, cc: &CurveClassification<H>) {
 }
 
 /// The curve record (see the ffi module).
-pub(crate) fn put_curve(o: &mut Vec<f64>, c: &Curve) {
+fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     let base = match c.kind() {
@@ -947,7 +947,7 @@ pub(crate) fn put_curve(o: &mut Vec<f64>, c: &Curve) {
         None => o.extend([-1.0, -1.0]),
     }
     for i in 0..=6 {
-        match c.evaluate_point(ivl.evaluate(f64::from(i) / 6.0)) {
+        match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 6.0)) {
             Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
             Err(e) => o.push(status(&e)),
         }
@@ -1162,7 +1162,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                             1 => must(cc.at(*j))?.mid,
                             _ => must(cc.at(*j))?.end,
                         };
-                        let p = must(cc.classify_crv_loc(&pool, &pc, *prm))?;
+                        let p = must(cc.classify_crv_loc(&k, &pool, &pc, *prm))?;
                         o.extend([0.0, p.x, p.y, p.z]);
                     }
                     OpIn::SetPcParams { mids, .. } => {
@@ -1261,11 +1261,11 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                                 r.point_3d.y,
                                 r.point_3d.z,
                             ]);
-                            put_curve(&mut o, &curve);
+                            put_curve(&k, &mut o, &curve);
                             for (u, bs) in uvc.iter().zip(uv_curves) {
                                 let ui = u.ok_or_else(|| harness("no uv curve"))?;
                                 let c = Curve::from(bs);
-                                put_curve(&mut o, &c);
+                                put_curve(&k, &mut o, &c);
                                 pool.put_curve(ui, c);
                             }
                             pool.put_curve(ci, curve);
@@ -1351,13 +1351,13 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         solution.start.parameters[1],
                     ]);
                     if let Some((_, c)) = &curve {
-                        put_curve(&mut o, c);
+                        put_curve(&k, &mut o, c);
                     }
                     done(&mut pool, curve);
                 }
                 OpIn::Angle { c1, t1, c2, t2, dev, .. } => {
                     let a = must(cc_mod::get_curve_curve_angle(
-                        pool.curve_at(*c1)?,
+                        &k, pool.curve_at(*c1)?,
                         *t1,
                         pool.curve_at(*c2)?,
                         *t2,

@@ -1148,8 +1148,8 @@ pub fn start_point_uv_loop_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<f6
                 .as_ref()
                 .ok_or_else(|| null("GetStartPointUVLoopGap: edge without curve"))
         };
-        let start_3d = point_or_undef(curve_of(eu)?.evaluate_point(start_param))?;
-        let cw_end_3d = point_or_undef(curve_of(cw)?.evaluate_point(cw_end_param))?;
+        let start_3d = point_or_undef(curve_of(eu)?.evaluate_point(k, start_param))?;
+        let cw_end_3d = point_or_undef(curve_of(cw)?.evaluate_point(k, cw_end_param))?;
 
         // drop point to Surface (statuses ignored, as upstream)
         let domain = surface.natural_uv_domain();
@@ -1176,8 +1176,8 @@ pub fn start_point_uv_loop_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<f6
         let cw_end_2d = cw_drop.map_or(start_2d, |d| d.result_uv);
         return Ok(start_2d.distance(cw_end_2d));
     };
-    let start_uv = point_or_undef(tc.evaluate_point(start_param))?;
-    let cw_end_uv = point_or_undef(cc.evaluate_point(cw_end_param))?;
+    let start_uv = point_or_undef(tc.evaluate_point(k, start_param))?;
+    let cw_end_uv = point_or_undef(cc.evaluate_point(k, cw_end_param))?;
 
     // compute and return the EdgeEnd to EdgeEnd gap
     Ok(start_uv.distance(cw_end_uv))
@@ -1437,6 +1437,7 @@ pub fn faceuse_collect_adjacent(
 /// [`SolidError::Unported`] from the surface evaluations (their other failures are
 /// ignored, as upstream).
 pub fn calc_dist_and_dev<'s, O: SolutionObject>(
+    k: &Kernel,
     pt: Point3,
     sol: &Solution<O>,
     surface_of: impl FnOnce(O) -> Option<&'s Surface>,
@@ -1465,7 +1466,7 @@ pub fn calc_dist_and_dev<'s, O: SolutionObject>(
     let [u, v, ..] = sol.start.parameters;
     let uv = Point2::new(u, v);
     let (s_pt, s_su, s_sv) =
-        crate::error::ignored(evaluate_1st_derivatives(srf, uv, Side::Left, Side::Left))?
+        crate::error::ignored(evaluate_1st_derivatives(k, srf, uv, Side::Left, Side::Left))?
             .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
 
     let mut norm = s_su.cross(s_sv);
@@ -1473,7 +1474,7 @@ pub fn calc_dist_and_dev<'s, O: SolutionObject>(
     if mag > EFF_ZERO {
         norm /= mag;
     } else {
-        norm = srf.evaluate_normal(uv, Side::Left, Side::Left)?;
+        norm = srf.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         if norm.length() < 0.5 {
             return Ok((dist, Some(dev)));
         }
@@ -1531,6 +1532,9 @@ pub fn are_seam_curves(
 /// `F0 = |S - P|^2 - d^2`, `F1 = S . N - P . N`.
 #[derive(Debug, Clone, Copy)]
 pub struct FindStepOff<'a> {
+    /// Caller context retained by evaluation callbacks.
+    pub kernel: &'a Kernel,
+
     /// `m_dStepOffDist`.
     step_off_dist: f64,
     /// `m_crPoint`.
@@ -1545,12 +1549,14 @@ impl<'a> FindStepOff<'a> {
     /// The equations for `point` on `surface` (the constructor).
     #[must_use]
     pub const fn new(
+        k: &'a Kernel,
         step_off_dist: f64,
         point: Point3,
         plane_normal: Vec3,
         surface: &'a Surface,
     ) -> Self {
         Self {
+            kernel: k,
             step_off_dist,
             point,
             plane_normal,
@@ -1571,6 +1577,7 @@ impl EvalNFunctions for FindStepOff<'_> {
         f: &mut [f64],
         jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
+        let k = self.kernel;
         let (Some(&u), Some(&v)) = (x.first(), x.get(1)) else {
             return Err(SolidError::invalid_input(
                 OP_STEP,
@@ -1585,7 +1592,7 @@ impl EvalNFunctions for FindStepOff<'_> {
         }
 
         let (s_point, s_du, s_dv) =
-            evaluate_1st_derivatives(self.surface, Point2::new(u, v), Side::Left, Side::Left)?;
+            evaluate_1st_derivatives(k, self.surface, Point2::new(u, v), Side::Left, Side::Left)?;
 
         let du_len_sq = s_du.length_squared();
         let dv_len_sq = s_dv.length_squared();
@@ -1981,13 +1988,11 @@ mod tests {
         ));
         // the caches were reset before
         assert!(!is_max_edge_face_gap_init(&b, a0).unwrap());
-        assert!(
-            calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, false, false)
-                .unwrap()
-                .is_none()
-        );
+        assert!(calc_edge_ccw_edge_gap(&k, &mut b, a0, false, false)
+            .unwrap()
+            .is_none());
         assert!(matches!(
-            calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, true, false),
+            calc_edge_ccw_edge_gap(&k, &mut b, a0, true, false),
             Err(SolidError::InvalidInput { .. })
         ));
         // With curves, both edge/edge and edge/face gaps are evaluated.
@@ -1999,7 +2004,7 @@ mod tests {
             line.set_owner(None, None);
             b.edge_mut(e).unwrap().curve = Some(line);
         }
-        let g = calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, true, true)
+        let g = calc_edge_ccw_edge_gap(&k, &mut b, a0, true, true)
             .unwrap()
             .unwrap();
         assert!(g.is_init() && g.gap_3d.abs() < 1e-12);
@@ -2041,20 +2046,21 @@ mod tests {
 
     #[test]
     fn dist_and_dev_on_a_plane() {
+        let k = &Kernel::default();
         let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
         let mut sol = Solution::<H>::new();
         sol.start.solution_value = 0.5;
         let pt = Vec3::new(3.0, 4.0, 2.0);
         assert_eq!(
-            calc_dist_and_dev(pt, &sol, |_| Some(&s), false).unwrap(),
+            calc_dist_and_dev(k, pt, &sol, |_| Some(&s), false).unwrap(),
             (0.5, None)
         );
         assert_eq!(
-            calc_dist_and_dev(pt, &sol, |_| Some(&s), true).unwrap(),
+            calc_dist_and_dev(k, pt, &sol, |_| Some(&s), true).unwrap(),
             (-1.0, Some(-1.0))
         );
         sol.objects[0] = Some(H(ObjectKind::Surface));
-        let (d, dev) = calc_dist_and_dev(pt, &sol, |_| Some(&s), true).unwrap();
+        let (d, dev) = calc_dist_and_dev(k, pt, &sol, |_| Some(&s), true).unwrap();
         assert!((d - 2.0).abs() < 1e-12);
         assert!(dev.is_some_and(|x| x > 0.0));
     }
@@ -2080,13 +2086,14 @@ mod tests {
 
     #[test]
     fn step_off_equations() {
+        let k = &Kernel::default();
         let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
-        let mut e = FindStepOff::new(1.0, Vec3::ZERO, Vec3::Y, &s);
+        let mut e = FindStepOff::new(k, 1.0, Vec3::ZERO, Vec3::Y, &s);
         let mut f = [0.0; 2];
         let mut m = Matrix::new(2, 2);
         let found = e.evaluate(&[0.0, 0.0], &mut f, Some(&mut m)).unwrap();
         assert!(!found);
-        let p = s.evaluate_point(Point2::new(0.0, 0.0)).unwrap();
+        let p = s.evaluate_point(k, Point2::new(0.0, 0.0)).unwrap();
         assert!((f[0] - (p.dot(p) - 1.0)).abs() < 1e-12);
         assert!((f[1] - p.y).abs() < 1e-12);
         assert!(e.evaluate(&[0.0], &mut f, None).is_err());

@@ -590,7 +590,7 @@ fn in_value(t: u8) -> Result<InValueType, HarnessError> {
 }
 
 /// The curve state record (see the ffi module docs).
-fn put_curve(o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
+fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
     let kind = match c.kind() {
         CurveKind::BSpline(_) => 0.0,
         CurveKind::Line(_) => 2.0,
@@ -600,7 +600,7 @@ fn put_curve(o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     for i in 0..=6 {
-        let p = match c.evaluate_point(ivl.evaluate(f64::from(i) / 6.0)) {
+        let p = match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 6.0)) {
             Ok(p) => p,
             Err(e) if e.is_unported() => return Err(e.into()),
             Err(_) => Vec3::new(UNDEF, UNDEF, UNDEF),
@@ -863,7 +863,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 )
             );
             o.extend([0.0, b(nc.is_some())]);
-            let state = put_curve(&mut o, nc.as_ref().unwrap_or(&c));
+            let state = put_curve(&k, &mut o, nc.as_ref().unwrap_or(&c));
             match state {
                 Ok(()) => {}
                 Err(Fail::Deferred(d)) => return Ok(*d),
@@ -1129,10 +1129,10 @@ fn scale3(a: [f64; 3], s: f64) -> [f64; 3] {
 }
 
 /// The point of `c` at `t` (Rust evaluation, used only to place test points).
-fn point_at(c: &CurveIn, t: f64) -> [f64; 3] {
+fn point_at(k: &Kernel, c: &CurveIn, t: f64) -> [f64; 3] {
     build(c)
         .ok()
-        .and_then(|cc| cc.evaluate_point(t).ok())
+        .and_then(|cc| cc.evaluate_point(k, t).ok())
         .map_or([0.0; 3], |p| [p.x, p.y, p.z])
 }
 
@@ -1176,7 +1176,7 @@ fn translated(c: &CurveIn, d: [f64; 3]) -> CurveIn {
 
 /// A second curve near `c`: an identical copy, a slightly moved copy, the same line
 /// reparameterised, or an unrelated curve.
-fn gen_partner(rng: &mut Rng, c: &CurveIn) -> CurveIn {
+fn gen_partner(k: &Kernel, rng: &mut Rng, c: &CurveIn) -> CurveIn {
     match rng.below(8) {
         0..=2 => c.clone(),
         3 | 4 => {
@@ -1186,8 +1186,8 @@ fn gen_partner(rng: &mut Rng, c: &CurveIn) -> CurveIn {
         5 => {
             // a line on the same carrier with another parameterisation
             let (a, bb) = range_of(c);
-            let p = point_at(c, a);
-            let q = point_at(c, bb);
+            let p = point_at(k, c, a);
+            let q = point_at(k, c, bb);
             let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
             if rng.chance(0.5) {
                 CurveIn::Line(LineIn {
@@ -1258,11 +1258,11 @@ fn gen_is_planar(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_drop_point(rng: &mut Rng) -> OpIn {
+fn gen_drop_point(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = gen_curve(rng);
     let ivl = gen_ivl(rng, &curve);
     let t = gen_t(rng, &curve);
-    let base = point_at(&curve, t);
+    let base = point_at(k, &curve, t);
     let off = *rng.choose(&[0.0, 1e-8, 1e-4, 0.01, 0.5, 3.0]).unwrap_or(&0.0);
     let p = add(base, scale3(gen_dir(rng), off));
     let tol = gen_tol(rng);
@@ -1279,8 +1279,8 @@ fn gen_drop_point(rng: &mut Rng) -> OpIn {
             } else {
                 (bb, bb - 1e-3 * (bb - a))
             };
-            let p0 = point_at(&curve, t0);
-            let p1 = point_at(&curve, t1);
+            let p0 = point_at(k, &curve, t0);
+            let p1 = point_at(k, &curve, t1);
             [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]
         })
     } else {
@@ -1306,7 +1306,7 @@ fn gen_drop_point(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_gps_step(rng: &mut Rng) -> OpIn {
+fn gen_gps_step(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = if rng.chance(0.8) {
         CurveIn::Line(gen_line(rng))
     } else {
@@ -1315,7 +1315,7 @@ fn gen_gps_step(rng: &mut Rng) -> OpIn {
     let ivl = gen_ivl(rng, &curve);
     let t = gen_t(rng, &curve);
     let p = add(
-        point_at(&curve, t),
+        point_at(k, &curve, t),
         scale3(gen_dir(rng), *rng.choose(&[0.0, 1e-6, 0.3, 4.0]).unwrap_or(&0.0)),
     );
     OpIn::GpsStep {
@@ -1333,11 +1333,11 @@ fn gen_gps_step(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_max_dist(rng: &mut Rng) -> OpIn {
+fn gen_max_dist(k: &Kernel, rng: &mut Rng) -> OpIn {
     let c1 = gen_curve(rng);
     let ivl = gen_ivl(rng, &c1);
     let same = rng.chance(0.1);
-    let c2 = if same { None } else { Some(gen_partner(rng, &c1)) };
+    let c2 = if same { None } else { Some(gen_partner(k, rng, &c1)) };
     let other = c2.as_ref().unwrap_or(&c1);
     let oi = if same && rng.chance(0.6) {
         ivl
@@ -1367,10 +1367,10 @@ fn gen_max_dist(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_simple(rng: &mut Rng) -> OpIn {
+fn gen_simple(k: &Kernel, rng: &mut Rng) -> OpIn {
     let c1 = gen_curve(rng);
     let ivl1 = gen_ivl(rng, &c1);
-    let c2 = gen_partner(rng, &c1);
+    let c2 = gen_partner(k, rng, &c1);
     let ivl2 = gen_partner_ivl(rng, &c2, ivl1);
     OpIn::Simple {
         c1,
@@ -1383,7 +1383,7 @@ fn gen_simple(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_global(rng: &mut Rng) -> OpIn {
+fn gen_global(k: &Kernel, rng: &mut Rng) -> OpIn {
     let c1 = if rng.chance(0.2) {
         gen_closed_curve(rng)
     } else {
@@ -1404,7 +1404,7 @@ fn gen_global(rng: &mut Rng) -> OpIn {
                 d2: [0.0; 3],
             })
         }
-        _ => gen_partner(rng, &c1),
+        _ => gen_partner(k, rng, &c1),
     };
     let ivl2 = gen_partner_ivl(rng, &c2, ivl1);
     let (c1, ivl1, c2, ivl2) = if rng.chance(0.3) {
@@ -1422,7 +1422,7 @@ fn gen_global(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_deform(rng: &mut Rng) -> OpIn {
+fn gen_deform(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = match rng.below(10) {
         0..=4 => {
             // mostly odd-degree B-splines, as the B-spline deformation expects
@@ -1441,8 +1441,8 @@ fn gen_deform(rng: &mut Rng) -> OpIn {
     let st_type = tan_type(rng);
     let et_type = tan_type(rng);
     let (a, bb) = range_of(&curve);
-    let ps = point_at(&curve, a);
-    let pe = point_at(&curve, bb);
+    let ps = point_at(k, &curve, a);
+    let pe = point_at(k, &curve, bb);
     OpIn::Deform {
         s: if rng.chance(0.7) {
             Some(add(ps, rp(rng, 1.0)))
@@ -1471,16 +1471,16 @@ fn gen_deform(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_case(rng: &mut Rng) -> OpIn {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     match rng.below(100) {
         0..=11 => gen_bbox(rng),
         12..=21 => gen_is_planar(rng),
-        22..=37 => gen_drop_point(rng),
-        38..=45 => gen_gps_step(rng),
-        46..=63 => gen_max_dist(rng),
-        64..=79 => gen_simple(rng),
-        80..=89 => gen_global(rng),
-        _ => gen_deform(rng),
+        22..=37 => gen_drop_point(k, rng),
+        38..=45 => gen_gps_step(k, rng),
+        46..=63 => gen_max_dist(k, rng),
+        64..=79 => gen_simple(k, rng),
+        80..=89 => gen_global(k, rng),
+        _ => gen_deform(k, rng),
     }
 }
 
@@ -1490,8 +1490,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let op = gen_case(rng);
+            let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
@@ -1529,11 +1530,15 @@ mod tests {
     /// that can be ported now.
     #[test]
     fn generated_cases_are_diverse() {
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         for _ in 0..2000 {
-            let op = gen_case(&mut rng);
-            let name = serde_json::to_value(&op).unwrap()["op"].as_str().unwrap().to_string();
+            let op = gen_case(k, &mut rng);
+            let name = serde_json::to_value(&op).unwrap()["op"]
+                .as_str()
+                .unwrap()
+                .to_string();
             let out = rust(&op);
             let e = stats.entry(name).or_default();
             e[0] += 1;
@@ -1545,7 +1550,10 @@ mod tests {
             }
         }
         for (k, v) in &stats {
-            eprintln!("{k}: total {} ok {} err {} deferred/harness {}", v[0], v[1], v[2], v[3]);
+            eprintln!(
+                "{k}: total {} ok {} err {} deferred/harness {}",
+                v[0], v[1], v[2], v[3]
+            );
         }
         assert_eq!(stats.len(), 8);
     }

@@ -643,7 +643,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             nonzero,
         } => {
             let c = Curve::from(pc);
-            let v = tri!(o, c.evaluate(*t, *n, *left, *nonzero));
+            let v = tri!(o, c.evaluate(&k, *t, *n, *left, *nonzero));
             o.push(0.0);
             for x in v {
                 pv(&mut o, x);
@@ -651,7 +651,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::EvalPoint { t } => {
             let c = Curve::from(pc);
-            let p = tri!(o, c.evaluate_point(*t));
+            let p = tri!(o, c.evaluate_point(&k, *t));
             o.push(0.0);
             pv(&mut o, p);
         }
@@ -667,7 +667,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Continuities { angle } => {
             let c = Curve::from(pc);
-            let (mn, all) = tri!(o, c.calculate_continuities(*angle));
+            let (mn, all) = tri!(o, c.calculate_continuities(&k, *angle));
             o.push(0.0);
             o.push(f64::from(mn as i32));
             o.push(all.len() as f64);
@@ -731,7 +731,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(0.0);
             projected_state(&mut o, &nc)?;
             o.push(b(pc.owns_curve() == OwnsCurve::No));
-            let eq = tri!(o, nc.approx_eq(&c));
+            let eq = tri!(o, nc.approx_eq(&k, &c));
             o.push(b(eq));
         }
         OpIn::Equal { other } => {
@@ -739,19 +739,19 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(0.0);
             match other {
                 None => {
-                    let eq = tri!(o, c.approx_eq(&c));
+                    let eq = tri!(o, c.approx_eq(&k, &c));
                     o.push(b(eq));
                 }
                 Some(oi) => {
                     let (p2, _) = build(oi)?;
-                    let eq = tri!(o, c.approx_eq(&Curve::from(p2)));
+                    let eq = tri!(o, c.approx_eq(&k, &Curve::from(p2)));
                     o.push(b(eq));
                 }
             }
         }
         OpIn::Ends => {
             let c = Curve::from(pc);
-            let e = tri!(o, c.ends());
+            let e = tri!(o, c.ends(&k, ));
             o.push(0.0);
             pv(&mut o, e.start);
             pv(&mut o, e.end);

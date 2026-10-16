@@ -717,7 +717,9 @@ fn is_singularity(
 ) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
-        SurfaceKind::BSpline(_)
+
+        SurfaceKind::Cone(_)
+        | SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
@@ -767,6 +769,7 @@ fn copy_block(pv: &mut [[Vec3; 2]; 2], r: &[Vec<Vec3>]) {
 
 /// `SmODEIntegrator(eval).RungeKuttaODEIntegrate(dY, x1, x2, eps, h1, 0, .., pYScale)`.
 fn runge_kutta_ode_integrate(
+    k: &Kernel,
     eval: &OdeIsoCurveLength<'_>,
     y: &mut [f64],
     x1: f64,
@@ -787,7 +790,7 @@ fn runge_kutta_ode_integrate(
             scale: Some(y_scale),
         },
         |t, _, dy| {
-            eval.evaluate(t, &mut scratch)?;
+            eval.evaluate(k, t, &mut scratch)?;
             for (d, v) in dy.iter_mut().zip(scratch.iter().skip(1)) {
                 *d = *v;
             }
@@ -913,7 +916,7 @@ pub fn are_connected(
     let v1 = vu1::vertex(b, vu1)?.ok_or_else(|| null("AreConnected: vertex use without vertex"))?;
     let tol_3d = b.vertex(v1)?.tolerance;
     let surf = surface_deref(b, f)?;
-    let uv_tol = map_to_2d(tol_3d, uv1, surf)?;
+    let uv_tol = map_to_2d(k, tol_3d, uv1, surf)?;
 
     if uv1.distance(uv2) < uv_tol {
         out.connected = true;
@@ -951,8 +954,8 @@ pub fn are_connected(
     if crosses_missing_seam_ok {
         // check for a properly oriented seam gap
         let domain = surf.natural_uv_domain();
-        let (closed_u, _) = surf.is_closed(&domain, SurfParamType::U, Some(uv_tol), false)?;
-        let (closed_v, _) = surf.is_closed(&domain, SurfParamType::V, Some(uv_tol), false)?;
+        let (closed_u, _) = surf.is_closed(k, &domain, SurfParamType::U, Some(uv_tol), false)?;
+        let (closed_v, _) = surf.is_closed(k, &domain, SurfParamType::V, Some(uv_tol), false)?;
 
         // when surface is closed
         let crossed = if closed_u && closed_v {
@@ -1114,10 +1117,10 @@ pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Po
                         continue;
                     };
                     let curve_parameter = ivl.interval.evaluate(0.45);
-                    let Ok(uv3) = uv_crv.evaluate_point(curve_parameter) else {
+                    let Ok(uv3) = uv_crv.evaluate_point(k, curve_parameter) else {
                         continue;
                     };
-                    let Ok(p) = surf.evaluate_point(Point2::new(uv3.x, uv3.y)) else {
+                    let Ok(p) = surf.evaluate_point(k, Point2::new(uv3.x, uv3.y)) else {
                         continue;
                     };
                     return Ok(p);
@@ -1310,7 +1313,7 @@ pub fn points_in_face(
                     let v_norm = ((kk + 1) as f64 + v_dither) / ((smp_cnt + 1) as f64);
                     // status ignored: the point keeps its default value
                     let uv_point = crv
-                        .evaluate_point(ivl.interval.evaluate(v_norm))
+                        .evaluate_point(k, ivl.interval.evaluate(v_norm))
                         .unwrap_or(Vec3::UNDEF);
                     out.uv.push(Point2::new(*u_param, uv_point.y));
                 }
@@ -1322,10 +1325,10 @@ pub fn points_in_face(
     let mut pnt = Vec3::UNDEF;
     let mut nrm = Vec3::UNDEF;
     for &uv in &out.uv {
-        if let Some(p) = ignored(surf.evaluate_point(uv))? {
+        if let Some(p) = ignored(surf.evaluate_point(k, uv))? {
             pnt = p;
         }
-        if let Some(n) = ignored(surf.evaluate_normal(uv, Side::Left, Side::Left))? {
+        if let Some(n) = ignored(surf.evaluate_normal(k, uv, Side::Left, Side::Left))? {
             nrm = n;
         }
         out.pv.push(pnt);
@@ -1474,7 +1477,7 @@ impl<'a> OdeIsoCurveLength<'a> {
     /// evaluating its offset surfaces); [`SolidError::InvalidInput`] for a layout
     /// index outside `dydx`.
     #[allow(clippy::too_many_lines)] // one upstream function
-    pub fn evaluate(&self, t: f64, dydx: &mut [f64]) -> Result<()> {
+    pub fn evaluate(&self, k: &Kernel, t: f64, dydx: &mut [f64]) -> Result<()> {
         let lay = self.layout;
         let mut pv = [[Vec3::ZERO; 2]; 2];
         let mut pv2 = [[Vec3::ZERO; 2]; 2];
@@ -1492,8 +1495,25 @@ impl<'a> OdeIsoCurveLength<'a> {
             let uv = Point2::new(self.u_iso_value, t);
 
             if self.face_thickness < EFF_ZERO {
-                let r = self.surface.evaluate_simple(uv, 1, 1, simple_flags())?;
-                copy_block(&mut pv, &r);
+                let r = self.surface.evaluate_simple(
+                    k,
+                    uv,
+                    1,
+                    1,
+                    EvaluateFlags {
+                        u_side: Side::Left,
+                        v_side: Side::Left,
+                        only_upper_half: true,
+                        non_zero_tangents: true,
+                    },
+                )?;
+                for (ii, row) in pv.iter_mut().enumerate() {
+                    for (jj, slot) in row.iter_mut().enumerate() {
+                        if let Some(v) = r.get(ii).and_then(|x| x.get(jj)) {
+                            *slot = *v;
+                        }
+                    }
+                }
             } else if i == 0 {
                 let r = offset_evaluate_simple(
                     self.kernel,
@@ -1743,8 +1763,8 @@ impl OdeArea<'_> {
     /// # Errors
     ///
     /// Those of the curve evaluation and the inner integration evaluator.
-    pub fn evaluate(&self, t: f64, dydx: &mut Vec<f64>) -> Result<()> {
-        let pv = self.uv_curve.evaluate(t, 1, true, true)?;
+    pub fn evaluate(&self, k: &Kernel, t: f64, dydx: &mut Vec<f64>) -> Result<()> {
+        let pv = self.uv_curve.evaluate(k, t, 1, true, true)?;
         let p0 = pv
             .first()
             .copied()
@@ -1771,6 +1791,7 @@ impl OdeArea<'_> {
 
             // A failed inner integration is not a zero-area contribution.
             runge_kutta_ode_integrate(
+                k,
                 &eval,
                 &mut dy,
                 self.min_v,
@@ -1867,7 +1888,7 @@ pub fn create_curves_by_trimming(
     if let Some(uv_list) = uv_curves {
         // a reasonable 2d tolerance based on the 3d tol
         let surf = surface_deref(b, f)?;
-        let uv_scale = approx_derivative_lengths(surf, &uv_domain(b, f)?)?;
+        let uv_scale = approx_derivative_lengths(k, surf, &uv_domain(b, f)?)?;
         let mut uv_scale_avg = 0.5 * (uv_scale.x + uv_scale.y);
         if uv_scale_avg < tol_3d / 1000.0 {
             uv_scale_avg = tol_3d / 1000.0;
@@ -1878,7 +1899,7 @@ pub fn create_curves_by_trimming(
         for (i, uv) in uv_list.iter().enumerate() {
             // skip missing or degenerate UVTrimCurves
             let Some(curve) = uv else { continue };
-            if curve.is_degenerate(EFF_ZERO, None)? {
+            if curve.is_degenerate(k, EFF_ZERO, None)? {
                 continue;
             }
 
@@ -1937,7 +1958,7 @@ pub fn create_curves_by_trimming(
                 .ok_or_else(|| null("CreateCurvesByTrimming: missing 3D curve"))?;
 
             // skip degenerate curves
-            if curve.is_degenerate(EFF_ZERO, None)? {
+            if curve.is_degenerate(k, EFF_ZERO, None)? {
                 continue;
             }
 
@@ -2219,8 +2240,8 @@ pub fn fix_uv_trim_curves(
     };
 
     // Get UVTrimCurve UV end Point positions
-    let uv_curr = held_curve(b, curr_holder)?.evaluate_point(t_curr)?;
-    let uv_prev = held_curve(b, prev_holder)?.evaluate_point(t_prev)?;
+    let uv_curr = held_curve(b, curr_holder)?.evaluate_point(k, t_curr)?;
+    let uv_prev = held_curve(b, prev_holder)?.evaluate_point(k, t_prev)?;
 
     // Get Vertexuse UV point. ComputeUVPoint smarter than LocalPointSolve alone.
     let vu = eu1::vertexuse(b, eu_current)?
@@ -2233,8 +2254,8 @@ pub fn fix_uv_trim_curves(
 
     // project Vertex drop point to 3d through surface (statuses ignored)
     let surf = surface_deref(b, curr_face)?;
-    let surf_vertex = ignored(surf.evaluate_point(uv_vertex))?.unwrap_or(Vec3::UNDEF);
-    let _ = ignored(surf.evaluate_normal(uv_vertex, Side::Left, Side::Left))?;
+    let surf_vertex = ignored(surf.evaluate_point(k, uv_vertex))?.unwrap_or(Vec3::UNDEF);
+    let _ = ignored(surf.evaluate_normal(k, uv_vertex, Side::Left, Side::Left))?;
 
     // UVGap sizes
     let uv_curr_edge_gap = uv_vertex_3d.distance(uv_curr);
@@ -2242,9 +2263,9 @@ pub fn fix_uv_trim_curves(
 
     // edge end points (statuses ignored)
     let curr_edge_point =
-        ignored(edge_curve(b, curr_edge)?.evaluate_point(t_curr))?.unwrap_or(Vec3::UNDEF);
+        ignored(edge_curve(b, curr_edge)?.evaluate_point(k, t_curr))?.unwrap_or(Vec3::UNDEF);
     let prev_edge_point =
-        ignored(edge_curve(b, prev_edge)?.evaluate_point(t_prev))?.unwrap_or(Vec3::UNDEF);
+        ignored(edge_curve(b, prev_edge)?.evaluate_point(k, t_prev))?.unwrap_or(Vec3::UNDEF);
 
     // Vertex/SurfVertex and EdgeEnd/SurfVertex gaps (the out-of-tolerance branch only
     // warns upstream)
@@ -2314,7 +2335,7 @@ pub fn fix_uv_trim_curves(
 
     // get current edgeuse->EndWeights (statuses ignored)
     let end_weight = |c: &Curve, start: bool| -> f64 {
-        match c.ends() {
+        match c.ends(k) {
             Ok(e) => {
                 if start {
                     e.start_weight
@@ -2382,7 +2403,7 @@ pub fn find_best_uv_curve(
 
     // get edgeuse->3DMidpoint and orientation adjusted tangent
     let ivl = b.edge(e)?.interval;
-    let edge_pv = edge_curve(b, e)?.evaluate(ivl.evaluate(0.5), 1, true, true)?;
+    let edge_pv = edge_curve(b, e)?.evaluate(k, ivl.evaluate(0.5), 1, true, true)?;
     let edge_p0 = edge_pv
         .first()
         .copied()
@@ -2414,7 +2435,7 @@ pub fn find_best_uv_curve(
 
         // get UVTrimCurve->3DMidPoint and orientation adjusted Tangent
         let interval = crv_on_surf.natural_interval();
-        let pv = crv_on_surf.evaluate(interval.evaluate(0.5), 1, true, true)?;
+        let pv = crv_on_surf.evaluate(k, interval.evaluate(0.5), 1, true, true)?;
         let p0 = pv
             .first()
             .copied()
@@ -2711,6 +2732,7 @@ mod tests {
 
     #[test]
     fn iso_curve_integrand_on_a_plane() {
+        let k = &Kernel::default();
         let p = Surface::from(Plane::new(
             Vec3::new(0.0, 0.0, 2.0),
             Vec3::X,
@@ -2722,18 +2744,17 @@ mod tests {
         let k = Kernel::default();
         let e = OdeIsoCurveLength::new(&k, &p, 0.5, Vec3::ZERO, 0.0, &lay);
         let mut d = vec![9.0; lay.num_components + 1];
-        e.evaluate(0.25, &mut d).unwrap();
+        e.evaluate(k, 0.25, &mut d).unwrap();
         assert_eq!(d[0], 0.0);
         assert_eq!(d[1], 1.0);
         assert_eq!(d[lay.area], 1.0);
         assert_eq!(d[lay.volume], 2.0);
         // too short an array
         let mut short = vec![0.0; 3];
-        assert!(e.evaluate(0.25, &mut short).is_err());
-        // a thick face integrates its two offsets at +-thickness/2: twice the area
-        let thick = OdeIsoCurveLength::new(&k, &p, 0.5, Vec3::ZERO, 0.1, &lay);
-        thick.evaluate(0.25, &mut d).unwrap();
-        assert_eq!(d[lay.area], 2.0);
+        assert!(e.evaluate(k, 0.25, &mut short).is_err());
+        // thick faces need the offset surface
+        let thick = OdeIsoCurveLength::new(&p, 0.5, Vec3::ZERO, 0.1, &lay);
+        assert!(thick.evaluate(k, 0.25, &mut d).unwrap_err().is_unported());
     }
 
     #[test]

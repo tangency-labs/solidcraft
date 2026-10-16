@@ -187,6 +187,7 @@ impl<'a, S> TangentField<'a, S> {
     /// `SM_ERR` when an end point does not match; those of the curve evaluations;
     /// None from the constructor (it takes the surface's natural UV domain).
     pub fn create(
+        k: &Kernel,
         approx_tol_3d: f64,
         base_3d_curve: &Curve,
         base_uv_curve: &'a Curve,
@@ -198,7 +199,7 @@ impl<'a, S> TangentField<'a, S> {
         S: SurfaceEvaluate,
     {
         // StartCurve position and tangent
-        let pv = start.curve.evaluate(start.param, 1, true, true)?;
+        let pv = start.curve.evaluate(k, start.param, 1, true, true)?;
         let mut start_tangent = at(&pv, 1);
         if start.opposite {
             start_tangent = -start_tangent;
@@ -206,7 +207,7 @@ impl<'a, S> TangentField<'a, S> {
 
         // Base3DCurve start position
         let ivl = base_3d_curve.natural_interval();
-        let start_pnt = base_3d_curve.evaluate_point(ivl.evaluate(0.0))?;
+        let start_pnt = base_3d_curve.evaluate_point(k, ivl.evaluate(0.0))?;
 
         // check state: Start points must match
         let dist = at(&pv, 0).distance(start_pnt);
@@ -216,14 +217,14 @@ impl<'a, S> TangentField<'a, S> {
         }
 
         // EndCurve position and tangent
-        let pv = end.curve.evaluate(end.param, 1, true, true)?;
+        let pv = end.curve.evaluate(k, end.param, 1, true, true)?;
         let mut end_tangent = at(&pv, 1);
         if end.opposite {
             end_tangent = -end_tangent;
         }
 
         // base3DCurve end position
-        let end_pnt = base_3d_curve.evaluate_point(ivl.evaluate(1.0))?;
+        let end_pnt = base_3d_curve.evaluate_point(k, ivl.evaluate(1.0))?;
 
         // check state: End points must match
         let dist = at(&pv, 0).distance(end_pnt);
@@ -317,7 +318,7 @@ impl<'a, S> TangentField<'a, S> {
     /// # Errors
     ///
     /// Those of the curve and surface comparisons.
-    pub fn approx_eq(&self, other: &Self) -> Result<bool>
+    pub fn approx_eq(&self, k: &Kernel, other: &Self) -> Result<bool>
     where
         S: SurfaceEvaluate,
     {
@@ -331,9 +332,9 @@ impl<'a, S> TangentField<'a, S> {
         // (SmCurve::operator==: same type, both of dimension 3)
         let mut rtn = true;
         rtn &= core::ptr::eq(self.uv_curve, other.uv_curve)
-            || self.uv_curve.approx_eq(other.uv_curve)?;
-        rtn &=
-            core::ptr::eq(self.surface, other.surface) || surface_eq(self.surface, other.surface)?;
+            || self.uv_curve.approx_eq(k, other.uv_curve)?;
+        rtn &= core::ptr::eq(self.surface, other.surface)
+            || surface_eq(k, self.surface, other.surface)?;
         rtn &= self.uv_domain.are_same(&other.uv_domain);
 
         if rtn {
@@ -357,7 +358,7 @@ impl<'a, S> TangentField<'a, S> {
     ///
     /// Those of the UV curve's evaluation; [`SolidError::Unported`] inside the
     /// interval (`EvaluateNormal` of the surface).
-    pub fn evaluate_point(&self, t: f64) -> Result<Point3>
+    pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3>
     where
         S: SurfaceEvaluate,
     {
@@ -388,10 +389,10 @@ impl<'a, S> TangentField<'a, S> {
         let tangent_field = self.start_tangent * dt + self.end_tangent * (1.0 - dt);
 
         // Get NormalPlane to m_pSurface at the m_pUVCurve(dParameter) point
-        let pnt = self.uv_curve.evaluate_point(t)?;
+        let pnt = self.uv_curve.evaluate_point(k, t)?;
         let uv = Point2::new(pnt.x, pnt.y);
 
-        let unit_normal = surface_evaluate_normal(self.surface, uv)?;
+        let unit_normal = surface_evaluate_normal(k, self.surface, uv)?;
 
         // return value = sTangentField projection onto the tangent plane
         Ok(tangent_field.project_to_plane(unit_normal))
@@ -403,21 +404,21 @@ impl<'a, S> TangentField<'a, S> {
     /// # Errors
     ///
     /// `SM_ERR` for `num_derivs > 1`; those of [`TangentField::evaluate_point`].
-    pub fn evaluate(&self, t: f64, num_derivs: usize) -> Result<Vec<Vec3>>
+    pub fn evaluate(&self, k: &Kernel, t: f64, num_derivs: usize) -> Result<Vec<Vec3>>
     where
         S: SurfaceEvaluate,
     {
         if num_derivs == 0 {
-            return Ok(vec![self.evaluate_point(t)?]);
+            return Ok(vec![self.evaluate_point(k, t)?]);
         }
 
         // get 1st derivative using finite differences
         if num_derivs == 1 {
             // Currently just use divided diff.
-            let p0 = self.evaluate_point(t)?;
+            let p0 = self.evaluate_point(k, t)?;
             let delta_t = 1.0e-8;
             let param1 = t + delta_t;
-            let tangent1 = self.evaluate_point(param1)?;
+            let tangent1 = self.evaluate_point(k, param1)?;
             let diff = tangent1 - p0;
             return Ok(vec![p0, diff / delta_t]);
         }
@@ -501,13 +502,18 @@ fn read_crv_on_surf(k: &Kernel, db: &mut DatabaseReader, _dim: u64, version: u64
 }
 
 /// `*m_pSurface == *rOther.m_pSurface`.
-fn surface_eq<S: SurfaceEvaluate>(a: &S, b: &S) -> Result<bool> {
-    a.surface_approx_eq(b)
+fn surface_eq<S: SurfaceEvaluate>(k: &Kernel, a: &S, b: &S) -> Result<bool> {
+    a.surface_approx_eq(k, b)
 }
 
 /// `m_pSurface->EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn surface_evaluate_normal<S: SurfaceEvaluate>(surface: &S, uv: Point2) -> Result<Vec3> {
+fn surface_evaluate_normal<S: SurfaceEvaluate>(
+    k: &Kernel,
+    surface: &S,
+    uv: Point2,
+) -> Result<Vec3> {
     surface.evaluate_normal(
+        k,
         uv,
         crate::nurbs::knots::Side::Left,
         crate::nurbs::knots::Side::Left,
@@ -559,6 +565,7 @@ mod tests {
 
     #[test]
     fn ends_return_stored_tangents() {
+        let k = &Kernel::default();
         let uv = hermite(
             [0.0; 3],
             [1.0, 0.0, 0.0],
@@ -571,20 +578,21 @@ mod tests {
         let e = Vec3::new(0.0, 0.0, 1.0);
         let tf = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, Some(domain()))
             .unwrap();
-        assert_eq!(tf.evaluate_point(0.0).unwrap(), s);
-        assert_eq!(tf.evaluate_point(1.0).unwrap(), e);
-        let d = tf.evaluate(1.0, 1).unwrap();
+        assert_eq!(tf.evaluate_point(k, 0.0).unwrap(), s);
+        assert_eq!(tf.evaluate_point(k, 1.0).unwrap(), e);
+        let d = tf.evaluate(k, 1.0, 1).unwrap();
         assert_eq!(d[1], Vec3::new(0.0, 0.0, 0.0));
-        assert!(tf.evaluate(0.0, 2).is_err());
+        assert!(tf.evaluate(k, 0.0, 2).is_err());
         // inside the interval: the surface normal (surface::surface::p7) is available
-        assert!(tf.evaluate_point(0.5).is_ok());
+        assert!(tf.evaluate_point(k, 0.5).is_ok());
         // without a domain: the surface's natural UV domain
         let n = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, None).unwrap();
-        assert_eq!(n.evaluate_point(0.0).unwrap(), s);
+        assert_eq!(n.evaluate_point(k, 0.0).unwrap(), s);
     }
 
     #[test]
     fn equality_same_surface() {
+        let k = &Kernel::default();
         let uv = hermite(
             [0.0; 3],
             [1.0, 0.0, 0.0],
@@ -599,8 +607,8 @@ mod tests {
             .unwrap();
         let b =
             TangentField::new(&uv, &srf, TangentDirType::Constant, s, e, Some(domain())).unwrap();
-        assert!(a.approx_eq(&a).unwrap());
-        assert!(!a.approx_eq(&b).unwrap());
+        assert!(a.approx_eq(k, &a).unwrap());
+        assert!(!a.approx_eq(k, &b).unwrap());
         let srf2 = unit_square();
         let c = TangentField::new(
             &uv,
@@ -612,11 +620,12 @@ mod tests {
         )
         .unwrap();
         // equal surfaces through SmSurface::operator==
-        assert!(a.approx_eq(&c).unwrap());
+        assert!(a.approx_eq(k, &c).unwrap());
     }
 
     #[test]
     fn create_checks_ends() {
+        let k = &Kernel::default();
         let base = hermite(
             [0.0; 3],
             [1.0, 0.0, 0.0],
@@ -657,7 +666,7 @@ mod tests {
             opposite: true,
         };
         // matching ends build the field over the surface's natural UV domain
-        assert!(TangentField::create(1e-6, &base, &uv, &srf, start, end).is_ok());
+        assert!(TangentField::create(k, 1e-6, &base, &uv, &srf, start, end).is_ok());
         // a mismatched end is SM_ERR
         let bad = CurveEnd {
             curve: &ec,
@@ -665,7 +674,7 @@ mod tests {
             opposite: false,
         };
         assert!(matches!(
-            TangentField::create(1e-6, &base, &uv, &srf, start, bad),
+            TangentField::create(k, 1e-6, &base, &uv, &srf, start, bad),
             Err(SolidError::Upstream { code: 1001, .. })
         ));
     }

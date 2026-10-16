@@ -161,6 +161,7 @@ fn intersect_srf_bndry_crv(
 /// value; `None` when not found. `opt_vectors` empty is upstream's `NULL`.
 #[allow(clippy::too_many_arguments)]
 fn local_surface_solve(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     other: &Surface,
@@ -171,6 +172,7 @@ fn local_surface_solve(
     other_uv: Point2,
 ) -> Result<Option<([f64; 4], f64)>> {
     let found = surface.local_surface_solve(
+        k,
         uv_domain,
         other,
         other_uv_domain,
@@ -260,6 +262,7 @@ impl Surface {
     /// checked upstream); `SM_ERR` past [`MAX_RECURSION`] self calls.
     pub fn local_surface_intersect(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
         other_uv_domain: &Extent2d,
@@ -269,6 +272,7 @@ impl Surface {
         opts: &LocalSurfaceIntersectOptions,
     ) -> Result<Option<SurfaceIntersection>> {
         self.local_surface_intersect_at(
+            k,
             uv_domain,
             other,
             other_uv_domain,
@@ -283,6 +287,7 @@ impl Surface {
     #[allow(clippy::too_many_lines)]
     fn local_surface_intersect_at(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
         other_uv_domain: &Extent2d,
@@ -431,8 +436,8 @@ impl Surface {
         let guess = [uv_guess.x, uv_guess.y, other_uv_guess.x, other_uv_guess.y];
 
         // get Surface GuessPoints (SER: checked; each surface's own EvaluatePoint)
-        let pnt1 = self.evaluate_point(uv_guess)?;
-        let pnt2 = other.evaluate_point(other_uv_guess)?;
+        let pnt1 = self.evaluate_point(k, uv_guess)?;
+        let pnt2 = other.evaluate_point(k, other_uv_guess)?;
 
         // Select through point for plane containing answer
         let plane_orig: Point3 = if this_on_boundary {
@@ -452,8 +457,8 @@ impl Surface {
             n
         } else {
             // (SER: checked; EvaluateNormal(uv, TRUE, TRUE) of each surface's kind)
-            let norm1 = self.evaluate_normal(uv_guess, Side::Left, Side::Left)?;
-            let norm2 = other.evaluate_normal(other_uv_guess, Side::Left, Side::Left)?;
+            let norm1 = self.evaluate_normal(k, uv_guess, Side::Left, Side::Left)?;
+            let norm2 = other.evaluate_normal(k, other_uv_guess, Side::Left, Side::Left)?;
             steepest_descent = true;
             let n = norm1.cross(norm2);
 
@@ -472,6 +477,7 @@ impl Surface {
         // instance SmSSPIntersectENFO surf/surf/plane NewtonRaphson Solver
         let ssi_node_tol = distance_tolerance / 100.0;
         let mut eval_fun = SspIntersectEnfo::new(
+            k,
             self,
             other,
             steepest_descent,
@@ -506,6 +512,7 @@ impl Surface {
             // do intersection over with guessPoint = iteration Solution so that
             // BoundarySolutions can be found and selected.
             return self.local_surface_intersect_at(
+                k,
                 uv_domain,
                 other,
                 other_uv_domain,
@@ -641,8 +648,8 @@ impl Surface {
         //       surfaces are a minDist from one another. A TangentTouching case
         if found_solution && steepest_descent {
             // get angle between surface normals at the solution (SER: checked)
-            let norm1 = self.evaluate_normal(uv, Side::Left, Side::Left)?;
-            let norm2 = other.evaluate_normal(uv_other, Side::Left, Side::Left)?;
+            let norm1 = self.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+            let norm2 = other.evaluate_normal(k, uv_other, Side::Left, Side::Left)?;
             let angle = norm1.angle_between(norm2)?;
 
             // If the angle is within 3 degrees of being parallel then try refining
@@ -651,6 +658,7 @@ impl Surface {
                 // find point of closest approach between the two surfaces in current
                 // solution neighborhood (SER: checked)
                 let sol_norm = local_surface_solve(
+                    k,
                     self,
                     uv_domain,
                     other,
@@ -661,8 +669,8 @@ impl Surface {
                     uv_other,
                 )?;
                 // (SER: checked)
-                let p1 = self.evaluate_point(uv)?;
-                let p2 = other.evaluate_point(uv_other)?;
+                let p1 = self.evaluate_point(k, uv)?;
+                let p2 = other.evaluate_point(k, uv_other)?;
                 let distance_between_points = p1.distance(p2);
 
                 // use new solution when deviation is better
@@ -678,16 +686,16 @@ impl Surface {
         // 6th - when a Non-Zero Deviation solution has been found
         if found_solution {
             // (SER: checked)
-            let p1 = self.evaluate_point(uv)?;
-            let p2 = other.evaluate_point(uv_other)?;
+            let p1 = self.evaluate_point(k, uv)?;
+            let p2 = other.evaluate_point(k, uv_other)?;
             let mut dist = p1.distance(p2);
 
             // If we don't converge to an exact answer then try converging to
             // surf/surf/plane intersection with a variation on the set of equations
             if dist > EFF_ZERO {
                 // (SER: checked)
-                let norm1 = self.evaluate_normal(uv, Side::Left, Side::Left)?;
-                let norm2 = other.evaluate_normal(uv_other, Side::Left, Side::Left)?;
+                let norm1 = self.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+                let norm2 = other.evaluate_normal(k, uv_other, Side::Left, Side::Left)?;
                 let angle = norm1.angle_between(norm2)?;
 
                 // If the angle is within 3 degrees of being perpendicular than we should
@@ -711,6 +719,7 @@ impl Surface {
                     // set up surf/surf/plane intersection NewtonRaphson solver using
                     // different eqns
                     let mut eval_fun2 = SsiNormalizeEnfo::new(
+                        k,
                         self,
                         other,
                         EFF_ZERO * EFF_ZERO,
@@ -731,8 +740,8 @@ impl Surface {
                         let sv2 = four(&r2.x)?;
                         let (uv2, uv_other2) = split(&sv2);
                         // (SER: checked)
-                        let pt1 = self.evaluate_point(uv2)?;
-                        let pt2 = other.evaluate_point(uv_other2)?;
+                        let pt1 = self.evaluate_point(k, uv2)?;
+                        let pt2 = other.evaluate_point(k, uv_other2)?;
                         let dist2 = pt1.distance(pt2);
 
                         // save solution when deviation is better than previous solution
@@ -750,6 +759,7 @@ impl Surface {
                         // current solution neighborhood (SER: checked; the found flag
                         // overwrites bFoundSolution upstream)
                         let sol = local_surface_solve(
+                            k,
                             self,
                             uv_domain,
                             other,
@@ -762,8 +772,8 @@ impl Surface {
                         if let Some((x, _)) = sol {
                             // get the Surf1Point/Surf2Point gap size (SER: checked)
                             let (uv2, uv_other2) = split(&x);
-                            let pt1 = self.evaluate_point(uv2)?;
-                            let pt2 = other.evaluate_point(uv_other2)?;
+                            let pt1 = self.evaluate_point(k, uv2)?;
+                            let pt2 = other.evaluate_point(k, uv_other2)?;
                             let dist2 = pt1.distance(pt2);
 
                             // save solution when this is a better answer
@@ -937,6 +947,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
     /// `SmExtent1d::Intersect`, `LocalCurveIntersect` and `sm_SCLocalSolve`.
     #[allow(clippy::too_many_lines)]
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
+        let k = self.kernel;
         let curve_node = *self.base.branch_node(branch, 0)?;
         let surface_node = *self.base.branch_node(branch, 1)?;
         let surface_id = branch
@@ -980,7 +991,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             }
             // Do a test to see if the range of vectors possible with the curve do not
             // cross the perpendicular of the normal field.
-            let polar = cache.polar_box_unstored(surface_id)?;
+            let polar = cache.polar_box_unstored(k, surface_id)?;
             let [start, end] = span.aux.ends;
             let line_vec = end - start;
             if line_vec.length_squared() > EFF_ZERO_SQ {
@@ -1030,7 +1041,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
                 // (SER: checked; LocalCurveIntersect is not overridden)
                 let hit = view
                     .eval
-                    .local_curve_intersect(&uv_domain, curve, &ivl, tol, uv_guess, t_guess)?;
+                    .local_curve_intersect(k, &uv_domain, curve, &ivl, tol, uv_guess, t_guess)?;
                 if let Some(h) = hit {
                     // for points within the surface's trim boundary
                     if is_point_valid(surface_tree.owner(), cache, h.uv) {
@@ -1066,7 +1077,14 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
         // discontinuities at the ends of the curves or boundaries of the patches.
         let mut skip_normalize = false;
         if (op == SolverOperation::Minimize || op == SolverOperation::Maximize)
-            && cs_are_perpen_disjoint_in(curve_tree, &curve_node, &surface_node, cache, surface_id)?
+            && cs_are_perpen_disjoint_in(
+                k,
+                curve_tree,
+                &curve_node,
+                &surface_node,
+                cache,
+                surface_id,
+            )?
         {
             skip_normalize = true;
         }
@@ -1077,7 +1095,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             surface_box: surface_node.bbox,
             curve_box: Some(curve_node.bbox),
         };
-        let k = self.kernel.ok_or(SolidError::null_pointer(OP_CS))?;
+
         // (SER: checked)
         let solutions: SolutionArray<O> = sc_local_solve(
             k,
@@ -1146,7 +1164,7 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CsGlobalSolver<'t, '_, O
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
         // (surface::surface::p5)
-        cs_identical_solutions(&self.base, self.surface, sol1, sol2)
+        cs_identical_solutions(self.kernel, &self.base, self.surface, sol1, sol2)
     }
 }
 
@@ -1181,6 +1199,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
         objects: [Option<O>; 2],
         process_boundary_curves: bool,
     ) -> Result<()> {
+        let k = self.kernel;
         let op = self.base.operation;
         let tol = self.base.tolerance_3d;
         let c0 = ct(ContinuityType::C0);
@@ -1247,7 +1266,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                 // SmIsoCurve(*pSrfEval, dir, value, bFlag) over the evaluated surface
                 let ic = boundary_iso_curve(own_view.eval, dir, value, from_left)?;
                 // (IsDegenerate's default tolerance SM_EFF_ZERO; the iso curve's kind)
-                if ic.is_degenerate(EFF_ZERO, None)? {
+                if ic.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
                 }
                 // the patch continuities and the curve's (the other direction's)
@@ -1327,6 +1346,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
     /// `sm_SCLocalSolve`, `LocalSurfaceSolve` and `sm_PassSSConvergenceTest`.
     #[allow(clippy::too_many_lines)]
     pub fn local_solve_branch(&mut self, branch: &Branch) -> Result<bool> {
+        let k = self.kernel;
         let node1 = *self.base.branch_node(branch, 0)?;
         let node2 = *self.base.branch_node(branch, 1)?;
         let id1 = branch
@@ -1417,6 +1437,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                 // (SER: checked; cpSurf1/cpSurf2 are the original surfaces, over their
                 // natural domains, with boundary testing)
                 let found = view1.eval.local_surface_intersect(
+                    k,
                     &view1.eval.natural_uv_domain(),
                     view2.eval,
                     &view2.eval.natural_uv_domain(),
@@ -1478,8 +1499,8 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             process_boundary_curves,
         )?;
 
-        let polar1 = cache1.polar_box_unstored(id1)?;
-        let polar2 = cache2.polar_box_unstored(id2)?;
+        let polar1 = cache1.polar_box_unstored(k, id1)?;
+        let polar2 = cache2.polar_box_unstored(k, id2)?;
         if op == SolverOperation::Signed3dDirectedMinimize {
             // Do a tight bounding box test in projected space to see if they are
             // disjoint
@@ -1510,6 +1531,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
         let uv_guess2 = dom2.evaluate(0.5, 0.5);
         // (SER: checked; pSrfEval1->LocalSurfaceSolve: virtual, never overridden)
         let mut found = local_surface_solve(
+            k,
             view1.eval,
             &dom1,
             view2.eval,
@@ -1524,7 +1546,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             if op != SolverOperation::Signed3dDirectedMinimize {
                 let (uv, uv2) = split(&x);
                 // (SER: checked)
-                if !pass_ss_convergence_test(view1.eval, uv, view2.eval, uv2)? {
+                if !pass_ss_convergence_test(k, view1.eval, uv, view2.eval, uv2)? {
                     found = None;
                 }
             }
@@ -1606,13 +1628,13 @@ fn boundary_curves(
     let mut out = vec![Curve::from(c0), Curve::from(c1)];
     // (IsClosed of the surface's own kind, default tolerance, no continuity)
     if !surface
-        .is_closed(uv_domain, SurfParamType::U, None, false)?
+        .is_closed(k, uv_domain, SurfParamType::U, None, false)?
         .0
     {
         out.push(Curve::from(c2));
     }
     if !surface
-        .is_closed(uv_domain, SurfParamType::V, None, false)?
+        .is_closed(k, uv_domain, SurfParamType::V, None, false)?
         .0
     {
         out.push(Curve::from(c3));
@@ -1702,7 +1724,7 @@ impl Surface {
 
                 let crv_t = ivl.mid();
                 // (SE: status ignored)
-                if let Some(p) = ignored(other_crv.evaluate_point(crv_t))? {
+                if let Some(p) = ignored(other_crv.evaluate_point(k, crv_t))? {
                     crv_pt = p;
                 }
 
@@ -1728,7 +1750,7 @@ impl Surface {
                         continue;
                     };
 
-                    if copy.approximate_length(&ivl, 4, false)?.0 < approx_tol_3d {
+                    if copy.approximate_length(k, &ivl, 4, false)?.0 < approx_tol_3d {
                         continue;
                     }
 
@@ -1902,7 +1924,7 @@ impl Surface {
             // get UVCurve knots and associated continuities (SER: checked; default
             // angle SM_CONTINUITY_ANGLE)
             let (knots, _) = uv_curve.knots(None)?;
-            let (_, curve_conts) = uv_curve.calculate_continuities(CONTINUITY_ANGLE)?;
+            let (_, curve_conts) = uv_curve.calculate_continuities(k, CONTINUITY_ANGLE)?;
 
             // for every curve knot: the projected 3D curve's C0 break points
             for (j, c) in curve_conts.iter().enumerate() {
@@ -1914,7 +1936,8 @@ impl Surface {
 
         let bss = match self.kind() {
             SurfaceKind::BSpline(b) => b,
-            SurfaceKind::Plane(_)
+            SurfaceKind::Cone(_)
+            | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::SrfInVolume(_)
@@ -1953,7 +1976,7 @@ impl Surface {
 
             // the UV curve point and (non-zero) tangent just inside the segment
             // (SER: checked)
-            let pv = uv_curve.evaluate(ivl.min() + EFF_ZERO_SQRT, 1, true, true)?;
+            let pv = uv_curve.evaluate(k, ivl.min() + EFF_ZERO_SQRT, 1, true, true)?;
             let (Some(p0), Some(p1)) = (pv.first(), pv.get(1)) else {
                 return Err(SolidError::sm_err(OP_LIFT));
             };
@@ -1972,14 +1995,14 @@ impl Surface {
             let mut trace = CrvOnSurf::new(k, uv_curve.clone(), bss.copy(), Some(seg_domain), 0)?;
 
             // Check for degenerate curve segment (SER: checked)
-            let pnt1 = trace.evaluate_point(ivl.min())?;
+            let pnt1 = trace.evaluate_point(k, ivl.min())?;
             let mut degenerate = true;
 
             // check 10 sample points until 1 is found that is more than tol dist from
             // begin point
             for ii in 1..=10_u32 {
                 // (SER: checked)
-                let pnt2 = trace.evaluate_point(ivl.evaluate(f64::from(ii) / 10.0))?;
+                let pnt2 = trace.evaluate_point(k, ivl.evaluate(f64::from(ii) / 10.0))?;
                 if pnt2.distance(pnt1) > approx_tol_3d / 100.0 {
                     degenerate = false;
                     break;
@@ -2012,7 +2035,7 @@ impl Surface {
             },
             // output = 1 composite curve (IsClosed default tolerance 0.0)
             _ => {
-                let closed = uv_curve.is_closed(interval, 0.0)?;
+                let closed = uv_curve.is_closed(k, interval, 0.0)?;
                 let mut composite = CompositeCurve::with_curves(3, curves_3d, closed, None, None)?;
                 // (SER: checked)
                 composite.make_composite_nurb()?
@@ -2036,11 +2059,13 @@ mod tests {
 
     #[test]
     fn two_perpendicular_planes_meet_on_their_line() {
+        let k = &Kernel::default();
         let a = plane(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
         let b = plane(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
         let dom = Extent2d::from_points(Point2::new(-5.0, -5.0), Point2::new(5.0, 5.0));
         let r = a
             .local_surface_intersect(
+                k,
                 &dom,
                 &b,
                 &dom,
@@ -2051,19 +2076,21 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        let p = a.evaluate_point(r.uv).unwrap();
-        let q = b.evaluate_point(r.other_uv).unwrap();
+        let p = a.evaluate_point(k, r.uv).unwrap();
+        let q = b.evaluate_point(k, r.other_uv).unwrap();
         assert!(p.distance(q) < 1e-6);
         assert!(p.x.abs() < 1e-9 && p.z.abs() < 1e-9);
     }
 
     #[test]
     fn parallel_guess_normals_give_no_answer() {
+        let k = &Kernel::default();
         let a = plane(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
         let b = plane(Point3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0));
         let dom = Extent2d::from_points(Point2::new(-5.0, -5.0), Point2::new(5.0, 5.0));
         let r = a
             .local_surface_intersect(
+                k,
                 &dom,
                 &b,
                 &dom,

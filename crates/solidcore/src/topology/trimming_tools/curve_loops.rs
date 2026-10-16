@@ -390,6 +390,7 @@ impl CurveLoops {
     /// evaluations.
     pub fn sample_nearby_points(
         &self,
+        k: &Kernel,
         store: &[Curve],
         key: CurveKey,
         param: f64,
@@ -401,9 +402,9 @@ impl CurveLoops {
         // when dParam is in the interior by more than tol
         if domain.contains_value(param, -tol) {
             let t = 0.8 * param + 0.2 * domain.min();
-            let p1 = crv.evaluate_point(t)?;
+            let p1 = crv.evaluate_point(k, t)?;
             let t = 0.8 * param + 0.2 * domain.max();
-            let p2 = crv.evaluate_point(t)?;
+            let p2 = crv.evaluate_point(k, t)?;
             return Ok((p1, p2));
         }
 
@@ -418,21 +419,21 @@ impl CurveLoops {
         let adj_orient = get(&self.orients, adj)?;
 
         if param < domain.mid() {
-            let p1 = crv.evaluate_point(domain.evaluate(0.2))?;
+            let p1 = crv.evaluate_point(k, domain.evaluate(0.2))?;
             let t = if adj_orient == OrientType::Same {
                 adj_domain.evaluate(0.8)
             } else {
                 adj_domain.evaluate(0.2)
             };
-            Ok((p1, adj_crv.evaluate_point(t)?))
+            Ok((p1, adj_crv.evaluate_point(k, t)?))
         } else {
-            let p1 = crv.evaluate_point(domain.evaluate(0.8))?;
+            let p1 = crv.evaluate_point(k, domain.evaluate(0.8))?;
             let t = if adj_orient == OrientType::Same {
                 adj_domain.evaluate(0.2)
             } else {
                 adj_domain.evaluate(0.8)
             };
-            Ok((p1, adj_crv.evaluate_point(t)?))
+            Ok((p1, adj_crv.evaluate_point(k, t)?))
         }
     }
 
@@ -457,7 +458,7 @@ impl CurveLoops {
         domain: &Extent2d,
         zone_tol_3d: f64,
     ) -> Result<bool> {
-        let (p1, p2) = self.sample_nearby_points(store, key, param)?;
+        let (p1, p2) = self.sample_nearby_points(k, store, key, param)?;
         let mut uv1 = p1;
         let mut uv2 = p2;
 
@@ -698,6 +699,7 @@ impl CurveLoops {
     /// [`SolidError::InvalidInput`] for keys not in `store`; those of the evaluation.
     pub fn update_solution_objects(
         &self,
+        k: &Kernel,
         store: &[Curve],
         ints: &mut [CurveIntersections],
         orig: CurveKey,
@@ -719,7 +721,7 @@ impl CurveLoops {
                 }
                 let param = sol.start.parameters[1];
                 let deriv = orig_crv
-                    .evaluate(param, 1, true, true)?
+                    .evaluate(k, param, 1, true, true)?
                     .get(1)
                     .copied()
                     .ok_or(SolidError::invalid_input(OP, "derivative"))?;

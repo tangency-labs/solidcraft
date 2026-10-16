@@ -151,6 +151,7 @@ fn table(v: &[f64], i: usize, operation: &'static str) -> Result<f64> {
 /// &Point, bFoundAnswer, sSolution)` of `curve`: whether an answer was found and its
 /// parameter.
 fn local_point_inversion(
+    k: &Kernel,
     curve: &Ellipse,
     interval: &Extent1d,
     guess: f64,
@@ -159,6 +160,7 @@ fn local_point_inversion(
     // (the ellipse evaluates through its NURB)
     let mut solution: Solution<()> = Solution::new();
     let found = crate::curve::curve::p5::local_property_analysis(
+        k,
         curve.base(),
         interval,
         curve_base::CurvePropertyType::PointInversion,
@@ -243,6 +245,7 @@ fn line_global_point_solve<O: Copy>(
 /// &dDist, NULL, dGuess0, dGuess1, bFoundAnswer, sSol)` of `curve` with the ellipse
 /// `other`: whether an answer was found and the solution.
 fn local_curve_solve_ellipse<O: Copy>(
+    k: &Kernel,
     curve: &Ellipse,
     interval: &Extent1d,
     other: &Ellipse,
@@ -253,6 +256,7 @@ fn local_curve_solve_ellipse<O: Copy>(
 ) -> Result<(bool, Solution<O>)> {
     // (the ellipses evaluate through their B-spline base)
     local_curve_solve(
+        k,
         &curve.base,
         interval,
         &other.base,
@@ -268,6 +272,7 @@ fn local_curve_solve_ellipse<O: Copy>(
 
 /// [`local_curve_solve_ellipse`] with the line `other`.
 fn local_curve_solve_line<O: Copy>(
+    k: &Kernel,
     curve: &Ellipse,
     interval: &Extent1d,
     other: &Line,
@@ -279,6 +284,7 @@ fn local_curve_solve_line<O: Copy>(
     // (the line evaluates through the curve dispatch, as its virtual Evaluate)
     let other = curve_base::Curve::from(other.clone());
     local_curve_solve(
+        k,
         &curve.base,
         interval,
         &other,
@@ -561,12 +567,13 @@ impl PolarConversion {
     /// evaluations and of the point inversion (`SmCurve::LocalPropertyAnalysis`).
     pub fn convert_to_nurbs_parameter(
         &self,
+        k: &Kernel,
         curve: &Ellipse,
         polar_param_deg: f64,
         zone_tol: f64,
     ) -> Result<(f64, bool)> {
         let mut written = None;
-        self.convert_to_nurbs_parameter_into(curve, polar_param_deg, zone_tol, &mut written)
+        self.convert_to_nurbs_parameter_into(k, curve, polar_param_deg, zone_tol, &mut written)
     }
 
     /// [`Self::convert_to_nurbs_parameter`] for a caller that ignores its status: the
@@ -579,12 +586,19 @@ impl PolarConversion {
     /// [`SolidError::Unported`] only.
     pub fn convert_to_nurbs_parameter_or_written(
         &self,
+        k: &Kernel,
         curve: &Ellipse,
         polar_param_deg: f64,
         zone_tol: f64,
     ) -> Result<Option<f64>> {
         let mut written = None;
-        match self.convert_to_nurbs_parameter_into(curve, polar_param_deg, zone_tol, &mut written) {
+        match self.convert_to_nurbs_parameter_into(
+            k,
+            curve,
+            polar_param_deg,
+            zone_tol,
+            &mut written,
+        ) {
             Ok((t, _)) => Ok(Some(t)),
             Err(e) if e.is_unported() => Err(e),
             Err(_) => Ok(written),
@@ -595,6 +609,7 @@ impl PolarConversion {
     /// writes to the out-parameter `rdNurbsParameter`.
     fn convert_to_nurbs_parameter_into(
         &self,
+        k: &Kernel,
         curve: &Ellipse,
         polar_param_deg: f64,
         _zone_tol: f64,
@@ -695,6 +710,7 @@ impl PolarConversion {
         } else {
             // Find closest point on Curve to GuessPoint
             let (found, param) = local_point_inversion(
+                k,
                 curve,
                 &curve.base.natural_interval(),
                 nurbs_guess,
@@ -1141,10 +1157,10 @@ impl Ellipse {
     /// # Errors
     ///
     /// As [`PolarConversion::convert_to_nurbs_parameter`].
-    pub fn convert_t_from_step_to_nurbs(&self, step_param: f64) -> Result<f64> {
+    pub fn convert_t_from_step_to_nurbs(&self, k: &Kernel, step_param: f64) -> Result<f64> {
         Ok(self
             .polar
-            .convert_to_nurbs_parameter(self, step_param, 0.0)?
+            .convert_to_nurbs_parameter(k, self, step_param, 0.0)?
             .0)
     }
 
@@ -1379,6 +1395,7 @@ impl Ellipse {
     /// errors of the conversions and evaluations.
     pub fn drop_point_fast<O: Copy>(
         &self,
+        k: &Kernel,
         interval: &Extent1d,
         operation: SolverOperation,
         test_point: Point3,
@@ -1463,9 +1480,9 @@ impl Ellipse {
             };
 
             // convert angle to curve parameter value
-            let (mut t, exact) = self
-                .polar
-                .convert_to_nurbs_parameter(self, clamped_angle, tol)?;
+            let (mut t, exact) =
+                self.polar
+                    .convert_to_nurbs_parameter(k, self, clamped_angle, tol)?;
 
             // clamp parameter to given Nurb interval - which may be a subset of the full curve interval
             t = interval.clamp_value(t);
@@ -1475,7 +1492,7 @@ impl Ellipse {
                 let pnt = self.step_point(clamped_angle);
 
                 // refine parameter value with NewtonRaphson iteration
-                let (found, refined) = local_point_inversion(self, interval, t, pnt)?;
+                let (found, refined) = local_point_inversion(k, self, interval, t, pnt)?;
                 if found {
                     t = refined;
                 }
@@ -1697,6 +1714,7 @@ impl Ellipse {
                     // far enough to need refinement
                     {
                         let (_found, sol2): (bool, Solution<O>) = local_curve_solve_ellipse(
+                            k,
                             self,
                             interval,
                             other,
@@ -1878,6 +1896,7 @@ impl Ellipse {
                     // far enough to need refinement
                     {
                         let (found, sol2): (bool, Solution<O>) = local_curve_solve_line(
+                            k,
                             self,
                             interval,
                             line,
@@ -2258,7 +2277,7 @@ mod tests {
         for io in [false, true] {
             let c = circle(&k, -30.0, 200.0, 1.5, io);
             for a in [-30.0, 0.0, 45.0, 90.0, 133.3, 200.0] {
-                let t = c.convert_t_from_step_to_nurbs(a).expect("convert");
+                let t = c.convert_t_from_step_to_nurbs(&k, a).expect("convert");
                 let p = c.base().evaluate_point(t).expect("eval");
                 let q = c.evaluate_step_point(a).expect("step");
                 assert!(p.distance(q) < 1e-9, "{a} {io}: {p:?} {q:?}");
@@ -2360,6 +2379,7 @@ mod tests {
         let p = Vec3::new(1.0, 2.0, 3.0) + Vec3::new(0.0, 5.0, 1.0);
         let sols = c
             .drop_point_fast::<i64>(
+                &k,
                 &ivl,
                 SolverOperation::Minimize,
                 p,
@@ -2379,6 +2399,7 @@ mod tests {
         // a point on the axis gives both ends
         let sols = c
             .drop_point_fast::<i64>(
+                &k,
                 &ivl,
                 SolverOperation::Minimize,
                 Vec3::new(1.0, 2.0, 9.0),
@@ -2405,6 +2426,7 @@ mod tests {
         .expect("ellipse");
         assert!(e
             .drop_point_fast::<i64>(
+                &k,
                 &ivl,
                 SolverOperation::Minimize,
                 p,

@@ -454,10 +454,13 @@ impl SurfOfExtrusion {
                 ..SurfaceBoxRequest::default()
             };
             let plane_nurb = plane.base_with_nurb()?;
-            let mut plane_pbox =
-                ignored(plane_nurb.calculate_bounding_box(&plane.natural_uv_domain(), &plane_req))?
-                    .and_then(|b| b.pseudo)
-                    .unwrap_or_default();
+            let mut plane_pbox = ignored(plane_nurb.calculate_bounding_box(
+                k,
+                &plane.natural_uv_domain(),
+                &plane_req,
+            ))?
+            .and_then(|b| b.pseudo)
+            .unwrap_or_default();
             let curve_req = CurveBoxRequest {
                 pseudo: true,
                 ..CurveBoxRequest::default()
@@ -521,7 +524,7 @@ impl SurfOfExtrusion {
             }
 
             // arrive here when all solutions are PointSolutions
-            let is_closed = gen.is_closed(&gen_curve_nurb_ivl, 0.0)?;
+            let is_closed = gen.is_closed(k, &gen_curve_nurb_ivl, 0.0)?;
 
             // for every SweptCurve/Plane point intersection - build, trim and if
             // nonNULL, output a line
@@ -531,7 +534,7 @@ impl SurfOfExtrusion {
             for (ii, sol) in sols.iter().enumerate() {
                 // create line segment intersection curve (Evaluate's status ignored
                 // upstream, which then reads the points)
-                let crv_pt = gen.evaluate(sol.start.parameters[0], 1, true, true)?;
+                let crv_pt = gen.evaluate(k, sol.start.parameters[0], 1, true, true)?;
                 let (Some(&pt0), Some(&pt1)) = (crv_pt.first(), crv_pt.get(1)) else {
                     return Err(SolidError::sm_err(OP_PLANE));
                 };
@@ -631,7 +634,7 @@ impl SurfOfExtrusion {
                 }
 
                 // add curve to ouput
-                let curve_type = if crv.is_degenerate(EFF_ZERO, None)? {
+                let curve_type = if crv.is_degenerate(k, EFF_ZERO, None)? {
                     TsectCurveType::Touching
                 } else if tangent {
                     TsectCurveType::Tangent
@@ -656,7 +659,7 @@ impl SurfOfExtrusion {
             // Line solutions have already added the curve types
             if cnt != out.curve_types.len() {
                 let crv = out.curves_3d.get(ii).ok_or(SolidError::sm_err(OP_PLANE))?;
-                let t = if crv.is_degenerate(EFF_ZERO, None)? {
+                let t = if crv.is_degenerate(k, EFF_ZERO, None)? {
                     TsectCurveType::Touching
                 } else {
                     TsectCurveType::Crossing

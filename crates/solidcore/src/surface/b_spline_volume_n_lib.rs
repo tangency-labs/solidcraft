@@ -124,6 +124,7 @@ impl BSplineVolume {
     /// upstream reads past its sample arrays.
     pub fn calculate_continuities_simple(
         &self,
+        k: &Kernel,
         param: VolumeParam,
         out: &mut DirectionDiscontinuities,
         calc_geometric: bool,
@@ -205,7 +206,7 @@ impl BSplineVolume {
                 let _ = ignored(iso.knots(None))?;
 
                 // When curve is degenerate - try another knot sample value
-                if iso.is_degenerate(EFF_ZERO, None)? {
+                if iso.is_degenerate(k, EFF_ZERO, None)? {
                     // past the first knot and nothing classified yet: try the middle
                     // of the previous span
                     if ii > 0 && jj > 0 && first {
@@ -219,13 +220,13 @@ impl BSplineVolume {
                             None,
                         )?;
                     }
-                    if iso.is_degenerate(EFF_ZERO, None)? {
+                    if iso.is_degenerate(k, EFF_ZERO, None)? {
                         continue;
                     }
                 }
 
                 // calculate the iso-curve continuities
-                let (tmp_min, tmp_conts) = iso.calculate_continuities(CONTINUITY_ANGLE)?;
+                let (tmp_min, tmp_conts) = iso.calculate_continuities(k, CONTINUITY_ANGLE)?;
 
                 if first {
                     first = false;
@@ -274,6 +275,7 @@ impl BSplineVolume {
     /// Only [`SolidError::Unported`] (from a callee of the geometric path).
     pub fn has_discontinuities_simple(
         &self,
+        k: &Kernel,
         disconts: Option<&mut Discontinuities3d>,
         calc_geometric: bool,
     ) -> Result<bool> {
@@ -285,9 +287,9 @@ impl BSplineVolume {
         d.init();
 
         // Calc the continuities in U, V and W (statuses ignored)
-        ignored(self.calculate_continuities_simple(VolumeParam::U, &mut d.u, calc_geometric))?;
-        ignored(self.calculate_continuities_simple(VolumeParam::V, &mut d.v, calc_geometric))?;
-        ignored(self.calculate_continuities_simple(VolumeParam::W, &mut d.w, calc_geometric))?;
+        ignored(self.calculate_continuities_simple(k, VolumeParam::U, &mut d.u, calc_geometric))?;
+        ignored(self.calculate_continuities_simple(k, VolumeParam::V, &mut d.v, calc_geometric))?;
+        ignored(self.calculate_continuities_simple(k, VolumeParam::W, &mut d.w, calc_geometric))?;
 
         // all done
         Ok(lower(d.u.min_cont, ContinuityType::G1)
@@ -402,7 +404,7 @@ mod tests {
             params: vec![9.0],
             conts: vec![],
         };
-        v.calculate_continuities_simple(VolumeParam::U, &mut d, false)
+        v.calculate_continuities_simple(&Kernel::default(), VolumeParam::U, &mut d, false)
             .unwrap();
         assert!(d.unaligned);
         assert_eq!(d.params, vec![0.0, 0.25, 0.5, 1.0]);
@@ -420,6 +422,7 @@ mod tests {
 
     #[test]
     fn geometric_path_fails_after_setting_params() {
+        let k = &Kernel::default();
         let v = unit_cube();
         let mut d = DirectionDiscontinuities {
             unaligned: false,
@@ -428,7 +431,7 @@ mod tests {
             conts: vec![ContinuityType::C0],
         };
         assert!(v
-            .calculate_continuities_simple(VolumeParam::V, &mut d, true)
+            .calculate_continuities_simple(k, VolumeParam::V, &mut d, true)
             .is_err());
         assert_eq!(d.params, vec![0.0, 1.0]);
         assert!(d.conts.is_empty());
@@ -446,7 +449,7 @@ mod tests {
             params: vec![],
             conts: vec![],
         };
-        let r = v.calculate_continuities_simple(VolumeParam::W, &mut d, false);
+        let r = v.calculate_continuities_simple(&Kernel::default(), VolumeParam::W, &mut d, false);
         assert!(r.is_err());
         assert_eq!(d.params.len(), 1);
         assert_eq!(d.min_cont, ContinuityType::CInfinity);
@@ -454,15 +457,18 @@ mod tests {
 
     #[test]
     fn has_discontinuities() {
+        let k = &Kernel::default();
         let v = unit_cube();
         let mut d = Discontinuities3d::new();
         // representational: the end knots are C0
-        assert!(v.has_discontinuities_simple(Some(&mut d), false).unwrap());
+        assert!(v
+            .has_discontinuities_simple(k, Some(&mut d), false)
+            .unwrap());
         assert_eq!(d.u.conts.len(), 2);
         // geometric: every direction fails, nothing below G1 is reported
-        assert!(!v.has_discontinuities_simple(Some(&mut d), true).unwrap());
+        assert!(!v.has_discontinuities_simple(k, Some(&mut d), true).unwrap());
         assert_eq!(d.w.params, vec![0.0, 1.0]);
-        assert!(!v.has_discontinuities_simple(None, true).unwrap());
+        assert!(!v.has_discontinuities_simple(k, None, true).unwrap());
     }
 
     #[test]

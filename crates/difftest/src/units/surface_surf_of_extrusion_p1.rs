@@ -560,7 +560,7 @@ pub(crate) fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
-pub(crate) fn put_state(o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
+pub(crate) fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
     o.extend([
         flag(s.is_kind_of(SURF_OF_EXTRUSION_TYPE)?),
         flag(s.is_kind_of(B_SPLINE_SURFACE_TYPE)?),
@@ -579,7 +579,7 @@ pub(crate) fn put_state(o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Res
     o.extend([ld.min(), ld.max(), f64::from(lp as u8)]);
     let (gd, gp) = s.gen_dir_param_extent();
     o.extend([gd.min(), gd.max(), f64::from(gp as u8)]);
-    push_dom(o, &s.max_analytic_domain()?);
+    push_dom(o, &s.max_analytic_domain(k)?);
     let (gc, ev) = s.canonical();
     o.push(flag(gc.is_some()));
     push_v(o, ev);
@@ -611,9 +611,9 @@ fn solver_op(op: u8) -> SolverOperation {
 }
 
 /// Status then state of an edited surface.
-fn edited(o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
+fn edited(k: &Kernel, o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
     o.push(0.0);
-    put_state(o, s)
+    put_state(k, o, s)
 }
 
 /// Runs the op on the Rust surface, appending its status and outputs.
@@ -624,7 +624,7 @@ fn rust_op(
     o: &mut Vec<f64>,
 ) -> Result<solidcore::Result<()>, HarnessError> {
     let r: solidcore::Result<()> = match op {
-        OpIn::Build {} => put_state(o, s),
+        OpIn::Build {} => put_state(k, o, s),
         OpIn::EvalStep { u, v, k: kk, point } => {
             let uv = Point2::new(*u, *v);
             if *point {
@@ -642,20 +642,20 @@ fn rust_op(
             }
         }
         OpIn::ToNurbs { u, v } => s
-            .convert_uv_from_step_to_nurbs(Point2::new(*u, *v))
+            .convert_uv_from_step_to_nurbs(k, Point2::new(*u, *v))
             .map(|p| o.extend([0.0, p.x, p.y])),
         OpIn::ToStep { u, v } => s
             .convert_uv_from_nurbs_to_step(k, Point2::new(*u, *v))
             .map(|p| o.extend([0.0, p.x, p.y])),
         OpIn::Adjust { dom } => s
             .adjust_step_uv_domain(k, &dom4(*dom))
-            .and_then(|()| edited(o, s)),
+            .and_then(|()| edited(k, o, s)),
         OpIn::Update { dom } => s
             .update_analytical_domain(k, &dom4(*dom))
-            .and_then(|()| edited(o, s)),
+            .and_then(|()| edited(k, o, s)),
         OpIn::Reparam { dom } => s
             .reparameterize(k, &dom4(*dom))
-            .and_then(|()| edited(o, s)),
+            .and_then(|()| edited(k, o, s)),
         OpIn::Transform {
             origin,
             x,
@@ -664,7 +664,7 @@ fn rust_op(
         } => {
             let rf = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             s.transform(k, &rf, scale.map(v3))
-                .and_then(|()| edited(o, s))
+                .and_then(|()| edited(k, o, s))
         }
         OpIn::Directrix { p, tol } => s.create_directrix_from_point(k, v3(*p), *tol).map(|c| {
             o.push(0.0);
@@ -725,16 +725,16 @@ fn rust_op(
                 o.push(status(&e));
                 Ok(())
             }
-            Ok(other) => s.approx_eq(&other).and_then(|a| {
-                let b = other.approx_eq(s)?;
+            Ok(other) => s.approx_eq(k, &other).and_then(|a| {
+                let b = other.approx_eq(k, s)?;
                 o.extend([0.0, flag(a), flag(b)]);
                 Ok(())
             }),
         },
         OpIn::Copy {} => s.copy().and_then(|c| {
-            let eq = s.approx_eq(&c)?;
+            let eq = s.approx_eq(k, &c)?;
             o.extend([0.0, flag(eq)]);
-            put_state(o, &c)
+            put_state(k, o, &c)
         }),
         OpIn::Generators {
             other,

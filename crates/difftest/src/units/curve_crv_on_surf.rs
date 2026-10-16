@@ -713,7 +713,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             left,
             nonzero,
         } => {
-            let r = c.evaluate(*t, *n, *left, *nonzero);
+            let r = c.evaluate(k, *t, *n, *left, *nonzero);
             o.push(st(&r)?);
             if let Ok(v) = r {
                 for p in v {
@@ -722,21 +722,21 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             }
         }
         OpIn::EvalPoint { t } => {
-            let r = c.evaluate_point(*t);
+            let r = c.evaluate_point(k, *t);
             o.push(st(&r)?);
             if let Ok(p) = r {
                 pv(o, p);
             }
         }
         OpIn::EvalUv { t } => {
-            let r = c.evaluate_uv_point(*t);
+            let r = c.evaluate_uv_point(k, *t);
             o.push(st(&r)?);
             if let Ok(p) = r {
                 o.extend([p.x, p.y]);
             }
         }
         OpIn::EvalNormal { t, left } => {
-            let r = c.evaluate_surface_normal(*t, *left);
+            let r = c.evaluate_surface_normal(k, *t, *left);
             o.push(st(&r)?);
             if let Ok(s) = r {
                 o.extend([s.uv.x, s.uv.y, s.uv_tangent.x, s.uv_tangent.y]);
@@ -744,7 +744,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             }
         }
         OpIn::Eval1st { t, left, .. } => {
-            let r = c.evaluate_surface_1st_deriv_derivs(*t, *left);
+            let r = c.evaluate_surface_1st_deriv_derivs(k, *t, *left);
             o.push(st(&r)?);
             if let Ok((du, dv)) = r {
                 for (u, v) in du.iter().zip(&dv) {
@@ -773,7 +773,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             put_state(o, c);
         }
         OpIn::Conts { angle } => {
-            let r = c.calculate_continuities(*angle);
+            let r = c.calculate_continuities(k, *angle);
             o.push(st(&r)?);
             let (mn, cs) = r.unwrap_or((
                 solidcore::geom::geom_utility::p2::ContinuityType::Undefined,
@@ -786,7 +786,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
         OpIn::Equal { other } => match other {
             None => {
                 let w = wrap(c);
-                let r = w.approx_eq(&w);
+                let r = w.approx_eq(k, &w);
                 o.push(st(&r)?);
                 o.push(b(r.unwrap_or(false)));
             }
@@ -796,8 +796,8 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
                     Err(e) => return Err(Stop::Harness(harness(format!("other: {e}")))),
                 };
                 let (wa, wb) = (wrap(c), Curve::from(d));
-                let r1 = wa.approx_eq(&wb);
-                let r2 = wb.approx_eq(&wa);
+                let r1 = wa.approx_eq(k, &wb);
+                let r2 = wb.approx_eq(k, &wa);
                 st(&r1)?;
                 st(&r2)?;
                 o.extend([0.0, b(r1.unwrap_or(false)), b(r2.unwrap_or(false))]);
@@ -807,7 +807,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             let r = wrap(c).copy(&Kernel::default());
             o.push(st(&r)?);
             if let Ok(cp) = r {
-                let eq = cp.approx_eq(&wrap(c));
+                let eq = cp.approx_eq(k, &wrap(c));
                 st(&eq)?;
                 let cp = cos_of(cp)?;
                 put_state(o, &cp);

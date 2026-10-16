@@ -805,17 +805,17 @@ fn range_of(c: &CurveIn) -> (f64, f64) {
     }
 }
 
-fn point_at(c: &CurveIn, t: f64) -> [f64; 3] {
+fn point_at(k: &Kernel, c: &CurveIn, t: f64) -> [f64; 3] {
     build(c)
         .ok()
-        .and_then(|cv| cv.evaluate_point(t).ok())
+        .and_then(|cv| cv.evaluate_point(k, t).ok())
         .map_or([0.0; 3], |p| [p.x, p.y, p.z])
 }
 
-fn tangent_at(c: &CurveIn, t: f64) -> [f64; 3] {
+fn tangent_at(k: &Kernel, c: &CurveIn, t: f64) -> [f64; 3] {
     build(c)
         .ok()
-        .and_then(|cv| cv.evaluate(t, 1, true, true).ok())
+        .and_then(|cv| cv.evaluate(k, t, 1, true, true).ok())
         .and_then(|v| v.get(1).copied())
         .map_or([1.0, 0.0, 0.0], |p| [p.x, p.y, p.z])
 }
@@ -833,11 +833,11 @@ fn gen_ivl(rng: &mut Rng, c: &CurveIn) -> [f64; 2] {
 
 /// A second curve related to `c1`: crossing it at a curve point, touching it, a copy
 /// (coincident), a nearby copy, or unrelated.
-fn gen_partner(rng: &mut Rng, c1: &CurveIn) -> CurveIn {
+fn gen_partner(k: &Kernel, rng: &mut Rng, c1: &CurveIn) -> CurveIn {
     let (a, bb) = range_of(c1);
     let t = a + (bb - a) * rng.unit();
-    let p = point_at(c1, t);
-    let tan = tangent_at(c1, t);
+    let p = point_at(k, c1, t);
+    let tan = tangent_at(k, c1, t);
     match rng.below(10) {
         // a segment crossing the curve at p (sometimes ending exactly on it)
         0..=3 => {
@@ -985,7 +985,7 @@ fn gen_loop(rng: &mut Rng) -> CurveIn {
     })
 }
 
-fn gen_cci(rng: &mut Rng) -> CciIn {
+fn gen_cci(k: &Kernel, rng: &mut Rng) -> CciIn {
     let self_int = rng.chance(0.15);
     let c1 = if self_int && rng.chance(0.6) {
         gen_loop(rng)
@@ -995,7 +995,7 @@ fn gen_cci(rng: &mut Rng) -> CciIn {
     let c2 = if self_int {
         None
     } else {
-        Some(gen_partner(rng, &c1))
+        Some(gen_partner(k, rng, &c1))
     };
     let cache1 = gen_cache(rng, &c1);
     let cache2 = c2.as_ref().and_then(|c| gen_cache(rng, c));
@@ -1042,12 +1042,12 @@ fn gen_cci(rng: &mut Rng) -> CciIn {
     }
 }
 
-fn gen_property(rng: &mut Rng) -> OpIn {
+fn gen_property(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = gen_curve(rng);
     let prop = rng.below(29) as i32;
     let (a, bb) = range_of(&curve);
     let t = a + (bb - a) * rng.unit();
-    let p = point_at(&curve, t);
+    let p = point_at(k, &curve, t);
     let (val, vecs) = match prop {
         // planes: through a curve point, or far away (no span reaches it)
         15 | 16 => {
@@ -1108,11 +1108,11 @@ fn overlapping_leaves(rng: &mut Rng, cci: &CciIn) -> Option<(u64, u64)> {
     rng.choose(&pairs).copied()
 }
 
-fn gen_case(rng: &mut Rng) -> OpIn {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     match rng.below(10) {
-        0..=2 => OpIn::CciSolve { cci: gen_cci(rng) },
+        0..=2 => OpIn::CciSolve { cci: gen_cci(k, rng) },
         3..=7 => {
-            let cci = gen_cci(rng);
+            let cci = gen_cci(k, rng);
             let (leaf1, leaf2) = if rng.chance(0.8) {
                 overlapping_leaves(rng, &cci).unwrap_or((rng.below(64), rng.below(64)))
             } else {
@@ -1120,7 +1120,7 @@ fn gen_case(rng: &mut Rng) -> OpIn {
             };
             OpIn::CciLocal { cci, leaf1, leaf2 }
         }
-        _ => gen_property(rng),
+        _ => gen_property(k, rng),
     }
 }
 
@@ -1130,8 +1130,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let op = gen_case(rng);
+            let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
@@ -1167,11 +1168,15 @@ mod tests {
     /// Generated cases cover every op, with passing (not deferred) cases.
     #[test]
     fn generated_cases_are_diverse() {
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         for _ in 0..600 {
-            let op = gen_case(&mut rng);
-            let name = serde_json::to_value(&op).unwrap()["op"].as_str().unwrap().to_string();
+            let op = gen_case(k, &mut rng);
+            let name = serde_json::to_value(&op).unwrap()["op"]
+                .as_str()
+                .unwrap()
+                .to_string();
             let out = rust(&op);
             let e = stats.entry(name).or_default();
             e[0] += 1;
@@ -1183,9 +1188,11 @@ mod tests {
             }
         }
         for (k, v) in &stats {
-            eprintln!("{k}: total {} ok {} err {} deferred/harness {}", v[0], v[1], v[2], v[3]);
+            eprintln!(
+                "{k}: total {} ok {} err {} deferred/harness {}",
+                v[0], v[1], v[2], v[3]
+            );
         }
         assert_eq!(stats.len(), 3);
     }
 }
-

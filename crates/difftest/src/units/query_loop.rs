@@ -748,8 +748,8 @@ fn gen_shape(rng: &mut Rng, a: P2, b: P2) -> (Vec<[f64; 3]>, usize, bool) {
 
 /// Evaluates a UV trim point on the surface (Rust; the 3D data only has to be the
 /// same numbers on both sides).
-fn srf_pt(s: &Surface, uv: P2) -> Option<[f64; 3]> {
-    let p = s.evaluate_point(Point2::new(uv[0], uv[1])).ok()?;
+fn srf_pt(k: &Kernel, s: &Surface, uv: P2) -> Option<[f64; 3]> {
+    let p = s.evaluate_point(k, Point2::new(uv[0], uv[1])).ok()?;
     (p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some([p.x, p.y, p.z])
 }
 
@@ -787,8 +787,8 @@ fn push_segment(
         let p1 = lerp2(s0, s1, 1.0 + e);
         let t0 = rng.uniform(-2.0, 2.0);
         let t1 = t0 + rng.uniform(0.5, 4.0);
-        let a3 = srf_pt(s, p0)?;
-        let b3 = srf_pt(s, p1)?;
+        let a3 = srf_pt(k, s, p0)?;
+        let b3 = srf_pt(k, s, p1)?;
         let iv = [
             t0 + (t1 - t0) * e / (1.0 + 2.0 * e),
             t0 + (t1 - t0) * (1.0 + e) / (1.0 + 2.0 * e),
@@ -834,9 +834,9 @@ fn push_segment(
             mid[0] - to_apex[0] / la * r * alpha.cos(),
             mid[1] - to_apex[1] / la * r * alpha.cos(),
         ];
-        let c3 = srf_pt(s, centre)?;
-        let a3 = srf_pt(s, pa)?;
-        let b3 = srf_pt(s, pb)?;
+        let c3 = srf_pt(k, s, centre)?;
+        let a3 = srf_pt(k, s, pa)?;
+        let b3 = srf_pt(k, s, pb)?;
         let xa = [a3[0] - c3[0], a3[1] - c3[1], a3[2] - c3[2]];
         let xb = [b3[0] - c3[0], b3[1] - c3[1], b3[2] - c3[2]];
         let rad = (xa[0] * xa[0] + xa[1] * xa[1] + xa[2] * xa[2]).sqrt();
@@ -857,8 +857,8 @@ fn push_segment(
         (ci, [d.min(), d.max()])
     } else if linear2 && rng.chance(0.6) {
         let (c0, c1) = (*cpts.first()?, *cpts.get(1)?);
-        let a3 = srf_pt(s, [c0[0], c0[1]])?;
-        let b3 = srf_pt(s, [c1[0], c1[1]])?;
+        let a3 = srf_pt(k, s, [c0[0], c0[1]])?;
+        let b3 = srf_pt(k, s, [c1[0], c1[1]])?;
         let c = CurveIn::Line { a: a3, b: b3 };
         let d = rust_curve(k, &c).ok()?.natural_interval();
         (c, [d.min(), d.max()])
@@ -878,7 +878,7 @@ fn push_segment(
             } else {
                 (c[0] / c[2], c[1] / c[2], c[2])
             };
-            let q = srf_pt(s, [u, v])?;
+            let q = srf_pt(k, s, [u, v])?;
             c3.push(if w == NOW {
                 [q[0], q[1], q[2], NOW]
             } else {
@@ -915,7 +915,7 @@ fn gen_tol(rng: &mut Rng, gs: f64) -> f64 {
 }
 
 /// The point to classify: random, on the loop, at or near a vertex, on a domain side.
-fn gen_point(rng: &mut Rng, verts: &[P2], built: &Built, dom: &Extent2d) -> P2 {
+fn gen_point(k: &Kernel, rng: &mut Rng, verts: &[P2], built: &Built, dom: &Extent2d) -> P2 {
     let (lo, hi) = (dom.min(), dom.max());
     let mut bmin = [f64::MAX, f64::MAX];
     let mut bmax = [f64::MIN, f64::MIN];
@@ -930,7 +930,7 @@ fn gen_point(rng: &mut Rng, verts: &[P2], built: &Built, dom: &Extent2d) -> P2 {
         let c = rust_nurb(&eu.trim, 2).ok()?;
         let d = c.natural_interval();
         let t = d.evaluate(rng.unit());
-        let p = c.evaluate_point(t).ok()?;
+        let p = c.evaluate_point(k, t).ok()?;
         Some([p.x, p.y])
     };
     let pick = rng.below(100);
@@ -1019,8 +1019,8 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             let tol = gen_tol(rng, gs);
             // bottom, seam (c1 -> c2), top, seam reversed (c3 -> c0, the same edge)
             push_segment(rng, &k, &surface, plane, &mut built, c[0], c[1], tol)?;
-            let a3 = srf_pt(&surface, c[1])?;
-            let b3 = srf_pt(&surface, c[2])?;
+            let a3 = srf_pt(&k, &surface, c[1])?;
+            let b3 = srf_pt(&k, &surface, c[2])?;
             let seam = CurveIn::Line { a: a3, b: b3 };
             let d = rust_curve(&k, &seam).ok()?.natural_interval();
             let dom1 = [d.min(), d.max()];
@@ -1097,7 +1097,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             built.edgeuses.remove(r);
         }
     }
-    let uv = gen_point(rng, &verts, &built, &dom);
+    let uv = gen_point(&k, rng, &verts, &built, &dom);
     Some(Inputs {
         face_tol,
         vertex_loop,

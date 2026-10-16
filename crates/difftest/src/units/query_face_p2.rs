@@ -271,7 +271,7 @@ fn face_exact(m: &Model, f: FaceId) -> Result<bool, HarnessError> {
 }
 
 /// The parameter point `at` on face `f`.
-fn point_of(m: &Model, f: FaceId, at: &At) -> Result<Point2, HarnessError> {
+fn point_of(k: &Kernel, m: &Model, f: FaceId, at: &At) -> Result<Point2, HarnessError> {
     let face = m.brep.face(f).map_err(|e| harness(e.to_string()))?;
     let dom = face.uv_domain;
     let (min, max) = (dom.min(), dom.max());
@@ -298,7 +298,7 @@ fn point_of(m: &Model, f: FaceId, at: &At) -> Result<Point2, HarnessError> {
                 Some(c) => {
                     let ivl = c.natural_interval();
                     let t = ivl.min() + at.a * (ivl.max() - ivl.min());
-                    let p = c.evaluate_point(t).map_err(|e| harness(e.to_string()))?;
+                    let p = c.evaluate_point(k, t).map_err(|e| harness(e.to_string()))?;
                     Point2::new(p.x, p.y)
                 }
                 // no trim curve: the domain centre
@@ -327,7 +327,7 @@ fn dom_of(m: &Model, f: FaceId, d: Option<[f64; 4]>) -> Result<[f64; 4], Harness
 
 /// The resolved arguments of a B-rep op (after the B-rep and edit blocks), and the
 /// faces it reads.
-fn op_args(m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessError> {
+fn op_args(k: &Kernel, m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessError> {
     match op {
         OpIn::PointClassify {
             face,
@@ -342,15 +342,8 @@ fn op_args(m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessE
             uv_ok,
         } => {
             let f = face_of(m, *face)?;
-            let uv = point_of(m, f, at)?;
-            let mut v = vec![
-                f64::from(f.index()),
-                uv.x,
-                uv.y,
-                *src_tol,
-                flag(*do_bnd),
-                flag(*use_uv),
-            ];
+            let uv = point_of(k, m, f, at)?;
+            let mut v = vec![f64::from(f.index()), uv.x, uv.y, *src_tol, flag(*do_bnd), flag(*use_uv)];
             v.extend([flag(*tgt_only), flag(*has_loops)]);
             let n_loops = m.brep.loops().len();
             let ls: Vec<f64> = loops
@@ -374,7 +367,7 @@ fn op_args(m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessE
         } => {
             let f1 = face_of(m, *face1)?;
             let f2 = face_of(m, *face2)?;
-            let uv = point_of(m, f1, at)?;
+            let uv = point_of(k, m, f1, at)?;
             let mut v = vec![uv.x, uv.y, *tol, f64::from(f1.index())];
             v.extend(dom_of(m, f1, *dom1)?);
             v.push(f64::from(f2.index()));
@@ -392,8 +385,8 @@ fn op_args(m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessE
             check3d,
         } => {
             let f = face_of(m, *face)?;
-            let a = point_of(m, f, from)?;
-            let b = point_of(m, f, to)?;
+            let a = point_of(k, m, f, from)?;
+            let b = point_of(k, m, f, to)?;
             let (p, q) = if *dim == 2 {
                 ([a.x, a.y, 0.0], [b.x, b.y, 0.0])
             } else {
@@ -404,8 +397,8 @@ fn op_args(m: &Model, op: &OpIn) -> Result<(Op, Vec<f64>, Vec<FaceId>), HarnessE
                     .surface
                     .as_ref()
                     .ok_or_else(|| harness("face without surface"))?;
-                let p = s.evaluate_point(a).map_err(|e| harness(e.to_string()))?;
-                let q = s.evaluate_point(b).map_err(|e| harness(e.to_string()))?;
+                let p = s.evaluate_point(k, a).map_err(|e| harness(e.to_string()))?;
+                let q = s.evaluate_point(k, b).map_err(|e| harness(e.to_string()))?;
                 ([p.x, p.y, p.z], [q.x, q.y, q.z])
             };
             let mut v = vec![f64::from(f.index()), f64::from(*dim)];
@@ -443,7 +436,7 @@ fn proto_input(op: &OpIn) -> Option<Vec<f64>> {
     }
 }
 
-fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
+fn cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     if let Some(v) = proto_input(&i.op) {
         let o = ffi::eval(Op::ProtoVertex, "", &v).map_err(|e| harness(format!("c++: {e}")))?;
         return Ok(Output::new().values("proto", o));
@@ -452,7 +445,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(m) => m,
         Err(o) => return Ok(o),
     };
-    let (op, args, faces) = op_args(&m, &i.op)?;
+    let (op, args, faces) = op_args(k, &m, &i.op)?;
     for &f in &faces {
         if !face_exact(&m, f)? {
             return Ok(Output::err("inexact_geometry"));
@@ -712,7 +705,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(m) => m,
         Err(o) => return Ok(o),
     };
-    let (op, args, faces) = op_args(&m, &i.op)?;
+    let (op, args, faces) = op_args(&k, &m, &i.op)?;
     for &f in &faces {
         if !face_exact(&m, f)? {
             return Ok(Output::err("inexact_geometry"));
@@ -1056,7 +1049,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
-        cpp(&case.parse::<Inputs>()?)
+let k = &Kernel::default();
+        cpp(k, &case.parse::<Inputs>()?)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {

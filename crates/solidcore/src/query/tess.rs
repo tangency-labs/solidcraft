@@ -527,6 +527,7 @@ impl TessSrfCache {
             .new_subdivision_handle()
             .ok_or_else(|| invalid(OP_SUB, "cache cannot name subdivision surfaces"))?;
         let bbox = ignore(copy.calculate_bounding_box(
+            k,
             &domain,
             &BoundingBoxRequest {
                 normal: true,
@@ -600,6 +601,15 @@ impl TessSrfCache {
                 SurfaceKind::Plane(p) => Some(match ignore(p.base_with_nurb())? {
                     Some(b) => b.into_owned(),
                     None => p.base().clone(),
+                }),
+                SurfaceKind::Cone(s) => Some(if s.rev().base().gw_nurb().is_some() {
+                    s.rev().base().clone()
+                } else {
+                    let mut c = s.as_ref().clone();
+                    match ignore(c.make_nurb(k))? {
+                        Some(()) => c.rev().base().clone(),
+                        None => s.rev().base().clone(),
+                    }
                 }),
                 SurfaceKind::SurfOfRevolution(s) => Some(if s.base().gw_nurb().is_some() {
                     s.base().clone()
@@ -740,12 +750,12 @@ impl TessSrfCache {
             let uv_domain = base.uv_domain();
             let mid_uv = (start + end) / 2.0;
             let tol_u = min2(
-                map_to_2d(tol_3d, mid_uv, Vec2::new(1.0, 0.0), surface)?,
+                map_to_2d(k, tol_3d, mid_uv, Vec2::new(1.0, 0.0), surface)?,
                 uv_domain.x_length() / 100.0,
             )
             .abs();
             let tol_v = min2(
-                map_to_2d(tol_3d, mid_uv, Vec2::new(0.0, 1.0), surface)?,
+                map_to_2d(k, tol_3d, mid_uv, Vec2::new(0.0, 1.0), surface)?,
                 uv_domain.y_length() / 100.0,
             )
             .abs();
@@ -1011,7 +1021,7 @@ fn tess_test_against_tolerances(
     for uv in uvs {
         let norm = cache
             .surface()
-            .evaluate_normal(uv, Side::Left, Side::Left)?;
+            .evaluate_normal(k, uv, Side::Left, Side::Left)?;
         let dot = norm.dot(view.view_vector);
         if dot * direction < 0.0 {
             silhouette = true;
@@ -1049,8 +1059,8 @@ fn tess_test_against_tolerances(
 }
 
 /// `SmTol::MapTo2d(tol, uv, dir, surface)`.
-fn map_to_2d(tol_3d: f64, uv: Point2, dir: Vec2, surface: &Surface) -> Result<f64> {
-    crate::surface::surface::p1::map_to_2d_dir(tol_3d, uv, dir, surface)
+fn map_to_2d(k: &Kernel, tol_3d: f64, uv: Point2, dir: Vec2, surface: &Surface) -> Result<f64> {
+    crate::surface::surface::p1::map_to_2d_dir(k, tol_3d, uv, dir, surface)
 }
 
 fn no_child() -> SolidError {

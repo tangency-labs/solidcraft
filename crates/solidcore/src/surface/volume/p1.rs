@@ -1388,12 +1388,13 @@ impl Volume {
     /// [`SolidError::Unported`] from the B-spline override's callees.
     pub fn has_discontinuities_simple(
         &self,
+        k: &Kernel,
         disconts: Option<&mut Discontinuities3d>,
         calc_geometric: bool,
     ) -> Result<bool> {
         match &self.kind {
             VolumeKind::Transform(t) => Ok(t.has_discontinuities_simple(disconts)),
-            VolumeKind::BSpline(b) => b.has_discontinuities_simple(disconts, calc_geometric),
+            VolumeKind::BSpline(b) => b.has_discontinuities_simple(k, disconts, calc_geometric),
             VolumeKind::Base
             | VolumeKind::Bend(_)
             | VolumeKind::Unbend(_)
@@ -1418,12 +1419,13 @@ impl Volume {
     /// Those of [`BSplineVolume::calculate_continuities_simple`].
     pub fn calculate_continuities_simple(
         &self,
+        k: &Kernel,
         param: VolumeParam,
         out: &mut DirectionDiscontinuities,
         calc_geometric: bool,
     ) -> Result<()> {
         if let VolumeKind::BSpline(b) = &self.kind {
-            return b.calculate_continuities_simple(param, out, calc_geometric);
+            return b.calculate_continuities_simple(k, param, out, calc_geometric);
         }
         out.min_cont = ContinuityType::CInfinity;
         out.params.clear();
@@ -2449,7 +2451,7 @@ mod tests {
         d.set_unaligned();
         assert!(d.u.unaligned && d.min_continuity == ContinuityType::C0);
         assert!(!chain
-            .has_discontinuities_simple(Some(&mut d), true)
+            .has_discontinuities_simple(&k, Some(&mut d), true)
             .unwrap());
         assert_eq!(d, Discontinuities3d::default());
     }
@@ -2583,12 +2585,13 @@ mod tests {
 
     #[test]
     fn b_spline_overrides_and_inherited_base() {
+        let k = &Kernel::default();
         // the B-spline volume's NLib overrides
         let bs = Volume::new(VolumeKind::BSpline(b_spline()));
-        assert!(!bs.has_discontinuities_simple(None, true).unwrap());
+        assert!(!bs.has_discontinuities_simple(k, None, true).unwrap());
         let mut d = DirectionDiscontinuities::none();
         assert!(bs
-            .calculate_continuities_simple(VolumeParam::U, &mut d, false)
+            .calculate_continuities_simple(k, VolumeParam::U, &mut d, false)
             .is_ok());
         assert!(!d.params.is_empty());
         assert!(bs.natural_param_domain().is_ok());
@@ -2601,7 +2604,7 @@ mod tests {
         assert!(!bs.approx_eq(&copy).unwrap());
         // inherited base behaviour still runs
         let mut twist = Volume::new(VolumeKind::Twist(TwistVolume::new()));
-        assert!(!twist.has_discontinuities_simple(None, true).unwrap());
+        assert!(!twist.has_discontinuities_simple(k, None, true).unwrap());
         let ax = Axis2Placement::new(v(1.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0));
         twist.transform(&ax, None).unwrap();
         assert!(twist.next_map().is_some());

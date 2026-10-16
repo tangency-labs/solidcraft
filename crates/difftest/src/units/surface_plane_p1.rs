@@ -941,7 +941,7 @@ fn rust_op(k: &Kernel, op: &OpIn, a: &mut Plane, o: &mut Vec<f64>) -> Result<(),
             let c = rust_curve(curve)?;
             let l = Line::create_line_segment(3, v3(line[0]), v3(line[1]), None)
                 .map_err(|e| harness(format!("segment: {e}")))?;
-            if let Some(g) = st(o, is_grazing_intersection(&c, *t, &l, *s))? {
+            if let Some(g) = st(o, is_grazing_intersection(k, &c, *t, &l, *s))? {
                 o.push(b(g));
             }
         }
@@ -950,7 +950,7 @@ fn rust_op(k: &Kernel, op: &OpIn, a: &mut Plane, o: &mut Vec<f64>) -> Result<(),
             o.push(0.0);
             put_dom(o, &s.natural_uv_domain());
             let max = s
-                .max_analytic_domain()
+                .max_analytic_domain(k)
                 .map_err(|e| harness(format!("max analytic domain: {e}")))?;
             put_dom(o, &max);
             o.push(b(s.is_bilinear()));

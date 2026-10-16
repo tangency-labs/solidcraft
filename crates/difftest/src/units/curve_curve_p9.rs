@@ -624,10 +624,10 @@ fn scale3(a: [f64; 3], s: f64) -> [f64; 3] {
 }
 
 /// The point of `c` at `t` (Rust evaluation, used only to place test points).
-fn point_at(c: &CurveIn, t: f64) -> [f64; 3] {
+fn point_at(k: &Kernel, c: &CurveIn, t: f64) -> [f64; 3] {
     build(c)
         .ok()
-        .and_then(|cc| cc.evaluate_point(t).ok())
+        .and_then(|cc| cc.evaluate_point(k, t).ok())
         .map_or([0.0; 3], |p| [p.x, p.y, p.z])
 }
 
@@ -676,7 +676,7 @@ fn translated(c: &CurveIn, d: [f64; 3]) -> CurveIn {
 
 /// A second curve near `c`: an identical copy, a slightly moved copy, the same line
 /// reparameterised, or an unrelated curve.
-fn gen_partner(rng: &mut Rng, c: &CurveIn) -> CurveIn {
+fn gen_partner(k: &Kernel, rng: &mut Rng, c: &CurveIn) -> CurveIn {
     match rng.below(8) {
         0..=2 => c.clone(),
         3 | 4 => {
@@ -686,8 +686,8 @@ fn gen_partner(rng: &mut Rng, c: &CurveIn) -> CurveIn {
         5 => {
             // a line on the same carrier with another parameterisation
             let (a, bb) = range_of(c);
-            let p = point_at(c, a);
-            let q = point_at(c, bb);
+            let p = point_at(k, c, a);
+            let q = point_at(k, c, bb);
             let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
             if rng.chance(0.5) {
                 CurveIn::Line(LineIn {
@@ -993,12 +993,12 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
 
 /// A curve through the point of `c` at `t` (a random curve moved so that one of its
 /// points lands there, optionally a little off).
-fn gen_crossing(rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
+fn gen_crossing(k: &Kernel, rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
     let other = gen_curve(rng);
     let (a, bb) = range_of(&other);
     let s = a + (bb - a) * rng.uniform(0.05, 0.95);
-    let p = point_at(c, t);
-    let q = point_at(&other, s);
+    let p = point_at(k, c, t);
+    let q = point_at(k, &other, s);
     let off = *rng.choose(&[0.0, 0.0, 1e-9, 1e-7, 1e-5]).unwrap_or(&0.0);
     let d = add(
         [p[0] - q[0], p[1] - q[1], p[2] - q[2]],
@@ -1008,12 +1008,12 @@ fn gen_crossing(rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
 }
 
 /// A line tangent to `c` at `t` (along the chord to a nearby point), possibly offset.
-fn gen_tangent_line(rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
+fn gen_tangent_line(k: &Kernel, rng: &mut Rng, c: &CurveIn, t: f64) -> CurveIn {
     let (a, bb) = range_of(c);
     let h = 1e-4 * (bb - a);
-    let p0 = point_at(c, t - h);
-    let p1 = point_at(c, t + h);
-    let p = point_at(c, t);
+    let p0 = point_at(k, c, t - h);
+    let p1 = point_at(k, c, t + h);
+    let p = point_at(k, c, t);
     let dir = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
     let off = *rng.choose(&[0.0, 1e-8, 1e-6, 1e-3]).unwrap_or(&0.0);
     let p = add(p, scale3(gen_dir(rng), off));
@@ -1173,7 +1173,7 @@ fn flattened(c: &CurveIn, z0: f64) -> CurveIn {
     }
 }
 
-fn gen_gcs(rng: &mut Rng) -> OpIn {
+fn gen_gcs(k: &Kernel, rng: &mut Rng) -> OpIn {
     let c1 = match rng.below(10) {
         0 => gen_closed_curve(rng),
         1 => gen_looping(rng),
@@ -1184,9 +1184,9 @@ fn gen_gcs(rng: &mut Rng) -> OpIn {
     let t = a + (bb - a) * rng.uniform(0.0, 1.0);
     let c2 = match rng.below(20) {
         0 => None,
-        1..=4 => Some(gen_crossing(rng, &c1, t)),
-        5 | 6 => Some(gen_tangent_line(rng, &c1, t)),
-        7..=10 => Some(gen_partner(rng, &c1)),
+        1..=4 => Some(gen_crossing(k, rng, &c1, t)),
+        5 | 6 => Some(gen_tangent_line(k, rng, &c1, t)),
+        7..=10 => Some(gen_partner(k, rng, &c1)),
         11 => Some(translated(&gen_curve(rng), [30.0, -20.0, 5.0])),
         12 | 13 => Some(CurveIn::Line(gen_line(rng))),
         _ => Some(gen_curve(rng)),
@@ -1217,13 +1217,13 @@ fn gen_gcs(rng: &mut Rng) -> OpIn {
     } else {
         (c1, c2)
     };
-    let near = point_at(&c1, (ivl1[0] + ivl1[1]) / 2.0);
+    let near = point_at(k, &c1, (ivl1[0] + ivl1[1]) / 2.0);
     let target = if sop == 6 {
         // mostly a distance some pair of points of the two curves really has
         if rng.chance(0.8) {
-            let p = point_at(&c1, ivl1[0] + (ivl1[1] - ivl1[0]) * rng.uniform(0.0, 1.0));
+            let p = point_at(k, &c1, ivl1[0] + (ivl1[1] - ivl1[0]) * rng.uniform(0.0, 1.0));
             let other = c2.as_ref().unwrap_or(&c1);
-            let q = point_at(other, ivl2[0] + (ivl2[1] - ivl2[0]) * rng.uniform(0.0, 1.0));
+            let q = point_at(k, other, ivl2[0] + (ivl2[1] - ivl2[0]) * rng.uniform(0.0, 1.0));
             let d = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
             Some(d.iter().map(|x| x * x).sum::<f64>().sqrt().max(0.05))
         } else {
@@ -1251,7 +1251,7 @@ fn gen_gcs(rng: &mut Rng) -> OpIn {
         (16..=18 | 22, Some(&n)) if rng.chance(0.7) => {
             let t = ivl1[0] + (ivl1[1] - ivl1[0]) * rng.uniform(0.0, 1.0);
             let c = if sop == 22 {
-                gen_tangent_line(rng, &c1, t)
+                gen_tangent_line(k, rng, &c1, t)
             } else {
                 let shifts: &[f64] = if sop == 18 {
                     &[0.0, 0.0, 0.0, 0.3]
@@ -1259,7 +1259,7 @@ fn gen_gcs(rng: &mut Rng) -> OpIn {
                     &[0.0, 0.5, -1.0, 3.0]
                 };
                 let shift = *rng.choose(shifts).unwrap_or(&0.0);
-                translated(&gen_crossing(rng, &c1, t), scale3(n, shift))
+                translated(&gen_crossing(k, rng, &c1, t), scale3(n, shift))
             };
             // mostly the whole second curve, so that it contains the crossing
             let ivl = if rng.chance(0.8) {
@@ -1285,9 +1285,9 @@ fn gen_gcs(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_case(rng: &mut Rng) -> OpIn {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     match rng.below(100) {
-        0..=64 => gen_gcs(rng),
+        0..=64 => gen_gcs(k, rng),
         65..=67 => {
             let c = if rng.chance(0.75) {
                 gen_looping(rng)
@@ -1324,7 +1324,7 @@ fn gen_case(rng: &mut Rng) -> OpIn {
             let c0 = gen_curve(rng);
             let c = if planar { flattened(&c0, z0) } else { c0 };
             let (a, bb) = range_of(&c);
-            let mut p = point_at(&c, a + (bb - a) * rng.uniform(0.0, 1.0));
+            let mut p = point_at(k, &c, a + (bb - a) * rng.uniform(0.0, 1.0));
             if rng.chance(0.2) {
                 p = add(
                     p,
@@ -1365,7 +1365,7 @@ fn gen_case(rng: &mut Rng) -> OpIn {
             let planes = (0..count)
                 .map(|_| {
                     let n = unit(gen_dir(rng));
-                    let on = point_at(&c, a + (bb - a) * rng.uniform(0.0, 1.0));
+                    let on = point_at(k, &c, a + (bb - a) * rng.uniform(0.0, 1.0));
                     let back = *rng.choose(&[0.0, 0.0, 1.0, 50.0, 500.0]).unwrap_or(&50.0);
                     [add(on, scale3(n, -back)), n]
                 })
@@ -1381,8 +1381,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..64 {
-            let op = gen_case(rng);
+            let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
@@ -1418,10 +1419,11 @@ mod tests {
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
     fn generated_cases_run() {
+let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats = [0usize; 4];
         for _ in 0..200 {
-            let op = gen_case(&mut rng);
+            let op = gen_case(k, &mut rng);
             stats[0] += 1;
             match rust(&op) {
                 Err(_) => stats[3] += 1,

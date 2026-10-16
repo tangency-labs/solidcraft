@@ -533,7 +533,7 @@ impl Torus {
     ///
     /// `InvalidInput` without converter circle (upstream dereferences it) or for a
     /// generator that is not a circle; those of the conversions.
-    pub fn convert_uv_from_step_to_nurbs(&self, step_uv: Point2) -> Result<Point2> {
+    pub fn convert_uv_from_step_to_nurbs(&self, k: &Kernel, step_uv: Point2) -> Result<Point2> {
         // convert sweep coordinate
         let polar_curve = self
             .base
@@ -546,14 +546,14 @@ impl Torus {
         let (mut nurbs_x, _exact) =
             self.base
                 .polar
-                .convert_to_nurbs_parameter(polar_curve, step_uv.x, 0.0)?;
+                .convert_to_nurbs_parameter(k, polar_curve, step_uv.x, 0.0)?;
 
         // (Torus GenCurves are centred on 0: the PolarParam is the StepParam)
         let polar_param = step_uv.y;
 
         // convert GenCurve PolarParam to NurbsParam
         let circle = gen_circle(self.base.gen_curve.as_ref(), OP_CONVERT)?;
-        let mut nurbs_y = circle.convert_t_from_step_to_nurbs(polar_param)?;
+        let mut nurbs_y = circle.convert_t_from_step_to_nurbs(k, polar_param)?;
 
         // m_bSwapUV - Nurb and STEP parameters are swapped
         if self.base.swap_uv {
@@ -1057,7 +1057,7 @@ fn iso_curve(
     )?;
 
     // low work - when curve is degenerate don't bother making a circle
-    if iso.curve.is_degenerate(EFF_ZERO, None)? {
+    if iso.curve.is_degenerate(k, EFF_ZERO, None)? {
         return Ok(RevolutionIsoCurve {
             curve: Curve::from(iso.curve),
             max_gap_3d: iso.max_gap_3d,
@@ -1222,7 +1222,7 @@ mod tests {
                 for (u, v) in [(10.0, 20.0), (100.0, 250.0), (359.0, 1.0), (0.0, 0.0)] {
                     let step = Point2::new(u, v);
                     let p = t.evaluate_step_point(step).expect("eval");
-                    let nurb = t.convert_uv_from_step_to_nurbs(step).expect("to nurbs");
+                    let nurb = t.convert_uv_from_step_to_nurbs(&k, step).expect("to nurbs");
                     let q = t.base.base.evaluate_point(nurb).expect("nurb eval");
                     assert!((p - q).length() < 1e-9, "{swap} {inside_out} {u} {v}");
                     let back = t.convert_uv_from_nurbs_to_step(&k, nurb).expect("to step");
@@ -1253,7 +1253,7 @@ mod tests {
             .expect("surface");
         assert!((off.minor_radius() - 1.25).abs() < 1e-15);
         let nurb = off
-            .convert_uv_from_step_to_nurbs(Point2::new(30.0, 60.0))
+            .convert_uv_from_step_to_nurbs(&k, Point2::new(30.0, 60.0))
             .expect("uv");
         let p = off.base.base.evaluate_point(nurb).expect("eval");
         let q = off

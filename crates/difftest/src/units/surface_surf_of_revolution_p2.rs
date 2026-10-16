@@ -271,9 +271,9 @@ fn dom_of(d: Option<[f64; 4]>, natural: Extent2d) -> Extent2d {
 }
 
 /// Pushes `0` and the state of `s`.
-fn ok_state(o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Result<()> {
+fn ok_state(k: &Kernel, o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Result<()> {
     o.push(0.0);
-    put_state(o, s)
+    put_state(k, o, s)
 }
 
 fn nurb_surface(s: &InlineSrf) -> Result<BSplineSurface, HarnessError> {
@@ -296,12 +296,12 @@ fn rust_op(
     o: &mut Vec<f64>,
 ) -> Result<solidcore::Result<()>, HarnessError> {
     let r: solidcore::Result<()> = match op {
-        OpIn::Build {} => put_state(o, s),
+        OpIn::Build {} => put_state(k, o, s),
         OpIn::Adjust { dom } => {
             let mut c = s.clone();
             let [a, b, cc, d] = *dom;
             c.adjust_step_uv_domain(k, &Extent2d::from_bounds(a, b, cc, d))
-                .and_then(|()| ok_state(o, &c))
+                .and_then(|()| ok_state(k, o, &c))
         }
         OpIn::StepInv { dom, p, tol, guess } => {
             let d = dom_of(*dom, s.step_uv_domain());
@@ -310,7 +310,7 @@ fn rust_op(
         }
         OpIn::Offset { dist, tol } => s
             .create_offset_surface(k, *dist, *tol)
-            .and_then(|off| ok_state(o, &off)),
+            .and_then(|off| ok_state(k, o, &off)),
         OpIn::Gssi {
             other,
             dom,
@@ -375,7 +375,7 @@ fn rust_op(
         OpIn::Trim { dom } => {
             let mut c = s.clone();
             let d = dom_of(*dom, c.base().natural_uv_domain());
-            c.trim_with_domain(k, &d).and_then(|()| ok_state(o, &c))
+            c.trim_with_domain(k, &d).and_then(|()| ok_state(k, o, &c))
         }
         OpIn::IsNurb { .. } => return Err(harness("unreachable")),
     };
@@ -409,7 +409,7 @@ fn rust_is_nurb(
             |found| {
                 o.push(flag(found.is_some()));
                 match &found {
-                    Some(r) => put_state(o, r),
+                    Some(r) => put_state(k, o, r),
                     None => Ok(()),
                 }
             },

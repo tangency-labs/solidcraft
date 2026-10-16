@@ -572,7 +572,7 @@ pub fn radial_sector_classify_between(
 
     // get edge's position for given param
     let this_param = this.interval.evaluate(normalized_param);
-    let start_point = curve_of(brep, edge, OP_RADIAL)?.evaluate_point(this_param)?;
+    let start_point = curve_of(brep, edge, OP_RADIAL)?.evaluate_point(k, this_param)?;
 
     // classify edge locals
     let same_brep = other_brep.is_none();
@@ -965,6 +965,7 @@ pub fn radial_sector_of_curve_classify(
         // calculate ClassificationCurve stepOff point and tangent (status ignored: a
         // failure leaves the start parameter)
         let step_param = ignored(euclid_step_off(
+            k,
             curve,
             interval,
             start_param,
@@ -972,7 +973,7 @@ pub fn radial_sector_of_curve_classify(
             step_off_distance,
         ))?
         .unwrap_or(start_param);
-        let pv = curve.evaluate(step_param, 1, true, true)?;
+        let pv = curve.evaluate(k, step_param, 1, true, true)?;
         let mut tan = *pv
             .get(1)
             .ok_or_else(|| SolidError::sm_err(OP_RADIAL_CURVE))?;
@@ -1073,6 +1074,7 @@ pub fn radial_sector_of_curve_classify(
 /// `crCurve.EuclidianStepOff(crInterval, dStartParam, eOrientation, dist, dist/100,
 /// bClampped, dStepParam)`: the step parameter.
 fn euclid_step_off(
+    k: &Kernel,
     curve: &Curve,
     interval: &Extent1d,
     start_param: f64,
@@ -1080,6 +1082,7 @@ fn euclid_step_off(
     step_off_distance: f64,
 ) -> Result<f64> {
     Ok(euclidian_step_off(
+        k,
         curve,
         interval,
         start_param,
@@ -1224,7 +1227,7 @@ mod tests {
             .curve
             .as_ref()
             .unwrap()
-            .evaluate_point(cp.parameter)
+            .evaluate_point(&k, cp.parameter)
             .unwrap();
         assert!(at.distance(Vec3::X) < 1e-12);
         assert!((cp.distance - 1.0).abs() < 1e-12);

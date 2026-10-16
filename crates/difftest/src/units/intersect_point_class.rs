@@ -161,25 +161,79 @@ enum ObjIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum OpIn {
-    Reset { t: usize, tol: Option<f64> },
-    SetClassObject { t: usize, class: i32, obj: Option<usize> },
-    SetT { t: usize, v: f64, snap: bool },
-    SetUv { t: usize, u: f64, v: f64 },
-    SetUvw { t: usize, p: [f64; 3] },
-    Unset { t: usize },
-    SetGap { t: usize, g: f64 },
-    SetDeviation { t: usize, g: f64 },
-    SetPresnap { t: usize, v: f64 },
-    SetSss { t: usize, p: [f64; 3] },
-    SetSrcTol { t: usize, tol: f64 },
-    SetFace { t: usize, obj: Option<usize> },
-    Assign { t: usize },
-    CopyClassOnly { t: usize },
-    CopySss { t: usize },
-    Combine { t: usize },
-    Compute { t: usize, p: [f64; 3] },
-    Find { t: usize },
-    Gap { t: usize, s: Option<usize> },
+    Reset {
+        t: usize,
+        tol: Option<f64>,
+    },
+    SetClassObject {
+        t: usize,
+        class: i32,
+        obj: Option<usize>,
+    },
+    SetT {
+        t: usize,
+        v: f64,
+        snap: bool,
+    },
+    SetUv {
+        t: usize,
+        u: f64,
+        v: f64,
+    },
+    SetUvw {
+        t: usize,
+        p: [f64; 3],
+    },
+    Unset {
+        t: usize,
+    },
+    SetGap {
+        t: usize,
+        g: f64,
+    },
+    SetDeviation {
+        t: usize,
+        g: f64,
+    },
+    SetPresnap {
+        t: usize,
+        v: f64,
+    },
+    SetSss {
+        t: usize,
+        p: [f64; 3],
+    },
+    SetSrcTol {
+        t: usize,
+        tol: f64,
+    },
+    SetFace {
+        t: usize,
+        obj: Option<usize>,
+    },
+    Assign {
+        t: usize,
+    },
+    CopyClassOnly {
+        t: usize,
+    },
+    CopySss {
+        t: usize,
+    },
+    Combine {
+        t: usize,
+    },
+    Compute {
+        t: usize,
+        p: [f64; 3],
+    },
+    Find {
+        t: usize,
+    },
+    Gap {
+        t: usize,
+        s: Option<usize>,
+    },
     Load {
         t: usize,
         tol: f64,
@@ -190,15 +244,36 @@ enum OpIn {
         offset: usize,
         pre: f64,
     },
-    Merge { t: usize, p: [f64; 3] },
-    Brep { t: usize },
-    Connected { t: usize, j: usize },
-    ConnectedAny { t: usize, js: Vec<usize> },
-    CurveObject { t: usize },
-    ObjTol { t: usize },
-    XsectTol { t: usize },
-    SrcTol { t: usize },
-    BendTypes { t: usize },
+    Merge {
+        t: usize,
+        p: [f64; 3],
+    },
+    Brep {
+        t: usize,
+    },
+    Connected {
+        t: usize,
+        j: usize,
+    },
+    ConnectedAny {
+        t: usize,
+        js: Vec<usize>,
+    },
+    CurveObject {
+        t: usize,
+    },
+    ObjTol {
+        t: usize,
+    },
+    XsectTol {
+        t: usize,
+    },
+    SrcTol {
+        t: usize,
+    },
+    BendTypes {
+        t: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,7 +381,10 @@ fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
                 .len()
                 .checked_sub(1)
                 .ok_or_else(|| harness("no points"))?;
-            let m = bs.u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
+            let m =
+                bs.u.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("no knots"))?;
             let mut cur =
                 allocate_nurb_curve(n, bs.p, m).map_err(|e| harness(format!("curve: {e}")))?;
             for (d, s) in cur.cpts_mut().iter_mut().zip(&bs.cpts) {
@@ -337,8 +415,12 @@ fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
             };
             let domain = Extent1d::from_min_max(c.domain[0], c.domain[1]);
             let e = match c.ry {
-                Some(ry) => Ellipse::new(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, ry, &opts),
-                None => Ellipse::new_circle(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, &opts),
+                Some(ry) => {
+                    Ellipse::new(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, ry, &opts)
+                }
+                None => {
+                    Ellipse::new_circle(&k, v3(c.center), v3(c.x), v3(c.y), domain, c.rx, &opts)
+                }
             }
             .map_err(|e| harness(format!("conic: {e}")))?;
             Ok(Curve::from(e))
@@ -680,7 +762,8 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     o.push(0.0);
                 }
                 OpIn::SetClassObject { class, obj, .. } => {
-                    let c = PointClassType::from_code(*class).ok_or_else(|| harness("bad class"))?;
+                    let c =
+                        PointClassType::from_code(*class).ok_or_else(|| harness("bad class"))?;
                     pc.set_class_object(c, pool.handle(*obj)?);
                     o.push(0.0);
                 }
@@ -745,16 +828,23 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     o.push(if which == Precedence::This { 0.0 } else { 1.0 });
                 }
                 OpIn::Compute { p, .. } => {
-                    if ok == Some(kind::POINT) || is_stand_in(ok) || class == PointClassType::Edgeuse {
+                    if ok == Some(kind::POINT)
+                        || is_stand_in(ok)
+                        || class == PointClassType::Edgeuse
+                    {
                         return Err(rejected());
                     }
-                    o.push(st(pc.compute_point_parameters(&k, &pool, v3(*p)))?.err().unwrap_or(0.0));
+                    o.push(
+                        st(pc.compute_point_parameters(&k, &pool, v3(*p)))?
+                            .err()
+                            .unwrap_or(0.0),
+                    );
                 }
                 OpIn::Find { .. } => {
                     if matches!(class, PointClassType::Edgeuse | PointClassType::Volume) {
                         return Err(rejected());
                     }
-                    match st(pc.find_obj_point_3d(&pool))? {
+                    match st(pc.find_obj_point_3d(&k, &pool))? {
                         Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
                         Err(c) => o.push(c),
                     }
@@ -767,7 +857,10 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         return Err(rejected());
                     }
                     let surf = match pool.handle(*s)? {
-                        Some(h) => Some(pool.surface(h).ok_or_else(|| harness("gap: not a surface"))?),
+                        Some(h) => Some(
+                            pool.surface(h)
+                                .ok_or_else(|| harness("gap: not a surface"))?,
+                        ),
                         None => None,
                     };
                     let g = st(pc.gap_3d(&k, &pool, surf))?.map_err(|_| harness("gap failed"))?;
@@ -804,7 +897,9 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         return Err(rejected());
                     }
                     match st(pc.merge_into_object(&k, v3(*p)))? {
-                        Ok(m) => o.extend([0.0, m.new_edges.len() as f64, m.new_vertices.len() as f64]),
+                        Ok(m) => {
+                            o.extend([0.0, m.new_edges.len() as f64, m.new_vertices.len() as f64]);
+                        }
                         Err(c) => o.extend([c, 0.0, 0.0]),
                     }
                 }
@@ -820,7 +915,8 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     if matches!(ok, Some(kind::POINT | kind::EDGEUSE)) {
                         return Err(rejected());
                     }
-                    let r = st(pc.is_connected_to(tgt))?.map_err(|_| harness("connected failed"))?;
+                    let r =
+                        st(pc.is_connected_to(tgt))?.map_err(|_| harness("connected failed"))?;
                     o.extend([0.0, b(r)]);
                 }
                 OpIn::ConnectedAny { js, .. } => {
@@ -839,7 +935,8 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     if class == PointClassType::Edgeuse {
                         return Err(rejected());
                     }
-                    let r = st(pc.curve_object(&pool))?.map_err(|_| harness("curve object failed"))?;
+                    let r =
+                        st(pc.curve_object(&pool))?.map_err(|_| harness("curve object failed"))?;
                     o.extend([0.0, r.map_or(-1.0, |c| pool.id_of_curve(c))]);
                 }
                 OpIn::ObjTol { .. } | OpIn::XsectTol { .. } => {
@@ -1073,7 +1170,7 @@ fn class_object_kind(class: i32) -> Option<usize> {
 }
 
 /// A point near the pool's first curve or plane, or anywhere.
-fn gen_point(rng: &mut Rng, objs: &[ObjIn]) -> [f64; 3] {
+fn gen_point(k: &Kernel, rng: &mut Rng, objs: &[ObjIn]) -> [f64; 3] {
     let near = |rng: &mut Rng, p: [f64; 3], d: f64| {
         let e = rp(rng, d);
         [p[0] + e[0], p[1] + e[1], p[2] + e[2]]
@@ -1083,7 +1180,7 @@ fn gen_point(rng: &mut Rng, objs: &[ObjIn]) -> [f64; 3] {
             if let Ok(curve) = build_curve(c) {
                 let ivl = curve.natural_interval();
                 let t = ivl.min() + (ivl.max() - ivl.min()) * rng.uniform(-0.1, 1.1);
-                if let Ok(p) = curve.evaluate_point(t) {
+                if let Ok(p) = curve.evaluate_point(k, t) {
                     let d = *rng.choose(&[0.0, 1e-9, 1e-6, 1e-4, 0.1, 2.0]).unwrap_or(&0.0);
                     return near(rng, [p.x, p.y, p.z], d);
                 }
@@ -1120,7 +1217,7 @@ fn gen_tol(rng: &mut Rng) -> f64 {
         .unwrap_or(&1e-5)
 }
 
-fn gen_op(rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
+fn gen_op(k: &Kernel, rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
     let t = rng.below(2) as usize;
     let topo: Vec<usize> = objs
         .iter()
@@ -1191,7 +1288,7 @@ fn gen_op(rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
             17..=19 => OpIn::Combine { t },
             20..=22 => OpIn::Compute {
                 t,
-                p: gen_point(rng, objs),
+                p: gen_point(k, rng, objs),
             },
             23 => OpIn::Find { t },
             24 => {
@@ -1222,7 +1319,7 @@ fn gen_op(rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
             }
             26 => OpIn::Merge {
                 t,
-                p: gen_point(rng, objs),
+                p: gen_point(k, rng, objs),
             },
             27 => OpIn::Brep { t },
             28 => {
@@ -1249,7 +1346,7 @@ fn gen_op(rng: &mut Rng, objs: &[ObjIn], geometric: bool) -> OpIn {
     }
 }
 
-fn gen_script(rng: &mut Rng) -> Script {
+fn gen_script(k: &Kernel, rng: &mut Rng) -> Script {
     let objects = gen_objects(rng);
     // most scripts stay on curves, surfaces and volumes (comparable now); some
     // exercise topology (deferred on the Rust side)
@@ -1264,7 +1361,7 @@ fn gen_script(rng: &mut Rng) -> Script {
         }
     }
     for _ in 0..n_ops {
-        ops.push(gen_op(rng, &objects, geometric));
+        ops.push(gen_op(k, rng, &objects, geometric));
     }
     Script {
         objects,
@@ -1279,8 +1376,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let s = gen_script(rng);
+            let s = gen_script(k, rng);
             let Ok(input) = cpp_input(&s) else {
                 continue;
             };
@@ -1354,4 +1452,3 @@ mod dump {
         println!("{}", serde_json::to_string(&v).unwrap());
     }
 }
-

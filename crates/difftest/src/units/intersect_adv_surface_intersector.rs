@@ -590,7 +590,7 @@ struct Ctx<'a> {
 }
 
 #[allow(clippy::too_many_lines)] // one match over the ops
-fn run_op(cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<f64>) -> Result<(), Fail> {
+fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<f64>) -> Result<(), Fail> {
     match op {
         OpIn::State => {
             o.push(0.0);
@@ -692,7 +692,7 @@ fn run_op(cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<f64>) -> Res
             o.extend([idx as f64, b(swap)]);
         }
         OpIn::Gauss { a, b: bb } => {
-            let r = si.branch_is_gauss_separate(&branch(*a, *bb));
+            let r = si.branch_is_gauss_separate(k, &branch(*a, *bb));
             let v = st(o, r)?;
             o.push(b(v.unwrap_or(false)));
         }
@@ -757,7 +757,7 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
     };
 
     let mut si: Si<'_> = match AdvSurfaceIntersector::new(
-        cache_a.surface(),
+        &k, cache_a.surface(),
         &ext(i.dom1),
         cb.surface(),
         &ext(i.dom2),
@@ -781,7 +781,7 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let mut o = Vec::new();
     for op in &i.ops {
         o.push(op_code(op));
-        run_op(&mut cx, &mut si, op, &mut o)?;
+        run_op(&k, &mut cx, &mut si, op, &mut o)?;
     }
     put_state(&mut o, &si);
     Ok(o)
@@ -1291,7 +1291,7 @@ fn gen_dupin_case(rng: &mut Rng) -> Inputs {
 // ---- tree programs ------------------------------------------------------------------------------
 
 /// Samples `s` on a 3 x 3 grid of `d`.
-fn samples(s: &Surface, d: [f64; 4]) -> Vec<V> {
+fn samples(k: &Kernel, s: &Surface, d: [f64; 4]) -> Vec<V> {
     let mut v = Vec::new();
     for i in 0..3 {
         for j in 0..3 {
@@ -1299,7 +1299,7 @@ fn samples(s: &Surface, d: [f64; 4]) -> Vec<V> {
                 d[0] + (d[2] - d[0]) * f64::from(i) / 2.0,
                 d[1] + (d[3] - d[1]) * f64::from(j) / 2.0,
             );
-            if let Ok(p) = s.evaluate_point(uv) {
+            if let Ok(p) = s.evaluate_point(k, uv) {
                 v.push([p.x, p.y, p.z]);
             }
         }
@@ -1315,7 +1315,7 @@ fn normals(s: &Surface, d: [f64; 4], count: usize) -> Vec<V> {
         let t = (k as f64 + 0.5) / count as f64;
         let u = d[0] + (d[2] - d[0]) * t;
         let v = d[1] + (d[3] - d[1]) * (1.0 - t);
-        let ev = |u: f64, v: f64| s.evaluate_point(Point2::new(u, v)).ok();
+        let ev = |u: f64, v: f64| s.evaluate_point(&Kernel::default(), Point2::new(u, v)).ok();
         if let (Some(p), Some(pu), Some(pv)) = (ev(u, v), ev(u + h, v), ev(u, v + h)) {
             let n = cross(
                 [pu.x - p.x, pu.y - p.y, pu.z - p.z],
@@ -1361,7 +1361,7 @@ impl TreeGen<'_> {
     /// Adds the node of domain `d` under `parent` and its subtree; returns its index.
     fn add(&mut self, rng: &mut Rng, parent: i64, d: [f64; 4], depth: u32, aux: u8) -> i64 {
         let k = self.nodes.len();
-        let pts = samples(self.s, d);
+        let pts = samples(&Kernel::default(), self.s, d);
         let ident = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let grow = 1e-3 * (1.0 + pts.iter().map(|p| dot(*p, *p).sqrt()).fold(0.0, f64::max));
         let bb = bounds(&pts, &ident, grow);

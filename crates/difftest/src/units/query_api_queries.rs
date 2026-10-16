@@ -695,7 +695,7 @@ fn topology(k: &Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>>
         23 => o.push(f64::from(
             api::edge_classify_parameter(k, b, e.ok_or_else(missing)?, a[14])?.code(),
         )),
-        24 => vec(&mut o, api::edge_tangent(b, e.ok_or_else(missing)?, a[14])?),
+        24 => vec(&mut o, api::edge_tangent(k, b, e.ok_or_else(missing)?, a[14])?),
         25 => vec(&mut o, api::vertex_get_point(b, vert.ok_or_else(missing)?)?),
         _ => return Err(missing()),
     }

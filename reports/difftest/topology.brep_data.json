@@ -234,40 +234,28 @@
       "values_compared": 141
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_LShape_I",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#8 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 2814
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_LShape_II",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#9 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 2814
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_Platte",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#10 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 14847
     },
     {
       "max_rel_err": 0.0,
@@ -278,16 +266,12 @@
       "values_compared": 1919
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_defillet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#12 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 825
     },
     {
       "max_rel_err": 0.0,
@@ -306,16 +290,12 @@
       "values_compared": 1249
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Defeature_flathead_screw_top",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#15 (upstream tests/prog_test/src/smFeatureTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 669
     },
     {
       "max_rel_err": 0.0,
@@ -2374,28 +2354,20 @@
       "values_compared": 847
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Solids_OffsetBoxCylOnCorner_edited",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#272 (upstream tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 847
     },
     {
-      "deferred": {
-        "symbol": "SmCone::ReadFromDB",
-        "unit": "surface.cone_p1"
-      },
       "max_rel_err": 0.0,
       "name": "file_Solids_OffsetBoxCylOnCorner_healed",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_data/upstream_files.json#273 (upstream tests/prog_test/src/smMergeTest.cpp (SmBrep::ReadFromFile))",
-      "values_compared": 0
+      "values_compared": 847
     },
     {
       "max_rel_err": 0.0,
@@ -19071,12 +19043,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 9,
+  "cases_deferred": 48,
   "cases_failed": 0,
-  "cases_passed": 2370,
+  "cases_passed": 2331,
   "cases_total": 2379,
   "deferred_by_unit": {
-    "surface.cone_p1": 7,
+    "surface.offset_surface": 46,
     "surface.surf_of_extrusion_p2": 2
   },
   "max_rel_err": 0.0,

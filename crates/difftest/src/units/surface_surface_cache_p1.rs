@@ -909,7 +909,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let surface = Surface::from(need()?.copy());
             let mut bez =
                 allocate_nurb_surface(3, 3, 3, 3, 7, 7).map_err(|e| harness(e.to_string()))?;
-            sc::compute_bezier_approximation(&surface, &dom_of(*dom), &mut bez).map(|()| {
+            sc::compute_bezier_approximation(&k, &surface, &dom_of(*dom), &mut bez).map(|()| {
                 for row in bez.rows() {
                     for p in row {
                         o.extend([p.x, p.y, p.z, p.w]);
@@ -946,7 +946,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         OpIn::Corners { dom, bez } => {
             let cache = cache_of(need()?, None);
             let nurb = bez.as_ref().map(surface_of).transpose()?;
-            cache.corners(nurb.as_ref(), &dom_of(*dom)).map(|c| {
+            cache.corners(&k, nurb.as_ref(), &dom_of(*dom)).map(|c| {
                 for p in [c.u0v0, c.u1v0, c.u1v1, c.u0v1] {
                     push3(&mut o, p);
                 }
@@ -1114,6 +1114,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                             SurfaceKind::BSpline(b) => b.gw_nurb(),
                             SurfaceKind::CurveBounded(_)
                             | SurfaceKind::Plane(_)
+                            | SurfaceKind::Cone(_)
                             | SurfaceKind::SurfOfRevolution(_)
                             | SurfaceKind::Step(_)
                             | SurfaceKind::OffsetSurface(_)
@@ -1174,7 +1175,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             let mut cache = cache_of(need()?, None);
             build_tree(&mut cache, tree)?;
             for &n in nodes {
-                match cache.polar_box(NodeId(n)) {
+                match cache.polar_box(&k, NodeId(n)) {
                     Ok(b) => dump_polar(&mut o, &b),
                     Err(e) => return Ok(Err(e)),
                 }

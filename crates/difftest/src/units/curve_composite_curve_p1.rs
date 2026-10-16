@@ -597,7 +597,7 @@ fn ftry<T>(r: solidcore::Result<T>) -> Result<T, Fail> {
 }
 
 /// The curve state record (see the ffi module docs).
-fn put_curve(o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
+fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
     let kind = match c.kind() {
         CurveKind::BSpline(_) => 0.0,
         CurveKind::Line(_) => 2.0,
@@ -607,7 +607,7 @@ fn put_curve(o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     for i in 0..=6 {
-        let p = match c.evaluate_point(ivl.evaluate(f64::from(i) / 6.0)) {
+        let p = match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 6.0)) {
             Ok(p) => p,
             Err(e) if e.is_unported() => return Err(e.into()),
             Err(_) => Vec3::new(UNDEF, UNDEF, UNDEF),
@@ -689,9 +689,9 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 o.push(ftry(c.number_control_points())? as f64);
                 o.push(b(c.is_analytic()));
                 o.push(b(c.is_bounded()));
-                o.push(b(ftry(c.has_repeated_end_control_points(1e-6))?));
+                o.push(b(ftry(c.has_repeated_end_control_points(&k, 1e-6))?));
                 o.push(c.type_code() as f64);
-                o.push(match c.evaluate_point(ivl.min()) {
+                o.push(match c.evaluate_point(&k, ivl.min()) {
                     Ok(_) => 0.0,
                     Err(e) => status(&e),
                 });
@@ -757,9 +757,9 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::Eq { a, b: bb } => {
             let ca = Curve::from(tri!(o, composite(a)?));
             let cb = Curve::from(tri!(o, composite(bb)?));
-            let ab = tri!(o, ca.approx_eq(&cb));
-            let ba = tri!(o, cb.approx_eq(&ca));
-            let aa = tri!(o, ca.approx_eq(&ca));
+            let ab = tri!(o, ca.approx_eq(&k, &cb));
+            let ba = tri!(o, cb.approx_eq(&k, &ca));
+            let aa = tri!(o, ca.approx_eq(&k, &ca));
             o.extend([0.0, b(ab), b(ba), b(aa)]);
             let (CurveKind::Composite(xa), CurveKind::Composite(xb)) = (ca.kind(), cb.kind())
             else {
@@ -767,7 +767,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             };
             match (xa.segment(0), xb.segment(0)) {
                 (Some(sa), Some(sb)) => {
-                    let e = tri!(o, CompositeCurveSegment::approx_eq(sa, sb));
+                    let e = tri!(o, CompositeCurveSegment::approx_eq(sa,&k,  sb));
                     o.push(b(e));
                 }
                 _ => o.push(-1.0),
@@ -776,13 +776,13 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::Copy { comp } => {
             let c = Curve::from(tri!(o, composite(comp)?));
             let cp = tri!(o, c.copy(&k));
-            let eq = tri!(o, cp.approx_eq(&c));
+            let eq = tri!(o, cp.approx_eq(&k, &c));
             return Ok(run_body(|o| {
                 o.extend([0.0, b(eq), cp.type_code() as f64]);
                 let x = as_comp(&cp)?;
                 put_segments(o, x);
                 for s in x.segments() {
-                    put_curve(o, &s.curve)?;
+                    put_curve(&k, o, &s.curve)?;
                 }
                 Ok(())
             }));
@@ -800,7 +800,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             return Ok(run_body(|o| {
                 o.push(0.0);
                 for s in as_comp(&c)?.segments() {
-                    put_curve(o, &s.curve)?;
+                    put_curve(&k, o, &s.curve)?;
                 }
                 Ok(())
             }));
@@ -811,7 +811,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             return Ok(run_body(|o| {
                 o.extend([0.0, r.max_gap, b(r.curve.is_some())]);
                 if let Some(bs) = r.curve {
-                    put_curve(o, &Curve::from(bs))?;
+                    put_curve(&k, o, &Curve::from(bs))?;
                 }
                 Ok(())
             }));
@@ -826,7 +826,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let mut bx = Extent2d::new();
             let r = tri!(
                 o,
-                CompositeCurve::compute_projected_loop_orientation(
+                CompositeCurve::compute_projected_loop_orientation(&k, 
                     &cs,
                     senses,
                     v3(*normal),
@@ -842,7 +842,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let cs = build_all(curves)?;
             let r = tri!(
                 o,
-                CompositeCurve::build_composites_from_curves(cs, *same, *line)
+                CompositeCurve::build_composites_from_curves(&k, cs, *same, *line)
             );
             return Ok(run_body(|o| {
                 o.extend([0.0, r.composites.len() as f64]);
@@ -850,7 +850,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                     o.push(x.dim() as f64);
                     put_segments(o, x);
                     for s in x.segments() {
-                        put_curve(o, &s.curve)?;
+                        put_curve(&k, o, &s.curve)?;
                     }
                 }
                 o.push(r.unused.len() as f64);
@@ -891,7 +891,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 for c in [&r.curve1, &r.curve2, &r.curve3] {
                     o.push(b(c.is_some()));
                     if let Some(c) = c {
-                        put_curve(o, c)?;
+                        put_curve(&k, o, c)?;
                     }
                 }
                 Ok(())

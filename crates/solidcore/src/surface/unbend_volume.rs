@@ -555,6 +555,7 @@ impl UnbendVolume {
     /// null or deleted line); [`SolidError::Unported`] from the edge boxes.
     pub fn evaluate_bounding_box_simple(
         &self,
+        k: &crate::kernel::Kernel,
         volume: &Volume,
         param_box: &Extent3d,
         proj_box: Option<&mut Extent3d>,
@@ -609,12 +610,21 @@ impl UnbendVolume {
         for ii in 0..3 {
             for jj in 0..2 {
                 for kk in 0..2 {
-                    let (j, k) = (f64::from(jj), f64::from(kk));
+                    let (j, edge_k) = (f64::from(jj), f64::from(kk));
                     // get UVWBox corner point pairs bounding edges
                     let (pt_min, pt_max) = match ii {
-                        0 => (param_box.evaluate(0.0, j, k), param_box.evaluate(1.0, j, k)),
-                        1 => (param_box.evaluate(j, 0.0, k), param_box.evaluate(j, 1.0, k)),
-                        _ => (param_box.evaluate(j, k, 0.0), param_box.evaluate(j, k, 1.0)),
+                        0 => (
+                            param_box.evaluate(0.0, j, edge_k),
+                            param_box.evaluate(1.0, j, edge_k),
+                        ),
+                        1 => (
+                            param_box.evaluate(j, 0.0, edge_k),
+                            param_box.evaluate(j, 1.0, edge_k),
+                        ),
+                        _ => (
+                            param_box.evaluate(j, edge_k, 0.0),
+                            param_box.evaluate(j, edge_k, 1.0),
+                        ),
                     };
 
                     // Build line from one UVWDomain corner to the other
@@ -639,7 +649,7 @@ impl UnbendVolume {
 
                     // Get mapped line's bounding box (status ignored upstream)
                     if let Some(boxes) =
-                        ignored(calculate_bounding_box_base(&map_line, &ivl, req, false))?
+                        ignored(calculate_bounding_box_base(k, &map_line, &ivl, req, false))?
                     {
                         if let Some(b) = boxes.normal {
                             this_bbox = b;
@@ -1142,6 +1152,7 @@ mod tests {
 
     #[test]
     fn bounding_boxes() {
+        let k = &crate::Kernel::default();
         let vol = UnbendVolume::create(Vec3::ZERO, Vec3::Z, Vec3::X, 1.0, 0.01);
         let VolumeKind::Unbend(u) = vol.kind() else {
             panic!("not an unbend")
@@ -1150,23 +1161,23 @@ mod tests {
         let pb = Extent3d::from_bounds(1.0, 1.0, 0.0, 2.0, 2.0, 1.0);
         let mut b = Extent3d::new();
         let mut pseudo = PseudoBox::new();
-        u.evaluate_bounding_box_simple(&vol, &pb, Some(&mut b), Some(&mut pseudo))
+        u.evaluate_bounding_box_simple(k, &vol, &pb, Some(&mut b), Some(&mut pseudo))
             .unwrap();
         assert!(b.u_min() <= 2f64.sqrt() + 1e-9 && b.u_max() >= 8f64.sqrt() - 1e-9);
         assert!(b.w_min() <= 1e-12 && b.w_max() >= 1.0 - 1e-12);
         // unbounded
         let mut un = Extent3d::new();
         un.set_unbounded();
-        u.evaluate_bounding_box_simple(&vol, &un, Some(&mut b), Some(&mut pseudo))
+        u.evaluate_bounding_box_simple(k, &vol, &un, Some(&mut b), Some(&mut pseudo))
             .unwrap();
         assert_eq!(b.u_max(), INFINITE_PARAMETER);
         // a flat box has zero-length edges
         let flat = Extent3d::from_bounds(1.0, 1.0, 0.0, 2.0, 2.0, 0.0);
         assert!(u
-            .evaluate_bounding_box_simple(&vol, &flat, Some(&mut b), None)
+            .evaluate_bounding_box_simple(k, &vol, &flat, Some(&mut b), None)
             .is_err());
         assert!(u
-            .evaluate_bounding_box_simple(&vol, &flat, None, None)
+            .evaluate_bounding_box_simple(k, &vol, &flat, None, None)
             .is_ok());
         assert_eq!(u.trim_param_bounding_box_simple(&pb), pb);
     }

@@ -232,7 +232,7 @@ impl ProjectedCurve {
     /// # Errors
     ///
     /// Those of [`Curve::approx_eq`] on the base curves.
-    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
+    pub fn approx_eq(&self, k: &Kernel, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
             return Ok(true);
@@ -240,7 +240,7 @@ impl ProjectedCurve {
 
         // check equivalence of these objects
         Ok((core::ptr::eq(self.curve.as_ref(), other.curve.as_ref())
-            || self.curve.approx_eq(&other.curve)?)
+            || self.curve.approx_eq(k, &other.curve)?)
             && self.proj_point.approx_eq(other.proj_point)
             && self.proj_vec.approx_eq(other.proj_vec)
             && self.aux_data.approx_eq(other.aux_data)
@@ -376,10 +376,11 @@ impl ProjectedCurve {
     /// Those of [`Curve::calculate_continuities`].
     pub fn calculate_continuities(
         &self,
+        k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         // pass the call along
-        self.curve.calculate_continuities(angle_tol)
+        self.curve.calculate_continuities(k, angle_tol)
     }
 
     // ---- edits ----------------------------------------------------------------------
@@ -500,6 +501,7 @@ impl ProjectedCurve {
     /// Those of [`Curve::evaluate`].
     pub fn evaluate(
         &self,
+        k: &Kernel,
         t: f64,
         num_derivs: usize,
         from_left: bool,
@@ -508,7 +510,7 @@ impl ProjectedCurve {
         // pass the call along
         let mut pd = self
             .curve
-            .evaluate(t, num_derivs, from_left, non_zero_tangents)?;
+            .evaluate(k, t, num_derivs, from_left, non_zero_tangents)?;
 
         // project the results
         match self.proj_type {
@@ -570,9 +572,9 @@ impl ProjectedCurve {
     /// # Errors
     ///
     /// Those of [`Curve::evaluate_point`].
-    pub fn evaluate_point(&self, t: f64) -> Result<Point3> {
+    pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
         // base curve evaluation
-        let pnt = self.curve.evaluate_point(t)?;
+        let pnt = self.curve.evaluate_point(k, t)?;
 
         let mut point = pnt.project_point_to_plane(self.proj_point, self.proj_vec);
 
@@ -724,6 +726,7 @@ mod tests {
 
     #[test]
     fn parallel_projection_flattens() {
+        let k = &Kernel::default();
         let c = ProjectedCurve::new(
             base(),
             Some(Vec3::new(0.0, 0.0, -1.0)),
@@ -734,15 +737,15 @@ mod tests {
         );
         let mut c2 = c.clone();
         c2.proj_vec = Vec3::Z;
-        let p = c2.evaluate_point(0.5).expect("eval");
+        let p = c2.evaluate_point(k, 0.5).expect("eval");
         assert!((p.z + 1.0).abs() < 1e-12);
-        let pd = c2.evaluate(0.3, 2, true, false).expect("eval");
+        let pd = c2.evaluate(k, 0.3, 2, true, false).expect("eval");
         assert_eq!(pd.len(), 3);
         for v in pd.iter().skip(1) {
             assert!(v.z.abs() < 1e-12);
         }
-        assert!(c.approx_eq(&c.clone()).unwrap());
-        assert!(!c.approx_eq(&c2).unwrap());
+        assert!(c.approx_eq(k, &c.clone()).unwrap());
+        assert!(!c.approx_eq(k, &c2).unwrap());
     }
 
     #[test]

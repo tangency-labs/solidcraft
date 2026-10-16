@@ -543,12 +543,14 @@ mod tests {
             .edge_definitions_mut()
             .extend([ed1, ed2]);
 
-        let (pos, tan) = m.proto_edge_evaluate_mid(&geo, pe, true, true).unwrap();
+        let (pos, tan) = m.proto_edge_evaluate_mid(&k, &geo, pe, true, true).unwrap();
         assert!((pos.unwrap() - Point3::new(1.0, 0.0, 0.0)).length() < 1e-12);
         assert!(tan.is_some());
-        let end = m.proto_edge_end_position_at(&geo, pe, Some(v1)).unwrap();
+        let end = m
+            .proto_edge_end_position_at(&k, &geo, pe, Some(v1))
+            .unwrap();
         assert!((end - Point3::new(2.0, 0.0, 0.0)).length() < 1e-12);
-        assert!(m.proto_edge_end_position_at(&geo, pe, None).is_err());
+        assert!(m.proto_edge_end_position_at(&k, &geo, pe, None).is_err());
         // same sources: drop the second
         assert_eq!(
             m.can_combine_edge_definitions(&k, &geo, ed1, ed2).unwrap(),
@@ -684,8 +686,8 @@ mod tests {
         assert!(proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-6).unwrap());
         assert!(!proto::are_same_curve(&k, &geo, Some(C0), &ivl, Some(c1), &ivl, 1e-12).unwrap());
         let dom = geo.0[0].natural_interval();
-        assert!(proto::is_interior(&geo, Some(C0), &dom, dom.mid(), 1e-6).unwrap());
-        assert!(!proto::is_interior(&geo, Some(C0), &dom, dom.min(), 1e-6).unwrap());
+        assert!(proto::is_interior(&k, &geo, Some(C0), &dom, dom.mid(), 1e-6).unwrap());
+        assert!(!proto::is_interior(&k, &geo, Some(C0), &dom, dom.min(), 1e-6).unwrap());
     }
 
     #[test]
@@ -699,7 +701,7 @@ mod tests {
         )
         .unwrap();
         let ivl = c.natural_interval();
-        let p = c.evaluate_point(ivl.min()).unwrap();
+        let p = c.evaluate_point(&k, ivl.min()).unwrap();
         assert!((p - Point3::new(1.0, 1.0, 0.0)).length() < 1e-12);
         api_transform::api_scale_by_pt(
             &mut k,
@@ -709,7 +711,7 @@ mod tests {
         )
         .unwrap();
         let ivl = c.natural_interval();
-        let q = c.evaluate_point(ivl.max()).unwrap();
+        let q = c.evaluate_point(&k, ivl.max()).unwrap();
         assert!((q - Point3::new(3.0, 1.0, 0.0)).length() < 1e-12);
 
         assert!(matches!(

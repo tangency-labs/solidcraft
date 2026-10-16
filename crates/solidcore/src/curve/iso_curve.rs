@@ -33,8 +33,9 @@
 //!   curves (dimension 3).
 //! - **Flags.** `m_bFromLeft` is a `bool` (upstream `SmBoolean`, `UNSURE` only in the
 //!   empty I/O constructor, whose state is never observable here). `SetContext` and the
-//!   `SmContext` arguments only choose where upstream allocates and are dropped, as is
-//!   `CalculateContinuities`' unused angle tolerance.
+//!   allocation-only `SmContext` arguments are omitted. Evaluation and continuity
+//!   queries retain the caller's Kernel through the concrete surface dispatch;
+//!   `CalculateContinuities`' unused angle tolerance is omitted.
 //! - **`CreateUVIsoLine`** keeps upstream's branches: a constant-`u` curve gets a line
 //!   at `x = iso` along `(0, 1, 0)` over the *u* interval of the domain; the second
 //!   branch repeats the `SM_SP_U` test, so every other parameter type is
@@ -195,13 +196,13 @@ impl IsoCurve {
 
     /// `operator==`: equal surfaces, the same direction and flag, and iso parameters
     /// within `SM_IS_ZERO`.
-    pub fn approx_eq(&self, other: &Self) -> Result<bool> {
+    pub fn approx_eq(&self, k: &Kernel, other: &Self) -> Result<bool> {
         // low work
         if core::ptr::eq(self, other) {
             return Ok(true);
         }
         // first check the base: same type and dimension (always for two iso curves)
-        Ok(self.surface.approx_eq(&other.surface)?
+        Ok(self.surface.approx_eq(k, &other.surface)?
             && self.surf_param == other.surf_param
             && is_zero(self.iso_parameter - other.iso_parameter)
             && self.from_left == other.from_left)
@@ -239,9 +240,12 @@ impl IsoCurve {
     /// # Errors
     ///
     /// [`SolidError::Unported`] (`SmSurface::CalculateContinuities`).
-    pub fn calculate_continuities(&self) -> Result<(ContinuityType, Vec<ContinuityType>)> {
+    pub fn calculate_continuities(
+        &self,
+        k: &Kernel,
+    ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         // pass the call along
-        surface_calculate_continuities(&self.surface, self.surf_param)
+        surface_calculate_continuities(k, &self.surface, self.surf_param)
     }
 
     /// The natural interval: the surface domain across the iso direction
@@ -273,6 +277,7 @@ impl IsoCurve {
     /// Those of the surface evaluation ([`BSplineSurface::evaluate`]).
     pub fn evaluate(
         &self,
+        k: &Kernel,
         t: f64,
         num_derivs: usize,
         from_left: bool,
@@ -288,6 +293,7 @@ impl IsoCurve {
             (num_derivs, 0, from_left, self.from_left)
         };
         let d = self.surface.evaluate(
+            k,
             uv,
             num_u,
             num_v,
@@ -307,8 +313,8 @@ impl IsoCurve {
     /// # Errors
     ///
     /// Those of [`BSplineSurface::evaluate_point`] (`SM_ERR` without NURB).
-    pub fn evaluate_point(&self, t: f64) -> Result<Point3> {
-        self.surface.evaluate_point(self.uv(t))
+    pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
+        self.surface.evaluate_point(k, self.uv(t))
     }
 
     /// The distinct knots and multiplicities of the surface across the iso direction,
@@ -412,13 +418,11 @@ impl IsoCurve {
 /// `SmSurface::CalculateContinuities(eSurfParam, ..)` (not overridden by
 /// `SmBSplineSurface`).
 fn surface_calculate_continuities(
+    k: &Kernel,
     srf: &Surface,
     surf_param: SurfParamType,
 ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
-    // (its iso curves are made without a trim domain, which never reaches the kernel;
-    // upstream uses the surface's context)
-    let k = Kernel::default();
-    srf.calculate_continuities(&k, surf_param)
+    srf.calculate_continuities(k, surf_param)
 }
 
 /// `SmSurface::ReadFromDB(type, db, .., version)`: the concrete surface of the record.
@@ -499,11 +503,12 @@ mod tests {
 
     #[test]
     fn equality_and_types() {
+        let k = &Kernel::default();
         let a = IsoCurve::new(patch(), SurfParamType::U, 1.0, false, true);
         let b = IsoCurve::new(patch(), SurfParamType::U, 1.0 + 1e-15, false, true);
-        assert!(a.approx_eq(&b).unwrap());
+        assert!(a.approx_eq(k, &b).unwrap());
         let c = IsoCurve::new(patch(), SurfParamType::U, 1.0, true, true);
-        assert!(!a.approx_eq(&c).unwrap());
+        assert!(!a.approx_eq(k, &c).unwrap());
         assert!(IsoCurve::is_kind_of(IsoCurve::TYPE));
         assert!(IsoCurve::is_kind_of(curve_base::TYPE));
         assert_eq!(a.type_string(), "SmIsoCurve_TYPE");
@@ -511,15 +516,16 @@ mod tests {
 
     #[test]
     fn evaluation_and_errors() {
+        let k = &Kernel::default();
         let a = IsoCurve::new(patch(), SurfParamType::V, 1.0, false, true);
         assert!(matches!(
             a.create_uv_iso_line(),
             Err(SolidError::InvalidInput { .. })
         ));
         // constant v = 1 on the patch: x = u / 2, y = (v + 1) / 4
-        let p = a.evaluate_point(0.5).expect("point");
+        let p = a.evaluate_point(k, 0.5).expect("point");
         assert!((p.y - 0.5).abs() < 1e-12);
-        let d = a.evaluate(0.5, 1, false, true).expect("evaluate");
+        let d = a.evaluate(k, 0.5, 1, false, true).expect("evaluate");
         assert_eq!(d.len(), 2);
         assert!(d[0].distance(p) < 1e-12);
         assert!((d[1].x - 0.5).abs() < 1e-12 && d[1].y.abs() < 1e-12);

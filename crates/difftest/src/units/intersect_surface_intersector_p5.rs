@@ -467,7 +467,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         _ => return Err(harness("one tree per distinct surface")),
     }
     let mut ssi: AdvSurfaceIntersector<'_, '_, H> =
-        match AdvSurfaceIntersector::new(&a, &dom1, b, &dom2, false) {
+        match AdvSurfaceIntersector::new(&k, &a, &dom1, b, &dom2, false) {
             Ok(s) => s,
             Err(e) => return record(Err(e), &[]),
         };
@@ -636,7 +636,7 @@ fn gen_domain(rng: &mut Rng, nat: [f64; 4]) -> [f64; 4] {
 }
 
 /// Samples `s` on a 3 x 3 grid of `d`.
-fn samples(s: &Surface, d: [f64; 4]) -> Vec<V> {
+fn samples(k: &Kernel, s: &Surface, d: [f64; 4]) -> Vec<V> {
     let mut v = Vec::new();
     for i in 0..3 {
         for j in 0..3 {
@@ -644,7 +644,7 @@ fn samples(s: &Surface, d: [f64; 4]) -> Vec<V> {
                 d[0] + (d[2] - d[0]) * f64::from(i) / 2.0,
                 d[1] + (d[3] - d[1]) * f64::from(j) / 2.0,
             );
-            if let Ok(p) = s.evaluate_point(uv) {
+            if let Ok(p) = s.evaluate_point(k, uv) {
                 v.push([p.x, p.y, p.z]);
             }
         }
@@ -660,7 +660,7 @@ fn normals(s: &Surface, d: [f64; 4], count: usize) -> Vec<V> {
         let t = (k as f64 + 0.5) / count as f64;
         let u = d[0] + (d[2] - d[0]) * t;
         let v = d[1] + (d[3] - d[1]) * (1.0 - t);
-        let ev = |u: f64, v: f64| s.evaluate_point(Point2::new(u, v)).ok();
+        let ev = |u: f64, v: f64| s.evaluate_point(&Kernel::default(), Point2::new(u, v)).ok();
         if let (Some(p), Some(pu), Some(pv)) = (ev(u, v), ev(u + h, v), ev(u, v + h)) {
             let n = cross(
                 [pu.x - p.x, pu.y - p.y, pu.z - p.z],
@@ -708,7 +708,7 @@ impl TreeGen<'_> {
     /// Adds the node of domain `d` under `parent` and its subtree; returns its index.
     fn add(&mut self, rng: &mut Rng, parent: i64, d: [f64; 4], depth: u32, aux: u8) -> i64 {
         let k = self.nodes.len();
-        let pts = samples(self.s, d);
+        let pts = samples(&Kernel::default(), self.s, d);
         let ident = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let size = pts.iter().map(|p| dot(*p, *p).sqrt()).fold(0.0, f64::max);
         let grow = self.grow * (1e-3 + size);

@@ -825,7 +825,7 @@ fn build_tree(nodes: &[NodeIn]) -> Result<Tree<Obj>, HarnessError> {
     Ok(t)
 }
 
-fn rust_solver(s: &SolverIn) -> Result<Output, HarnessError> {
+fn rust_solver(k: &Kernel, s: &SolverIn) -> Result<Output, HarnessError> {
     let trees: Vec<Tree<Obj>> = s.trees.iter().map(|t| build_tree(t)).collect::<Result<_, _>>()?;
     let sop = SolverOperation::from_code(s.sop as i32).ok_or_else(|| harness("solver op"))?;
     let opt: Vec<Vec3> = s.opt.iter().map(|&o| v3(o)).collect();
@@ -839,7 +839,7 @@ fn rust_solver(s: &SolverIn) -> Result<Output, HarnessError> {
     let r = match s.kind.as_str() {
         "property" => {
             let prop = CurvePropertyType::from_code(s.prop as i32).ok_or_else(|| harness("prop"))?;
-            let mut g = CurvePropertyGs::new(t0, ivl, prop, Some(s.value), opt);
+            let mut g = CurvePropertyGs::new(k, t0, ivl, prop, Some(s.value), opt);
             g.base.operation = sop;
             g.base.tolerance_3d = s.tol;
             g.base.best_answer_so_far_sq = s.best;
@@ -859,7 +859,7 @@ fn rust_solver(s: &SolverIn) -> Result<Output, HarnessError> {
                 g.base.opt_vectors = opt;
                 g.may_contain_answers(&branch).map(|f| vec![b(f)])
             } else {
-                let mut g = CpGlobalSolver::new(t0, t1, ivl);
+                let mut g = CpGlobalSolver::new(k, t0, t1, ivl);
                 g.base.operation = sop;
                 g.base.tolerance_3d = s.tol;
                 g.base.best_answer_so_far_sq = s.best;
@@ -888,7 +888,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let mut o: Vec<f64> = Vec::new();
     if let OpIn::Solver(s) = &i.op {
-        return rust_solver(s);
+        return rust_solver(&k, s);
     }
     let curve = match &i.curve {
         Some(c) => Some(build(c)?),
@@ -916,19 +916,19 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             left,
             nonzero,
         } => {
-            let v = tri!(o, c_ref()?.evaluate(*t, *n, *left, *nonzero));
+            let v = tri!(o, c_ref()?.evaluate(&k, *t, *n, *left, *nonzero));
             o.push(0.0);
             for x in v.iter().take(n + 1) {
                 pv(&mut o, *x);
             }
         }
         OpIn::EvalPoint { t } => {
-            let p = tri!(o, c_ref()?.evaluate_point(*t));
+            let p = tri!(o, c_ref()?.evaluate_point(&k, *t));
             o.push(0.0);
             pv(&mut o, p);
         }
         OpIn::Ends => {
-            let e = tri!(o, c_ref()?.ends());
+            let e = tri!(o, c_ref()?.ends(&k, ));
             o.push(0.0);
             pv(&mut o, e.start);
             pv(&mut o, e.end);
@@ -943,7 +943,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.extend(m.iter().map(|&x| x as f64));
         }
         OpIn::Continuities { angle } => {
-            let (mn, all) = tri!(o, c_ref()?.calculate_continuities(*angle));
+            let (mn, all) = tri!(o, c_ref()?.calculate_continuities(&k, *angle));
             o.extend([0.0, f64::from(mn as i32), all.len() as f64]);
             o.extend(all.iter().map(|&x| f64::from(x as i32)));
         }
@@ -955,7 +955,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let (len, t) = tri!(
                 o,
-                c_ref()?.approximate_length(&Extent1d::from_min_max(*a, *bb), *samples, *turn)
+                c_ref()?.approximate_length(&k, &Extent1d::from_min_max(*a, *bb), *samples, *turn)
             );
             o.extend([0.0, len, b(t.is_some())]);
             if let Some(t) = t {
@@ -963,14 +963,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
         }
         OpIn::EvalStep { t, n, left } => {
-            let v = tri!(o, evaluate_step(c_ref()?, *t, *n, *left));
+            let v = tri!(o, evaluate_step(&k, c_ref()?, *t, *n, *left));
             o.push(0.0);
             for x in v.iter().take(n + 1) {
                 pv(&mut o, *x);
             }
         }
         OpIn::EvalGeom { t, n, left } => {
-            let v = tri!(o, evaluate_geometric(c_ref()?, *t, *n, *left));
+            let v = tri!(o, evaluate_geometric(&k, c_ref()?, *t, *n, *left));
             o.push(0.0);
             for x in v.iter().take(n + 1) {
                 pv(&mut o, *x);
@@ -987,7 +987,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let other = build(other)?;
             let r = tri!(
                 o,
-                evaluate_continuity(c_ref()?, *t, *left, &other, *t2, *left2, *angle)
+                evaluate_continuity(&k, c_ref()?, *t, *left, &other, *t2, *left2, *angle)
             );
             o.extend([0.0, f64::from(r.continuity as i32)]);
             for v in r.this_eval.iter().chain(r.other_eval.iter()) {
@@ -1004,7 +1004,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let s = tri!(
                 o,
-                euclidian_step_off(
+                euclidian_step_off(&k, 
                     c_ref()?,
                     &Extent1d::from_min_max(*a, *bb),
                     *start,
@@ -1025,18 +1025,18 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::ConvertT { t } => {
             let c = c_ref()?;
             let a = tri!(o, c.convert_t_from_nurbs_to_step(&Kernel::default(), *t));
-            let bb = tri!(o, c.convert_t_from_step_to_nurbs(*t));
+            let bb = tri!(o, c.convert_t_from_step_to_nurbs(&k, *t));
             o.extend([0.0, a, bb]);
         }
         OpIn::Repeated { tol } => {
-            let f = tri!(o, c_ref()?.has_repeated_end_control_points(*tol));
+            let f = tri!(o, c_ref()?.has_repeated_end_control_points(&k, *tol));
             o.extend([0.0, b(f)]);
         }
         OpIn::Equal { other } => {
             let c = c_ref()?;
             let eq = match other {
-                None => tri!(o, c.approx_eq(c)),
-                Some(x) => tri!(o, c.approx_eq(&build(x)?)),
+                None => tri!(o, c.approx_eq(&k, c)),
+                Some(x) => tri!(o, c.approx_eq(&k, &build(x)?)),
             };
             o.extend([0.0, b(eq)]);
         }
@@ -1126,7 +1126,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let c = c_ref()?;
             tri!(
                 o,
-                c.drop_point_fast(
+                c.drop_point_fast(&k, 
                     &c.natural_interval(),
                     SolverOperation::Minimize,
                     v3(*p),
@@ -1156,7 +1156,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let (s, good) = tri!(
                 o,
-                snap_sol_to_specified_endpoint(
+                snap_sol_to_specified_endpoint(&k, 
                     c_ref()?,
                     &Extent1d::from_min_max(*a, *bb),
                     vec.map(v3),
@@ -1755,7 +1755,7 @@ fn gen_static(rng: &mut Rng) -> Inputs {
                         Vec3::new(-r * s * th.sin(), r * s * th.cos(), 0.0),
                     ]
                 } else {
-                    match curve.as_ref().and_then(|cv| cv.evaluate(t, 1, true, false).ok()) {
+                    match curve.as_ref().and_then(|cv| cv.evaluate(&Kernel::default(), t, 1, true, false).ok()) {
                         Some(v) => [
                             v.first().copied().unwrap_or(Vec3::ZERO),
                             v.get(1).copied().unwrap_or(Vec3::ZERO),

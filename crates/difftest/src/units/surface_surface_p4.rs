@@ -272,14 +272,14 @@ fn side_left() -> Side {
 
 /// The upper half of the evaluation matrix of `s` at `uv`, with the unit normal in `[2][2]`
 /// (as the shim builds it for `smsurf_EvaluateNormalSection`).
-fn eval_matrix(s: &Surface, uv: [f64; 2]) -> Result<Result<[[Vec3; 3]; 3], f64>, Fail> {
+fn eval_matrix(k: &Kernel, s: &Surface, uv: [f64; 2]) -> Result<Result<[[Vec3; 3]; 3], f64>, Fail> {
     let flags = EvaluateFlags {
         u_side: side_left(),
         v_side: side_left(),
         only_upper_half: true,
         non_zero_tangents: true,
     };
-    let m = match stat(s.evaluate(p2(uv), 2, 2, flags))? {
+    let m = match stat(s.evaluate(k, p2(uv), 2, 2, flags))? {
         Ok(m) => m,
         Err(c) => return Ok(Err(c)),
     };
@@ -297,7 +297,7 @@ fn eval_matrix(s: &Surface, uv: [f64; 2]) -> Result<Result<[[Vec3; 3]; 3], f64>,
     }
     let n = pvv[1][0].cross(pvv[0][1]);
     pvv[2][2] = if n.length_squared() < 1e-24 {
-        match stat(s.evaluate_normal(p2(uv), side_left(), side_left()))? {
+        match stat(s.evaluate_normal(k, p2(uv), side_left(), side_left()))? {
             Ok(n) => n,
             Err(c) => return Ok(Err(c)),
         }
@@ -357,13 +357,13 @@ fn opt_vecs(v: &[Vec3]) -> Option<&[Vec3]> {
     (!v.is_empty()).then_some(v)
 }
 
-fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
+fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     let s = surface_of(&i.surface)?;
     let mut o = Vec::new();
     match &i.op {
         OpIn::NormalEval { uv } => {
-            let mut e = SurfaceEval::with_uv(Some(&s), uv[0], uv[1]);
-            match stat(e.normal())? {
+            let mut e = SurfaceEval::with_uv(k, Some(&s), uv[0], uv[1]);
+            match stat(e.normal(k))? {
                 Ok(n) => {
                     o.push(0.0);
                     pv(&mut o, n);
@@ -371,7 +371,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Err(c) => o.push(c),
             }
         }
-        OpIn::SectionFn { uv, dir } => match eval_matrix(&s, *uv)? {
+        OpIn::SectionFn { uv, dir } => match eval_matrix(k, &s, *uv)? {
             Ok(mut pvv) => match stat(evaluate_normal_section(&mut pvv, v3(*dir)))? {
                 Ok((tangent, curvature)) => {
                     o.push(0.0);
@@ -383,15 +383,15 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             Err(c) => o.push(c),
         },
         OpIn::SectionEval { uv, dir } => {
-            let mut e = SurfaceEval::with_uv_and_sect_dir(Some(&s), uv[0], uv[1], v3(*dir));
+            let mut e = SurfaceEval::with_uv_and_sect_dir(k, Some(&s), uv[0], uv[1], v3(*dir));
             match stat(e.eval())? {
                 Ok(()) => {
                     // upstream ignores the status of the normal and the section
-                    let n = match stat(e.normal())? {
+                    let n = match stat(e.normal(k))? {
                         Ok(n) => n,
                         Err(_) => e.values()[2][2],
                     };
-                    let _ = stat(e.eval_normal_section())?;
+                    let _ = stat(e.eval_normal_section(k))?;
                     let (t, k) = e.stored_section();
                     o.push(0.0);
                     pv(&mut o, n);
@@ -403,7 +403,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         }
         OpIn::OnNormal { dom, uv, p, deriv, tol } => {
             let d = dom.map(dom_of);
-            match stat(is_point_on_normal(&s, d.as_ref(), p2(*uv), v3(*p), deriv.map(v3), *tol))? {
+            match stat(is_point_on_normal(k, &s, d.as_ref(), p2(*uv), v3(*p), deriv.map(v3), *tol))? {
                 Ok(r) => {
                     o.extend([0.0, b(r.from_left_u), b(r.from_left_v), b(r.good_point)]);
                     o.push(reason_code(r.reason));
@@ -417,7 +417,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Err(c) => o.push(c),
             }
         }
-        OpIn::PassSp { uv, p, tol } => match stat(pass_sp_convergence_test(&s, p2(*uv), v3(*p), *tol))? {
+        OpIn::PassSp { uv, p, tol } => match stat(pass_sp_convergence_test(k, &s, p2(*uv), v3(*p), *tol))? {
             Ok(pass) => o.extend([0.0, b(pass)]),
             Err(c) => o.push(c),
         },
@@ -432,7 +432,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         o.extend([iv.min(), iv.max()]);
                         for n in 0..5 {
                             let t = iv.min() + (iv.max() - iv.min()) * f64::from(n) / 4.0;
-                            match stat(c.evaluate_point(t))? {
+                            match stat(c.evaluate_point(&k, t))? {
                                 Ok(p) => {
                                     o.push(0.0);
                                     pv(&mut o, p);
@@ -492,35 +492,35 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         }
         OpIn::CsIntersect { curve, pts } => {
             let c = curve_of(curve)?;
-            run_enfo(&mut CsIntersectEnfo::new(&c, &s, 0.0), 3, pts, &mut o)?;
+            run_enfo(&mut CsIntersectEnfo::new(k, &c, &s, 0.0), 3, pts, &mut o)?;
         }
         OpIn::CsNormalize { curve, sop, vecs, pts } => {
             let c = curve_of(curve)?;
             let op = sop_of(*sop)?;
             let dim = if op == SolverOperation::Signed3dDirectedMinimize { 4 } else { 3 };
             let vs = vecs3(vecs);
-            run_enfo(&mut CsNormalizeEnfo::new(&c, &s, op, 0.0, opt_vecs(&vs), 0.0), dim, pts, &mut o)?;
+            run_enfo(&mut CsNormalizeEnfo::new(k, &c, &s, op, 0.0, opt_vecs(&vs), 0.0), dim, pts, &mut o)?;
         }
         OpIn::SspIntersect { other, steepest, plane, pts } => {
             let s2 = surface_of(other)?;
             let pl = plane.map(|(po, pn)| Plane::from_normal(v3(po), v3(pn)));
-            run_enfo(&mut SspIntersectEnfo::new(&s, &s2, *steepest, pl.as_ref(), 0.0), 4, pts, &mut o)?;
+            run_enfo(&mut SspIntersectEnfo::new(k, &s, &s2, *steepest, pl.as_ref(), 0.0), 4, pts, &mut o)?;
         }
         OpIn::SsiNormalize { other, n, d, pts } => {
             let s2 = surface_of(other)?;
-            run_enfo(&mut SsiNormalizeEnfo::new(&s, &s2, 0.0, v3(*n), *d), 4, pts, &mut o)?;
+            run_enfo(&mut SsiNormalizeEnfo::new(k, &s, &s2, 0.0, v3(*n), *d), 4, pts, &mut o)?;
         }
         OpIn::SsNormalize { other, sop, vecs, pts } => {
             let s2 = surface_of(other)?;
             let op = sop_of(*sop)?;
             let dim = if op == SolverOperation::Signed3dDirectedMinimize { 5 } else { 4 };
             let vs = vecs3(vecs);
-            run_enfo(&mut SsNormalizeEnfo::new(&s, &s2, op, opt_vecs(&vs), 0.0), dim, pts, &mut o)?;
+            run_enfo(&mut SsNormalizeEnfo::new(k, &s, &s2, op, opt_vecs(&vs), 0.0), dim, pts, &mut o)?;
         }
         OpIn::Classify { dom, curve, ivl, uv, t } => {
             let c = curve_of(curve)?;
             match stat(classify_curve_surface_xsect_point(
-                &s,
+                k, &s,
                 &dom_of(*dom),
                 &c,
                 &Extent1d::from_min_max(ivl[0], ivl[1]),
@@ -538,8 +538,8 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    match rust_run(i) {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+    match rust_run(k, i) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(e)) => Err(e),
@@ -556,11 +556,11 @@ fn crange(c: &CrvIn) -> (f64, f64) {
 /// A quadratic Bezier through the surface point at `uv` (at `t = 0.5`) whose tangent lies in
 /// the surface's tangent plane, with curvature `1 + delta` times that of the surface's
 /// normal section: a (near) tangent intersection. Returns the curve and `t`.
-fn gen_tangent_curve(rng: &mut Rng, srf: &SrfIn, uv: [f64; 2]) -> Option<(CrvIn, f64)> {
+fn gen_tangent_curve(k: &Kernel, rng: &mut Rng, srf: &SrfIn, uv: [f64; 2]) -> Option<(CrvIn, f64)> {
     let s = surface_of(srf).ok()?;
     let m = s
         .evaluate(
-            p2(uv),
+            k, p2(uv),
             2,
             2,
             EvaluateFlags {
@@ -696,18 +696,18 @@ fn gen_solve_dom(rng: &mut Rng, s: &SrfIn) -> [f64; 4] {
     gen_dom(rng, s)
 }
 
-fn gen_gps(rng: &mut Rng, s: &SrfIn) -> OpIn {
+fn gen_gps(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> OpIn {
     OpIn::Gps {
         dom: gen_solve_dom(rng, s),
         sop: *rng.choose(&[0u8, 3, 3, 4, 5]).unwrap_or(&3),
-        p: gen_point_near(rng, s),
+        p: gen_point_near(k, rng, s),
         tol: *rng.choose(&[1e-9, 1e-6, 1e-5, 1e-3]).unwrap_or(&1e-5),
         target: if rng.chance(0.2) { Some(rng.uniform(0.0, 3.0)) } else { None },
         req: rng.below(2) as u8,
     }
 }
 
-fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
+fn gen_op(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> OpIn {
     let is_bspline = matches!(s, SrfIn::Bspline(_) | SrfIn::Sms(_));
     match rng.below(46) {
         0..=2 => OpIn::NormalEval { uv: gen_boundary_uv(rng, s) },
@@ -718,8 +718,8 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
             let p = if rng.chance(0.4) {
                 // on the normal: surface point plus a normal offset
                 surface_of(s).ok().and_then(|srf| {
-                    let pt = srf.evaluate_point(p2(uv)).ok()?;
-                    let n = srf.evaluate_normal(p2(uv), Side::Left, Side::Left).ok()?;
+                    let pt = srf.evaluate_point(k, p2(uv)).ok()?;
+                    let n = srf.evaluate_normal(k, p2(uv), Side::Left, Side::Left).ok()?;
                     let d = *rng.choose(&[0.0, 0.3, 2.0, -1.5]).unwrap_or(&0.3);
                     let e = *rng.choose(&[0.0, 1e-9, 1e-4, 0.1]).unwrap_or(&0.0);
                     Some([pt.x + n.x * d + e, pt.y + n.y * d, pt.z + n.z * d])
@@ -727,7 +727,7 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
             } else {
                 None
             }
-            .unwrap_or_else(|| gen_point_near(rng, s));
+            .unwrap_or_else(|| gen_point_near(k, rng, s));
             let dom = if rng.chance(0.5) { Some(gen_dom(rng, s)) } else { None };
             let tol = *rng.choose(&[1e-9, 1e-6, 1e-3, 0.1]).unwrap_or(&1e-3);
             let deriv = if rng.chance(0.4) { Some(rng.point3(-1.0, 1.0)) } else { None };
@@ -737,7 +737,7 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
         }
         13..=15 => OpIn::PassSp {
             uv: gen_uv(rng, s),
-            p: gen_point_near(rng, s),
+            p: gen_point_near(k, rng, s),
             tol: *rng.choose(&[1e-9, 1e-6, 1e-3, 0.1]).unwrap_or(&1e-3),
         },
         16..=18 if is_bspline => OpIn::Seam { param: rng.below(2) as u8, known: rng.chance(0.2) },
@@ -745,14 +745,14 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
             uv: gen_boundary_uv(rng, s),
             tol: if rng.chance(0.4) { Some(*rng.choose(&[1e-9, 1e-5, 1e-2]).unwrap_or(&1e-5)) } else { None },
         },
-        21..=24 => gen_gps(rng, s),
+        21..=24 => gen_gps(k, rng, s),
         25..=29 => {
-            let (curve, tangent) = gen_curve_for(rng, s);
+            let (curve, tangent) = gen_curve_for(k, rng, s);
             let pts = gen_pts3(rng, s, &curve, tangent);
             OpIn::CsIntersect { curve, pts }
         }
         30..=33 => {
-            let (curve, tangent) = gen_curve_for(rng, s);
+            let (curve, tangent) = gen_curve_for(k, rng, s);
             let sop = *rng.choose(&[3u8, 4, 5, 5, 9]).unwrap_or(&5);
             let signed = sop == 9;
             let mut pts = gen_pts3(rng, s, &curve, tangent);
@@ -819,7 +819,7 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
         }
         _ => {
             let uv = gen_uv(rng, s);
-            let (curve, t) = match gen_tangent_curve(rng, s, uv) {
+            let (curve, t) = match gen_tangent_curve(k, rng, s, uv) {
                 Some((c, t)) if rng.chance(0.85) => (c, t),
                 _ => {
                     let c = gen_curve(rng);
@@ -837,21 +837,21 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
 /// A curve for an equation-set case: tangent to the surface at some point half the time (with
 /// that point, for generating the parameters), else random.
 #[allow(clippy::type_complexity)]
-fn gen_curve_for(rng: &mut Rng, s: &SrfIn) -> (CrvIn, Option<([f64; 2], f64)>) {
+fn gen_curve_for(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> (CrvIn, Option<([f64; 2], f64)>) {
     if rng.chance(0.5) {
         let uv = gen_uv(rng, s);
-        if let Some((c, t)) = gen_tangent_curve(rng, s, uv) {
+        if let Some((c, t)) = gen_tangent_curve(k, rng, s, uv) {
             return (c, Some((uv, t)));
         }
     }
     (gen_curve(rng), None)
 }
 
-fn gen_case(rng: &mut Rng) -> Inputs {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> Inputs {
     // the global point solve is only comparable on planes: give them their share
     if rng.chance(0.08) {
         let surface = gen_plane(rng);
-        let mut op = gen_gps(rng, &surface);
+        let mut op = gen_gps(k, rng, &surface);
         if let OpIn::Gps { sop, .. } = &mut op {
             *sop = *rng.choose(&[0u8, 3, 3, 3]).unwrap_or(&3);
         }
@@ -864,11 +864,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         let uv = [rng.uniform(dom[0], dom[2]), rng.uniform(dom[1], dom[3])];
         let on = surface_of(&surface)
             .ok()
-            .and_then(|srf| srf.evaluate_point(p2(uv)).ok())
+            .and_then(|srf| srf.evaluate_point(k, p2(uv)).ok())
             .map(|q| [q.x, q.y, q.z]);
         let p = match on {
             Some(q) if rng.chance(0.8) => q,
-            _ => gen_point_near(rng, &surface),
+            _ => gen_point_near(k, rng, &surface),
         };
         let op = OpIn::StepInv {
             dom,
@@ -879,7 +879,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         return Inputs { surface, op };
     }
     let surface = gen_surface(rng);
-    let op = gen_op(rng, &surface);
+    let op = gen_op(k, rng, &surface);
     Inputs { surface, op }
 }
 
@@ -895,15 +895,16 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..64 {
-            let i = gen_case(rng);
+            let i = gen_case(k, rng);
             let Ok((op, input)) = cpp_input(&i) else {
                 continue;
             };
             if ffi::validate(op, &input).is_err() {
                 continue;
             }
-            if let Err(Fail::Harness(_)) = rust_run(&i) {
+            if let Err(Fail::Harness(_)) = rust_run(k, &i) {
                 continue;
             }
             if !gps_ok(&i) {
@@ -927,7 +928,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }
 
@@ -943,6 +945,7 @@ mod tests {
     #[test]
     #[ignore = "debugging aid; needs P4_CASES"]
     fn p4_dump_case() {
+let k = &Kernel::default();
         for idx in std::env::var("P4_CASES").unwrap().split(',') {
             let i: usize = idx.parse().unwrap();
             let mut rng = Rng::new(CaseContext::seed_for("surface.surface_p4", i));
@@ -950,13 +953,14 @@ mod tests {
             let inp: Inputs = serde_json::from_value(v.clone()).unwrap();
             println!("CASE {i}: {}", serde_json::to_string(&v).unwrap());
             println!("  cpp : {:?}", cpp(&inp).map(|o| format!("{o:?}")));
-            println!("  rust: {:?}", rust(&inp).map(|o| format!("{o:?}")));
+            println!("  rust: {:?}", rust(k, &inp).map(|o| format!("{o:?}")));
         }
     }
 
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
+let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 3]> = BTreeMap::new();
         let mut classes: BTreeMap<(i64, i64), usize> = BTreeMap::new();
@@ -968,12 +972,12 @@ mod tests {
             let name = serde_json::to_value(&i.op).unwrap()["op"].as_str().unwrap().to_string();
             let e = stats.entry(name).or_default();
             e[0] += 1;
-            if let (OpIn::Classify { .. }, Ok(o)) = (&i.op, rust_run(&i)) {
+            if let (OpIn::Classify { .. }, Ok(o)) = (&i.op, rust_run(k, &i)) {
                 if o.len() == 6 {
                     *classes.entry((o[5] as i64, o[1] as i64)).or_default() += 1;
                 }
             }
-            match rust_run(&i) {
+            match rust_run(k, &i) {
                 Ok(_) => e[1] += 1,
                 Err(_) => e[2] += 1,
             }

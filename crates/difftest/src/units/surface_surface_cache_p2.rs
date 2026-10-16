@@ -530,7 +530,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Err(e) => Ok(Err(e)),
             }
         }
-        OpIn::ApproxBlock => match sc::create_approximate_bezier_patch_block(&surface) {
+        OpIn::ApproxBlock => match sc::create_approximate_bezier_patch_block(&k, &surface) {
             Ok(r) => {
                 let mut o = vec![0.0, r.num_u_spans as f64, r.num_v_spans as f64];
                 o.push(r.u_splits.len() as f64);

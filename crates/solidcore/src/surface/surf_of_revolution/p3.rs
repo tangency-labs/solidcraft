@@ -189,6 +189,7 @@ fn surface_local_point_solve<O: Copy>(
 /// bFoundAnswer, sSol)`: whether an answer was found and the solution (the solution as
 /// left by a failure, as upstream reads it then too).
 fn iso_point_inversion(
+    k: &Kernel,
     iso: &IsoCurve,
     interval: &Extent1d,
     guess: f64,
@@ -196,6 +197,7 @@ fn iso_point_inversion(
 ) -> Result<(Result<bool>, Solution<()>)> {
     let mut sol: Solution<()> = Solution::new();
     let r = local_property_analysis(
+        k,
         iso,
         interval,
         CurvePropertyType::PointInversion,
@@ -464,8 +466,8 @@ impl SurfOfRevolution {
             .ok_or(SolidError::null_pointer(OP_TO_NURBS))?;
         let (mut x, exact_conversion) = self
             .polar
-            .convert_to_nurbs_parameter(circle, step_uv.x, 0.0)?;
-        let y = self.gen()?.convert_t_from_step_to_nurbs(step_uv.y)?;
+            .convert_to_nurbs_parameter(k, circle, step_uv.x, 0.0)?;
+        let y = self.gen()?.convert_t_from_step_to_nurbs(k, step_uv.y)?;
 
         // when the conversion was not exact
         if !exact_conversion {
@@ -479,7 +481,7 @@ impl SurfOfRevolution {
             let ivl = iso.natural_interval();
 
             // do a local point solve (status ignored; the solution is always used)
-            let (_found, sol3) = iso_point_inversion(&iso, &ivl, x, pnt)?;
+            let (_found, sol3) = iso_point_inversion(k, &iso, &ivl, x, pnt)?;
             x = sol3.start.param(0)?;
         }
 
@@ -642,8 +644,9 @@ impl SurfOfRevolution {
         // for every rotation angle (normally 1, 2 for points on seams)
         for &angle in angles_deg.iter().take(num_angles) {
             // convert the angles (degrees) to NURBS parameters
-            let (mut u_parameter, exact_conversion) =
-                self.polar.convert_to_nurbs_parameter(circle, angle, 0.0)?;
+            let (mut u_parameter, exact_conversion) = self
+                .polar
+                .convert_to_nurbs_parameter(k, circle, angle, 0.0)?;
 
             // for every drop point to generator curve solution
             for cr_sol in gen_solutions.as_slice() {
@@ -662,14 +665,14 @@ impl SurfOfRevolution {
                     let nurb_ivl = iso.natural_interval();
 
                     // when isoCurve is degenerate - use Interval min
-                    if is_degenerate_base(&iso, EFF_ZERO, None)? {
+                    if is_degenerate_base(k, &iso, EFF_ZERO, None)? {
                         u_parameter = nurb_ivl.min();
                     } else {
                         // get the 3dDropPoint
                         let pnt = self.evaluate_step_point(k, Point2::new(angle, t))?;
 
                         // transform the DropPoint coordinates
-                        let (r, sol3) = iso_point_inversion(&iso, &nurb_ivl, u_parameter, pnt)?;
+                        let (r, sol3) = iso_point_inversion(k, &iso, &nurb_ivl, u_parameter, pnt)?;
                         match r {
                             Ok(true) => u_parameter = sol3.start.param(0)?,
                             _ => return Err(SolidError::sm_err(OP_DROP)),
@@ -681,11 +684,11 @@ impl SurfOfRevolution {
                 // given for a periodic genCurve
                 if num_gen > 1 {
                     if let Some(v) = in_pointing_vector {
-                        if gen.is_periodic(&gen_nurb_ivl)? {
+                        if gen.is_periodic(k, &gen_nurb_ivl)? {
                             // skip solution when solution is ivl min and PointingVector
                             // opposes curve tangent
                             if are_same(t, gen_nurb_ivl.min()) {
-                                let pv = gen.evaluate(t, 1, true, true)?;
+                                let pv = gen.evaluate(k, t, 1, true, true)?;
                                 let d1 = pv.get(1).copied().unwrap_or(Vec3::UNDEF);
                                 if d1.dot(v) < -EFF_ZERO_SQRT {
                                     continue;
@@ -695,7 +698,7 @@ impl SurfOfRevolution {
                             // skip solution when solution is ivl max and PointingVector
                             // does not oppose curve tangent
                             if are_same(t, gen_nurb_ivl.max()) {
-                                let pv = gen.evaluate(t, 1, true, true)?;
+                                let pv = gen.evaluate(k, t, 1, true, true)?;
                                 let d1 = pv.get(1).copied().unwrap_or(Vec3::UNDEF);
                                 if d1.dot(v) > EFF_ZERO_SQRT {
                                     continue;
@@ -867,7 +870,7 @@ impl SurfOfRevolution {
                     expand_by_zone_tol: true,
                     ..BoundingBoxRequest::default()
                 };
-                let boxes = self.base.calculate_bounding_box(uv_domain, &req)?;
+                let boxes = self.base.calculate_bounding_box(k, uv_domain, &req)?;
                 let bbox = boxes.normal.ok_or(SolidError::null_pointer(OP_ISECT))?;
                 let size = bbox.size().length();
                 EFF_ZERO_SQRT * (1.0 + size)
@@ -941,8 +944,8 @@ impl SurfOfRevolution {
         // for every genCurve/genCurve solution
         for solution in solutions.as_slice() {
             // get Solution Start Points (statuses ignored upstream; the points are read)
-            let start_point = this_gen.evaluate(solution.start.param(0)?, 1, true, true)?;
-            let other_point = other_gen.evaluate(solution.start.param(1)?, 1, true, true)?;
+            let start_point = this_gen.evaluate(k, solution.start.param(0)?, 1, true, true)?;
+            let other_point = other_gen.evaluate(k, solution.start.param(1)?, 1, true, true)?;
             let sp0 = start_point.first().copied().unwrap_or(Vec3::UNDEF);
             let sp1 = start_point.get(1).copied().unwrap_or(Vec3::UNDEF);
             let op0 = other_point.first().copied().unwrap_or(Vec3::UNDEF);
@@ -1028,7 +1031,7 @@ impl SurfOfRevolution {
 
                         // get Top Circle Center and Radius from Solution EndPoint (status
                         // ignored upstream; the point is read)
-                        let end_point = this_gen.evaluate_point(solution.end.param(0)?)?;
+                        let end_point = this_gen.evaluate_point(k, solution.end.param(0)?)?;
                         let top_circle_center = origin + z_axis.dot(end_point - origin) * z_axis;
                         let top_circle_radius = top_circle_center.distance(end_point);
                         let top_sweep_arc = sweep_arc(
@@ -1162,14 +1165,14 @@ impl SurfOfRevolution {
         let interval = iso_crv.natural_interval();
 
         // no work - GenCurve is degenerate
-        if iso_crv.is_degenerate(scaled_zero, None)? {
+        if iso_crv.is_degenerate(k, scaled_zero, None)? {
             return Err(SolidError::sm_err(OP_REBUILD));
         }
 
         // verify GenCurve is planar and coplanar with refFrame ZAxis
         let iso_curve = Curve::from(iso_crv);
         let planar = iso_curve.is_planar(k, scaled_zero)?;
-        let linear = iso_curve.is_linear(EFF_ZERO, false)?;
+        let linear = iso_curve.is_linear(k, EFF_ZERO, false)?;
         let is_planar = planar.is_planar;
         let is_linear = linear.linear;
         if !is_planar {

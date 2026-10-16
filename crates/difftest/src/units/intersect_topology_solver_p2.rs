@@ -421,7 +421,7 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
                 (first, second)
             };
             local
-                .solve_it(&mut ts, Some(first), Some(second))
+                .solve_it(&kernel, &mut ts, Some(first), Some(second))
                 .map(|()| ts.base.solutions)
         }
         _ => return Err(HarnessError::new("static entry")),

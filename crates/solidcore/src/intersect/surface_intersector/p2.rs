@@ -484,13 +484,13 @@ impl SurfaceIntersector<'_> {
             *point.uv_pos_mut(s) = uv;
 
             // load Surface eval matrix into the point
-            let m = match self.surface(s).evaluate(uv, 2, 2, LEFT_UPPER) {
+            let m = match self.surface(s).evaluate(k, uv, 2, 2, LEFT_UPPER) {
                 Ok(m) => m,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => {
                     // upstream evaluates into the point's matrix before the zero
                     // tangent replacement fails: those exact derivatives stay
-                    if let Ok(raw) = self.surface(s).evaluate(uv, 2, 2, LEFT_UPPER_EXACT) {
+                    if let Ok(raw) = self.surface(s).evaluate(k, uv, 2, 2, LEFT_UPPER_EXACT) {
                         copy_upper_half(point.srf_eval_matrix_mut(s), &raw, 2);
                     }
                     return Err(e);
@@ -502,7 +502,7 @@ impl SurfaceIntersector<'_> {
             let mut norm = point.srf_du(s).cross(point.srf_dv(s));
             if norm.length_squared() < EFF_ZERO_SQ {
                 // try to evaluate a normal for pole and singularity points
-                norm = surface_evaluate_normal(self.surface(s), uv)?;
+                norm = surface_evaluate_normal(k, self.surface(s), uv)?;
 
                 // error case - surface point has no normal
                 if norm.length_squared() < EFF_ZERO_SQ {
@@ -676,6 +676,7 @@ impl SurfaceIntersector<'_> {
 
                     // seek a point where the surfaces are parallel
                     found = surface_local_surface_solve_normalize(
+                        k,
                         self.surface(SrfIndex::First),
                         &uv_domain1,
                         self.surface(SrfIndex::Second),
@@ -728,7 +729,7 @@ impl SurfaceIntersector<'_> {
     ///
     /// Those of the degenerate curves and of [`flush_crv`]; [`SolidError::Unported`]
     /// from the curve evaluations of [`is_point_unique`].
-    pub fn flush_curve(&mut self, out: &mut TsectCurves) -> Result<()> {
+    pub fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // take (and clear) the curve points
         let ids = core::mem::take(&mut self.curve_points);
         let pnts = ids
@@ -750,6 +751,7 @@ impl SurfaceIntersector<'_> {
                     .map(|&id| self.point(id))
                     .collect::<Result<Vec<_>>>()?;
                 is_point_unique(
+                    k,
                     first.crv_pos(),
                     &starts,
                     &out.curves_3d,
@@ -899,6 +901,7 @@ impl SurfaceIntersector<'_> {
     /// [`SolidError::Unported`] from unported callees.
     pub fn compute_law_point_values<L: ?Sized>(
         &self,
+        k: &Kernel,
         parameter: f64,
         uv0: Point2,
         uv1: Point2,
@@ -916,12 +919,12 @@ impl SurfaceIntersector<'_> {
             let delta_param = parameter + delta_step;
             let mut pv = [Vec3::UNDEF; 2];
             let mut pv_delta = [Vec3::UNDEF; 2];
-            if let Some(v) = ignored(law.point_curve.evaluate(parameter, 1, true, true))? {
+            if let Some(v) = ignored(law.point_curve.evaluate(k, parameter, 1, true, true))? {
                 for (d, s) in pv.iter_mut().zip(v) {
                     *d = s;
                 }
             }
-            if let Some(v) = ignored(law.point_curve.evaluate(delta_param, 1, true, true))? {
+            if let Some(v) = ignored(law.point_curve.evaluate(k, delta_param, 1, true, true))? {
                 for (d, s) in pv_delta.iter_mut().zip(v) {
                     *d = s;
                 }
@@ -947,6 +950,7 @@ impl SurfaceIntersector<'_> {
                 ]
             } else {
                 let uvs = self.evaluate_law_point(
+                    k,
                     parameter,
                     uv0,
                     uv1,
@@ -964,6 +968,7 @@ impl SurfaceIntersector<'_> {
                 uvs
             };
             let _uv_deltas = self.evaluate_law_point(
+                k,
                 delta_param,
                 uv0,
                 uv1,
@@ -1209,7 +1214,7 @@ impl SurfaceIntersector<'_> {
                 && self.domain(o).contains_point(uv1, 10.0 * EFF_ZERO)
             {
                 // this surface's natural boundary point (status ignored)
-                if let Some(p) = ignored(self.surface(s).evaluate_point(uv0))? {
+                if let Some(p) = ignored(self.surface(s).evaluate_point(k, uv0))? {
                     set3(&mut w.curve_point, tgt, p);
                 }
                 let cp = get3(&w.curve_point, tgt);
@@ -1228,7 +1233,9 @@ impl SurfaceIntersector<'_> {
                 if let Some([du, dv]) = found {
                     uv_drop = Point2::new(du, dv);
                     // status ignored: the old values stay
-                    if let Some(m) = ignored(self.surface(o).evaluate(uv_drop, 1, 1, LEFT_UPPER))? {
+                    if let Some(m) =
+                        ignored(self.surface(o).evaluate(k, uv_drop, 1, 1, LEFT_UPPER))?
+                    {
                         copy_upper_half(o_surf_pv, &m, 1);
                     }
 
@@ -1445,6 +1452,7 @@ fn compute_singularity_point_base(
 ///
 /// [`SolidError::Unported`] from the curve evaluations.
 pub fn is_point_unique(
+    k: &Kernel,
     point: Point3,
     start_points: &[&TsectPnt],
     curves_3d: &[Curve],
@@ -1461,13 +1469,13 @@ pub fn is_point_unique(
     for curve in curves_3d {
         let ivl = curve.natural_interval();
         let mut p = Vec3::UNDEF;
-        if let Some(v) = ignored(curve.evaluate_point(ivl.min()))? {
+        if let Some(v) = ignored(curve.evaluate_point(k, ivl.min()))? {
             p = v;
         }
         if point.distance(p) < tol_3d {
             return Ok(false);
         }
-        if let Some(v) = ignored(curve.evaluate_point(ivl.max()))? {
+        if let Some(v) = ignored(curve.evaluate_point(k, ivl.max()))? {
             p = v;
         }
         if point.distance(p) < tol_3d {
@@ -1520,8 +1528,8 @@ impl SolutionObject for BoundaryCurve {
 
 /// `crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)` (virtual: the plane override, the
 /// curve-bounded surface's basis surface, `SmSurface::EvaluateNormal` otherwise).
-fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
-    surface.evaluate_normal(uv, Side::Left, Side::Left)
+fn surface_evaluate_normal(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Vec3> {
+    surface.evaluate_normal(k, uv, Side::Left, Side::Left)
 }
 
 /// `crSurface.IsSingularity(uv, eSingDir)`: the plane override (none); other kinds
@@ -1529,7 +1537,9 @@ fn surface_evaluate_normal(surface: &Surface, uv: Point2) -> Result<Vec3> {
 fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
-        SurfaceKind::BSpline(_)
+
+        SurfaceKind::Cone(_)
+        | SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::Step(_)
@@ -1571,6 +1581,7 @@ fn surface_local_point_solve_normalize(
 /// NULL, guess, other_guess, found, sol)`: the solution's start parameters `[u0, v0,
 /// u1, v1]` when found.
 fn surface_local_surface_solve_normalize(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     other: &Surface,
@@ -1581,6 +1592,7 @@ fn surface_local_surface_solve_normalize(
 ) -> Result<Option<[f64; 4]>> {
     Ok(surface
         .local_surface_solve(
+            k,
             domain,
             other,
             other_domain,
@@ -1616,9 +1628,10 @@ mod tests {
 
     #[test]
     fn crossing_point_of_two_planes() {
+        let k = &Kernel::default();
         let (a, b) = two_planes();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let si = SurfaceIntersector::new(&a, &d, &b, &d, false).unwrap();
+        let si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
         let mut p = TsectPnt::new();
         si.compute_point_values(
             &Kernel::default(),
@@ -1640,10 +1653,11 @@ mod tests {
 
     #[test]
     fn parallel_planes_make_a_tangent_point() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let si = SurfaceIntersector::new(&a, &d, &b, &d, false).unwrap();
+        let si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
         let mut p = TsectPnt::new();
         // no previous point: the singularity handling is SM_ERR
         assert!(si
@@ -1663,11 +1677,12 @@ mod tests {
 
     #[test]
     fn flush_single_and_traced_points() {
+        let k = &Kernel::default();
         let (a, b) = two_planes();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let mut si = SurfaceIntersector::new(&a, &d, &b, &d, false).unwrap();
+        let mut si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
         let mut out = TsectCurves::default();
-        si.flush_curve(&mut out).unwrap();
+        si.flush_curve(k, &mut out).unwrap();
         assert!(out.curves_3d.is_empty());
 
         let mut ids = Vec::new();
@@ -1687,7 +1702,7 @@ mod tests {
         }
         let first = ids[0];
         si.add_point_to_curve(first).unwrap();
-        si.flush_curve(&mut out).unwrap();
+        si.flush_curve(k, &mut out).unwrap();
         assert_eq!(out.curves_3d.len(), 1);
         assert_eq!(out.curve_types, vec![TsectCurveType::Touching]);
         assert!(si.curve_points().is_empty());
@@ -1695,31 +1710,33 @@ mod tests {
         for &id in &ids {
             si.add_point_to_curve(id).unwrap();
         }
-        si.flush_curve(&mut out).unwrap();
+        si.flush_curve(k, &mut out).unwrap();
         assert_eq!(out.curves_3d.len(), 2);
         assert_eq!(out.uv_curves[0].len(), 2);
         assert_eq!(out.curve_types[1], TsectCurveType::Crossing);
 
         // the single point is no longer unique
         si.add_point_to_curve(first).unwrap();
-        si.flush_curve(&mut out).unwrap();
+        si.flush_curve(k, &mut out).unwrap();
         assert_eq!(out.curves_3d.len(), 2);
     }
 
     #[test]
     fn unique_points() {
+        let k = &Kernel::default();
         let p = TsectPnt::new();
-        assert!(is_point_unique(Vec3::new(0.0, 0.0, 0.0), &[], &[], 1e-3).unwrap());
+        assert!(is_point_unique(k, Vec3::new(0.0, 0.0, 0.0), &[], &[], 1e-3).unwrap());
         let mut q = p.clone();
         q.curve_pv[0] = Vec3::new(0.0, 0.0, 1e-4);
-        assert!(!is_point_unique(Vec3::new(0.0, 0.0, 0.0), &[&q], &[], 1e-3).unwrap());
+        assert!(!is_point_unique(k, Vec3::new(0.0, 0.0, 0.0), &[&q], &[], 1e-3).unwrap());
     }
 
     #[test]
     fn plane_boundary_test_needs_plane_iso_curves() {
+        let k = &Kernel::default();
         let (a, b) = two_planes();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let si = SurfaceIntersector::new(&a, &d, &b, &d, false).unwrap();
+        let si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
         let k = Kernel::default();
         let mut p1 = PatchBoundaryBoundingPlanes::new(d);
         let mut p2 = PatchBoundaryBoundingPlanes::new(d);

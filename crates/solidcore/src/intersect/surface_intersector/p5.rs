@@ -166,6 +166,7 @@ impl SurfaceIntersector<'_> {
     /// Those of the evaluations, unit vectors and degenerate curves.
     pub fn grazing_box_process(
         &self,
+        k: &Kernel,
         uv_domain1: &Extent2d,
         uv_domain2: &Extent2d,
     ) -> Result<(bool, Option<GrazingBox>)> {
@@ -193,9 +194,9 @@ impl SurfaceIntersector<'_> {
                         // a corner inside both intersection domains: compare the
                         // 3D points
                         let (pnt1, mut du1, mut dv1) =
-                            evaluate_1st_derivatives(self.surface(SrfIndex::First), uv1)?;
+                            evaluate_1st_derivatives(k, self.surface(SrfIndex::First), uv1)?;
                         let (pnt2, mut du2, mut dv2) =
-                            evaluate_1st_derivatives(self.surface(SrfIndex::Second), uv2)?;
+                            evaluate_1st_derivatives(k, self.surface(SrfIndex::Second), uv2)?;
                         if iu1 == 1 {
                             du1 = -du1;
                         }
@@ -314,9 +315,9 @@ pub fn do_intersection(
     opt_approx_tol_3d: Option<f64>,
     opt_ang_tol_rad: Option<f64>,
 ) -> Result<SurfaceIntersection> {
-    let mut caches: Vec<SurfaceCache<IntersectionSurface>>;
-    let mut ssi: AdvSurfaceIntersector<'_, '_, IntersectionSurface> =
-        AdvSurfaceIntersector::new(surface1, uv_domain1, surface2, uv_domain2, false)?;
+    let mut caches: Vec<SurfaceCache<NoSurfaceHandle>>;
+    let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+        AdvSurfaceIntersector::new(k, surface1, uv_domain1, surface2, uv_domain2, false)?;
     ssi.base
         .set_use_surface_edges(use_surface_edges[0], use_surface_edges[1]);
     caches = intersection_surface_caches(
@@ -481,7 +482,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 
                 // resolve the intersection
                 let (more_work_required, touching) =
-                    self.base.grazing_box_process(&uv_domain1, &uv_domain2)?;
+                    self.base.grazing_box_process(k, &uv_domain1, &uv_domain2)?;
                 if !more_work_required {
                     if let Some(g) = touching {
                         let [uv1, uv2] = g.uv_curves;
@@ -580,7 +581,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                 }
 
                 // create the curves from the points in m_vCurvePoints
-                self.base.flush_curve(&mut out)?;
+                self.base.flush_curve(k, &mut out)?;
             }
 
             // when an intersection curve was not generated from this startPoint
@@ -610,9 +611,9 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // remove degenerate Curves whose points lie on nonDegenerate intersections
         let mut ii = 0;
         while let Some(curve) = curves_3d.get(ii) {
-            if curve.is_degenerate(EFF_ZERO, None)? {
+            if curve.is_degenerate(k, EFF_ZERO, None)? {
                 // status ignored: an unset point
-                let point = ignored(curve.evaluate_point(0.0))?.unwrap_or(Vec3::UNDEF);
+                let point = ignored(curve.evaluate_point(k, 0.0))?.unwrap_or(Vec3::UNDEF);
                 if self
                     .base
                     .is_point_on_curve(k, point, &curves_3d, Some(ii))?
@@ -653,8 +654,12 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`.
-fn evaluate_1st_derivatives(surface: &Surface, uv: Point2) -> Result<(Point3, Vec3, Vec3)> {
-    crate::surface::surface::p1::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)
+fn evaluate_1st_derivatives(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+) -> Result<(Point3, Vec3, Vec3)> {
+    crate::surface::surface::p1::evaluate_1st_derivatives(k, surface, uv, Side::Left, Side::Left)
 }
 
 #[cfg(test)]
@@ -684,32 +689,34 @@ mod tests {
 
     #[test]
     fn grazing_corner_leaving_the_other_surface_is_a_touching_point() {
+        let k = &Kernel::default();
         // B starts at A's corner (1, 1, 0) and leaves A (along (1, 1, 0) and z)
         let s = 0.5_f64.sqrt();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([1.0, 1.0, 0.0], [s, s, 0.0], [0.0, 0.0, 1.0]);
-        let si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let (more, touching) = si
-            .grazing_box_process(&corner(1.0, 1.0), &corner(0.0, 0.0))
+            .grazing_box_process(k, &corner(1.0, 1.0), &corner(0.0, 0.0))
             .unwrap();
         assert!(!more);
         let g = touching.unwrap();
         assert_eq!(g.curve_type, TsectCurveType::Touching);
         assert_eq!(g.deviation, 0.0);
-        let p = g.curve_3d.evaluate_point(0.5).unwrap();
+        let p = g.curve_3d.evaluate_point(k, 0.5).unwrap();
         assert!(p.distance(Vec3::new(1.0, 1.0, 0.0)) < 1e-15);
-        let uv2 = g.uv_curves[1].evaluate_point(0.0).unwrap();
+        let uv2 = g.uv_curves[1].evaluate_point(k, 0.0).unwrap();
         assert!(uv2.distance(Vec3::ZERO) < 1e-15);
     }
 
     #[test]
     fn grazing_corner_entering_the_other_surface_needs_more_work() {
+        let k = &Kernel::default();
         // B's u axis runs back over A from its corner
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([1.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         let (more, touching) = si
-            .grazing_box_process(&corner(1.0, 1.0), &corner(0.0, 0.0))
+            .grazing_box_process(k, &corner(1.0, 1.0), &corner(0.0, 0.0))
             .unwrap();
         assert!(more);
         assert!(touching.is_none());
@@ -717,16 +724,17 @@ mod tests {
 
     #[test]
     fn grazing_without_coincident_corners_needs_more_work() {
+        let k = &Kernel::default();
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-        let si = SurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+        let si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
         // corners in both domains, 1 apart
-        let (more, touching) = si.grazing_box_process(&unit(), &unit()).unwrap();
+        let (more, touching) = si.grazing_box_process(k, &unit(), &unit()).unwrap();
         assert!(more);
         assert!(touching.is_none());
         // no corner inside the intersection domains
         let inner = Extent2d::from_bounds(0.4, 0.4, 0.6, 0.6);
-        let (more, _) = si.grazing_box_process(&inner, &inner).unwrap();
+        let (more, _) = si.grazing_box_process(k, &inner, &inner).unwrap();
         assert!(more);
     }
 
@@ -736,7 +744,7 @@ mod tests {
         let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let k = Kernel::default();
         let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
-            AdvSurfaceIntersector::new(&a, &unit(), &b, &unit(), false).unwrap();
+            AdvSurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
         let mut caches: Vec<SurfaceCache<NoSurfaceHandle>> = Vec::new();
         let e = ssi
             .do_intersection_with_caches(&k, &mut caches, Some(0.5), Some(0.1))

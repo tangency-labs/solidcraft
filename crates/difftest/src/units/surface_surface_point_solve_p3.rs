@@ -291,12 +291,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                         previous.hit_bound(which, hits.signum());
                     }
                 }
-                let mut stepper = SurfPtSolveStepper::copy_of(&previous);
+                let mut stepper = SurfPtSolveStepper::copy_of(&k, &previous);
                 stepper.set_uv(p2(next));
                 match mode {
-                    0 => out.push(flag(stepper.find_boundary_solution()?)),
+                    0 => out.push(flag(stepper.find_boundary_solution(&k)?)),
                     1 => {
-                        let result = stepper.find_next_step(&Kernel::default(), &mut previous)?;
+                        let result = stepper.find_next_step(&k, &mut previous)?;
                         if let Some(status) = out.first_mut() {
                             *status = f64::from(result.status);
                         }
@@ -363,7 +363,7 @@ fn candidate(rng: &mut Rng) -> Option<Inputs> {
         natural
     };
     case.dom = domain;
-    case.test = gen_test(rng, &surface, domain, size);
+    case.test = gen_test(&k, rng, &surface, domain, size);
     case.op = match rng.below(12) {
         0..=2 => Operation::Global {
             target: if rng.chance(0.5) {

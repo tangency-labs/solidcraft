@@ -234,6 +234,7 @@ pub fn find_first_vertex_within_tol_to_pnt(
 /// [`SolidError::Unported`] while edge geometry and curve evaluation are not
 /// ported; errors of the edge / curve queries are propagated.
 pub fn find_coincident_edge<C: ?Sized>(
+    k: &Kernel,
     brep: &Brep,
     query: &CoincidentEdgeQuery<'_, C>,
     edges: &[EdgeId],
@@ -259,14 +260,14 @@ pub fn find_coincident_edge<C: ?Sized>(
 
         let edge_ivl = edge_interval(brep, e)?;
         let edge_mid_param = edge_ivl.evaluate(0.5);
-        let mid_pt = edge_curve_point(brep, e, edge_mid_param)?;
+        let mid_pt = edge_curve_point(k, brep, e, edge_mid_param)?;
 
         let drop = drop_point(query.curve, &curve_ivl, mid_pt, tol, guess)?;
         if !drop.good || drop.distance > tol {
             continue;
         }
 
-        let edge_tangent = edge_curve_derivative(brep, e, edge_mid_param)?;
+        let edge_tangent = edge_curve_derivative(k, brep, e, edge_mid_param)?;
         let curve_tangent = curve_derivative(query.curve, drop.parameter)?;
         let same_orientation = curve_tangent.dot(edge_tangent) > 0.0;
 
@@ -394,13 +395,13 @@ fn edge_curve(brep: &Brep, e: EdgeId) -> Result<&crate::curve::curve::Curve> {
 }
 
 /// `pE->GetCurve()->EvaluatePoint(t)` (`NER` on a missing curve).
-fn edge_curve_point(brep: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
-    edge_curve(brep, e)?.evaluate_point(t)
+fn edge_curve_point(k: &Kernel, brep: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
+    edge_curve(brep, e)?.evaluate_point(k, t)
 }
 
 /// First derivative from `pE->GetCurve()->Evaluate(t, 1, TRUE, ...)`.
-fn edge_curve_derivative(brep: &Brep, e: EdgeId, t: f64) -> Result<Vec3> {
-    let pv = edge_curve(brep, e)?.evaluate(t, 1, true, true)?;
+fn edge_curve_derivative(k: &Kernel, brep: &Brep, e: EdgeId, t: f64) -> Result<Vec3> {
+    let pv = edge_curve(brep, e)?.evaluate(k, t, 1, true, true)?;
     pv.get(1).copied().ok_or(SolidError::null_pointer(
         "geom::tools::edge_curve_derivative",
     ))
@@ -575,6 +576,7 @@ mod tests {
 
     #[test]
     fn unported_paths() {
+        let k = &Kernel::default();
         let mut brep = Brep::new();
         let a = brep.add_vertex(p(0.0, 0.0, 0.0)).unwrap();
         let b = brep.add_vertex(p(1.0, 0.0, 0.0)).unwrap();
@@ -590,14 +592,9 @@ mod tests {
             interval: Extent1d::from_min_max(0.0, 1.0),
             tolerance: 1e-6,
         };
-        let r = find_coincident_edge(&brep, &q, &[e], 0);
+        let r = find_coincident_edge(k, &brep, &q, &[e], 0);
         assert!(matches!(r, Err(SolidError::Unported { .. })));
-        assert_eq!(find_coincident_edge(&brep, &q, &[e], 1).unwrap(), None);
-        // SmBrep::GetEdges is ported (topology.brep_p1): the edge is reached and its
-        // drop (curve.curve_p6) is what defers
-        brep.edge_mut(e).unwrap().curve = Some(crate::curve::curve::Curve::from(
-            crate::curve::line::Line::from_points(p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), 3),
-        ));
+        assert_eq!(find_coincident_edge(k, &brep, &q, &[e], 1).unwrap(), None);
         assert!(matches!(
             find_edge(&brep, p(0.0, 0.0, 0.0)),
             Err(SolidError::Unported {

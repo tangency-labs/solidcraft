@@ -660,11 +660,11 @@ fn put_eval(
     Ok(())
 }
 
-fn put_points(o: &mut Vec<f64>, c: &Curve) {
+fn put_points(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     let nat = c.natural_interval();
     o.extend([nat.min(), nat.max()]);
     for t in [nat.min(), nat.evaluate(0.5), nat.max()] {
-        pv(o, c.evaluate_point(t).unwrap_or(Vec3::UNDEF));
+        pv(o, c.evaluate_point(k, t).unwrap_or(Vec3::UNDEF));
     }
 }
 
@@ -682,7 +682,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             o.extend([0.0, r.removed as f64, cs.len() as f64]);
             for (c, origin) in cs.iter().zip(&r.origin) {
                 o.push(*origin as f64);
-                put_points(&mut o, c);
+                put_points(&k, &mut o, c);
             }
         }
         OpIn::RemoveDup { curves } => {
@@ -690,7 +690,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 .iter()
                 .map(|c| c.as_ref().map(|c| build(&k, c)).transpose())
                 .collect::<Result<_, _>>()?;
-            let origin = tri!(o, remove_duplicate_curves(&mut cs));
+            let origin = tri!(o, remove_duplicate_curves(&k, &mut cs));
             o.extend([0.0, cs.len() as f64]);
             for (c, i) in cs.iter().zip(&origin) {
                 o.push(if c.is_some() { *i as f64 } else { -1.0 });
@@ -698,7 +698,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::StepPoint { curve, t } => {
             let c = build(&k, curve)?;
-            let p = tri!(o, c.evaluate_step_point(*t));
+            let p = tri!(o, c.evaluate_step_point(&k, *t));
             o.push(0.0);
             pv(&mut o, p);
         }
@@ -722,7 +722,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             sol.start.parameters[1] = s[1];
             let r = tri!(
                 o,
-                is_point_solution_across_closed_seam_boundary(
+                is_point_solution_across_closed_seam_boundary(&k, 
                     &sol,
                     &a,
                     &ivl_of(*ivl1),
@@ -766,12 +766,12 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::CpGuess { curve, ivl, abc, t } => {
             let c = build(&k, curve)?;
-            let r = tri!(o, find_additional_cp_guess(&c, &ivl_of(*ivl), v3(*abc), *t));
+            let r = tri!(o, find_additional_cp_guess(&k, &c, &ivl_of(*ivl), v3(*abc), *t));
             o.extend([0.0, b(r.is_some()), r.unwrap_or(0.0)]);
         }
         OpIn::IsArc { curve, n, tol } => {
             let c = build(&k, curve)?;
-            let r = tri!(o, c.is_arc(*n, *tol));
+            let r = tri!(o, c.is_arc(&k, *n, *tol));
             o.extend([0.0, b(r.is_some())]);
             if let Some((f, r, s0, s1)) = r {
                 pv(&mut o, f.origin());
@@ -782,7 +782,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::IsLine { curve, n, tol } => {
             let c = build(&k, curve)?;
-            let r = tri!(o, c.is_line(*n, *tol));
+            let r = tri!(o, c.is_line(&k, *n, *tol));
             o.extend([0.0, b(r.is_some())]);
             if let Some((p, v)) = r {
                 pv(&mut o, p);
@@ -795,7 +795,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             want_dev,
         } => {
             let c = build(&k, curve)?;
-            let r = tri!(o, c.is_linear(*tol, *want_dev));
+            let r = tri!(o, c.is_linear(&k, *tol, *want_dev));
             o.extend([0.0, b(r.linear)]);
             if r.linear {
                 pv(&mut o, r.line_point);
@@ -806,12 +806,12 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::Domain { curve, domain, tol } => {
             let c = build(&k, curve)?;
             let d = Extent2d::from_bounds(domain[0], domain[1], domain[2], domain[3]);
-            let r = tri!(o, c.is_domain_boundary(&d, *tol));
+            let r = tri!(o, c.is_domain_boundary(&k, &d, *tol));
             o.extend([0.0, f64::from(r as i32)]);
         }
         OpIn::Periodic { curve, ivl } => {
             let c = build(&k, curve)?;
-            let r = tri!(o, c.is_periodic(&ivl_of(*ivl)));
+            let r = tri!(o, c.is_periodic(&k, &ivl_of(*ivl)));
             o.extend([0.0, b(r)]);
         }
         OpIn::Length { curve, ivl, acc } => {
@@ -834,7 +834,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let mut sol: Solution<()> = Solution::new();
             let found = tri!(
                 o,
-                local_property_analysis(&c, &ivl_of(*ivl), prop, *guess, *val, &vecs, &mut sol)
+                local_property_analysis(&k, &c, &ivl_of(*ivl), prop, *guess, *val, &vecs, &mut sol)
             );
             o.extend([0.0, b(found)]);
             if found {
@@ -848,10 +848,10 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::Cci { c1, c2, x, jac } => {
             let a = build(&k, c1)?;
             let bb = build(&k, c2)?;
-            let mut e = CcIntersectEnfo::new(&a, &bb, EFF_ZERO_SQ);
+            let mut e = CcIntersectEnfo::new(&k, &a, &bb, EFF_ZERO_SQ);
             let mut f = [0.0; 2];
             let mut j = Matrix::new(2, 2);
-            let r = e.evaluate_equations(x, &mut f, jac.then_some(&mut j));
+            let r = e.evaluate_equations(&k, x, &mut f, jac.then_some(&mut j));
             if let Err(d) = put_eval(&mut o, &r, f, &j) {
                 return Ok(*d);
             }
@@ -860,7 +860,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::CcTan { c1, c2, x, jac } => {
             let a = build(&k, c1)?;
             let bb = build(&k, c2)?;
-            let mut e = CcTangentIntEnfo::new(&a, &bb, EFF_ZERO_SQ);
+            let mut e = CcTangentIntEnfo::new(&k, &a, &bb, EFF_ZERO_SQ);
             let mut f = [0.0; 2];
             let mut j = Matrix::new(2, 2);
             let r = e.evaluate(x, &mut f, jac.then_some(&mut j));
@@ -886,12 +886,12 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             } else {
                 Some(vecs.as_slice())
             };
-            let mut e = FindCcNormalEnfo::new(&a, &bb, *sqtol, *sqdist, sop, opt);
+            let mut e = FindCcNormalEnfo::new(&k, &a, &bb, *sqtol, *sqdist, sop, opt);
             o.push(0.0);
             for call in calls {
                 let mut f = [0.0; 2];
                 let mut j = Matrix::new(2, 2);
-                let r = e.evaluate_equations(&call.x, &mut f, call.jac.then_some(&mut j));
+                let r = e.evaluate_equations(&k, &call.x, &mut f, call.jac.then_some(&mut j));
                 if let Err(d) = put_eval(&mut o, &r, f, &j) {
                     return Ok(*d);
                 }
@@ -1379,7 +1379,7 @@ fn gen_lpa(rng: &mut Rng) -> OpIn {
         let k = Kernel::default();
         if let Ok(c) = build(&k, &curve) {
             let t = gen_t(rng, &curve);
-            if let (Ok(p), Some(v)) = (c.evaluate_point(t), vecs.first_mut()) {
+            if let (Ok(p), Some(v)) = (c.evaluate_point(&k, t), vecs.first_mut()) {
                 let d = rp(rng, 0.5);
                 *v = [p.x + d[0], p.y + d[1], p.z + d[2]];
             }
@@ -1518,7 +1518,7 @@ fn gen_cp_guess(rng: &mut Rng) -> OpIn {
     if rng.chance(0.7) {
         let k = Kernel::default();
         if let Ok(c) = build(&k, &curve) {
-            if let Ok(v) = c.evaluate(t, 1, true, true) {
+            if let Ok(v) = c.evaluate(&k, t, 1, true, true) {
                 if let Some(tan) = v.get(1) {
                     // the plane normal: perpendicular to the tangent, tilted a little
                     let side = tan.cross(v3(rp(rng, 1.0)));

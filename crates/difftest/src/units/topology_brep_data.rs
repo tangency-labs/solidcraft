@@ -202,6 +202,7 @@ impl Dump<'_> {
     }
 
     fn curve(&mut self, c: &Keyed<Curve>) {
+let k = &Kernel::default();
         self.i(1);
         let cv = &c.object;
         self.i(cv.type_code());
@@ -211,7 +212,7 @@ impl Dump<'_> {
         self.d(ivl.max());
         let ts = [ivl.min(), 0.5 * (ivl.min() + ivl.max()), ivl.max()];
         for t in ts {
-            match cv.evaluate_point(t) {
+            match cv.evaluate_point(k, t) {
                 Ok(p) => {
                     self.i(0);
                     self.d(p.x);
@@ -225,6 +226,7 @@ impl Dump<'_> {
     }
 
     fn surface(&mut self, s: &Keyed<Surface>) {
+let k = &Kernel::default();
         self.i(1);
         let sf = &s.object;
         self.i(sf.type_code());
@@ -236,7 +238,7 @@ impl Dump<'_> {
         self.d(b.y);
         for f in [0.0, 0.5, 1.0] {
             let uv = Point2::new(a.x + f * (b.x - a.x), a.y + f * (b.y - a.y));
-            match sf.evaluate_point(uv) {
+            match sf.evaluate_point(k, uv) {
                 Ok(p) => {
                     self.i(0);
                     self.d(p.x);

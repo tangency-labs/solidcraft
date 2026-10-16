@@ -735,7 +735,7 @@ fn sub_ivl(nat: Extent1d, f: [f64; 2]) -> Extent1d {
 }
 
 #[allow(clippy::too_many_lines)]
-fn rust(op: &OpIn) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, op: &OpIn) -> Result<Output, HarnessError> {
     let mut o: Vec<f64> = Vec::new();
     match op {
         OpIn::IsClosed {
@@ -747,9 +747,9 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let c = build(curve)?;
             let i = Extent1d::from_min_max(ivl[0], ivl[1]);
             let r = if *base {
-                is_closed_base(&c, &i, *tol)
+                is_closed_base(k, &c, &i, *tol)
             } else {
-                c.is_closed(&i, *tol)
+                c.is_closed(k, &i, *tol)
             };
             let r = tri!(o, r);
             o.extend([0.0, b(r)]);
@@ -763,9 +763,9 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let c = build(curve)?;
             let i = ivl.map(|v| Extent1d::from_min_max(v[0], v[1]));
             let r = if *base {
-                is_degenerate_base(&c, *tol, i.as_ref())
+                is_degenerate_base(k, &c, *tol, i.as_ref())
             } else {
-                c.is_degenerate(*tol, i.as_ref())
+                c.is_degenerate(k, *tol, i.as_ref())
             };
             let r = tri!(o, r);
             o.extend([0.0, b(r)]);
@@ -774,7 +774,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let c = build(curve)?;
             let bx = tri!(
                 o,
-                approximate_polar_box(&c, &Extent1d::from_min_max(ivl[0], ivl[1]), *count)
+                approximate_polar_box(k, &c, &Extent1d::from_min_max(ivl[0], ivl[1]), *count)
             );
             o.push(0.0);
             o.push(f64::from(bx.state().code()));
@@ -846,7 +846,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 let nat = c.natural_interval();
                 o.extend([nat.min(), nat.max()]);
                 for t in [nat.min(), nat.max()] {
-                    let p = match c.evaluate_point(t) {
+                    let p = match c.evaluate_point(k, t) {
                         Ok(p) => p,
                         Err(e) => match Fail::from(e) {
                             Fail::Deferred(d) => return Ok(*d),
@@ -875,7 +875,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             sol.start.parameters[1] = s[1];
             sol.start.solution_value = *value;
             let r = filter_solution(
-                &a,
+                k, &a,
                 &Extent1d::from_min_max(ivl1[0], ivl1[1]),
                 &bb,
                 &Extent1d::from_min_max(ivl2[0], ivl2[1]),
@@ -898,7 +898,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         } => {
             let c = build(curve)?;
             let sop = SolverOperation::from_code(*sop).ok_or_else(|| harness("sop"))?;
-            let r = proj_dist(&c, *t, v3(*p), v3(*n), *rev, v3(*d), sop);
+            let r = proj_dist(k, &c, *t, v3(*p), v3(*n), *rev, v3(*d), sop);
             // upstream returns a failing status as the distance
             let value = match r {
                 Ok(v) => v,
@@ -922,7 +922,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let prop = CurvePropertyType::from_code(*prop).ok_or_else(|| harness("prop"))?;
             let vs: Vec<Vec3> = vecs.iter().map(|x| v3(*x)).collect();
             let mut efo = CurvePropertyEfo::new(
-                &c,
+                k, &c,
                 prop,
                 *val,
                 if vs.is_empty() { None } else { Some(&vs) },
@@ -942,7 +942,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let mut f = [0.0; 2];
             let mut m = Matrix::new(2, 2);
             let r = CcTangentIntEnfo::static_evaluate(
-                &a,
+                k, &a,
                 &bb,
                 x,
                 &mut f,
@@ -966,7 +966,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             jac,
         } => {
             let c = build(curve)?;
-            let mut e = CpDistAtEnfo::new(&c, v3(*p), *dsq, *sqtol);
+            let mut e = CpDistAtEnfo::new(k, &c, v3(*p), *dsq, *sqtol);
             let mut f = [0.0; 4];
             let mut m = Matrix::new(4, 4);
             let r = e.evaluate(x, &mut f, if *jac { Some(&mut m) } else { None });
@@ -989,7 +989,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let a = build(c1)?;
             let bb = build(c2)?;
             let mut efo = FindCurveDistanceExtrema::new(
-                &a,
+                k, &a,
                 &bb,
                 Extent1d::from_min_max(dom[0], dom[1]),
                 *tol,
@@ -1677,7 +1677,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }
 
@@ -1690,13 +1691,14 @@ mod tests {
     /// Generated cases cover every op with both successful and failing statuses.
     #[test]
     fn generated_cases_are_diverse() {
+let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         let mut trues: BTreeMap<String, usize> = BTreeMap::new();
         for _ in 0..3000 {
             let op = gen_case(&mut rng);
             let name = serde_json::to_value(&op).unwrap()["op"].as_str().unwrap().to_string();
-            let out = rust(&op);
+            let out = rust(k, &op);
             let e = stats.entry(name.clone()).or_default();
             e[0] += 1;
             match out {

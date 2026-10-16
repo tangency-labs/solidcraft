@@ -285,13 +285,14 @@ pub(super) fn connect_intervals<O: ClassObject>(
 ///
 /// Those of [`Curve::is_degenerate`].
 pub fn curve_is_degenerate(
+    k: &Kernel,
     curve: Option<&Curve>,
     interval: &Extent1d,
     xsect_tol_3d: f64,
 ) -> Result<bool> {
     match curve {
         None => Ok(true),
-        Some(c) => c.is_degenerate(xsect_tol_3d, Some(interval)),
+        Some(c) => c.is_degenerate(k, xsect_tol_3d, Some(interval)),
     }
 }
 
@@ -352,12 +353,13 @@ fn pair_tol<O: ClassObject>(
 /// `SmCurveClassification::Evaluate`-style: the position and unit tangent of `curve` at
 /// `param` (`Evaluate(param, 1, from_left, pts)` then `Unitize` on the tangent).
 fn point_and_unit_tangent(
+    k: &Kernel,
     curve: &Curve,
     param: f64,
     from_left: bool,
     op: &'static str,
 ) -> Result<(Point3, Vec3)> {
-    let d = curve.evaluate(param, 1, from_left, true)?;
+    let d = curve.evaluate(k, param, 1, from_left, true)?;
     let p = *d
         .first()
         .ok_or(SolidError::invalid_input(op, "no position"))?;
@@ -471,11 +473,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 // not interior: use the curve tangent.
                 // GetClassifyCrvLoc(0): SSSPointFlag ? SSSPoint : Curve(Param)
                 let start_pt =
-                    self.classify_crv_loc(geometry, &first.start, first.interval.min())?;
+                    self.classify_crv_loc(k, geometry, &first.start, first.interval.min())?;
 
                 // cp_Curve position, UnintTan for dParameter (SER)
                 let curve = cc_curve(self, geometry, OP_FIND)?;
-                let (pt, tan) = point_and_unit_tangent(curve, param, true, OP_FIND)?;
+                let (pt, tan) = point_and_unit_tangent(k, curve, param, true, OP_FIND)?;
 
                 // Leave rdEndDist3d as actual 3d distance.
                 out.end_dist_3d = start_pt.distance(pt);
@@ -518,11 +520,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 )?;
 
                 // GetClassifyCrvLoc(GetSize()): the last boundary
-                let end_pt = self.classify_crv_loc(geometry, &last.end, last.interval.max())?;
+                let end_pt = self.classify_crv_loc(k, geometry, &last.end, last.interval.max())?;
 
                 // cp_Curve position, UnintTan for dParameter (SER)
                 let curve = cc_curve(self, geometry, OP_FIND)?;
-                let (pt, tan) = point_and_unit_tangent(curve, param, false, OP_FIND)?;
+                let (pt, tan) = point_and_unit_tangent(k, curve, param, false, OP_FIND)?;
 
                 out.end_dist_3d = end_pt.distance(pt);
 
@@ -574,9 +576,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
             // Test 3D space tolerances to see if point lies near existing end-points.
             let curve = cc_curve(self, geometry, OP_FIND)?;
-            let start_pt = curve.evaluate_point(ivl.min())?;
-            let end_pt = curve.evaluate_point(ivl.max())?;
-            let classify_pt = curve.evaluate_point(param)?;
+            let start_pt = curve.evaluate_point(k, ivl.min())?;
+            let end_pt = curve.evaluate_point(k, ivl.max())?;
+            let classify_pt = curve.evaluate_point(k, param)?;
 
             // Start/End tolerances - 2d or 3d as needed
             let start_tol = pair_tol(
@@ -608,10 +610,10 @@ impl<O: ClassObject> CurveClassification<O> {
             // watch for misClassify due to Closed curve - check arc length not Dist3D
             if start_3d_dist < start_tol || end_3d_dist < end_tol {
                 let seg = Extent1d::from_min_max(ivl.min(), param);
-                start_3d_dist = curve.approximate_length(&seg, 5, false)?.0;
+                start_3d_dist = curve.approximate_length(k, &seg, 5, false)?.0;
 
                 let seg = Extent1d::from_min_max(param, ivl.max());
-                end_3d_dist = curve.approximate_length(&seg, 5, false)?.0;
+                end_3d_dist = curve.approximate_length(k, &seg, 5, false)?.0;
             }
 
             // Use ParamSpace Dist:[Param,EndPt] to help classify
@@ -1378,7 +1380,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 if self.at(i)?.mid.object() == old_edge {
                     // evaluate interval midPoint position
                     let curve = cc_curve(self, geometry, OP_MERGE)?;
-                    let mid_pnt = curve.evaluate_point(self.at(i)?.interval.evaluate(0.5))?;
+                    let mid_pnt = curve.evaluate_point(k, self.at(i)?.interval.evaluate(0.5))?;
 
                     // XSectTol3d(SrcCurve, pNewEdge)
                     let mut this_xsect_tol_3d = xsect_tol_3d_from_zones(
@@ -1496,7 +1498,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 if coin == Coincident::No && self.size() > 1 {
                     let curve = cc_curve(self, geometry, OP_CLEANUP)?;
                     let ivl = self.at(ii)?.interval;
-                    if curve_is_degenerate(Some(curve), &ivl, xsect_tol_3d)? {
+                    if curve_is_degenerate(k, Some(curve), &ivl, xsect_tol_3d)? {
                         coin = Coincident::Yes;
                         // Have to set eEndOfCM: doesn't matter except at ends of CC.
                         end_of_cm = if ii == 0 {
@@ -1664,6 +1666,7 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         let edge_xsect_tol_3d = xsect_tol_3d_from_zones(k, edge_zone_tol_3d, edge_zone_tol_3d);
         if vertex == vertex_next
             && curve_is_degenerate(
+                k,
                 edge_curve(geometry, edge)?,
                 &cc.at(index)?.interval,
                 edge_xsect_tol_3d,
@@ -1693,6 +1696,7 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         if let Some(prev) = index.checked_sub(1) {
             if vertex == vertex_last
                 && curve_is_degenerate(
+                    k,
                     edge_curve(geometry, edge)?,
                     &cc.at(prev)?.interval,
                     edge_xsect_tol_3d,

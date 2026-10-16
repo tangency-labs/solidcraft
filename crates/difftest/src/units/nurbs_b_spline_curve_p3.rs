@@ -594,7 +594,7 @@ fn rust_op(
             o.push(1.0);
             dump_state(o, &r);
         }
-        OpIn::Pole { tol } => o.push(flag(c.has_internal_pole(*tol)?)),
+        OpIn::Pole { tol } => o.push(flag(c.has_internal_pole(&k, *tol)?)),
         OpIn::Segment { a, b, ns, tol } => {
             let r = c.is_segment_line(&ivl(*a, *b), *ns as u64, *tol)?;
             o.push(flag(r.is_line));
@@ -623,7 +623,7 @@ fn rust_op(
             ..
         } => {
             let other = other.ok_or_else(|| harness("join without other curve"))?;
-            c.join_with(*this_end, other, *other_end, *tol)?;
+            c.join_with(&k, *this_end, other, *other_end, *tol)?;
         }
         OpIn::Subdivide { cont, ang } => {
             let parts = c.subdivide_at_discontinuity(&k, continuity_of(*cont)?, *ang)?;

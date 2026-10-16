@@ -139,6 +139,7 @@ impl SolutionObject for CurveHandle {
 /// Those of `LocalPropertyAnalysis` and the base `Tessellate`; those of `IsDegenerate` and
 /// `ApproximateLength`; `InvalidInput` where upstream would read past the samples.
 pub fn calculate_bounding_box_base(
+    k: &Kernel,
     curve: &Curve,
     interval: &Extent1d,
     req: BoundingBoxRequest,
@@ -162,7 +163,7 @@ pub fn calculate_bounding_box_base(
     let mut pt_der = [Vec3::UNDEF, Vec3::UNDEF];
     let sample = |t: f64, pt_der: &mut [Vec3; 2]| -> Result<()> {
         // nonZeroTangent values (status ignored)
-        if let Some(v) = ignored(curve.evaluate(t, num_derivs, false, true))? {
+        if let Some(v) = ignored(curve.evaluate(k, t, num_derivs, false, true))? {
             for (dst, src) in pt_der.iter_mut().zip(v) {
                 *dst = src;
             }
@@ -208,6 +209,7 @@ pub fn calculate_bounding_box_base(
             }
 
             let found = match local_property_analysis(
+                k,
                 curve,
                 &sub_ivl,
                 CurvePropertyType::ParallelToVector,
@@ -244,7 +246,7 @@ pub fn calculate_bounding_box_base(
 
         if !stat_ok {
             // Maybe the curve is degenerate.
-            if curve.is_degenerate(EFF_ZERO, None)? {
+            if curve.is_degenerate(k, EFF_ZERO, None)? {
                 // Just go with the first point, which is already in the points.
                 stat_ok = true;
             }
@@ -257,7 +259,7 @@ pub fn calculate_bounding_box_base(
     }
 
     // pick tessellate control accuracies
-    let (size, _) = curve.approximate_length(interval, 5, false)?;
+    let (size, _) = curve.approximate_length(k, interval, 5, false)?;
     let angle_tol_deg = 2.0;
 
     // LocalPropertyAnalysis failed, use Tess.
@@ -265,7 +267,7 @@ pub fn calculate_bounding_box_base(
         // sample the target curve over target interval
         let chord_height = size / 100_000.0;
         // (Tessellate resets the arrays it is given)
-        let tess = curve.tessellate(interval, chord_height, angle_tol_deg, 0)?;
+        let tess = curve.tessellate(k, interval, chord_height, angle_tol_deg, 0)?;
         points = tess.points;
         if want_tangents {
             tangents = tess.tangents;
@@ -467,7 +469,7 @@ impl Curve {
                 })
             }
             CurveKind::Composite(c) => c.calculate_bounding_box(k, interval, req, expand),
-            _ => calculate_bounding_box_base(self, interval, req, expand),
+            _ => calculate_bounding_box_base(k, self, interval, req, expand),
         }
     }
 
@@ -626,6 +628,7 @@ impl Curve {
 
         if let Some(guess) = guess {
             let (converged, sol) = self.local_point_solve::<()>(
+                k,
                 interval,
                 op,
                 point,
@@ -644,6 +647,7 @@ impl Curve {
             // when a good enough solution was found
             if local_converged && solution.start.solution_value < xsect_tol {
                 let (snapped, keep_sol) = snap_sol_to_specified_endpoint(
+                    k,
                     self,
                     interval,
                     vec_to_inside,
@@ -683,6 +687,7 @@ impl Curve {
             // for every solution
             for sol in solutions.as_slice() {
                 let (snapped, keep_sol) = snap_sol_to_specified_endpoint(
+                    k,
                     self,
                     interval,
                     vec_to_inside,
@@ -917,10 +922,11 @@ impl Curve {
 
             // locals for localPointSolve
             let mut found_parameter = 0.0;
-            let mut pnt = other.evaluate_point(t_guess2)?;
+            let mut pnt = other.evaluate_point(k, t_guess2)?;
 
             // Find ThisCurvePoint Normal to OtherCurvePoint
             let (mut found, mut solution) = self.local_point_solve::<()>(
+                k,
                 interval,
                 SolverOperation::Minimize,
                 pnt,
@@ -932,8 +938,9 @@ impl Curve {
             if !found && ii == 0 {
                 // try moving ThisCurvePoint a small distance from its endPoint
                 t_guess2 = other_interval.evaluate(0.001);
-                pnt = other.evaluate_point(t_guess2)?;
+                pnt = other.evaluate_point(k, t_guess2)?;
                 (found, solution) = self.local_point_solve::<()>(
+                    k,
                     interval,
                     SolverOperation::Minimize,
                     pnt,
@@ -946,8 +953,9 @@ impl Curve {
             if !found && ii == num_samples - 1 {
                 // try moving ThisCurvePoint a small distance from its endPoint
                 t_guess2 = other_interval.evaluate(0.999);
-                pnt = other.evaluate_point(t_guess2)?;
+                pnt = other.evaluate_point(k, t_guess2)?;
                 (found, solution) = self.local_point_solve::<()>(
+                    k,
                     interval,
                     SolverOperation::Minimize,
                     pnt,
@@ -959,7 +967,7 @@ impl Curve {
             // get ThisCurve solution point and gap vector distance
             let mut found_dist = BIG_DOUBLE;
             if found {
-                let test_pnt = self.evaluate_point(solution.start.param(0)?)?;
+                let test_pnt = self.evaluate_point(k, solution.start.param(0)?)?;
                 found_dist = test_pnt.distance(pnt);
                 found_parameter = solution.start.param(0)?;
             }
@@ -1018,6 +1026,7 @@ impl Curve {
                 } else {
                     // Find ThisCurvePoint Closest (not Normal) to OtherCurvePoint
                     (found, solution) = self.local_point_solve::<()>(
+                        k,
                         interval,
                         SolverOperation::Minimize,
                         pnt,
@@ -1065,13 +1074,14 @@ impl Curve {
         }
 
         // get maxGap ThisCurve Point
-        let pnt = self.evaluate_point(this_t_max)?;
+        let pnt = self.evaluate_point(k, this_t_max)?;
 
         // when doing precise and MaxDist found is greater than zero
         let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
         if do_precise && max_dist > scaled_zero {
             // find the gap maximum near the largest sampled gap point
             let (found, solution) = self.local_curve_solve::<()>(
+                k,
                 interval,
                 other,
                 &other_interval,
@@ -1088,8 +1098,8 @@ impl Curve {
                 // get Gap points and size
                 let t_max1 = solution.start.param(0)?;
                 let t_max2 = solution.start.param(1)?;
-                let pnt1 = self.evaluate_point(t_max1)?;
-                let pnt2 = other.evaluate_point(t_max2)?;
+                let pnt1 = self.evaluate_point(k, t_max1)?;
+                let pnt2 = other.evaluate_point(k, t_max2)?;
                 let found_dist = pnt1.distance(pnt2);
 
                 // save largest gap seen
@@ -1135,10 +1145,10 @@ impl Curve {
         objects: [Option<O>; 2],
     ) -> Result<Vec<Solution<O>>> {
         // evaluate both curveInterval min/max endPoints
-        let start_point1 = self.evaluate_point(interval.min())?;
-        let end_point1 = self.evaluate_point(interval.max())?;
-        let start_point2 = other.evaluate_point(other_interval.min())?;
-        let end_point2 = other.evaluate_point(other_interval.max())?;
+        let start_point1 = self.evaluate_point(k, interval.min())?;
+        let end_point1 = self.evaluate_point(k, interval.max())?;
+        let start_point2 = other.evaluate_point(k, other_interval.min())?;
+        let end_point2 = other.evaluate_point(k, other_interval.max())?;
 
         // Curve/curve MinDistance parameter pairs and distance value
         let mut drops: Vec<(f64, f64, f64)> = Vec::with_capacity(4);
@@ -1149,6 +1159,7 @@ impl Curve {
             // find OtherCurve Point closest to ThisCurve StartPoint
             let guess = other_interval.evaluate(0.5);
             let (found, sol) = other.local_point_solve::<()>(
+                k,
                 other_interval,
                 SolverOperation::Minimize,
                 start_point1,
@@ -1171,6 +1182,7 @@ impl Curve {
             // find ThisCurve Point closest to OtherCurve StartPoint
             let guess = interval.evaluate(0.5);
             let (found, sol) = self.local_point_solve::<()>(
+                k,
                 interval,
                 SolverOperation::Minimize,
                 start_point2,
@@ -1196,6 +1208,7 @@ impl Curve {
             // find ThisCurve Point closest to OtherCurve EndPoint
             let guess = interval.evaluate(0.5);
             let (found, sol) = self.local_point_solve::<()>(
+                k,
                 interval,
                 SolverOperation::Minimize,
                 end_point2,
@@ -1230,6 +1243,7 @@ impl Curve {
             // find OtherCurve Point closest to ThisCurve EndPoint
             let guess = other_interval.evaluate(0.5);
             let (found, sol) = other.local_point_solve::<()>(
+                k,
                 other_interval,
                 SolverOperation::Minimize,
                 end_point1,
@@ -1379,10 +1393,10 @@ impl Curve {
         };
 
         // no work - either curve is degenerate - no solutions possible
-        if self.is_degenerate(tol / 2.0, Some(interval))? {
+        if self.is_degenerate(k, tol / 2.0, Some(interval))? {
             return Ok(out);
         }
-        if other.is_degenerate(tol / 2.0, Some(other_interval))? {
+        if other.is_degenerate(k, tol / 2.0, Some(other_interval))? {
             return Ok(out);
         }
 
@@ -1409,7 +1423,7 @@ impl Curve {
 
         // Special Case: closed or half-closed curves: split it into smaller pieces
         // and recursively call itself.
-        if self.is_split_needed(interval, tol)? {
+        if self.is_split_needed(k, interval, tol)? {
             let pieces = split_in_three(interval);
             let mut parts = Vec::with_capacity(3);
             for piece in &pieces {
@@ -1428,11 +1442,11 @@ impl Curve {
                     .solutions,
                 );
             }
-            return self.merge_split_solutions(&parts, interval, other, other_interval, true);
+            return self.merge_split_solutions(k, &parts, interval, other, other_interval, true);
         }
 
         // Do the same recursive division if the second curve is closed.
-        if other.is_split_needed(other_interval, tol)? {
+        if other.is_split_needed(k, other_interval, tol)? {
             let pieces = split_in_three(other_interval);
             let mut parts = Vec::with_capacity(3);
             for piece in &pieces {
@@ -1451,22 +1465,22 @@ impl Curve {
                     .solutions,
                 );
             }
-            return self.merge_split_solutions(&parts, interval, other, other_interval, false);
+            return self.merge_split_solutions(k, &parts, interval, other, other_interval, false);
         }
 
         // Two non closed intervals: drop the endPoints, sort them and test the
         // maximum distance between the curves.
 
         // get thisCurve start and stop position/tangents
-        let line_pt1 = self.evaluate(interval.min(), 1, true, true)?;
+        let line_pt1 = self.evaluate(k, interval.min(), 1, true, true)?;
         let (line_pt1_0, line_pt1_1) = (at(&line_pt1, 0), at(&line_pt1, 1));
-        let end1 = self.evaluate(interval.max(), 1, true, true)?;
+        let end1 = self.evaluate(k, interval.max(), 1, true, true)?;
         let (end1_0, end1_1) = (at(&end1, 0), -at(&end1, 1)); // Negate end derivatives
 
         // get otherCurve start and stop position/tangents
-        let line_pt2 = other.evaluate(other_interval.min(), 1, true, true)?;
+        let line_pt2 = other.evaluate(k, other_interval.min(), 1, true, true)?;
         let (line_pt2_0, line_pt2_1) = (at(&line_pt2, 0), at(&line_pt2, 1));
-        let end2 = other.evaluate(other_interval.max(), 1, true, true)?;
+        let end2 = other.evaluate(k, other_interval.max(), 1, true, true)?;
         let (end2_0, end2_1) = (at(&end2, 0), -at(&end2, 1)); // Negate end derivatives
 
         // Add any endPoint/endPoint coincident cases with open gaps as single solutions
@@ -1687,14 +1701,14 @@ impl Curve {
     /// Whether [`Curve::global_coincidence_checker`] splits this curve over
     /// `interval`: closed, or (for an interval longer than a tenth of the zone
     /// tolerance) tangents sweeping through 180 degrees or more.
-    fn is_split_needed(&self, interval: &Extent1d, tol: f64) -> Result<bool> {
-        let mut do_split = self.is_closed(interval, tol)?;
+    fn is_split_needed(&self, k: &Kernel, interval: &Extent1d, tol: f64) -> Result<bool> {
+        let mut do_split = self.is_closed(k, interval, tol)?;
 
         // In addition to closed curves, split curves which are half closed
         if !do_split {
             // Needed to break infinite recursion
             if interval.length() > ZONE_TOL_3D / 10.0 {
-                let polar_box = self.approximate_polar_box(interval, 5)?;
+                let polar_box = self.approximate_polar_box(k, interval, 5)?;
                 let state = polar_box.state();
                 if state == PolarBoxState::Unbounded
                     || ((state == PolarBoxState::Arc || state == PolarBoxState::Region)
@@ -1714,6 +1728,7 @@ impl Curve {
     /// contiguous run of range solutions covers all of either interval.
     fn merge_split_solutions<O: SolutionObject>(
         &self,
+        k: &Kernel,
         parts: &[Vec<Solution<O>>],
         interval: &Extent1d,
         other: &Self,
@@ -1734,6 +1749,7 @@ impl Curve {
                 // the object pointers with the seam test's `this` curve)
                 let across = if split_this {
                     is_point_solution_across_closed_seam_boundary(
+                        k,
                         sol,
                         other,
                         other_interval,
@@ -1743,6 +1759,7 @@ impl Curve {
                     )?
                 } else {
                     is_point_solution_across_closed_seam_boundary(
+                        k,
                         sol,
                         self,
                         interval,

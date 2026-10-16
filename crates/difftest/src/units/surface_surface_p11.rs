@@ -138,7 +138,7 @@ fn run_rust_isb(i: &Inputs) -> Result<Output, HarnessError> {
             // (SM_TC_TANGENT)
             flat.extend([*dev, 3.0, ivl.min(), ivl.max()]);
             for j in 0..=4 {
-                let p = c.evaluate_point(ivl.evaluate(f64::from(j) / 4.0))?;
+                let p = c.evaluate_point(&k, ivl.evaluate(f64::from(j) / 4.0))?;
                 flat.extend([p.x, p.y, p.z]);
             }
         }
@@ -151,6 +151,7 @@ fn run_rust_isb(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    let k = Kernel::default();
     if i.op == 1 {
         return run_rust_isb(i);
     }
@@ -162,6 +163,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         do_boundary_testing: i.boundary_testing,
     };
     let r = a.local_surface_intersect(
+        &k,
         &domain(i.a.domain),
         &b,
         &domain(i.b.domain),

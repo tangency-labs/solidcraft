@@ -203,6 +203,7 @@ fn approximate_tangent_field(
 /// SAME)` followed by its `ApproximateCurve` over the knots of `boundary`: the
 /// cross-tangent curve of `boundary` on `surface`.
 fn tangent_field_curve(
+    k: &crate::kernel::Kernel,
     tol: f64,
     boundary: &BSplineCurve,
     uv_curve: &BSplineCurve,
@@ -216,6 +217,7 @@ fn tangent_field_curve(
     let start_crv = as_sm_curve(start);
     let end_crv = as_sm_curve(end);
     let field = TangentField::create(
+        k,
         tol,
         &base_3d,
         &base_uv,
@@ -260,14 +262,24 @@ fn interpolated_tangent_field_curve(
 }
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
-fn evaluate_normal(surface: &BSplineSurface, uv: Point2) -> Result<Vec3> {
-    crate::surface::surface::p7::base_evaluate_normal(surface, uv, Side::Left, Side::Left)
+fn evaluate_normal(
+    k: &crate::kernel::Kernel,
+    surface: &BSplineSurface,
+    uv: Point2,
+) -> Result<Vec3> {
+    crate::surface::surface::p7::base_evaluate_normal(k, surface, uv, Side::Left, Side::Left)
 }
 
 /// `SmSurface::EvaluateNormalSection(uv, TRUE, TRUE, direction, ..)`: the cross
 /// tangent (the unit projection of `direction` into the tangent plane).
-fn evaluate_normal_section(surface: &BSplineSurface, uv: Point2, dir: Vec3) -> Result<Vec3> {
+fn evaluate_normal_section(
+    k: &crate::kernel::Kernel,
+    surface: &BSplineSurface,
+    uv: Point2,
+    dir: Vec3,
+) -> Result<Vec3> {
     Ok(crate::surface::surface::p3::evaluate_normal_section_of(
+        k,
         surface,
         uv,
         Side::Left,
@@ -278,9 +290,18 @@ fn evaluate_normal_section(surface: &BSplineSurface, uv: Point2, dir: Vec3) -> R
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`: `(Su, Sv)`.
-fn evaluate_1st_derivatives(surface: &BSplineSurface, uv: Point2) -> Result<(Vec3, Vec3)> {
-    let (_, du, dv) =
-        crate::surface::surface::p1::evaluate_1st_derivatives(surface, uv, Side::Left, Side::Left)?;
+fn evaluate_1st_derivatives(
+    k: &crate::kernel::Kernel,
+    surface: &BSplineSurface,
+    uv: Point2,
+) -> Result<(Vec3, Vec3)> {
+    let (_, du, dv) = crate::surface::surface::p1::evaluate_1st_derivatives(
+        k,
+        surface,
+        uv,
+        Side::Left,
+        Side::Left,
+    )?;
     Ok((du, dv))
 }
 
@@ -288,6 +309,7 @@ fn evaluate_1st_derivatives(surface: &BSplineSurface, uv: Point2) -> Result<(Vec
 /// ..)`: whether an intersection was found and its parameter on `rail` (the status is
 /// ignored upstream: a failure is no intersection; `Unported` is propagated).
 fn local_curve_intersect(
+    k: &crate::kernel::Kernel,
     rail: &BSplineCurve,
     domain: &Extent1d,
     other: &BSplineCurve,
@@ -297,6 +319,7 @@ fn local_curve_intersect(
     other_guess: f64,
 ) -> Result<(bool, f64)> {
     let r = ignored(crate::curve::curve::p3::local_curve_intersect(
+        k,
         rail,
         domain,
         other,
@@ -367,6 +390,7 @@ impl BSplineSurface {
     /// surfaces where upstream dereferences them; [`SolidError::Unported`] where the
     /// tangent fields or surface normals are needed.
     pub fn create_corner_blend(
+        k: &crate::kernel::Kernel,
         curves_3d: &[BSplineCurve],
         curve_orients: &[OrientType],
         uv_curves: &[Option<BSplineCurve>],
@@ -427,6 +451,7 @@ impl BSplineSurface {
         // compatible
         if boundaries.len() == 4 {
             return corner_blend_4(
+                k,
                 boundaries,
                 uv_crvs,
                 curve_orients,
@@ -438,6 +463,7 @@ impl BSplineSurface {
         }
 
         corner_blend_n(
+            k,
             boundaries,
             uv_crvs,
             curve_orients,
@@ -468,6 +494,7 @@ impl BSplineSurface {
     /// few intersection parameters; [`SolidError::Unported`] when two rails change
     /// their domains (`SmCurve::LocalCurveIntersect`).
     pub fn create_skinned_surface(
+        k: &crate::kernel::Kernel,
         cross_sections: &[BSplineCurve],
         opts: SkinnedSurfaceOptions<'_>,
     ) -> Result<Self> {
@@ -526,8 +553,14 @@ impl BSplineSurface {
 
             if let Some(params) = int_params.as_mut() {
                 let tol = 0.001
-                    * crate::curve::curve::p2::approximate_length(&*r1, &domain1_after, 6, false)?
-                        .0;
+                    * crate::curve::curve::p2::approximate_length(
+                        k,
+                        &*r1,
+                        &domain1_after,
+                        6,
+                        false,
+                    )?
+                    .0;
 
                 // Check rail 1.
                 if (domain1_after.min() - domain1_before.min()).abs() > EFF_ZERO
@@ -544,6 +577,7 @@ impl BSplineSurface {
                         // reintersect, to be safe
                         let cross_domain = sect_crv.natural_interval();
                         let (found, t_rail) = local_curve_intersect(
+                            k,
                             r1,
                             &domain1_after,
                             sect_crv,
@@ -573,6 +607,7 @@ impl BSplineSurface {
 
                         let cross_domain = sect_crv.natural_interval();
                         let (found, t_rail) = local_curve_intersect(
+                            k,
                             r2,
                             &domain2_after,
                             sect_crv,
@@ -1331,6 +1366,7 @@ const TOP: usize = 3;
 
 /// The four-sided branch of `CreateCornerBlend`.
 fn corner_blend_4(
+    k: &crate::kernel::Kernel,
     mut boundaries: Vec<BSplineCurve>,
     mut uv_crvs: Vec<Option<BSplineCurve>>,
     curve_orients: &[OrientType],
@@ -1412,6 +1448,7 @@ fn corner_blend_4(
                     .and_then(Option::as_ref)
                     .ok_or_else(|| SolidError::invalid_input(OP, "missing UV curve"))?;
                 tangent_field_curve(
+                    k,
                     2.0 * approx_tol,
                     boundary_curve,
                     uv,
@@ -1422,7 +1459,7 @@ fn corner_blend_4(
                 )?
             } else {
                 // a degenerate curve which does not 'lie' on a surface
-                if !boundary_curve.is_degenerate(EFF_ZERO, None)? {
+                if !boundary_curve.is_degenerate(k, EFF_ZERO, None)? {
                     return Err(SolidError::sm_err(OP));
                 }
 
@@ -1499,6 +1536,7 @@ fn corner_blend_4(
 
 /// The n-sided branch of `CreateCornerBlend`.
 fn corner_blend_n(
+    k: &crate::kernel::Kernel,
     mut boundaries: Vec<BSplineCurve>,
     mut uv_crvs: Vec<Option<BSplineCurve>>,
     curve_orients: &[OrientType],
@@ -1578,10 +1616,10 @@ fn corner_blend_n(
         let next_start_uv = uv2(next_uv, next_start_param);
 
         // Surface Normals at boundary endPoints
-        let mut prev_end_normal = evaluate_normal(prev_srf, prev_end_uv)?;
-        let mut curr_start_normal = evaluate_normal(curr_srf, curr_start_uv)?;
-        let mut curr_end_normal = evaluate_normal(curr_srf, curr_end_uv)?;
-        let mut next_start_normal = evaluate_normal(next_srf, next_start_uv)?;
+        let mut prev_end_normal = evaluate_normal(k, prev_srf, prev_end_uv)?;
+        let mut curr_start_normal = evaluate_normal(k, curr_srf, curr_start_uv)?;
+        let mut curr_end_normal = evaluate_normal(k, curr_srf, curr_end_uv)?;
+        let mut next_start_normal = evaluate_normal(k, next_srf, next_start_uv)?;
 
         // compare the neighbor and current surface normal directions
         let prev_dot_curr_normal = prev_end_normal.dot(curr_start_normal);
@@ -1632,7 +1670,7 @@ fn corner_blend_n(
             // when pCurr starts and stop on a common boundary - check orientation
             if bndries != 0 {
                 // Surface 1st derivs at CurveStart
-                let (srf_du, srf_dv) = evaluate_1st_derivatives(curr_srf, curr_start_uv)?;
+                let (srf_du, srf_dv) = evaluate_1st_derivatives(k, curr_srf, curr_start_uv)?;
 
                 // pick the appropriate vector and make it point out of the patch
                 let outward = if bndries & SS_UMIN != 0 {
@@ -1652,13 +1690,13 @@ fn corner_blend_n(
 
         // Surface CrossTangents at boundary endPoints
         let prev_end_cross_tang =
-            evaluate_normal_section(prev_srf, prev_end_uv, prev_end_cross_vec)?;
+            evaluate_normal_section(k, prev_srf, prev_end_uv, prev_end_cross_vec)?;
         let curr_start_cross_tang =
-            evaluate_normal_section(curr_srf, curr_start_uv, curr_start_cross_vec)?;
+            evaluate_normal_section(k, curr_srf, curr_start_uv, curr_start_cross_vec)?;
         let curr_end_cross_tang =
-            evaluate_normal_section(curr_srf, curr_end_uv, curr_end_cross_vec)?;
+            evaluate_normal_section(k, curr_srf, curr_end_uv, curr_end_cross_vec)?;
         let next_start_cross_tang =
-            evaluate_normal_section(next_srf, next_start_uv, next_start_cross_vec)?;
+            evaluate_normal_section(k, next_srf, next_start_uv, next_start_cross_vec)?;
 
         // check boundary curve gap sizes
         let dist_prev = pv0(&prev_end_pv).distance(pv0(&curr_start_pv));
@@ -1778,13 +1816,15 @@ mod tests {
 
     #[test]
     fn corner_blend_needs_four_curves() {
-        let r = BSplineSurface::create_corner_blend(&[], &[], &[], &[], 1e-3, 0.1, true);
+        let k = &crate::Kernel::default();
+        let r = BSplineSurface::create_corner_blend(k, &[], &[], &[], &[], 1e-3, 0.1, true);
         assert!(r.is_err());
     }
 
     #[test]
     fn skinned_surface_needs_sections() {
-        let r = BSplineSurface::create_skinned_surface(&[], SkinnedSurfaceOptions::default());
+        let k = &crate::Kernel::default();
+        let r = BSplineSurface::create_skinned_surface(k, &[], SkinnedSurfaceOptions::default());
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
     }
 }

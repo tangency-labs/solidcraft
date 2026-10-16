@@ -359,7 +359,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                     )?;
                     return Err(SolidError::sm_err("unexpected brep dependency"));
                 }
-                let p = props::curve_properties(&c, &ivl, accuracy, Vec3::new(ox, oy, oz), radius)?;
+                let p = props::curve_properties(&kernel, &c, &ivl, accuracy, Vec3::new(ox, oy, oz), radius)?;
                 let mut out = vec![0.0, p.length, p.properties.area, p.properties.volume];
                 for m in p.properties.moments {
                     out.extend([m.x, m.y, m.z]);
@@ -545,7 +545,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                         domain.max().x,
                         IntegrationAlgorithm::Romberg,
                         p[12],
-                        |t| eval.evaluate(t),
+                        |t| eval.evaluate(&kernel, t),
                     )?;
                     return Ok(if area == 0.0 {
                         vec![1001.0]
@@ -554,8 +554,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                     });
                 }
                 let properties = props::boundary_properties(
-                    &kernel,
-                    &surface,
+                    &kernel, &surface,
                     &curves,
                     &domain,
                     if p[14] == 0.0 {

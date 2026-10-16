@@ -139,8 +139,12 @@ impl<'a, O: SolutionObject> Named<'a, O> {
 }
 
 /// Runs `sm_RefineCCSolutions` on `sols` (status ignored).
-fn refine<O: SolutionObject>(sols: &mut SolutionArray<O>, named: &Named<'_, O>) -> Result<()> {
-    ignored(refine_cc_solutions(sols, |o| named.curve_of(o)))?;
+fn refine<O: SolutionObject>(
+    k: &Kernel,
+    sols: &mut SolutionArray<O>,
+    named: &Named<'_, O>,
+) -> Result<()> {
+    ignored(refine_cc_solutions(k, sols, |o| named.curve_of(o)))?;
     Ok(())
 }
 
@@ -237,7 +241,7 @@ impl Curve {
             needs_more_intersections = r.needs_more_intersections;
 
             // Refine Range solutions.
-            refine(&mut sols, &base_named)?;
+            refine(k, &mut sols, &base_named)?;
 
             // exit when Line/Line solutions are complete
             if !needs_more_intersections {
@@ -415,8 +419,8 @@ impl Curve {
                         && sol2.start.solution_value > dist_tol / 1000.0
                     {
                         // get the curve/curve intersection point positions and tangents
-                        let pv1 = self.evaluate(sol2.start.parameters[0], 1, true, true)?;
-                        let pv2 = other.evaluate(sol2.start.parameters[1], 1, true, true)?;
+                        let pv1 = self.evaluate(k, sol2.start.parameters[0], 1, true, true)?;
+                        let pv2 = other.evaluate(k, sol2.start.parameters[1], 1, true, true)?;
                         let t1 = at(&pv1, 1);
                         let t2 = at(&pv2, 1);
 
@@ -585,7 +589,7 @@ impl Curve {
         )?;
 
         // Refine Range solutions.
-        refine(&mut sols, &named)?;
+        refine(k, &mut sols, &named)?;
 
         // Now sort through the intersections looking for cases to combine, split, or
         // convert from 'coincident maybe' intervals to point intersections.
@@ -733,11 +737,17 @@ impl Curve {
         // solution very close may be an artifact of the local intersector; when the
         // gap steadily decreases from the bad solution to the tight one, delete the
         // bad one. [B298] (Assumes the solutions are sorted on the first parameter.)
-        Self::cull_spurious_points(&mut sols, &named, &this_whole_domain, &other_whole_domain)?;
+        Self::cull_spurious_points(
+            k,
+            &mut sols,
+            &named,
+            &this_whole_domain,
+            &other_whole_domain,
+        )?;
 
         // check each coincident interval solution: very short or diverging intervals
         // become point solutions.
-        self.classify_ranges(&mut sols, other, interval, other_interval)?;
+        self.classify_ranges(k, &mut sols, other, interval, other_interval)?;
 
         Ok(sols)
     }
@@ -827,8 +837,8 @@ impl Curve {
         // for point solutions only
         if curr.solution_type == SolutionType::SingleValue {
             // evaluate solution points (statuses ignored)
-            let pt1 = point_or_undef(self, cs0)?;
-            let pt2 = point_or_undef(self, le0)?;
+            let pt1 = point_or_undef(k, self, cs0)?;
+            let pt2 = point_or_undef(k, self, le0)?;
             let dist2 = pt1.distance_squared(pt2);
 
             // combine solutions when points are close enough together
@@ -871,7 +881,7 @@ impl Curve {
             interval2.add_value(cs1);
 
             // Evaluate and Drop a Curve1 SolutionOpening MidPoint to Curve2
-            let pt_on1 = self.evaluate_point(interval1.evaluate(0.45))?;
+            let pt_on1 = self.evaluate_point(k, interval1.evaluate(0.45))?;
             let guess = interval2.evaluate(0.5);
             let dropped = other.drop_point(
                 k,
@@ -890,8 +900,8 @@ impl Curve {
 
             if self_intersect {
                 // with self intersection the orientation must be opposite
-                let pv1 = self.evaluate(interval1.evaluate(0.45), 1, true, true)?;
-                let pv2 = other.evaluate(dropped.parameter, 1, true, true)?;
+                let pv1 = self.evaluate(k, interval1.evaluate(0.45), 1, true, true)?;
+                let pv2 = other.evaluate(k, dropped.parameter, 1, true, true)?;
                 let t1 = at(&pv1, 1);
                 let t2 = at(&pv2, 1);
                 if t1.dot(t2) > 0.0 {
@@ -901,7 +911,7 @@ impl Curve {
 
             // Evaluate and drop a Curve2 SolutionOpening nearMidPoint to Curve1
             // (upstream evaluates the trimmed interval sIvl2)
-            let pt_on2 = other.evaluate_point(ivl2.evaluate(0.38))?;
+            let pt_on2 = other.evaluate_point(k, ivl2.evaluate(0.38))?;
             let guess = interval1.evaluate(0.5);
             let dropped = self.drop_point(
                 k,
@@ -1142,6 +1152,7 @@ impl Curve {
     /// point solutions with very different values, the worse is removed when the
     /// curves' gap at the midpoint is smaller than at the worse one.
     fn cull_spurious_points<O: SolutionObject>(
+        k: &Kernel,
         sols: &mut SolutionArray<O>,
         named: &Named<'_, O>,
         domain_a: &Extent1d,
@@ -1208,18 +1219,18 @@ impl Curve {
                 let curve_b = named
                     .curve_of(sol_a.objects[1])
                     .ok_or(SolidError::null_pointer(OP_GCI))?;
-                let pt_a = point_or_undef(curve_a, param_a1)?;
-                let pt_b = point_or_undef(curve_b, param_b1)?;
+                let pt_a = point_or_undef(k, curve_a, param_a1)?;
+                let pt_b = point_or_undef(k, curve_b, param_b1)?;
                 let dist1 = pt_a.distance(pt_b);
 
-                let pt_a = point_or_undef(curve_a, param_a2)?;
-                let pt_b = point_or_undef(curve_b, param_b2)?;
+                let pt_a = point_or_undef(k, curve_a, param_a2)?;
+                let pt_b = point_or_undef(k, curve_b, param_b2)?;
                 let dist2 = pt_a.distance(pt_b);
 
                 let t = (param_a1 + param_a2) / 2.0;
-                let pt_a = point_or_undef(curve_a, t)?;
+                let pt_a = point_or_undef(k, curve_a, t)?;
                 let t = (param_b1 + param_b2) / 2.0;
-                let pt_b = point_or_undef(curve_b, t)?;
+                let pt_b = point_or_undef(k, curve_b, t)?;
                 let dist_mid = pt_a.distance(pt_b);
 
                 if dist1 < dist2 && dist_mid < dist2 {
@@ -1257,6 +1268,7 @@ impl Curve {
     /// kept.
     fn classify_ranges<O: SolutionObject>(
         &self,
+        k: &Kernel,
         sols: &mut SolutionArray<O>,
         other: &Self,
         interval: &Extent1d,
@@ -1286,16 +1298,16 @@ impl Curve {
             o_ivl.add_value(curr.end.parameters[1]);
             let ivl_length = ivl.length();
             let o_ivl_length = o_ivl.length();
-            let pnt = self.evaluate_point(curr.start.parameters[0])?;
+            let pnt = self.evaluate_point(k, curr.start.parameters[0])?;
 
             // locals: Curve 3d and solution range lengths
             if this_length == BIG_DOUBLE {
-                this_length = self.approximate_length(interval, 5, false)?.0;
+                this_length = self.approximate_length(k, interval, 5, false)?.0;
             }
             if other_length == BIG_DOUBLE {
-                other_length = other.approximate_length(other_interval, 5, false)?.0;
+                other_length = other.approximate_length(k, other_interval, 5, false)?.0;
             }
-            let seg_leng = self.approximate_length(&ivl, 5, false)?.0;
+            let seg_leng = self.approximate_length(k, &ivl, 5, false)?.0;
 
             // Scaled Zeros in 3D and both Parameter spaces
             let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
@@ -1324,7 +1336,7 @@ impl Curve {
                 // if GapVector is diverging over length of solution range change
                 // solution to a tangent point intersection (status ignored)
                 let (deg, point) =
-                    ignored(self.classify_intersecting_range_solution(other, &curr))?
+                    ignored(self.classify_intersecting_range_solution(k, other, &curr))?
                         .unwrap_or((false, None));
                 is_degenerate = deg;
                 if let Some(p) = point {

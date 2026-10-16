@@ -752,6 +752,7 @@ fn run_op(
                 .ok_or_else(|| harness("point type"))?;
             let prev_uv = prev.map(|pv| [p2(pv[0]), p2(pv[1])]);
             let r = si.refine_point(
+                k,
                 p2(*uv0),
                 p2(*uv1),
                 t,
@@ -773,7 +774,7 @@ fn run_op(
         OpIn::TestSpan { a, b: bb } => {
             pt(si, *a)?;
             pt(si, *bb)?;
-            if let Some(r) = st(o, si.test_span_accuracy(id(*a), id(*bb)))? {
+            if let Some(r) = st(o, si.test_span_accuracy(k, id(*a), id(*bb)))? {
                 o.extend([
                     b(r.found_good_point),
                     r.deviation_found.unwrap_or(ffi::UNSET),
@@ -788,7 +789,7 @@ fn run_op(
             } else {
                 let r = match op {
                     OpIn::AddCurve { .. } => si.add_point_to_curve(id(*i)),
-                    OpIn::AddStart { .. } => si.add_start_point(id(*i)),
+                    OpIn::AddStart { .. } => si.add_start_point(k, id(*i)),
                     _ => si.add_through_point(id(*i)),
                 };
                 st(o, r)?;
@@ -815,7 +816,7 @@ fn run_op(
             tol,
         } => {
             let (a, c, d) = (pt(si, *p)?, pt(si, *prev)?, pt(si, *next)?);
-            if let Some(f) = st(o, is_point_on_tsect_curve(&a, &c, &d, *tol))? {
+            if let Some(f) = st(o, is_point_on_tsect_curve(k, &a, &c, &d, *tol))? {
                 o.push(b(f));
             }
         }
@@ -829,7 +830,7 @@ fn run_op(
                 return Err(Fail::Harness(harness("curve index")));
             };
             let r = compute_curve_type(
-                si.surface(SrfIndex::First),
+                k, si.surface(SrfIndex::First),
                 si.surface(SrfIndex::Second),
                 c1,
                 c2,
@@ -886,7 +887,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         .map(rust_curve)
         .collect::<Result<Vec<_>, _>>()?;
     let mut o = Vec::new();
-    let mut si = match SurfaceIntersector::new(&a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet) {
+    let mut si = match SurfaceIntersector::new(&k, &a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet) {
         Ok(si) => si,
         Err(e) => {
             if let Some(d) = Output::unported(&e) {
@@ -1017,7 +1018,9 @@ fn gen_plane(rng: &mut Rng, s: f64) -> SurfaceIn {
 fn clamped_knots(rng: &mut Rng, n: usize, p: usize, lo: f64, hi: f64) -> Vec<f64> {
     let interior = n - p - 1;
     let mut inner: Vec<f64> = (0..interior)
-        .map(|i| lo + (hi - lo) * (i as f64 + 1.0 + rng.uniform(-0.3, 0.3)) / (interior as f64 + 1.0))
+        .map(|i| {
+            lo + (hi - lo) * (i as f64 + 1.0 + rng.uniform(-0.3, 0.3)) / (interior as f64 + 1.0)
+        })
         .collect();
     inner.sort_by(f64::total_cmp);
     let mut k = vec![lo; p + 1];
@@ -1105,10 +1108,10 @@ fn gen_domain(rng: &mut Rng, nat: [f64; 4]) -> [f64; 4] {
 }
 
 /// Rust evaluation of a generated surface (for consistent points); `None` on failure.
-fn eval_srf(s: &Surface, uv: [f64; 2]) -> Option<[[f64; 3]; 6]> {
+fn eval_srf(k: &Kernel, s: &Surface, uv: [f64; 2]) -> Option<[[f64; 3]; 6]> {
     let m = s
         .evaluate(
-            p2(uv),
+            k, p2(uv),
             2,
             2,
             solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags::default(),
@@ -1127,7 +1130,7 @@ fn lerp_dom(d: [f64; 4], a: f64, c: f64) -> [f64; 2] {
 
 /// One surface's part of a generated point: `uv duv matrix[3][3]` values, the surface
 /// point and the curve tangent it implies.
-fn gen_srf_part(
+fn gen_srf_part(k: &Kernel, 
     rng: &mut Rng,
     srf: &Surface,
     dom: [f64; 4],
@@ -1143,7 +1146,7 @@ fn gen_srf_part(
     v.extend(uv);
     v.extend(dir);
     let fallback = rng.point3(-1.0, 1.0);
-    let [p, du, dv, duu, duv, dvv] = eval_srf(srf, uv).unwrap_or([fallback; 6]);
+    let [p, du, dv, duu, duv, dvv] = eval_srf(k, srf, uv).unwrap_or([fallback; 6]);
     let n = cross(du, dv);
     let tan = [
         du[0] * dir[0] + dv[0] * dir[1],
@@ -1165,7 +1168,7 @@ fn gen_srf_part(
 
 /// A point: consistent with the surfaces along a UV line, perturbed, or random.
 #[allow(clippy::too_many_arguments)]
-fn gen_point(
+fn gen_point(k: &Kernel, 
     rng: &mut Rng,
     srfs: &[Surface; 2],
     doms: [[f64; 4]; 2],
@@ -1192,8 +1195,8 @@ fn gen_point(
     let mut uvs = Vec::new();
     let mut mats = Vec::new();
     let [s0, s1] = srfs;
-    let (p0, tan0) = gen_srf_part(rng, s0, doms[0], base[0], dir[0], t, &mut mats);
-    let (p1, _) = gen_srf_part(rng, s1, doms[1], base[1], dir[1], t, &mut mats);
+    let (p0, tan0) = gen_srf_part(k, rng, s0, doms[0], base[0], dir[0], t, &mut mats);
+    let (p1, _) = gen_srf_part(k, rng, s1, doms[1], base[1], dir[1], t, &mut mats);
     // gen_srf_part writes `uv duv` then the 27 matrix values: split them
     for chunk in [mats.get(..31), mats.get(31..)].into_iter().flatten() {
         uvs.extend(chunk.iter().take(4));
@@ -1416,6 +1419,7 @@ fn gen_op(
 }
 
 fn gen_case(rng: &mut Rng) -> Option<Inputs> {
+    let k = &Kernel::default();
     let s = gen_scale(rng);
     let scenario = rng.below(10);
     let a = match scenario {
@@ -1466,20 +1470,40 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             2 => 0.05,
             _ => 0.3,
         };
-        *d = [mag * (n[2] - n[0]) * ang.cos(), mag * (n[3] - n[1]) * ang.sin()];
+        *d = [
+            mag * (n[2] - n[0]) * ang.cos(),
+            mag * (n[3] - n[1]) * ang.sin(),
+        ];
     }
     if b.is_none() || rng.chance(0.3) {
         dir[1] = dir[0];
         if b.is_none() {
             let b0 = base[0];
-            return Some(build(rng, a, b, dom1, dom2, fillet, curves, &srfs, doms, [b0, b0], dir, s));
+            return Some(build(
+                k,
+                rng,
+                a,
+                b,
+                dom1,
+                dom2,
+                fillet,
+                curves,
+                &srfs,
+                doms,
+                [b0, b0],
+                dir,
+                s,
+            ));
         }
     }
-    Some(build(rng, a, b, dom1, dom2, fillet, curves, &srfs, doms, base, dir, s))
+    Some(build(
+        k, rng, a, b, dom1, dom2, fillet, curves, &srfs, doms, base, dir, s,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build(
+    k: &Kernel,
     rng: &mut Rng,
     a: SurfaceIn,
     b: Option<SurfaceIn>,
@@ -1499,7 +1523,7 @@ fn build(
         .map(|i| {
             let t = i as f64 * step;
             let param = t * (1.0 + rng.uniform(-0.01, 0.01));
-            gen_point(rng, srfs, doms, base, dir, t, param)
+            gen_point(k, rng, srfs, doms, base, dir, t, param)
         })
         .collect();
     let mut np = n_pts;

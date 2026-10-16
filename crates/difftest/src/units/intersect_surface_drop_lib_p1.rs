@@ -655,7 +655,7 @@ fn closure(c: u8) -> SurfParamType {
 
 /// The shim's `span_undefined`: a Hermite sample outside the domain whose point or
 /// clamped point does not evaluate.
-fn span_undefined(
+fn span_undefined(k: &Kernel, 
     s: &Surface,
     d: &Extent2d,
     a: &DropPt,
@@ -672,8 +672,8 @@ fn span_undefined(
         let hp = h.evaluate_point(nt);
         let uv = Point2::new(hp.x, hp.y);
         if !d.contains_point(uv, EFF_ZERO)
-            && (st(s.evaluate_point(uv))?.is_err()
-                || st(s.evaluate_point(d.clamp_point(uv)))?.is_err())
+            && (st(s.evaluate_point(k, uv))?.is_err()
+                || st(s.evaluate_point(k, d.clamp_point(uv)))?.is_err())
         {
             return Ok(true);
         }
@@ -715,7 +715,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             };
             let p = pt_in(pt)?;
             match st(p.is_moving_along_boundary(
-                &s,
+                k, &s,
                 &ext(*domain),
                 tol[0],
                 tol[1],
@@ -744,11 +744,11 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let d = ext(*domain);
             let a = pt_in(start)?;
             let e = pt_in(end)?;
-            if span_undefined(&s, &d, &a, &e)? {
+            if span_undefined(k, &s, &d, &a, &e)? {
                 o.push(ffi::REJECTED);
                 return Ok(());
             }
-            match st(a.test_span_accuracy(&s, &d, &c, &e, *tol, uv_tol[0], uv_tol[1], *refine))? {
+            match st(a.test_span_accuracy(k, &s, &d, &c, &e, *tol, uv_tol[0], uv_tol[1], *refine))? {
                 Ok(r) => o.extend([
                     0.0,
                     b(r.passes),
@@ -772,7 +772,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             };
             let a = pt_in(start)?;
             let mut e = pt_in(end)?;
-            match st(a.check_seam_jump(&s, closure(*cl), *tol, &mut e))? {
+            match st(a.check_seam_jump(k, &s, closure(*cl), *tol, &mut e))? {
                 Ok(()) => o.push(0.0),
                 Err(code) => o.push(code),
             }
@@ -861,7 +861,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             };
             let c = rust_curve(k, curve)?;
             let r = s.drop_iso_curve(
-                &ext(*domain),
+                k, &ext(*domain),
                 &c,
                 &Extent1d::from_min_max(interval[0], interval[1]),
                 p2(*start_uv),
@@ -1262,7 +1262,7 @@ fn gen_moving(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
     let uv = uv_on_boundary(rng, domain, tol);
     // a tangent in the surface tangent plane (or a random one)
     let (_, su, sv) = srf
-        .evaluate_1st_derivatives(Point2::new(uv[0], uv[1]), true, true)
+        .evaluate_1st_derivatives(k, Point2::new(uv[0], uv[1]), true, true)
         .ok()?;
     let a = rng.uniform(-1.0, 1.0);
     let c = rng.uniform(-1.0, 1.0);
@@ -1288,13 +1288,13 @@ fn gen_moving(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
 }
 
 /// A curve near the surface: through surface points (perhaps offset).
-fn gen_curve_near(rng: &mut Rng, srf: &Surface, d: [f64; 4], s: f64) -> Option<CurveIn> {
+fn gen_curve_near(k: &Kernel, rng: &mut Rng, srf: &Surface, d: [f64; 4], s: f64) -> Option<CurveIn> {
     let n = 2 + rng.below(4) as usize;
     let off = pick(rng, &[0.0, 0.0, 1.0e-9, 1.0e-6, 1.0e-3, 0.1], 0.0) * s;
     let mut cpts = Vec::new();
     for _ in 0..n {
         let uv = uv_in(rng, d);
-        let p = srf.evaluate_point(Point2::new(uv[0], uv[1])).ok()?;
+        let p = srf.evaluate_point(k, Point2::new(uv[0], uv[1])).ok()?;
         let p = add3(arr3(p), scale3(unit_dir(rng), off));
         cpts.push([p[0], p[1], p[2], NOW]);
     }
@@ -1313,7 +1313,7 @@ fn gen_span(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
     let surface = gen_surface(rng, s);
     let (srf, nat) = surface_with_domain(k, &surface)?;
     let domain = gen_domain(rng, nat);
-    let curve = gen_curve_near(rng, &srf, domain, s)?;
+    let curve = gen_curve_near(k, rng, &srf, domain, s)?;
     let c = rust_curve(k, &curve).ok()?;
     let ivl = c.natural_interval();
     let mut ta = rng.uniform(ivl.min(), ivl.max());
@@ -1531,11 +1531,11 @@ fn gen_iso(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
         2 => end[1] += frac * w[1],
         _ => end[1] -= frac * w[1],
     }
-    let pa = arr3(srf.evaluate_point(Point2::new(start[0], start[1])).ok()?);
-    let pb = arr3(srf.evaluate_point(Point2::new(end[0], end[1])).ok()?);
+    let pa = arr3(srf.evaluate_point(k, Point2::new(start[0], start[1])).ok()?);
+    let pb = arr3(srf.evaluate_point(k, Point2::new(end[0], end[1])).ok()?);
     let nrm = arr3(
         srf.evaluate_normal(
-            Point2::new(start[0], start[1]),
+            k, Point2::new(start[0], start[1]),
             solidcore::nurbs::knots::Side::Left,
             solidcore::nurbs::knots::Side::Left,
         )
@@ -1567,7 +1567,7 @@ fn gen_iso(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
             }
             CurveIn::Line { a, b: bb }
         }
-        _ => gen_curve_near(rng, &srf, domain, s)?,
+        _ => gen_curve_near(k, rng, &srf, domain, s)?,
     };
     let c = rust_curve(k, &curve).ok()?;
     let ivl = c.natural_interval();
@@ -1599,8 +1599,8 @@ fn gen_trim(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
         nat[0] + 0.75 * (nat[2] - nat[0]),
         nat[1] + 0.5 * (nat[3] - nat[1]),
     ];
-    let pa = arr3(srf.evaluate_point(Point2::new(a[0], a[1])).ok()?);
-    let pb = arr3(srf.evaluate_point(Point2::new(bb[0], bb[1])).ok()?);
+    let pa = arr3(srf.evaluate_point(k, Point2::new(a[0], a[1])).ok()?);
+    let pb = arr3(srf.evaluate_point(k, Point2::new(bb[0], bb[1])).ok()?);
     Some(Inputs::Trim {
         surface,
         curve: CurveIn::Line { a: pa, b: pb },

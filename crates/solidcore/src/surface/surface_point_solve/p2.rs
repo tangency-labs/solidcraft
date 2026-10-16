@@ -114,7 +114,7 @@ impl SurfPtGlobalSolver<'_> {
     ///
     /// `SM_ERR` when neither guess has a defined objective value; those of the
     /// objective function and the grid search.
-    pub fn find_rough_guess(&mut self) -> Result<RoughGuess> {
+    pub fn find_rough_guess(&mut self, k: &Kernel) -> Result<RoughGuess> {
         // init output
         let mut best_idx_u = 0;
         let mut best_idx_v = 0;
@@ -124,7 +124,7 @@ impl SurfPtGlobalSolver<'_> {
         let mut suspicious = false;
 
         // Find a guess from a BSplineSurface's control polygon
-        let poly_ok = match self.find_polygon_guess((best_idx_u, best_idx_v)) {
+        let poly_ok = match self.find_polygon_guess(k, (best_idx_u, best_idx_v)) {
             Ok(g) => {
                 uv = g.uv;
                 best_idx_u = g.best_idx_u;
@@ -178,6 +178,7 @@ impl SurfPtGlobalSolver<'_> {
         // best guess, search a grid of UV samples for the best UV guess point
         for _ in 0..num_iters {
             self.refine_patch_by_grid(
+                k,
                 &sub_domain,
                 grid_size_u,
                 grid_size_v,
@@ -216,8 +217,8 @@ impl SurfPtGlobalSolver<'_> {
         // If guesses from both FindPolygonGuess() and RefinePatchByGrid(), pick the
         // better one.
         if poly_ok && grid_ok {
-            let poly_dist = self.calc_func_val(uv)?;
-            let grid_dist = self.calc_func_val(grid_uv_guess)?;
+            let poly_dist = self.calc_func_val(k, uv)?;
+            let grid_dist = self.calc_func_val(k, grid_uv_guess)?;
 
             // when either guess is uninitialized - quit
             if poly_dist >= BIG_DOUBLE && grid_dist >= BIG_DOUBLE {
@@ -254,7 +255,7 @@ impl SurfPtGlobalSolver<'_> {
     ///
     /// `SM_ERR` without a B-spline surface with a NURB; those of the seam check, the
     /// leg refinement and the Greville abscissae.
-    pub fn find_polygon_guess(&self, best_idx: (usize, usize)) -> Result<PolygonGuess> {
+    pub fn find_polygon_guess(&self, k: &Kernel, best_idx: (usize, usize)) -> Result<PolygonGuess> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline() else {
@@ -279,7 +280,7 @@ impl SurfPtGlobalSolver<'_> {
                     // when the BestDist is small compared to the Average spacing
                     if t.best_dist < t.ave_cpt_dist / 100.0 {
                         // Also check distance to the surface. [091002]
-                        let srf_pt = eval_point(b.surface(), uv, Point3::UNDEF)?;
+                        let srf_pt = eval_point(k, b.surface(), uv, Point3::UNDEF)?;
                         let surf_dist = srf_pt.distance(test_pt);
 
                         if surf_dist < t.ave_cpt_dist / 100.0 {
@@ -377,7 +378,7 @@ impl SurfPtGlobalSolver<'_> {
             // Adjacent u-points with the same value (presumably coincident).
             for ii in 0..num_u {
                 if let Some(guess) = self.leg_or_none(ii, best_idx_v)? {
-                    srf_pt = eval_point(b.surface(), guess, srf_pt)?;
+                    srf_pt = eval_point(k, b.surface(), guess, srf_pt)?;
                     let this_dist = srf_pt.distance(test_pt);
                     if this_dist < best_dist {
                         best_dist = this_dist;
@@ -396,7 +397,7 @@ impl SurfPtGlobalSolver<'_> {
             // Adjacent v-points.
             for ii in 0..num_v {
                 if let Some(guess) = self.leg_or_none(best_idx_u, ii)? {
-                    srf_pt = eval_point(b.surface(), guess, srf_pt)?;
+                    srf_pt = eval_point(k, b.surface(), guess, srf_pt)?;
                     let this_dist = srf_pt.distance(test_pt);
                     if this_dist < best_dist {
                         best_dist = this_dist;
@@ -479,7 +480,7 @@ impl SurfPtGlobalSolver<'_> {
         for _ in 0..3 {
             this_f_val = next_f_val;
 
-            next_f_val = self.calc_func_val(next_uv)?;
+            next_f_val = self.calc_func_val(k, next_uv)?;
 
             if next_f_val.abs() < EFF_ZERO_SQRT {
                 *uv_guess = next_uv;
@@ -505,7 +506,7 @@ impl SurfPtGlobalSolver<'_> {
             let (pt, su, sv) = self
                 .base
                 .surface()
-                .evaluate_1st_derivatives(next_uv, false, false)?;
+                .evaluate_1st_derivatives(k, next_uv, false, false)?;
 
             let (u_shift, v_shift);
             if op == SolverOperation::Signed3dDirectedMaximize {
@@ -585,7 +586,7 @@ impl SurfPtGlobalSolver<'_> {
 
         // We didn't return with success during the loop.
         this_f_val = next_f_val;
-        next_f_val = self.calc_func_val(next_uv)?;
+        next_f_val = self.calc_func_val(k, next_uv)?;
 
         *uv_guess = if next_f_val < this_f_val {
             next_uv
@@ -615,6 +616,7 @@ impl SurfPtGlobalSolver<'_> {
     /// Those of the objective function and the stride check.
     pub fn refine_patch_by_grid(
         &self,
+        k: &Kernel,
         sub_domain: &Extent2d,
         num_u: i32,
         num_v: i32,
@@ -622,7 +624,7 @@ impl SurfPtGlobalSolver<'_> {
         best_func_val: &mut f64,
     ) -> Result<()> {
         let surface = self.base.surface();
-        let mut this_grid_pt = SurfaceEval::new(Some(surface));
+        let mut this_grid_pt = SurfaceEval::new(k, Some(surface));
 
         let num_u = num_u.max(2);
         let num_v = num_v.max(2);
@@ -637,13 +639,13 @@ impl SurfPtGlobalSolver<'_> {
 
                 this_grid_pt.set_uv(this_uv);
 
-                let mut this_val = self.calc_func_val(this_uv)?;
+                let mut this_val = self.calc_func_val(k, this_uv)?;
 
                 let mut best_uv = this_uv; // Best of: this uv, or one of the refined ones.
 
                 // Check for too-big strides.  [B46, B51]
                 if let Some((temp_srf_pt, temp_val)) =
-                    self.check_bad_guess_stride(&mut this_grid_pt)?
+                    self.check_bad_guess_stride(k, &mut this_grid_pt)?
                 {
                     if temp_val < this_val {
                         this_val = temp_val;
@@ -672,6 +674,7 @@ impl SurfPtGlobalSolver<'_> {
     /// Those of the objective function, the grid search and the Greville abscissae.
     pub fn refine_guess_by_grid(
         &self,
+        k: &Kernel,
         uv_guess: Point2,
         best_idx_u: usize,
         best_idx_v: usize,
@@ -681,7 +684,7 @@ impl SurfPtGlobalSolver<'_> {
 
         // Sometimes the original guess is better than any gridded value.
         let mut best_uv_guess = uv_guess;
-        let mut best_val = self.calc_func_val(best_uv_guess)?;
+        let mut best_val = self.calc_func_val(k, best_uv_guess)?;
 
         // Find a subdomain around rUVGuess.
         let (mut min_uv, mut max_uv);
@@ -728,6 +731,7 @@ impl SurfPtGlobalSolver<'_> {
         let mut this_val = BIG_DOUBLE;
 
         self.refine_patch_by_grid(
+            k,
             &sub_domain,
             grid_size,
             grid_size,
@@ -762,6 +766,7 @@ impl SurfPtGlobalSolver<'_> {
             let _ = sub_domain.set_min_max(min_uv, max_uv);
 
             self.refine_patch_by_grid(
+                k,
                 &sub_domain,
                 grid_size,
                 grid_size,
@@ -831,7 +836,7 @@ impl SurfPtGlobalSolver<'_> {
             b.loose_tol(),
             b.solver_op(),
         )?;
-        let mut other_eval = SurfPtSolveStepper::copy_of(&this_eval);
+        let mut other_eval = SurfPtSolveStepper::copy_of(k, &this_eval);
         let tight_tol = b.tight_tol();
 
         // For comparison:
@@ -842,7 +847,7 @@ impl SurfPtGlobalSolver<'_> {
         };
 
         // Do U direction.
-        if self.closed_surface(SurfParamType::U)?
+        if self.closed_surface(k, SurfParamType::U)?
             && (which_bound == SurfParamType::U || which_bound == SurfParamType::Both)
         {
             let dom = domain.u_interval();
@@ -878,7 +883,7 @@ impl SurfPtGlobalSolver<'_> {
         }
 
         // Now do V direction.
-        if self.closed_surface(SurfParamType::V)?
+        if self.closed_surface(k, SurfParamType::V)?
             && (which_bound == SurfParamType::V || which_bound == SurfParamType::Both)
         {
             let dom = domain.v_interval();
@@ -914,8 +919,8 @@ impl SurfPtGlobalSolver<'_> {
         }
 
         // Finally, check both directions (torus).
-        if self.closed_surface(SurfParamType::U)?
-            && self.closed_surface(SurfParamType::V)?
+        if self.closed_surface(k, SurfParamType::U)?
+            && self.closed_surface(k, SurfParamType::V)?
             && which_bound == SurfParamType::Both
         {
             let dom = domain.u_interval();
@@ -988,7 +993,7 @@ impl SurfPtGlobalSolver<'_> {
         sol.num_variables = 2;
         let mut found_answer = false;
 
-        let rough = match self.find_rough_guess() {
+        let rough = match self.find_rough_guess(k) {
             Ok(r) => r,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_SOLVE)),
@@ -1050,7 +1055,7 @@ impl SurfPtGlobalSolver<'_> {
             // more refined guess.
             let mut try_again = false;
             let mut surf_eval =
-                SurfaceEval::with_uv(Some(surface), sol.start.param(0)?, sol.start.param(1)?);
+                SurfaceEval::with_uv(k, Some(surface), sol.start.param(0)?, sol.start.param(1)?);
 
             match op {
                 SolverOperation::Minimize | SolverOperation::Signed3dDirectedMaximize => {
@@ -1087,7 +1092,7 @@ impl SurfPtGlobalSolver<'_> {
 
             if try_again {
                 let save_guess = uv_guess;
-                match self.refine_guess_by_grid(uv_guess, best_idx_u, best_idx_v) {
+                match self.refine_guess_by_grid(k, uv_guess, best_idx_u, best_idx_v) {
                     Ok(refined) => {
                         uv_guess = refined;
                         // eStat is now RefineGuessByGrid's status, even if the
@@ -1193,6 +1198,7 @@ pub(super) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
     let enabled = match surface.kind() {
         SurfaceKind::BSpline(b) => b.is_out_of_bounds_enabled(),
         SurfaceKind::Plane(p) => p.base().is_out_of_bounds_enabled(),
+        SurfaceKind::Cone(s) => s.rev().base().is_out_of_bounds_enabled(),
         SurfaceKind::SurfOfRevolution(s) => s.base().is_out_of_bounds_enabled(),
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
@@ -1208,6 +1214,7 @@ pub(super) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
     match copy.kind_mut() {
         SurfaceKind::BSpline(b) => *b.out_of_bounds_enabled_mut() = true,
         SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
+        SurfaceKind::Cone(s) => *s.rev.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
@@ -1218,8 +1225,8 @@ pub(super) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
 }
 
 /// `pSurf->EvaluatePoint(uv, rPt)` with its status ignored: `prev` on failure.
-fn eval_point(surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
-    match surface.evaluate_point(uv) {
+fn eval_point(k: &Kernel, surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
+    match surface.evaluate_point(k, uv) {
         Ok(p) => Ok(p),
         Err(e) if e.is_unported() => Err(e),
         Err(_) => Ok(prev),
@@ -1265,7 +1272,7 @@ impl SurfPtSolveStepper<'_> {
     /// `SM_ERR` when there is no step and the UV is outside the domain (it is clamped
     /// to the domain: upstream's outputs are `adjusted`, scale `0`); those of the
     /// evaluations.
-    pub fn adjust_step(&mut self, prev: &Self) -> Result<(bool, f64)> {
+    pub fn adjust_step(&mut self, k: &Kernel, prev: &Self) -> Result<(bool, f64)> {
         let mut adjusted = false;
         let mut scale = 1.0;
         let domain = *self.base.domain();
@@ -1321,7 +1328,7 @@ impl SurfPtSolveStepper<'_> {
                 // Evaluate both and use the better one.
                 self.set_uv(clamped_uv);
 
-                let mut scaled_eval = Self::copy_of(self);
+                let mut scaled_eval = Self::copy_of(k, self);
                 scaled_eval.set_uv(bc.clamped_uv_scaled.unwrap_or(next_uv));
 
                 if scaled_eval.error_norm(ErrorNormType::SumAbs)?
@@ -1385,13 +1392,13 @@ impl SurfPtSolveStepper<'_> {
     /// # Errors
     ///
     /// Those of [`Self::converged`].
-    pub fn converged_with(&mut self, use_tight_tol: bool) -> Result<bool> {
+    pub fn converged_with(&mut self, k: &Kernel, use_tight_tol: bool) -> Result<bool> {
         let tol = if use_tight_tol {
             self.base.tight_tol()
         } else {
             self.base.loose_tol()
         };
-        self.converged(tol)
+        self.converged(k, tol)
     }
 
     /// Whether the evaluation has converged within `tol` (`Converged(double)`): on
@@ -1403,7 +1410,7 @@ impl SurfPtSolveStepper<'_> {
     ///
     /// [`SolidError::Unported`] from the evaluation and, at a singularity,
     /// `SmSurfaceEval::Normal` (`surface.surface_p4`).
-    pub fn converged(&mut self, tol: f64) -> Result<bool> {
+    pub fn converged(&mut self, k: &Kernel, tol: f64) -> Result<bool> {
         self.eval()?;
 
         // If surface point equals test point, we're done.
@@ -1417,7 +1424,7 @@ impl SurfPtSolveStepper<'_> {
         }
 
         // We're at a singularity.
-        let norm = self.normal()?;
+        let norm = self.normal(k)?;
 
         if norm.length_squared() < EFF_ZERO_SQ {
             return Ok(false);
@@ -1646,7 +1653,7 @@ impl SurfPtSolveStepper<'_> {
     ///
     /// Those of [`Self::line_search_bracketted`]; [`SolidError::Unported`] from the
     /// evaluations.
-    pub fn line_search(&mut self, prev: &mut Self) -> Result<()> {
+    pub fn line_search(&mut self, k: &Kernel, prev: &mut Self) -> Result<()> {
         const VALS: [f64; 4] = [0.1, 0.2, 0.4, 0.7]; // was: { 0.5, 0.2, 0.8, 0.4, 0.6, 0.1, 0.9 }
 
         // If one function value (F or G) is much bigger than the other, and it
@@ -1657,7 +1664,7 @@ impl SurfPtSolveStepper<'_> {
             && self.error_norm(ErrorNormType::FAbs)?
                 > 10.0 * self.error_norm(ErrorNormType::GAbs)?
         {
-            return self.line_search_bracketted(prev, ErrorNormType::F);
+            return self.line_search_bracketted(k, prev, ErrorNormType::F);
         }
         if prev.error_norm(ErrorNormType::G)? * self.error_norm(ErrorNormType::G)? < 0.0
             && prev.error_norm(ErrorNormType::GAbs)?
@@ -1665,7 +1672,7 @@ impl SurfPtSolveStepper<'_> {
             && self.error_norm(ErrorNormType::GAbs)?
                 > 10.0 * self.error_norm(ErrorNormType::FAbs)?
         {
-            return self.line_search_bracketted(prev, ErrorNormType::G);
+            return self.line_search_bracketted(k, prev, ErrorNormType::G);
         }
 
         // Since we're likely in a problem area, use 3d gap for the error,
@@ -1679,7 +1686,7 @@ impl SurfPtSolveStepper<'_> {
             ErrorNormType::Gap
         };
 
-        let mut third_eval = Self::copy_of(self); // init to this: bnds counts, etc.
+        let mut third_eval = Self::copy_of(k, self); // init to this: bnds counts, etc.
 
         // Set dBestErr and dBestVal.
         let err0 = prev.error_norm(norm_type)?;
@@ -1754,6 +1761,7 @@ impl SurfPtSolveStepper<'_> {
     /// bracket zero; [`SolidError::Unported`] from the evaluations.
     pub fn line_search_bracketted(
         &mut self,
+        k: &Kernel,
         prev: &mut Self,
         norm_type: ErrorNormType,
     ) -> Result<()> {
@@ -1783,7 +1791,7 @@ impl SurfPtSolveStepper<'_> {
         let mut x0 = 0.0;
         let mut x1 = 1.0;
 
-        let mut mid_eval = Self::copy_of(prev);
+        let mut mid_eval = Self::copy_of(k, prev);
         let domain = *self.base.domain();
 
         let mut ii = 0;
@@ -2062,7 +2070,7 @@ mod tests {
     }
 
     fn stepper<'s>(
-        k: &Kernel,
+        k: &'s Kernel,
         s: &'s Surface,
         test: Point3,
         uv: Point2,
@@ -2081,9 +2089,9 @@ mod tests {
             SolverOperation::Minimize,
             Point3::new(0.25, 0.75, 2.0),
         );
-        let r = g.find_rough_guess().unwrap();
+        let r = g.find_rough_guess(&k).unwrap();
         assert!((r.uv.x - 0.25).abs() < 1e-12 && (r.uv.y - 0.75).abs() < 1e-12);
-        let p = g.find_polygon_guess((0, 0)).unwrap();
+        let p = g.find_polygon_guess(&k, (0, 0)).unwrap();
         assert!(!p.suspicious);
         assert_eq!(p.uv, r.uv);
 
@@ -2096,7 +2104,7 @@ mod tests {
             SolverOperation::Minimize,
             Point3::new(0.9, 0.9, 0.7),
         );
-        let r = g.find_rough_guess().unwrap();
+        let r = g.find_rough_guess(&k).unwrap();
         assert!(r.uv.x > 0.5 && r.uv.y > 0.5);
     }
 
@@ -2116,12 +2124,16 @@ mod tests {
 
         let mut best = BIG_DOUBLE;
         let mut guess = Point2::new(0.0, 0.0);
-        g.refine_patch_by_grid(&unit_dom(), 3, 1, &mut guess, &mut best)
+        g.refine_patch_by_grid(&k, &unit_dom(), 3, 1, &mut guess, &mut best)
             .unwrap();
         assert!((best - 1.0).abs() < 1e-12);
 
-        let uv = g.refine_guess_by_grid(Point2::new(0.9, 0.1), 1, 1).unwrap();
-        assert!(g.calc_func_val(uv).unwrap() <= g.calc_func_val(Point2::new(0.9, 0.1)).unwrap());
+        let uv = g
+            .refine_guess_by_grid(&k, Point2::new(0.9, 0.1), 1, 1)
+            .unwrap();
+        assert!(
+            g.calc_func_val(&k, uv).unwrap() <= g.calc_func_val(&k, Point2::new(0.9, 0.1)).unwrap()
+        );
     }
 
     #[test]
@@ -2171,17 +2183,17 @@ mod tests {
         assert_eq!(st.error_norm(ErrorNormType::Max).unwrap(), -0.25);
         assert_eq!(st.error_norm(ErrorNormType::MaxAbs).unwrap(), 0.25);
         assert_eq!(st.is_singular().unwrap(), (false, SurfParamType::Neither));
-        assert!(!st.converged(1e-6).unwrap());
+        assert!(!st.converged(&k, 1e-6).unwrap());
 
         // a Newton step on a plane lands on the foot point
-        let mut next = SurfPtSolveStepper::copy_of(&st);
+        let mut next = SurfPtSolveStepper::copy_of(&k, &st);
         assert_eq!(
             next.step(&Kernel::default(), &mut st, false).unwrap(),
             TerminationReason::StillIterating
         );
         assert!((next.uv().x - 0.5).abs() < 1e-12 && (next.uv().y - 0.25).abs() < 1e-12);
-        assert!(next.converged(1e-6).unwrap());
-        assert!(next.converged_with(false).unwrap());
+        assert!(next.converged(&k, 1e-6).unwrap());
+        assert!(next.converged_with(&k, false).unwrap());
 
         // pushing a boundary
         let mut b = stepper(
@@ -2225,19 +2237,19 @@ mod tests {
             Point2::new(0.5, 0.5),
             SolverOperation::Minimize,
         );
-        let mut this = SurfPtSolveStepper::copy_of(&prev);
+        let mut this = SurfPtSolveStepper::copy_of(&k, &prev);
         this.set_uv(Point2::new(1.5, 0.5));
-        let (adjusted, scale) = this.adjust_step(&prev).unwrap();
+        let (adjusted, scale) = this.adjust_step(&k, &prev).unwrap();
         assert!(adjusted);
         assert!((scale - 0.5).abs() < 1e-12);
         assert_eq!(this.uv(), Point2::new(1.0, 0.5));
         assert_eq!(this.bound_hits_u(), 1);
 
         // no step, outside: clamped, SM_ERR
-        let mut out = SurfPtSolveStepper::copy_of(&prev);
+        let mut out = SurfPtSolveStepper::copy_of(&k, &prev);
         out.set_uv(Point2::new(1.5, 0.5));
-        let prev_out = SurfPtSolveStepper::copy_of(&out);
-        assert!(out.adjust_step(&prev_out).is_err());
+        let prev_out = SurfPtSolveStepper::copy_of(&k, &out);
+        assert!(out.adjust_step(&k, &prev_out).is_err());
         assert_eq!(out.uv(), Point2::new(1.0, 0.5));
 
         let mut prev = stepper(
@@ -2247,14 +2259,14 @@ mod tests {
             Point2::new(0.1, 0.1),
             SolverOperation::Minimize,
         );
-        let mut this = SurfPtSolveStepper::copy_of(&prev);
+        let mut this = SurfPtSolveStepper::copy_of(&k, &prev);
         this.set_uv(Point2::new(0.9, 0.9));
         let before = this.error_norm(ErrorNormType::Gap).unwrap();
-        this.line_search(&mut prev).unwrap();
+        this.line_search(&k, &mut prev).unwrap();
         assert!(this.error_norm(ErrorNormType::Gap).unwrap() <= before);
 
         assert!(this
-            .line_search_bracketted(&mut prev, ErrorNormType::Gap)
+            .line_search_bracketted(&k, &mut prev, ErrorNormType::Gap)
             .is_err());
     }
 }

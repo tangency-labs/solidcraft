@@ -237,7 +237,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 base.operation = SolverOperation::Intersect;
                 base.tolerance_3d = 1e-6;
                 let mut solver = CsiGlobalSolver::new(
-                    curve_tree,
+                    &k, curve_tree,
                     tree,
                     Some(cache.surface()),
                     false,
@@ -247,9 +247,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 solver.base = base;
                 solver.curve = Some(&curve);
                 solver.surface_cache = Some(&cache);
-                solver.kernel = Some(&k);
+                solver.kernel = &k;
                 solver
-                    .local_solve_branch(&[Some(NodeId(0)), Some(NodeId(0)), None])
+                    .local_solve_branch(&k, &[Some(NodeId(0)), Some(NodeId(0)), None])
                     .map(|more| {
                         let mut out = vec![
                             0.0,

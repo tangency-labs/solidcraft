@@ -203,8 +203,13 @@ fn is_singularity(k: &Kernel, srf: &BSplineSurface, uv: Point2) -> Result<(bool,
 }
 
 /// `SmSurface::IsClosed(domain, dir)`.
-fn is_closed(srf: &BSplineSurface, domain: &Extent2d, dir: SurfParamType) -> Result<bool> {
-    Ok(crate::surface::surface::p7::base_is_closed(srf, domain, dir, None, false)?.0)
+fn is_closed(
+    k: &Kernel,
+    srf: &BSplineSurface,
+    domain: &Extent2d,
+    dir: SurfParamType,
+) -> Result<bool> {
+    Ok(crate::surface::surface::p7::base_is_closed(k, srf, domain, dir, None, false)?.0)
 }
 
 /// The curves dropped by `SmSurface::DropCurve` (with its two distance outputs, which
@@ -1122,11 +1127,12 @@ impl BSplineSurface {
     /// The errors of [`BSplineSurface::create_extended_surface_dir`].
     pub fn create_extended_surface(
         &self,
+        k: &Kernel,
         dist: f64,
         extension_continuity: ContinuityType,
     ) -> Result<BSplineSurface> {
         // pass the call along
-        self.create_extended_surface_dir(SurfParamType::Both, dist, extension_continuity)
+        self.create_extended_surface_dir(k, SurfParamType::Both, dist, extension_continuity)
     }
 
     /// The surface extended by `dist` across the sides named by `ext_direction`
@@ -1148,6 +1154,7 @@ impl BSplineSurface {
     /// singularity and closedness tests.
     pub fn create_extended_surface_dir(
         &self,
+        k: &Kernel,
         ext_direction: SurfParamType,
         dist: f64,
         extension_continuity: ContinuityType,
@@ -1156,8 +1163,8 @@ impl BSplineSurface {
             ext_direction,
             dist,
             extension_continuity,
-            &|uv| is_singularity(&Kernel::default(), self, uv),
-            &|domain, dir| is_closed(self, domain, dir),
+            &|uv| is_singularity(k, self, uv),
+            &|domain, dir| is_closed(k, self, domain, dir),
         )
     }
 
@@ -1893,8 +1900,9 @@ mod tests {
 
     #[test]
     fn extended_surface_runs() {
+        let k = &Kernel::default();
         let s = plane_surface();
-        let r = s.create_extended_surface(0.1, ContinuityType::G1);
+        let r = s.create_extended_surface(k, 0.1, ContinuityType::G1);
         assert!(r.is_ok(), "{r:?}");
     }
 

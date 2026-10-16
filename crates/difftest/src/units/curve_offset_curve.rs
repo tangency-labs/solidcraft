@@ -415,9 +415,9 @@ fn state(o: &mut Vec<f64>, c: &Curve) -> Result<(), SolidError> {
     Ok(())
 }
 
-fn probes(o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), SolidError> {
+fn probes(k: &Kernel, o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), SolidError> {
     for &t in ts {
-        match c.evaluate_point(t) {
+        match c.evaluate_point(k, t) {
             Ok(p) => {
                 o.push(0.0);
                 pv(o, p);
@@ -425,7 +425,7 @@ fn probes(o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), SolidError> {
             Err(e @ SolidError::Unported { .. }) => return Err(e),
             Err(e) => o.push(status(&e)),
         }
-        match c.evaluate(t, 3, true, true) {
+        match c.evaluate(k, t, 3, true, true) {
             Ok(v) => {
                 o.push(0.0);
                 for x in v {
@@ -440,7 +440,7 @@ fn probes(o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), SolidError> {
 }
 
 /// Runs the op; `Err` is a Rust failure of the op itself (reported as its status).
-fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
+fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
     if let OpIn::ReadDb {
         binary,
         version,
@@ -465,7 +465,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
         let c = Curve::from(OffsetCurve::read_from_db(&Kernel::default(), &mut db, *version)?);
         o.push(0.0);
         state(o, &c)?;
-        return probes(o, &c, ts);
+        return probes(k, o, &c, ts);
     }
     let (under, mut c) = build(i).map_err(|_| SolidError::InvalidInput {
         operation: "difftest",
@@ -482,14 +482,14 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             left,
             nonzero,
         } => {
-            let v = c.evaluate(*t, *n, *left, *nonzero)?;
+            let v = c.evaluate(k, *t, *n, *left, *nonzero)?;
             o.push(0.0);
             for x in v {
                 pv(o, x);
             }
         }
         OpIn::EvalPoint { t } => {
-            let p = c.evaluate_point(*t)?;
+            let p = c.evaluate_point(k, *t)?;
             o.push(0.0);
             pv(o, p);
         }
@@ -507,7 +507,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             }
         }
         OpIn::Continuities { angle } => {
-            let (min, all) = c.calculate_continuities(*angle)?;
+            let (min, all) = c.calculate_continuities(k, *angle)?;
             o.push(0.0);
             o.push(f64::from(min as i32));
             o.push(all.len() as f64);
@@ -517,7 +517,7 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             let ivl = c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb))?;
             o.extend([0.0, ivl.min(), ivl.max()]);
             state(o, &c)?;
-            probes(o, &c, ts)?;
+            probes(k, o, &c, ts)?;
         }
         OpIn::Trim {
             a,
@@ -539,16 +539,16 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
             };
             o.extend([s, ivl.min(), ivl.max()]);
             state(o, &c)?;
-            probes(o, &c, ts)?;
+            probes(&k, o, &c, ts)?;
         }
         OpIn::Eq { this, copy, other } => {
             o.push(0.0);
             if *this {
-                o.push(b(c.approx_eq(&c)?));
+                o.push(b(c.approx_eq(k, &c)?));
             } else if *copy {
                 let cp = c.copy(&Kernel::default())?;
-                o.push(b(c.approx_eq(&cp)?));
-                o.push(b(cp.approx_eq(&c)?));
+                o.push(b(c.approx_eq(k, &cp)?));
+                o.push(b(cp.approx_eq(k, &c)?));
             } else {
                 let s = other.as_ref().ok_or(SolidError::InvalidInput {
                     operation: "difftest",
@@ -557,15 +557,15 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
                 let mut s = s.clone();
                 s.owns = false;
                 let c2 = build_offset(under, &s);
-                o.push(b(c.approx_eq(&c2)?));
-                o.push(b(c2.approx_eq(&c)?));
+                o.push(b(c.approx_eq(k, &c2)?));
+                o.push(b(c2.approx_eq(k, &c)?));
             }
         }
         OpIn::Copy { probes: ts } => {
             let cp = c.copy(&Kernel::default())?;
             o.push(0.0);
             state(o, &cp)?;
-            probes(o, &cp, ts)?;
+            probes(k, o, &cp, ts)?;
         }
         OpIn::IsKindOf { type_code } => {
             o.push(0.0);
@@ -576,9 +576,9 @@ fn rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), SolidError> {
     Ok(())
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
-    let Err(e) = rust_op(i, &mut o) else {
+    let Err(e) = rust_op(k, i, &mut o) else {
         return Ok(to_output(&o));
     };
     if let Some(d) = Output::unported(&e) {
@@ -934,6 +934,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

@@ -131,6 +131,7 @@ pub(crate) fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
     match surface.kind() {
         SurfaceKind::BSpline(s) => Some(s.is_out_of_bounds_enabled()),
         SurfaceKind::Plane(s) => Some(s.is_out_of_bounds_enabled()),
+        SurfaceKind::Cone(s) => Some(s.rev().is_out_of_bounds_enabled()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.is_out_of_bounds_enabled()),
         SurfaceKind::OffsetSurface(_)
         | SurfaceKind::CurveBounded(_)
@@ -147,6 +148,7 @@ pub(crate) fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
     match surface.kind_mut() {
         SurfaceKind::BSpline(s) => *s.out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::Plane(s) => s.set_out_of_bounds_enabled(enabled),
+        SurfaceKind::Cone(s) => *s.rev.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::OffsetSurface(_)
         | SurfaceKind::CurveBounded(_)
@@ -171,12 +173,14 @@ fn out_of_bounds_copy(surface: &Surface) -> Option<Surface> {
 /// derivative `i` times in `u` and `j` times in `v`; the entries of the lower half (not
 /// computed) are undefined.
 fn evaluate_pvv<S: SurfaceEvaluate + ?Sized>(
+    k: &Kernel,
     surface: &S,
     uv: Point2,
     u_side: Side,
     v_side: Side,
 ) -> Result<[[Vec3; 3]; 3]> {
     let m = surface.evaluate(
+        k,
         uv,
         2,
         2,
@@ -383,18 +387,19 @@ pub fn check_shape_match(
 ///
 /// Those of the evaluations and of `smsurf_EvaluateGeometric`.
 pub fn evaluate_geometric_of<S: SurfaceEvaluate + ?Sized>(
+    k: &Kernel,
     surface: &S,
     uv: Point2,
     u_side: Side,
     v_side: Side,
 ) -> Result<GeometricProperties> {
     // Evaluate Target parameter for position and derivatives
-    let mut pvv = evaluate_pvv(surface, uv, u_side, v_side)?; // exact Tangent values
+    let mut pvv = evaluate_pvv(k, surface, uv, u_side, v_side)?; // exact Tangent values
 
     // make sure there is a normal vector - even at singular points
     let norm = pvv[0][1].cross(pvv[1][0]);
     if norm.length_squared() < EFF_ZERO {
-        pvv[2][2] = surface.evaluate_normal(uv, u_side, v_side)?;
+        pvv[2][2] = surface.evaluate_normal(k, uv, u_side, v_side)?;
     }
 
     // pass the call along
@@ -409,6 +414,7 @@ pub fn evaluate_geometric_of<S: SurfaceEvaluate + ?Sized>(
 /// Those of the evaluations, the zero-length-vector status for a vanishing normal and those of
 /// `smsurf_EvaluateNormalSection`.
 pub fn evaluate_normal_section_of<S: SurfaceEvaluate + ?Sized>(
+    k: &Kernel,
     surface: &S,
     uv: Point2,
     u_side: Side,
@@ -416,12 +422,12 @@ pub fn evaluate_normal_section_of<S: SurfaceEvaluate + ?Sized>(
     direction: Vec3,
 ) -> Result<SurfaceNormalSection> {
     // Get SurfacePoint Evaluation
-    let mut pvv = evaluate_pvv(surface, uv, u_side, v_side)?; // exact Tangent values
+    let mut pvv = evaluate_pvv(k, surface, uv, u_side, v_side)?; // exact Tangent values
 
     // get surface Normal
     let mut surface_normal = pvv[1][0].cross(pvv[0][1]);
     if surface_normal.length_squared() < EFF_ZERO_SQ {
-        surface_normal = surface.evaluate_normal(uv, u_side, v_side)?;
+        surface_normal = surface.evaluate_normal(k, uv, u_side, v_side)?;
     } else {
         surface_normal = surface_normal.unitize()?;
     }
@@ -445,11 +451,12 @@ impl Surface {
     /// Those of the evaluations and of `smsurf_EvaluateGeometric`.
     pub fn evaluate_geometric(
         &self,
+        k: &Kernel,
         uv: Point2,
         u_side: Side,
         v_side: Side,
     ) -> Result<GeometricProperties> {
-        evaluate_geometric_of(self, uv, u_side, v_side)
+        evaluate_geometric_of(k, self, uv, u_side, v_side)
     }
 
     /// The tangent-plane direction, curvature and unit normal of the normal section
@@ -461,12 +468,13 @@ impl Surface {
     /// `smsurf_EvaluateNormalSection`.
     pub fn evaluate_normal_section(
         &self,
+        k: &Kernel,
         uv: Point2,
         u_side: Side,
         v_side: Side,
         direction: Vec3,
     ) -> Result<SurfaceNormalSection> {
-        evaluate_normal_section_of(self, uv, u_side, v_side, direction)
+        evaluate_normal_section_of(k, self, uv, u_side, v_side, direction)
     }
 
     /// The singular sides: a natural boundary is singular (or approximately singular)
@@ -527,7 +535,7 @@ impl Surface {
         // multiplied by the various basis derivatives and added together.  Any
         // numerical noise in the basis derivs is multiplied by the size of the control
         // point numbers.  On very large parts, this can cause problems.  [B253]
-        let mut size = approx_derivative_lengths(self, &uv_domain)?;
+        let mut size = approx_derivative_lengths(k, self, &uv_domain)?;
         // Multiply by domain size.
         size.x *= uv_domain.x_length();
         size.y *= uv_domain.y_length();
@@ -581,6 +589,7 @@ impl Surface {
                 // evaluate this surface point - the 1st derivative needing checking is
                 // in p1stDir
                 if let Some(m) = ignored(self.evaluate(
+                    k,
                     uv,
                     1,
                     1,
@@ -656,7 +665,7 @@ impl Surface {
             ];
             for (slot, (flag, uv)) in points.iter_mut().zip(sides) {
                 if is_pole(flag) {
-                    if let Some(p) = ignored(self.evaluate_point(uv))? {
+                    if let Some(p) = ignored(self.evaluate_point(k, uv))? {
                         *slot = p;
                     }
                 }
@@ -677,7 +686,8 @@ impl Surface {
             ];
             for (slot, (flag, uv, u_left, v_left)) in normals.iter_mut().zip(sides) {
                 if is_pole(flag) {
-                    if let Some(n) = ignored(self.evaluate_normal(uv, side(u_left), side(v_left)))?
+                    if let Some(n) =
+                        ignored(self.evaluate_normal(k, uv, side(u_left), side(v_left)))?
                     {
                         *slot = n;
                     }
@@ -740,7 +750,7 @@ impl Surface {
         };
 
         // We're going to have to expand ourselves right away.
-        let big_domain = self.max_analytic_domain()?;
+        let big_domain = self.max_analytic_domain(k)?;
         if big_domain.is_degenerate(0.0) {
             return Ok(failure);
         }
@@ -765,7 +775,7 @@ impl Surface {
         // out most, and save lots of drops on corners and edges.  (Picture two fillet
         // surfaces end to end that form a closed loop.)
         let uv_other = other_dom.evaluate(0.5, 0.5);
-        if let Some(p) = ignored(other.evaluate_point(uv_other))? {
+        if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
             pt = p;
         }
         if ignored(self.step_inversion(k, &big_domain, pt, tol, None))?.is_none() {
@@ -776,7 +786,7 @@ impl Surface {
         for ii in 0..2_usize {
             for jj in 0..2_usize {
                 let uv_other = other_dom.evaluate(ii as f64, jj as f64);
-                if let Some(p) = ignored(other.evaluate_point(uv_other))? {
+                if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
                     pt = p;
                 }
 
@@ -787,6 +797,7 @@ impl Surface {
                 };
 
                 match ignored(check_seam_drop(
+                    k,
                     self,
                     uv_this,
                     &big_domain,
@@ -809,7 +820,7 @@ impl Surface {
                 new_domain.add_point(uv_this);
 
                 // Check max distance.
-                if let Some(p) = ignored(self.evaluate_step_point(uv_this))? {
+                if let Some(p) = ignored(self.evaluate_step_point(k, uv_this))? {
                     pt2 = p;
                 }
                 let dist = pt.distance(pt2);
@@ -868,7 +879,7 @@ impl Surface {
                 let dv = kk as f64 / denom;
 
                 let uv_other = other_dom.evaluate(du, dv);
-                if let Some(p) = ignored(other.evaluate_point(uv_other))? {
+                if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
                     pt = p;
                 }
 
@@ -880,6 +891,7 @@ impl Surface {
                 };
 
                 match ignored(check_seam_drop(
+                    k,
                     self,
                     uv_this,
                     &big_domain,
@@ -893,7 +905,7 @@ impl Surface {
                 }
 
                 // Check max distance.
-                if let Some(p) = ignored(self.evaluate_step_point(uv_this))? {
+                if let Some(p) = ignored(self.evaluate_step_point(k, uv_this))? {
                     pt2 = p;
                 }
                 let dist = pt.distance(pt2);
@@ -952,7 +964,7 @@ impl Surface {
                 };
 
                 // Do the drop.
-                if let Some(p) = ignored(other.evaluate_point(uv_other))? {
+                if let Some(p) = ignored(other.evaluate_point(k, uv_other))? {
                     pt = p;
                 }
 
@@ -964,6 +976,7 @@ impl Surface {
                 };
 
                 match ignored(check_seam_drop(
+                    k,
                     self,
                     drop_uv,
                     &big_domain,
@@ -982,7 +995,7 @@ impl Surface {
                 }
 
                 // Check max distance.
-                if let Some(p) = ignored(self.evaluate_step_point(drop_uv))? {
+                if let Some(p) = ignored(self.evaluate_step_point(k, drop_uv))? {
                     pt2 = p;
                 }
                 let dist = pt.distance(pt2);
@@ -1056,6 +1069,7 @@ impl Surface {
     /// Those of the solver and of the evaluations.
     pub fn local_plane_surface_intersect(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
         other_uv_domain: &Extent2d,
@@ -1085,6 +1099,7 @@ impl Surface {
         let node_tol = xsect_tol_3d / 100.0; // max allowed Param Space deviations for solution
         let sq_node_tol = node_tol * node_tol;
         let mut equations = SspIntersectEnfo::new(
+            k,
             self,
             other,
             steepest_descent,
@@ -1103,9 +1118,9 @@ impl Surface {
         // when a solution was found
         if solution.found {
             let uv = uv_at(&solution.x, 0, OP_LOCAL_SOLVE)?;
-            let p1 = self.evaluate_point(uv)?;
+            let p1 = self.evaluate_point(k, uv)?;
             let other_uv = uv_at(&solution.x, 2, OP_LOCAL_SOLVE)?;
-            let p2 = other.evaluate_point(other_uv)?;
+            let p2 = other.evaluate_point(k, other_uv)?;
             let dist = p1.distance(p2);
 
             // when dist between surf pts is less than dist Tolerance - save a solution
@@ -1132,6 +1147,7 @@ impl Surface {
     /// solve without a vector (upstream dereferences `NULL`).
     pub fn local_surface_solve(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
         other_uv_domain: &Extent2d,
@@ -1159,7 +1175,7 @@ impl Surface {
         let periodicities = periodicities.get(..n).unwrap_or(&[]);
 
         let mut equations =
-            SsNormalizeEnfo::new(self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
+            SsNormalizeEnfo::new(k, self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(periodicities));
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
@@ -1181,9 +1197,9 @@ impl Surface {
 
         // compute Surf1Point/Surf2Point gap distance
         let uv = uv_at(&solution.x, 0, OP_LOCAL_SOLVE)?;
-        let p1 = self.evaluate_point(uv)?;
+        let p1 = self.evaluate_point(k, uv)?;
         let other_uv = uv_at(&solution.x, 2, OP_LOCAL_SOLVE)?;
-        let p2 = other.evaluate_point(other_uv)?;
+        let p2 = other.evaluate_point(k, other_uv)?;
         let mut dist = p1.distance(p2);
         if signed {
             // Gap Vector going from surface1Point to surface2Point
@@ -1212,6 +1228,7 @@ impl Surface {
     /// Those of the solver and of the evaluations.
     pub fn local_surface_surface_intersect(
         &self,
+        k: &Kernel,
         uv_domain1: &Extent2d,
         surface2: &Surface,
         uv_domain2: &Extent2d,
@@ -1246,7 +1263,7 @@ impl Surface {
         ];
 
         // Construct the Newton-Raphson Solver class with the surf/surf/surf equation set
-        let mut equations = SssIntersectEnfo::new(s1, s2, s3, EFF_ZERO_SQ);
+        let mut equations = SssIntersectEnfo::new(k, s1, s2, s3, EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
 
         // set the solver's exit behavior for solutions that run outside the boundary
@@ -1299,6 +1316,7 @@ impl EvalNFunctions for FindPsNormalEnfo<'_> {
         f: &mut [f64],
         jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
+        let k = self.kernel;
         let (Some(&u), Some(&v)) = (x.first(), x.get(1)) else {
             return Err(SolidError::sm_err(OP_FIND_PS_NORMAL));
         };
@@ -1311,7 +1329,7 @@ impl EvalNFunctions for FindPsNormalEnfo<'_> {
 
         // get Surface evaluations
         let uv = Point2::new(u, v);
-        let d = evaluate_2nd_derivatives(self.surface, uv, Side::Left, Side::Left)?;
+        let d = evaluate_2nd_derivatives(k, self.surface, uv, Side::Left, Side::Left)?;
         let (point, su, sv, suv, suu, svv) = (d.point, d.du, d.dv, d.duv, d.duu, d.dvv);
 
         // failure - zero length surface tangents
@@ -1409,6 +1427,7 @@ impl EvalNFunctions for SssIntersectEnfo<'_> {
         f: &mut [f64],
         jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
+        let k = self.kernel;
         if x.len() != 6 || f.len() != 6 {
             return Err(SolidError::invalid_input(
                 OP_SSS_INTERSECT,
@@ -1421,7 +1440,7 @@ impl EvalNFunctions for SssIntersectEnfo<'_> {
         let surfaces = [self.surface1, self.surface2, self.surface3];
         for (i, surface) in surfaces.iter().enumerate() {
             let uv = uv_at(x, 2 * i, OP_SSS_INTERSECT)?;
-            let (p, du, dv) = evaluate_1st_derivatives(*surface, uv, Side::Left, Side::Left)?;
+            let (p, du, dv) = evaluate_1st_derivatives(k, *surface, uv, Side::Left, Side::Left)?;
             if let (Some(sp), Some(st)) = (self.srf_points.get_mut(i), self.srf_tangents.get_mut(i))
             {
                 *sp = p;
@@ -1517,6 +1536,11 @@ mod tests {
                 .unwrap();
         rev.set_out_of_bounds_enabled(false);
         let gen_flag = |s: &Surface| match s.kind() {
+            SurfaceKind::Cone(r) => r
+                .rev()
+                .gen_curve()
+                .and_then(|g| gen_base(g).ok())
+                .map(Bsc::is_out_of_bounds_enabled),
             SurfaceKind::SurfOfRevolution(r) => r
                 .gen_curve()
                 .and_then(|g| gen_base(g).ok())

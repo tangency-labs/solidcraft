@@ -389,12 +389,12 @@ impl<'c> OdeEdgeLength<'c> {
     ///
     /// The curve evaluation's; [`SolidError::InvalidInput`] when `dydx` has fewer than
     /// 28 entries (upstream writes out of bounds).
-    pub fn evaluate(&self, t: f64, dydx: &mut [f64]) -> Result<()> {
+    pub fn evaluate(&self, k: &Kernel, t: f64, dydx: &mut [f64]) -> Result<()> {
         for v in dydx.iter_mut() {
             *v = 0.0;
         }
 
-        let pv = self.curve.evaluate(t, 1, true, true)?;
+        let pv = self.curve.evaluate(k, t, 1, true, true)?;
         let (Some(&p0), Some(&p1)) = (pv.first(), pv.get(1)) else {
             return Err(null("SmODEEdgeLengthIFEO::Evaluate: short evaluation"));
         };
@@ -475,11 +475,11 @@ impl<'c> OdeEdgeLength<'c> {
 // ---- geometry queries -------------------------------------------------------------------
 
 /// `GetEndTangent`: the curve tangent at the interval's start (`at_start`) or end.
-pub fn end_tangent(b: &Brep, e: EdgeId, at_start: bool) -> Result<Vec3> {
+pub fn end_tangent(k: &Kernel, b: &Brep, e: EdgeId, at_start: bool) -> Result<Vec3> {
     let c = curve_deref(b, e, "GetEndTangent: edge without curve")?;
     let ivl = b.edge(e)?.interval;
     let param = if at_start { ivl.min() } else { ivl.max() };
-    let pv = c.evaluate(param, 1, true, true)?;
+    let pv = c.evaluate(k, param, 1, true, true)?;
     pv.get(1)
         .copied()
         .ok_or_else(|| null("GetEndTangent: short evaluation"))
@@ -1535,7 +1535,7 @@ pub fn is_spine(b: &Brep, e: EdgeId) -> Result<bool> {
 
 /// `IsSeam()`: the edge is a seam of the surface of any of its faces
 /// ([`is_seam_of_surface`]).
-pub fn is_seam(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
+pub fn is_seam(k: &Kernel, b: &Brep, e: EdgeId) -> Result<bool> {
     for f in faces(b, e, None)? {
         if b.face(f)?.surface.is_some() && is_seam_of_surface(k, b, e, f)? {
             return Ok(true);
@@ -1553,12 +1553,7 @@ pub fn is_seam(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
 /// [`SolidError::InvalidInput`] for a face without surface or an edge use without
 /// face (upstream dereferences them); those of the surface queries;
 /// [`SolidError::Unported`] from `SmEdgeuse::NormalizedEvaluate`.
-pub fn is_seam_of_surface(
-    k: &Kernel,
-    b: &mut Brep,
-    e: EdgeId,
-    surface_face: FaceId,
-) -> Result<bool> {
+pub fn is_seam_of_surface(k: &Kernel, b: &Brep, e: EdgeId, surface_face: FaceId) -> Result<bool> {
     let surface = b
         .face(surface_face)?
         .surface
@@ -1569,10 +1564,10 @@ pub fn is_seam_of_surface(
     // surface must be closed
     let dom = surface.natural_uv_domain();
     if !(surface
-        .is_closed(&dom, SurfParamType::U, Some(edge_tol), false)?
+        .is_closed(k, &dom, SurfParamType::U, Some(edge_tol), false)?
         .0
         || surface
-            .is_closed(&dom, SurfParamType::V, Some(edge_tol), false)?
+            .is_closed(k, &dom, SurfParamType::V, Some(edge_tol), false)?
             .0)
     {
         return Ok(false);
@@ -1757,7 +1752,7 @@ pub fn is_topological(
             }
         };
         let uv0 = Point2::new(p.x, p.y);
-        let norm1 = match surf1.evaluate_normal(uv0, Side::Right, Side::Right) {
+        let norm1 = match surf1.evaluate_normal(k, uv0, Side::Right, Side::Right) {
             Ok(n) => n,
             Err(err) => {
                 failed(err)?;
@@ -1773,7 +1768,7 @@ pub fn is_topological(
             }
         };
         let uv1 = Point2::new(p.x, p.y);
-        let norm2 = match surf2.evaluate_normal(uv1, Side::Right, Side::Right) {
+        let norm2 = match surf2.evaluate_normal(k, uv1, Side::Right, Side::Right) {
             Ok(n) => n,
             Err(err) => {
                 failed(err)?;
@@ -1796,8 +1791,8 @@ pub fn is_topological(
         let gap_tol = face2::tolerance(b, face1)? + face2::tolerance(b, face2_)?;
         // statuses ignored upstream; a failure leaves an uninitialised point there, so
         // the port returns the error
-        let pt1 = surf1.evaluate_point(uv0)?;
-        let pt2 = surf2.evaluate_point(uv1)?;
+        let pt1 = surf1.evaluate_point(k, uv0)?;
+        let pt2 = surf2.evaluate_point(k, uv1)?;
         if pt1.distance(pt2) > gap_tol {
             return Ok(out);
         }
@@ -1811,10 +1806,10 @@ pub fn is_topological(
             continue;
         };
         if let Some(c) = closed_u.get_mut(i) {
-            *c = s.is_closed(d, SurfParamType::U, None, false)?.0;
+            *c = s.is_closed(k, d, SurfParamType::U, None, false)?.0;
         }
         if let Some(c) = closed_v.get_mut(i) {
-            *c = s.is_closed(d, SurfParamType::V, None, false)?.0;
+            *c = s.is_closed(k, d, SurfParamType::V, None, false)?.0;
         }
     }
 
@@ -2632,6 +2627,7 @@ mod tests {
 
     #[test]
     fn wire_queries() {
+        let k = &Kernel::default();
         let (b, e, eus, v) = wire();
         assert_eq!(edgeuse_count(&b, e).unwrap(), 2);
         assert!(is_wire(&b, e).unwrap());
@@ -2648,7 +2644,7 @@ mod tests {
         assert_eq!(shells(&b, e, None).unwrap().len(), 1);
         assert!(is_connected_to(&b, e, Some(EntityRef::Vertex(v[1]))).unwrap());
         assert!(is_connected_to(&b, e, None).unwrap());
-        let t = end_tangent(&b, e, true).unwrap();
+        let t = end_tangent(k, &b, e, true).unwrap();
         assert_eq!(t, Vec3::new(1.0, 0.0, 0.0));
     }
 
@@ -2683,13 +2679,14 @@ mod tests {
 
     #[test]
     fn ode_evaluate_needs_room() {
+        let k = &Kernel::default();
         let (b, e, _, _) = wire();
         let c = b.edge(e).unwrap().curve.as_ref().unwrap();
         let ode = OdeEdgeLength::new(c, Vec3::new(0.0, 0.0, 0.0), 1.0);
         let mut short = vec![0.0; 10];
-        assert!(ode.evaluate(0.5, &mut short).is_err());
+        assert!(ode.evaluate(k, 0.5, &mut short).is_err());
         let mut dydx = vec![1.0; 28];
-        ode.evaluate(0.5, &mut dydx).unwrap();
+        ode.evaluate(k, 0.5, &mut dydx).unwrap();
         assert_eq!(dydx[1], 1.0);
         assert_eq!(dydx[0], 0.0);
         assert!((dydx[2] - 2.0 * PI).abs() < 1e-15);

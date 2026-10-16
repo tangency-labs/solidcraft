@@ -384,7 +384,7 @@ pub fn edge_vertices(b: &Brep, e: EdgeId) -> Result<Vec<Option<VertexId>>> {
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an
 /// edge without curve (upstream dereferences null); the curve evaluation's error
 /// (upstream's `SER` status).
-pub fn edge_end_tangent(b: &Brep, e: EdgeId, at_start: bool) -> Result<Vec3> {
+pub fn edge_end_tangent(k: &Kernel, b: &Brep, e: EdgeId, at_start: bool) -> Result<Vec3> {
     let r = b.edge(e)?;
     let curve = r
         .curve
@@ -392,7 +392,7 @@ pub fn edge_end_tangent(b: &Brep, e: EdgeId, at_start: bool) -> Result<Vec3> {
         .ok_or_else(|| null("GetEndTangent: edge without curve"))?;
     let ivl = r.interval;
     let param = if at_start { ivl.min() } else { ivl.max() };
-    let pv = curve.evaluate(param, 1, true, true)?;
+    let pv = curve.evaluate(k, param, 1, true, true)?;
     pv.get(1)
         .copied()
         .ok_or_else(|| null("GetEndTangent: no derivative"))
@@ -760,8 +760,13 @@ pub fn is_connected_to(b: &Brep, v: VertexId, target: Option<EntityRef>) -> Resu
 /// `GetEndTangent` whose status upstream ignores (`SE`): the tangent, or `None` when
 /// the evaluation failed (the tangent is left as it was). A missing curve is the null
 /// dereference upstream; [`SolidError::Unported`] propagates.
-fn end_tangent_ignoring_status(b: &Brep, e: EdgeId, at_start: bool) -> Result<Option<Vec3>> {
-    match edge_end_tangent(b, e, at_start) {
+fn end_tangent_ignoring_status(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    at_start: bool,
+) -> Result<Option<Vec3>> {
+    match edge_end_tangent(k, b, e, at_start) {
         Ok(t) => Ok(Some(t)),
         Err(
             err @ (SolidError::Unported { .. }
@@ -787,6 +792,7 @@ fn uninitialised_tangent() -> SolidError {
 /// [`SolidError::InvalidInput`] for an edge without curve and for a tangent whose
 /// evaluation failed (upstream reads it uninitialised).
 pub fn are_edges_tangent(
+    k: &Kernel,
     b: &Brep,
     v: VertexId,
     e1: EdgeId,
@@ -794,17 +800,17 @@ pub fn are_edges_tangent(
     angle_tol_deg: f64,
 ) -> Result<bool> {
     let tan1 = if edge_start_vertex(b, e1)? == Some(v) {
-        end_tangent_ignoring_status(b, e1, true)?.ok_or_else(uninitialised_tangent)?
+        end_tangent_ignoring_status(k, b, e1, true)?.ok_or_else(uninitialised_tangent)?
     } else {
-        -end_tangent_ignoring_status(b, e1, false)?.ok_or_else(uninitialised_tangent)?
+        -end_tangent_ignoring_status(k, b, e1, false)?.ok_or_else(uninitialised_tangent)?
     };
 
     // Note that sTan1 is pointing to the inside of the curve and sTan2 will be pointing
     // to the outside of the curve. That should make them parallel.
     let tan2 = if edge_start_vertex(b, e2)? == Some(v) {
-        -end_tangent_ignoring_status(b, e2, true)?.ok_or_else(uninitialised_tangent)?
+        -end_tangent_ignoring_status(k, b, e2, true)?.ok_or_else(uninitialised_tangent)?
     } else {
-        end_tangent_ignoring_status(b, e2, false)?.ok_or_else(uninitialised_tangent)?
+        end_tangent_ignoring_status(k, b, e2, false)?.ok_or_else(uninitialised_tangent)?
     };
 
     // AngleBetween sets the angle to 0 on failure (status ignored)
@@ -867,7 +873,7 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         let r = b.edge(e)?;
         match &r.curve {
             Some(c) => Ok(c
-                .is_line(IS_LINE_SAMPLES, r.tolerance / 1000.0)?
+                .is_line(k, IS_LINE_SAMPLES, r.tolerance / 1000.0)?
                 .map(|(_, t)| t)),
             None => Ok(None),
         }
@@ -904,7 +910,7 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
             {
                 if at_start {
                     // SER: a failed status is returned as the SmBoolean result (TRUE)
-                    match edge_end_tangent(b, e, true) {
+                    match edge_end_tangent(k, b, e, true) {
                         Ok(t) => *tan = Some(t),
                         Err(
                             err @ (SolidError::Unported { .. }
@@ -913,7 +919,7 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
                         ) => return Err(err),
                         Err(_) => return Ok(true),
                     }
-                } else if let Some(t) = end_tangent_ignoring_status(b, e, false)? {
+                } else if let Some(t) = end_tangent_ignoring_status(k, b, e, false)? {
                     // SE: a failed evaluation leaves the tangent as it was
                     *tan = Some(t);
                 }
@@ -1452,7 +1458,7 @@ mod tests {
     fn tangency_and_topological_vertices() {
         let k = Kernel::default();
         let (mut b, v, e) = chain(true, Vec3::X, Vec3::X);
-        assert!(are_edges_tangent(&b, v[1], e[0], e[1], 0.5).unwrap());
+        assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
         assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
         assert!(!is_topological_vertex(&k, &mut b, v[0]).unwrap());
 
@@ -1461,8 +1467,8 @@ mod tests {
         assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
 
         let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
-        assert!(!are_edges_tangent(&b, v[1], e[0], e[1], 0.5).unwrap());
-        assert!(are_edges_tangent(&b, v[1], e[0], e[1], 91.0).unwrap());
+        assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
+        assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], 91.0).unwrap());
         assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
 
         // no curves: the same (null) curve; the parameters differ (1 and 0), then match
@@ -1471,7 +1477,7 @@ mod tests {
         b.edge_mut(e[1]).unwrap().interval = Extent1d::from_min_max(1.0, 2.0);
         assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
         assert!(matches!(
-            are_edges_tangent(&b, v[1], e[0], e[1], 0.5),
+            are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5),
             Err(SolidError::InvalidInput { .. })
         ));
     }

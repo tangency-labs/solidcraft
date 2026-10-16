@@ -60,8 +60,8 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
-use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
@@ -69,10 +69,10 @@ use solidcore::surface::surface::Surface;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2 as fp2;
 use solidcore::topology::loopuse as lu1;
+use solidcore::topology::trimming_tools as tt;
 use solidcore::topology::trimming_tools::curve_loops::{
     CurveIntersections, CurveKey, CurveLoops, IsoXSectSegment, LoopObject,
 };
-use solidcore::topology::trimming_tools as tt;
 use solidcore::topology::{Brep, EdgeuseId, FaceId, LoopId};
 use solidcore::SolidError;
 use solidcore_ffi::units::topology_trimming_tools::{self as ffi, Op};
@@ -204,18 +204,54 @@ enum SrfIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "do", rename_all = "snake_case")]
 enum LoopOp {
-    StartIndex { i: u64 },
-    StartEnd { i: u64 },
-    Adjacent { key: usize, t: f64 },
-    EnterLeave { a: u64, b: u64 },
-    Sample { key: usize, t: f64 },
-    SameSide { key: usize, t: f64, dir: u8, iso: f64, ztol: f64, dom: [f64; 4] },
-    AppendSelf { i: u64 },
-    InsertInto { new: usize, after: usize },
-    InsertIso { key: usize, ivl: [f64; 2], idx: [u64; 4] },
-    Update { ints: Vec<IntsIn>, orig: usize, new: usize, ztol: f64 },
+    StartIndex {
+        i: u64,
+    },
+    StartEnd {
+        i: u64,
+    },
+    Adjacent {
+        key: usize,
+        t: f64,
+    },
+    EnterLeave {
+        a: u64,
+        b: u64,
+    },
+    Sample {
+        key: usize,
+        t: f64,
+    },
+    SameSide {
+        key: usize,
+        t: f64,
+        dir: u8,
+        iso: f64,
+        ztol: f64,
+        dom: [f64; 4],
+    },
+    AppendSelf {
+        i: u64,
+    },
+    InsertInto {
+        new: usize,
+        after: usize,
+    },
+    InsertIso {
+        key: usize,
+        ivl: [f64; 2],
+        idx: [u64; 4],
+    },
+    Update {
+        ints: Vec<IntsIn>,
+        orig: usize,
+        new: usize,
+        ztol: f64,
+    },
     Reset,
-    SegIndices { idx: [u64; 4] },
+    SegIndices {
+        idx: [u64; 4],
+    },
 }
 
 /// An `SmCurveIntersections`: iso curve key (`-1` none), direction, parameter and its
@@ -936,7 +972,11 @@ fn rust_surface(s: &SrfIn) -> Result<Surface, HarnessError> {
             let net = b
                 .net
                 .iter()
-                .map(|r| r.iter().map(|p| CPoint::new(p[0], p[1], p[2], p[3])).collect())
+                .map(|r| {
+                    r.iter()
+                        .map(|p| CPoint::new(p[0], p[1], p[2], p[3]))
+                        .collect()
+                })
                 .collect();
             let nl = NlSurface::new(net, b.p, b.q, b.u.clone(), b.v.clone())
                 .map_err(|e| harness(format!("surface: {e}")))?;
@@ -1002,11 +1042,11 @@ fn put_nurb(o: &mut Vec<f64>, c: &Curve) {
 }
 
 /// The shim's `tt_put_samples`.
-fn put_samples(o: &mut Vec<f64>, c: &Curve) {
+fn put_samples(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     for i in 0..=4 {
-        match c.evaluate_point(ivl.evaluate(f64::from(i) / 4.0)) {
+        match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => {
                 o.push(0.0);
                 put_vec(o, p);
@@ -1047,6 +1087,7 @@ fn put_outer(
 
 /// The shim's `tt_find_outer`.
 fn find_outer(
+    k: &Kernel,
     o: &mut Vec<f64>,
     curves: &[Curve],
     mut ordered: Vec<usize>,
@@ -1055,7 +1096,15 @@ fn find_outer(
     mut normal: Vec3,
     tol: f64,
 ) -> Result<(), Fail> {
-    let r = tt::find_outer_loops(curves, &mut ordered, &mut counts, &mut orients, &mut normal, tol);
+    let r = tt::find_outer_loops(
+        k,
+        curves,
+        &mut ordered,
+        &mut counts,
+        &mut orients,
+        &mut normal,
+        tol,
+    );
     match r {
         Ok(outer) => {
             o.push(0.0);
@@ -1089,6 +1138,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     put_vec(&mut o, r.curves_box.max());
                     if *outer && st == 0.0 {
                         find_outer(
+                            k,
                             &mut o,
                             &cs,
                             r.ordered,
@@ -1111,6 +1161,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
         } => {
             let cs = rust_curves(curves)?;
             find_outer(
+                k,
                 &mut o,
                 &cs,
                 (0..cs.len()).collect(),
@@ -1145,7 +1196,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
         }
         OpIn::Iso { curve } => {
             let c = rust_curve(curve)?;
-            match tt::is_iso_curve(&c).map_err(|e| fail(&e))? {
+            match tt::is_iso_curve(k, &c).map_err(|e| fail(&e))? {
                 Some((side, param)) => o.extend([1.0, f64::from(side as u8), param]),
                 None => o.push(0.0),
             }
@@ -1153,7 +1204,9 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
         OpIn::IsoSeam { surface, curve } => {
             let s = rust_surface(surface)?;
             let c = rust_curve(curve)?;
-            o.push(flag(tt::is_iso_curve_on_seam(&s, &c).map_err(|e| fail(&e))?));
+            o.push(flag(
+                tt::is_iso_curve_on_seam(k, &s, &c).map_err(|e| fail(&e))?,
+            ));
         }
         OpIn::Continuity { surface } => {
             let s = rust_surface(surface)?;
@@ -1174,7 +1227,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let (ua, ub) = (Point2::new(a[0], a[1]), Point2::new(b[0], b[1]));
             let (pa, pb) = match pts {
                 Some([p0, p1]) => (Ok(v3(*p0)), Ok(v3(*p1))),
-                None => (s.evaluate_point(ua), s.evaluate_point(ub)),
+                None => (s.evaluate_point(k, ua), s.evaluate_point(k, ub)),
             };
             o.push(status(&pa)?);
             o.push(status(&pb)?);
@@ -1236,7 +1289,17 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
             mode,
             surface,
             ops,
-        } => run_rust_loops(k, store, counts, keys, orients, *mode, surface.as_ref(), ops, &mut o)?,
+        } => run_rust_loops(
+            k,
+            store,
+            counts,
+            keys,
+            orients,
+            *mode,
+            surface.as_ref(),
+            ops,
+            &mut o,
+        )?,
         _ => return Err(Fail::Harness(harness("not a geometry op"))),
     }
     Ok(o)
@@ -1321,7 +1384,7 @@ fn run_rust_loops(
                     continue;
                 }
                 let (p1, p2) = l
-                    .sample_nearby_points(&store, CurveKey(*key), *t)
+                    .sample_nearby_points(k, &store, CurveKey(*key), *t)
                     .map_err(|e| fail(&e))?;
                 o.push(0.0);
                 put_vec(o, p1);
@@ -1413,6 +1476,7 @@ fn run_rust_loops(
                     cis.push(c);
                 }
                 let r = l.update_solution_objects(
+                    k,
                     &store,
                     &mut cis,
                     CurveKey(*orig),
@@ -1457,7 +1521,7 @@ fn run_rust_loops(
     o.extend(l.orients.iter().map(|&x| orient_code(x)));
     o.push(store.len().saturating_sub(ns) as f64);
     for c in store.iter().skip(ns) {
-        put_samples(o, c);
+        put_samples(k, o, c);
     }
     Ok(())
 }
@@ -1772,7 +1836,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> 
                     return Ok(o);
                 }
             }
-            let r = tt::ensure_last_edgeuse_uv_correct(b, &srf, &mut eus);
+            let r = tt::ensure_last_edgeuse_uv_correct(k, b, &srf, &mut eus);
             o.push(status(&r)?);
             o.push(flag(r.unwrap_or(false)));
             o.push(eus.len() as f64);
@@ -1790,11 +1854,11 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> 
             };
             let bounds = srf.natural_uv_domain();
             let closed = srf
-                .is_closed(&bounds, SurfParamType::U, None, false)
+                .is_closed(k, &bounds, SurfParamType::U, None, false)
                 .map_err(f)?
                 .0
                 || srf
-                    .is_closed(&bounds, SurfParamType::V, None, false)
+                    .is_closed(k, &bounds, SurfParamType::V, None, false)
                     .map_err(f)?
                     .0;
             if closed {

@@ -567,7 +567,7 @@ fn run_op(
             uv,
             point,
             tol,
-        } => match st(test_point(surface, &ext(*domain), p2(*uv), v3(*point), *tol))? {
+        } => match st(test_point(k, surface, &ext(*domain), p2(*uv), v3(*point), *tol))? {
             Ok(tp) => o.extend([
                 0.0,
                 b(tp.good_point),
@@ -578,7 +578,7 @@ fn run_op(
         },
         OpIn::Graze { p1, curve: c2, p2 } => {
             let c2 = rust_curve(c2)?;
-            match st(is_grazing_intersection(curve, *p1, &c2, *p2))? {
+            match st(is_grazing_intersection(k, curve, *p1, &c2, *p2))? {
                 Ok(g) => o.extend([0.0, b(g)]),
                 Err(s) => o.push(s),
             }
@@ -731,7 +731,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let surface = rust_surface(&i.surface)?;
     let curve = rust_curve(&i.curve)?;
     let interval = Extent1d::from_min_max(i.interval[0], i.interval[1]);
-    let mut t = match SurfaceDropCurve::new(&surface, &ext(i.domain), &curve, &interval) {
+    let mut t = match SurfaceDropCurve::new(&k, &surface, &ext(i.domain), &curve, &interval) {
         Ok(t) => t,
         Err(e) => {
             return Output::unported(&e)
@@ -933,9 +933,9 @@ fn uv_in(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
 }
 
 /// A surface point at `uv` lifted `h` along the normal (the evaluation in the port).
-fn lifted(surface: &Surface, uv: [f64; 2], h: f64) -> Option<[f64; 3]> {
+fn lifted(k: &Kernel, surface: &Surface, uv: [f64; 2], h: f64) -> Option<[f64; 3]> {
     let (p, du, dv) = surface
-        .evaluate_1st_derivatives(p2(uv), true, true)
+        .evaluate_1st_derivatives(k, p2(uv), true, true)
         .ok()?;
     let n = du.cross(dv);
     let l = n.length();
@@ -944,10 +944,10 @@ fn lifted(surface: &Surface, uv: [f64; 2], h: f64) -> Option<[f64; 3]> {
 }
 
 /// A curve near the surface: control points over the domain lifted by up to `lift`.
-fn gen_curve(rng: &mut Rng, surface: &Surface, d: [f64; 4], lift: f64) -> Option<CurveIn> {
+fn gen_curve(k: &Kernel, rng: &mut Rng, surface: &Surface, d: [f64; 4], lift: f64) -> Option<CurveIn> {
     let pt = |rng: &mut Rng| {
         let uv = [rng.uniform(d[0], d[2]), rng.uniform(d[1], d[3])];
-        lifted(surface, uv, lift * rng.uniform(-1.0, 1.0))
+        lifted(k, surface, uv, lift * rng.uniform(-1.0, 1.0))
     };
     let segment = |a: [f64; 3], bb: [f64; 3]| {
         let l = ((bb[0] - a[0]).powi(2) + (bb[1] - a[1]).powi(2) + (bb[2] - a[2]).powi(2)).sqrt();
@@ -962,16 +962,16 @@ fn gen_curve(rng: &mut Rng, surface: &Surface, d: [f64; 4], lift: f64) -> Option
             let (v0, v1) = (rng.uniform(d[1], d[3]), rng.uniform(d[1], d[3]));
             let h = lift * rng.uniform(-1.0, 1.0);
             if rng.chance(0.5) {
-                segment(lifted(surface, [u0, v0], h)?, lifted(surface, [u1, v0], h)?)
+                segment(lifted(k, surface, [u0, v0], h)?, lifted(k, surface, [u1, v0], h)?)
             } else {
-                segment(lifted(surface, [u0, v0], h)?, lifted(surface, [u0, v1], h)?)
+                segment(lifted(k, surface, [u0, v0], h)?, lifted(k, surface, [u0, v1], h)?)
             }
         }
         4 => {
             // along the surface normal: the dropped tangent vanishes
             let uv = [rng.uniform(d[0], d[2]), rng.uniform(d[1], d[3])];
             let h = (d[2] - d[0]).abs().max(1e-6) * 0.1;
-            segment(lifted(surface, uv, -h)?, lifted(surface, uv, h)?)
+            segment(lifted(k, surface, uv, -h)?, lifted(k, surface, uv, h)?)
         }
         _ => {
             let n1 = 2 + rng.below(5) as usize;
@@ -1039,7 +1039,7 @@ enum Flavour {
 }
 
 #[allow(clippy::too_many_lines)] // one generator
-fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
+fn gen_inputs(k: &Kernel, rng: &mut Rng) -> Option<Inputs> {
     let scale = pick(rng, &[1.0, 1.0, 1.0, 1e-3, 1e3], 1.0);
     let plane = rng.chance(0.65);
     let surf_in = if plane {
@@ -1051,7 +1051,7 @@ fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
     let nat = natural(&surf_in);
     let domain = gen_domain(rng, nat);
     let lift = scale * pick(rng, &[0.0, 1e-9, 1e-4, 0.01, 0.3], 0.0);
-    let curve = gen_curve(rng, &surface, domain, lift)?;
+    let curve = gen_curve(k, rng, &surface, domain, lift)?;
     let civl = curve_interval(&curve);
     let interval = match rng.below(6) {
         0 => {
@@ -1173,7 +1173,7 @@ fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
                 } else {
                     uv_in(rng, d)
                 };
-                let pnt = lifted(&surface, [uv[0].clamp(d[0], d[2]), uv[1].clamp(d[1], d[3])], scale * rng.uniform(-0.5, 0.5))
+                let pnt = lifted(k, &surface, [uv[0].clamp(d[0], d[2]), uv[1].clamp(d[1], d[3])], scale * rng.uniform(-0.5, 0.5))
                     .unwrap_or([0.0; 3]);
                 let jitter = scale * pick(rng, &[0.0, 1e-7, 1e-3, 0.1], 0.0);
                 OpIn::TestPoint {
@@ -1191,7 +1191,7 @@ fn gen_inputs(rng: &mut Rng) -> Option<Inputs> {
                 let c2 = if rng.chance(0.3) {
                     curve.clone()
                 } else {
-                    gen_curve(rng, &surface, domain, lift)?
+                    gen_curve(k, rng, &surface, domain, lift)?
                 };
                 let i2 = curve_interval(&c2);
                 OpIn::Graze {
@@ -1303,8 +1303,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..16 {
-            if let Some(i) = gen_inputs(rng) {
+            if let Some(i) = gen_inputs(k, rng) {
                 return serde_json::to_value(i).ok();
             }
         }

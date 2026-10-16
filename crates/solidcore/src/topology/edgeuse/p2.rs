@@ -379,7 +379,7 @@ pub fn evaluate_binormal_step_off_into(
     let uv_domain = face_rec.uv_domain;
 
     // evaluate surface at edge point
-    let mut surf_point = surface.evaluate_point(uv)?;
+    let mut surf_point = surface.evaluate_point(k, uv)?;
 
     // set startpoint = stepoffdistance from surfPoint in binormal direction
     let binormal = match at_edge.binormal.unitize() {
@@ -394,7 +394,7 @@ pub fn evaluate_binormal_step_off_into(
 
     // drop start point to surface to get a guess point
     let dropped =
-        drop_points_to_tangent_plane(surface, uv, Side::Left, Side::Left, &[start_point])?;
+        drop_points_to_tangent_plane(k, surface, uv, Side::Left, Side::Left, &[start_point])?;
     let mut uv_guess = dropped
         .first()
         .copied()
@@ -445,7 +445,7 @@ pub fn evaluate_binormal_step_off_into(
     }
     let plane_normal = options.plane_normal.unwrap_or(tangent);
 
-    let mut eval_fun = FindStepOff::new(step_off_distance, surf_point, plane_normal, surface);
+    let mut eval_fun = FindStepOff::new(k, step_off_distance, surf_point, plane_normal, surface);
     let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
 
@@ -466,18 +466,20 @@ pub fn evaluate_binormal_step_off_into(
     // orientations)
     let uv_found = Point2::new(solution_vector[0], solution_vector[1]);
 
-    let mut normal = surface.evaluate_normal(uv_found, Side::Left, Side::Left)?;
+    let mut normal = surface.evaluate_normal(k, uv_found, Side::Left, Side::Left)?;
     let fu = faceuse(b, eu)?.ok_or_else(|| null("EvaluateBinormalStepOff: no face use"))?;
     if b.faceuse(fu)?.orientation == OrientType::Opposite {
         normal = -normal;
     }
 
     // set output
-    out.binormal = normal.cross(tangent);
-    out.point = surface.evaluate_point(uv_found)?;
-    out.face_normal = normal;
-    out.uv = uv_found;
-    Ok(())
+    Ok(BinormalEval {
+        point: surface.evaluate_point(k, uv_found)?,
+        binormal: normal.cross(tangent),
+        tangent,
+        face_normal: normal,
+        uv: uv_found,
+    })
 }
 
 /// `IsConvexRadialSector`: true when, at `num_samples` evenly spaced interior samples
@@ -715,7 +717,7 @@ pub fn check_and_set_uv_trim_curve(
             // give bad curves one last chance to be ok
             if !uv_good_enough {
                 // check approx pEdgeCurve length with 10 sample points
-                let (edge_length, _) = edge_curve.approximate_length(&interval, 10, false)?;
+                let (edge_length, _) = edge_curve.approximate_length(k, &interval, 10, false)?;
 
                 // if max dist between curves is near the edge (based on edge length)
                 if max_dist_to_surf < edge_length / 10.0 {

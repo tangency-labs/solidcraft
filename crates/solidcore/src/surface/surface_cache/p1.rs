@@ -202,6 +202,7 @@ pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
+        SurfaceKind::Cone(s) => Some(s.rev().base()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
@@ -247,7 +248,7 @@ fn create_iso_parametric_curve(
         // (surface.surf_of_revolution_p1), but it makes an SmCircle in the sweep
         // direction and this cache holds its iso curves as BSplineCurve, which would drop
         // the SmEllipse overrides; wiring it needs Curve storage here.
-        SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
+        SurfaceKind::Cone(_) | SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
             "SmSurfOfRevolution::CreateIsoParametricCurve",
             "surface.surface_cache_p1",
         )),
@@ -286,15 +287,17 @@ fn bspline_iso_curve(
 /// `SmSurface::CalculateBoundingBox(domain, ...)`: the B-spline override; other kinds
 /// run the base class body.
 pub(super) fn calculate_bounding_box(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     req: &BoundingBoxRequest<'_>,
 ) -> Result<BoundingBoxes> {
     match surface.kind() {
-        SurfaceKind::BSpline(b) => b.calculate_bounding_box(domain, req),
+        SurfaceKind::BSpline(b) => b.calculate_bounding_box(k, domain, req),
         // inherited from SmBSplineSurface: none of its virtual calls is overridden
-        SurfaceKind::SurfOfRevolution(s) => s.base().calculate_bounding_box(domain, req),
-        SurfaceKind::Plane(p) => crate::surface::surface::p1::plane_bounding_box(p, domain, req),
+        SurfaceKind::Cone(s) => s.rev().base().calculate_bounding_box(k, domain, req),
+        SurfaceKind::SurfOfRevolution(s) => s.base().calculate_bounding_box(k, domain, req),
+        SurfaceKind::Plane(p) => crate::surface::surface::p1::plane_bounding_box(k, p, domain, req),
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
             // SmSurface::CalculateBoundingBox (surface::surface::p1). Its polar box asks the
             // surface's own cache for it, whose build asks this function again: upstream
@@ -335,6 +338,7 @@ pub(super) fn calculate_bounding_box(
 fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
+        SurfaceKind::Cone(_) => Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular),
         SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
@@ -347,10 +351,16 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
 }
 
 /// `EvaluateNormal(uv, u_from_left, v_from_left, normal)` (virtual).
-fn evaluate_normal(surface: &Surface, uv: Point2, u_left: bool, v_left: bool) -> Result<Vec3> {
+fn evaluate_normal(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    u_left: bool,
+    v_left: bool,
+) -> Result<Vec3> {
     use crate::nurbs::knots::Side;
     let side = |left: bool| if left { Side::Left } else { Side::Right };
-    surface.evaluate_normal(uv, side(u_left), side(v_left))
+    surface.evaluate_normal(k, uv, side(u_left), side(v_left))
 }
 
 /// `smos_Max`.
@@ -665,7 +675,7 @@ impl PatchBoundaryBoundingPlanes {
             self.set_flags(ii, false, false);
 
             // test 3D boundary curve for degeneracy
-            if bsp.is_degenerate(EFF_ZERO, None)? {
+            if bsp.is_degenerate(k, EFF_ZERO, None)? {
                 self.set_flags(ii, false, true);
                 continue;
             }
@@ -695,7 +705,7 @@ impl PatchBoundaryBoundingPlanes {
                     self.uv_domain.max()
                 };
 
-                let surf_normal = evaluate_normal(surface, corner, from_left, from_left)?;
+                let surf_normal = evaluate_normal(k, surface, corner, from_left, from_left)?;
 
                 let rel_curve_loc = if ii == 0 || ii == 3 { 0.0 } else { 1.0 };
                 let evals = bsp.evaluate(domain.evaluate(rel_curve_loc), 1, from_left, false)?;
@@ -777,6 +787,7 @@ impl PatchBoundaryBoundingPlanes {
 /// Those of `Evaluate`; `InvalidInput` when `bezier` is smaller than bicubic;
 /// [`SolidError::Unported`] from `SmSurface::IsSingularity`.
 pub fn compute_bezier_approximation(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     bezier: &mut NurbSurface,
@@ -842,7 +853,7 @@ pub fn compute_bezier_approximation(
             twist,
             net: [c00, c10, c01, c11],
         } = corner;
-        let mat = surface.evaluate(uv, 1, 1, flags)?;
+        let mat = surface.evaluate(k, uv, 1, 1, flags)?;
         let d = |m: &Vec<Vec<Vec3>>, i: usize, j: usize| -> Result<Vec3> {
             m.get(i)
                 .and_then(|r| r.get(j))
@@ -851,13 +862,13 @@ pub fn compute_bezier_approximation(
         };
         let p00 = d(&mat, 0, 0)?;
         let (du, dv, duv);
-        if is_singularity(&Kernel::default(), surface, uv)? {
+        if is_singularity(k, surface, uv)? {
             let uvu = Point2::new(uv.x + su * (size.x * EFF_ZERO_SQRT), uv.y);
             let uvv = Point2::new(uv.x, uv.y + sv * (size.y * EFF_ZERO_SQRT));
-            let mu = surface.evaluate(uvu, 1, 1, flags)?;
+            let mu = surface.evaluate(k, uvu, 1, 1, flags)?;
             du = d(&mu, 1, 0)? * size.x;
             let duv1 = d(&mu, 1, 1)? * size.x * size.y;
-            let mv = surface.evaluate(uvv, 1, 1, flags)?;
+            let mv = surface.evaluate(k, uvv, 1, 1, flags)?;
             dv = d(&mv, 0, 1)? * size.y;
             duv = (duv1 + d(&mv, 1, 1)? * size.x * size.y) / 2.0;
         } else {
@@ -2019,9 +2030,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// `InvalidInput` for a node without surface data; [`SolidError::Unported`] from
     /// the build.
-    pub fn polar_box(&mut self, node: NodeId) -> Result<PolarBox> {
+    pub fn polar_box(&mut self, k: &Kernel, node: NodeId) -> Result<PolarBox> {
         if self.aux(node)?.polar_box.state() == PolarBoxState::Uninitialized {
-            match self.build_polar_box(node) {
+            match self.build_polar_box(k, node) {
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) | Ok(()) => {}
             }
@@ -2037,7 +2048,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// `InvalidInput` for nodes without surface data or surface, cyclic parent
     /// links; [`SolidError::Unported`] from `CalculateBoundingBox`.
-    pub fn build_polar_box(&mut self, node: NodeId) -> Result<()> {
+    pub fn build_polar_box(&mut self, k: &Kernel, node: NodeId) -> Result<()> {
         // collect chain of nodes up the tree, terminating in either the root
         // or something which has a polar box already
         let mut chain = vec![node];
@@ -2068,7 +2079,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             self.aux(last)?.polar_box
         } else {
             // the root (can't have a box, else we would have stopped when we saw it)
-            let b = self.compute_polar_box(last, None)?;
+            let b = self.compute_polar_box(k, last, None)?;
             if let Some(b) = b {
                 self.aux_mut(last)?.polar_box = b;
             }
@@ -2079,7 +2090,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         while let Some(n) = chain.pop() {
             // this addresses a bunch of assert messages by not using a bad initial guess
             let guess = (last_polar.state() != PolarBoxState::Unbounded).then_some(last_polar);
-            if let Some(b) = self.compute_polar_box(n, guess.as_ref())? {
+            if let Some(b) = self.compute_polar_box(k, n, guess.as_ref())? {
                 self.aux_mut(n)?.polar_box = b;
             }
             last_polar = self.aux(n)?.polar_box;
@@ -2097,9 +2108,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// `InvalidInput` for a node without surface data; [`SolidError::Unported`] from
     /// the build (its other failures leave the stored box, as [`Self::polar_box`]).
-    pub fn polar_box_unstored(&self, node: NodeId) -> Result<PolarBox> {
+    pub fn polar_box_unstored(&self, k: &Kernel, node: NodeId) -> Result<PolarBox> {
         if self.aux(node)?.polar_box.state() == PolarBoxState::Uninitialized {
-            match self.build_polar_box_unstored(node) {
+            match self.build_polar_box_unstored(k, node) {
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) => {}
                 Ok(b) => return Ok(b),
@@ -2109,7 +2120,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     }
 
     /// The box [`Self::build_polar_box`] would store at `node`.
-    fn build_polar_box_unstored(&self, node: NodeId) -> Result<PolarBox> {
+    fn build_polar_box_unstored(&self, k: &Kernel, node: NodeId) -> Result<PolarBox> {
         // collect chain of nodes up the tree, as build_polar_box
         let mut chain = vec![node];
         let mut found_polar = false;
@@ -2138,7 +2149,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             self.aux(last)?.polar_box
         } else {
             // the root (can't have a box, else we would have stopped when we saw it)
-            match self.compute_polar_box(last, None)? {
+            match self.compute_polar_box(k, last, None)? {
                 Some(b) => b,
                 None => self.aux(last)?.polar_box,
             }
@@ -2147,7 +2158,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // build boxes toward the start of the array (our starting node)
         while let Some(n) = chain.pop() {
             let guess = (last_polar.state() != PolarBoxState::Unbounded).then_some(last_polar);
-            last_polar = match self.compute_polar_box(n, guess.as_ref())? {
+            last_polar = match self.compute_polar_box(k, n, guess.as_ref())? {
                 Some(b) => b,
                 None => self.aux(n)?.polar_box,
             };
@@ -2159,6 +2170,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// NULL, guess)`; `None` when the (ignored) status is a failure.
     fn compute_polar_box(
         &self,
+        k: &Kernel,
         node: NodeId,
         guess: Option<&PolarBox>,
     ) -> Result<Option<PolarBox>> {
@@ -2175,7 +2187,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             polar_guess: guess,
             expand_by_zone_tol: true,
         };
-        let boxes = ignored(calculate_bounding_box(surface, &domain, &req))?;
+        let boxes = ignored(calculate_bounding_box(k, surface, &domain, &req))?;
         Ok(boxes.and_then(|b| b.polar))
     }
 
@@ -2723,7 +2735,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // 3D Udir and Vdir IsoParamCurve lengths
         let len = |c: &BSplineCurve, ivl: &Extent1d| -> Result<f64> {
-            Ok(approximate_length(c, ivl, 8, false)?.0)
+            Ok(approximate_length(k, c, ivl, 8, false)?.0)
         };
         let bot_v_size = len(&bot_u, &v_domain)?;
         let bot_u_size = len(&bot_v, &u_domain)?;
@@ -2753,6 +2765,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// Those of `EvaluatePoint`; `InvalidInput` for an empty Bezier net.
     pub fn corners(
         &self,
+        k: &Kernel,
         bezier: Option<&NurbSurface>,
         patch_domain: &Extent2d,
     ) -> Result<Corners> {
@@ -2778,16 +2791,16 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             // no gw_SURFACE available
             let u0v0 = self
                 .surface
-                .evaluate_point(patch_domain.evaluate(0.0, 0.0))?;
+                .evaluate_point(k, patch_domain.evaluate(0.0, 0.0))?;
             let u1v0 = self
                 .surface
-                .evaluate_point(patch_domain.evaluate(1.0, 0.0))?;
+                .evaluate_point(k, patch_domain.evaluate(1.0, 0.0))?;
             let u0v1 = self
                 .surface
-                .evaluate_point(patch_domain.evaluate(0.0, 1.0))?;
+                .evaluate_point(k, patch_domain.evaluate(0.0, 1.0))?;
             let u1v1 = self
                 .surface
-                .evaluate_point(patch_domain.evaluate(1.0, 1.0))?;
+                .evaluate_point(k, patch_domain.evaluate(1.0, 1.0))?;
             Ok(Corners {
                 u0v0,
                 u1v0,

@@ -323,7 +323,7 @@ macro_rules! solid {
 }
 
 /// The outputs of a member op after the status, or the op's error.
-fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
+fn member(k: &solidcore::kernel::Kernel, curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
     let mut o = Vec::new();
     match op {
         OpIn::State { types } => {
@@ -405,11 +405,11 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
         }
         OpIn::Eq { other } => {
             let other = Curve::from(build(other));
-            o.push(flag(solid!(curve.approx_eq(&other))));
+            o.push(flag(solid!(curve.approx_eq(k, &other))));
         }
         OpIn::Copy => {
             let c = solid!(curve.copy(&solidcore::kernel::Kernel::default()));
-            o.push(flag(solid!(curve.approx_eq(&c))));
+            o.push(flag(solid!(curve.approx_eq(k, &c))));
             state(&mut o, hyp_of(&c)?);
         }
         OpIn::ReadDb { .. } => return Err(harness("read_db is not a member op")),
@@ -418,7 +418,7 @@ fn member(curve: &mut Curve, op: &OpIn) -> Result<solidcore::Result<Vec<f64>>, H
 }
 
 /// The Rust record, or `Err(output)` for a deferred case.
-fn rust_record(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
+fn rust_record(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
     let mut o = Vec::new();
 
     if let OpIn::ReadDb {
@@ -454,7 +454,7 @@ fn rust_record(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
 
     let this = i.this.as_ref().ok_or_else(|| harness("member op without this"))?;
     let mut curve = Curve::from(build(this));
-    match member(&mut curve, &i.op)? {
+    match member(k, &mut curve, &i.op)? {
         Ok(out) => {
             o.push(0.0);
             o.extend(out);
@@ -747,8 +747,9 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+let k = &solidcore::Kernel::default();
         let i: Inputs = case.parse()?;
-        Ok(match rust_record(&i)? {
+        Ok(match rust_record(k, &i)? {
             Ok(r) => Output::new().values("r", r),
             Err(deferred) => deferred,
         })

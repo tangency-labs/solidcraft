@@ -459,7 +459,7 @@ impl Hyperbola {
 
         let mut out = Vec::with_capacity(sols.len());
         for sol in sols.as_slice() {
-            let point_on_curve = curve.evaluate_point(sol.start.parameters[0])?;
+            let point_on_curve = curve.evaluate_point(k, sol.start.parameters[0])?;
             let (angle_param, _) = self.step_inversion(point_on_curve, false)?;
             let mut r: Solution<ObjectRef> = Solution::new();
             r.solution_type = sol.solution_type;

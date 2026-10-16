@@ -503,14 +503,14 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
             }
         }
         OpJ::ToNurbs { t } => {
-            if let Some(r) = st(o, a.convert_t_from_step_to_nurbs(*t))? {
+            if let Some(r) = st(o, a.convert_t_from_step_to_nurbs(k, *t))? {
                 o.push(r);
             }
         }
         OpJ::PolarToNurbs { t, zone_tol } => {
             let r = a
                 .polar_converter()
-                .convert_to_nurbs_parameter(a, *t, *zone_tol);
+                .convert_to_nurbs_parameter(k, a, *t, *zone_tol);
             if let Some((r, exact)) = st(o, r)? {
                 o.extend([r, b(exact)]);
             }
@@ -555,7 +555,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
                 SolutionRequested::All
             };
             let r = a.drop_point_fast::<i64>(
-                &i,
+                k, &i,
                 sop,
                 v3(*p),
                 in_vec.map(v3),

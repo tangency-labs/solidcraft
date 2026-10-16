@@ -511,7 +511,7 @@ fn run_op(
             p.curve_3d[1] = v3(*t);
             sil.base.curve_trace_direction = *dir;
             let prev = if *use_prev { *last } else { None };
-            match st(sil.compute_point_values(p2(*uv), &mut p, prev.as_ref()))? {
+            match st(sil.compute_point_values(k, p2(*uv), &mut p, prev.as_ref()))? {
                 Ok(()) => {
                     o.push(0.0);
                     put_point(o, &p);
@@ -565,7 +565,7 @@ fn run_op(
                 if let Some(slot) = branch.first_mut() {
                     *slot = Some(NodeId(q));
                 }
-                match st(sil.branch_may_contain_answers(&solver, &cache, &branch))? {
+                match st(sil.branch_may_contain_answers(k, &solver, &cache, &branch))? {
                     Ok(f) => o.push(b(f)),
                     Err(s) => o.push(s),
                 }
@@ -588,7 +588,7 @@ fn op_code(op: &OpIn) -> f64 {
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let surface = rust_surface(&i.surface)?;
-    let mut sil = match SurfaceSilhouette::new(&surface, &ext(i.domain), i.perspective, v3(i.eye))
+    let mut sil = match SurfaceSilhouette::new(&k, &surface, &ext(i.domain), i.perspective, v3(i.eye))
     {
         Ok(s) => s,
         Err(e) => {

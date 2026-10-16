@@ -97,6 +97,85 @@ impl UvContainment {
     }
 }
 
+/// The result of [`uv_corner_boundaries`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UvCornerBoundaries {
+    /// `SM_SS_NONE` or an OR of `SM_SS_UMIN`, `SM_SS_VMIN`, `SM_SS_UMAX`, `SM_SS_VMAX`.
+    pub boundaries: u32,
+    /// `rOnEdges`: the edges with an end on a side, one entry per end.
+    pub on_edges: Vec<EdgeId>,
+    /// `rOnBndries`: the sides each of those ends is on.
+    pub on_boundaries: Vec<u32>,
+    /// `rOnParams`: the trim curve parameter of each of those ends.
+    pub on_params: Vec<f64>,
+}
+
+/// `GetOrCreateUVTrimCurve` of an edge use: its existing trim curve.
+fn uv_trim_curve<'a>(eu: &LoopEdgeuse<'a>) -> Result<&'a Curve> {
+    eu.uv_trim_curve.ok_or_else(|| {
+        // UNPORTED(topology.edgeuse_p3): SmEdgeuse::GetOrCreateUVTrimCurve
+        SolidError::unported("SmEdgeuse::GetOrCreateUVTrimCurve", "topology.edgeuse_p3")
+    })
+}
+
+/// `SmLoop::GetUVCornerBoundaries`: the sides of `uv_domain` touched (within `tol`)
+/// by the start or end of a UV trim curve of the loop, with the edge and trim curve
+/// parameter of every touching end.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] for an edge use without UV trim curve
+/// (`SmEdgeuse::GetOrCreateUVTrimCurve`, `topology.edgeuse_p3`); those of the trim
+/// curve evaluations.
+pub fn uv_corner_boundaries(
+    k: &Kernel,
+    lp: &FaceLoop<'_>,
+    uv_domain: &Extent2d,
+    tol: f64,
+) -> Result<UvCornerBoundaries> {
+    // init return values
+    let mut out = UvCornerBoundaries {
+        boundaries: SS_NONE,
+        ..UvCornerBoundaries::default()
+    };
+
+    // for every edgeuse - classify the end points
+    for eu in &lp.edgeuses {
+        // get UVTrimCurve (the recovery branch for a missing trim curve is behind
+        // its creation)
+        let trim = uv_trim_curve(eu)?;
+
+        // end points
+        let ivl = trim.natural_interval();
+        let uv_beg = trim.evaluate_point(k, ivl.evaluate(0.0))?;
+        let uv_end = trim.evaluate_point(k, ivl.evaluate(1.0))?;
+        let uv_pnt_beg = Point2::new(uv_beg.x, uv_beg.y);
+        let uv_pnt_end = Point2::new(uv_end.x, uv_end.y);
+
+        // classify the BegPoint
+        let these = uv_domain.point_boundaries(uv_pnt_beg, tol);
+        out.boundaries |= these;
+        if these != 0 {
+            out.on_edges.push(eu.edge);
+            out.on_boundaries.push(these);
+            out.on_params.push(ivl.evaluate(0.0));
+        }
+
+        // classify the endPoint - in a perfect world we can skip this, but allow for
+        // tolerance errors
+        let these = uv_domain.point_boundaries(uv_pnt_end, tol);
+        out.boundaries |= these;
+        if these != 0 {
+            out.on_edges.push(eu.edge);
+            out.on_boundaries.push(these);
+            out.on_params.push(ivl.evaluate(1.0));
+        }
+    }
+
+    // all done
+    Ok(out)
+}
+
 /// `sm_CalcQuadNum` (unit `topology.loopuse`): the quadrant of `test` in a frame
 /// centred on `origin` (`1 | 0` above, `2 | 3` below).
 fn calc_quad_num(origin: Point3, test: Point3) -> i32 {
@@ -155,6 +234,7 @@ fn drop_on_edge(
 /// converged and the solution. A failing solve has not converged (its status is
 /// ignored upstream and the flag is reset first).
 fn local_minimize(
+    k: &Kernel,
     trim: &Curve,
     interval: &Extent1d,
     point: Point3,
@@ -165,7 +245,8 @@ fn local_minimize(
         distance_tolerance: Some(tol_uv),
         ..PointSolveOptions::default()
     };
-    match trim.local_point_solve::<()>(interval, SolverOperation::Minimize, point, &opts, guess) {
+    match trim.local_point_solve::<()>(k, interval, SolverOperation::Minimize, point, &opts, guess)
+    {
         Ok((true, sol)) => Ok(Some(sol)),
         Err(e @ SolidError::Unported { .. }) => Err(e),
         Ok((false, _)) | Err(_) => Ok(None),
@@ -174,8 +255,13 @@ fn local_minimize(
 
 /// The point and unit tangent (in the edge use's direction) of a trim curve at `t`,
 /// with the tangent's length (`1` when below `SM_EFF_ZERO`).
-fn eval_with_tangent(trim: &Curve, t: f64, orient: OrientType) -> Result<(Point3, Vec3, f64)> {
-    let der = trim.evaluate(t, 1, false, true)?;
+fn eval_with_tangent(
+    k: &Kernel,
+    trim: &Curve,
+    t: f64,
+    orient: OrientType,
+) -> Result<(Point3, Vec3, f64)> {
+    let der = trim.evaluate(k, t, 1, false, true)?;
     let pt = der.first().copied().unwrap_or(Vec3::UNDEF);
     let mut tan = der.get(1).copied().unwrap_or(Vec3::UNDEF);
     if orient == OrientType::Opposite {
@@ -268,12 +354,13 @@ pub fn contains_uv_point(
     let zone_tol = face_rec.tolerance;
 
     let srf_uv_domain = surface.natural_uv_domain();
-    let point_3d = surface.evaluate_point(uv)?;
+    let point_3d = surface.evaluate_point(k, uv)?;
     let uv_pt = Point3::new(uv.x, uv.y, 0.0);
 
     // Get a tolerance in uv space.
     // Scale the input tolerance by the UV deriv size.
-    let mut tol_uv = map_to_2d(zone_tol, uv, surface)?;
+    let zone_tol = face.tolerance;
+    let mut tol_uv = map_to_2d(k, zone_tol, uv, surface)?;
 
     // minimize pole checking - if UVPnt on boundary -then-> if Loop on boundary -then->
     // if GetSingularities -then-> expensive check
@@ -284,7 +371,7 @@ pub fn contains_uv_point(
     // When crUVPoint is on Surface UVBoundary - does Loop have any edgeuse ends on
     // Surface Natural UVBoundary
     let corners = if uv_boundaries != 0 {
-        crate::topology::loopuse::uv_corner_boundaries(k, b, l, &srf_uv_domain, tol_uv)?
+        uv_corner_boundaries(k, lp, &srf_uv_domain, tol_uv)?
     } else {
         crate::topology::loopuse::UvCorners::default()
     };
@@ -355,6 +442,8 @@ pub fn contains_uv_point(
             .ok_or_else(|| null("ContainsUVPoint: edge use without UV trim curve"))?;
         last_trim.evaluate_point(last_end_param)?
     };
+    let last_trim = uv_trim_curve(last_end_eu)?;
+    let mut last_end_uv = last_trim.evaluate_point(k, last_end_param)?;
     let mut last_end_quad_num = calc_quad_num(uv_pt, last_end_uv);
 
     // Now start the outer loop, on Edgeuses.
@@ -398,18 +487,20 @@ pub fn contains_uv_point(
         let _default_param_step = domain.length() / trim.number_control_points()? as f64;
         let min_param_step = domain.length() / 1000.0;
         let max_param_step = domain.length() / 20.0;
-        let curve_is_linear = trim.is_linear(tol_uv, false)?.linear;
+        let curve_is_linear = trim.is_linear(k, tol_uv, false)?.linear;
 
         // Eval info for start point of this EU.
         let (mut prev_uv, mut prev_uv_tan, mut prev_uv_tan_len) =
-            eval_with_tangent(trim, prev_param, orient)?;
+            eval_with_tangent(k, trim, prev_param, orient)?;
         let (prev_vec, mut prev_dist) = unit_from(uv_pt, prev_uv);
         let mut prev_cos = prev_vec.dot(prev_uv_tan);
 
         // Note: if dPrevDist < tol, then this uv pt is on the edge.
         if prev_dist < tol_uv {
             // We should refine the point.
-            if let Some(sol) = local_minimize(trim, &domain, uv_pt, tol_uv, prev_param)? {
+            if let Some(sol) =
+                local_minimize(k, trim, &this_eu.interval, uv_pt, tol_uv, prev_param)?
+            {
                 // since the guess was good enough - we expect the refined solution to
                 // be as good or better
                 if sol.start.solution_value <= tol_uv {
@@ -517,7 +608,7 @@ pub fn contains_uv_point(
                 }
 
                 let (uv_at, this_uv_tan, this_uv_tan_len) =
-                    eval_with_tangent(trim, this_param, orient)?;
+                    eval_with_tangent(k, trim, this_param, orient)?;
                 this_uv = uv_at;
                 let (this_vec, this_dist) = unit_from(uv_pt, this_uv);
                 let this_cos = this_vec.dot(this_uv_tan);
@@ -599,7 +690,7 @@ pub fn contains_uv_point(
                     crv_ivl.add_value(this_param);
                     crv_ivl.expand_absolute(EFF_ZERO);
 
-                    if let Some(sol) = local_minimize(trim, &crv_ivl, uv_pt, tol_uv, guess_t)? {
+                    if let Some(sol) = local_minimize(k, trim, &crv_ivl, uv_pt, tol_uv, guess_t)? {
                         if sol.start.solution_value <= tol_uv {
                             return Ok(UvContainment::on(this_edge, sol.start.param(0)?));
                         }
@@ -870,6 +961,16 @@ mod tests {
 
     #[test]
     fn corner_boundaries_and_poles() {
+        let k = Kernel::default();
+        let s = plane();
+        let (e, t) = square(true);
+        let lp = view(&s, &e, &t);
+        let dom = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
+        let b = uv_corner_boundaries(&k, &lp, &dom, 1e-9).unwrap();
+        assert_eq!(b.boundaries, 15);
+        assert_eq!(b.on_edges.len(), 8);
+        assert_eq!(b.on_params.first(), Some(&0.0));
+
         // a point on a domain side with the loop on that side reaches GetSingularities
         let dom = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
         let s2 = Surface::from(Plane::new(

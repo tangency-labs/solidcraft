@@ -23,6 +23,8 @@
 #include <SmCircle.h>
 #include <SmCone.h>
 #include <SmContext.h>
+#include <SmDatabaseIO.h>
+#include <sstream>
 #include <SmCurve.h>
 #include <SmCylinder.h>
 #include <SmEllipse.h>
@@ -513,9 +515,40 @@ void put_derivs(std::vector<double>& o, const std::vector<SmVector3d>& d)
 
 void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<double>& o)
 {
+    SmSurface* common = s; // real native Cone/Cylinder virtual dispatch (issue #76)
     switch (op)
     {
     case OP_BUILD: put_state(o, s); break;
+    case 14: // SmSurfaceEval callback over a real analytic object
+    {
+        const double u = rd.num(), v = rd.num();
+        SmSurfaceEval eval(s, u, v);
+        o.push_back(SM_SUCCESS);
+        put_vec(o, eval.Pos()); put_vec(o, eval.Su()); put_vec(o, eval.Sv());
+        put_vec(o, eval.Suu()); put_vec(o, eval.Suv()); put_vec(o, eval.Svv());
+        break;
+    }
+    case 17:
+    case 18: // inherited common queries, preserving analytic virtual evaluation
+    {
+        SmExtent2d domain = common->GetNaturalUVDomain();
+        if (op == 18) {
+            const SmPoint2d low = domain.Evaluate(0.2, 0.2), high = domain.Evaluate(0.8, 0.8);
+            domain.SetMinMax(low, high);
+        }
+        o.push_back(SM_SUCCESS);
+        o.push_back((double)common->IsDegeneratePoint(SM_ZONE_TOL_3D / 10.0, &domain));
+        o.push_back((double)common->IsDegenerateCurve(SM_EFF_ZERO_DEG, &domain, SM_ZONE_TOL_3D / 10.0));
+        SmVector3d normal(0.0, 0.0, 0.0);
+        SmStatus status = common->EvaluateNormal(domain.Evaluate(0.5, 0.5), TRUE, TRUE, normal);
+        o.push_back((double)status);
+        if (status == SM_SUCCESS) put_vec(o, normal);
+        SmExtent3d box;
+        status = common->CalculateBoundingBox(domain, &box, NULL, NULL, NULL, NULL, FALSE);
+        o.push_back((double)status);
+        if (status == SM_SUCCESS) { put_vec(o, box.GetMin()); put_vec(o, box.GetMax()); }
+        break;
+    }
     case OP_EVAL_STEP:
     {
         double u = rd.num();
@@ -526,14 +559,14 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         if (point)
         {
             SmPoint3d p(0.0, 0.0, 0.0);
-            SmStatus stt = s->EvaluateSTEPPoint(SmPoint2d(u, v), p);
+            SmStatus stt = common->EvaluateSTEPPoint(SmPoint2d(u, v), p);
             o.push_back((double)stt);
             if (stt == SM_SUCCESS)
                 put_vec(o, p);
             break;
         }
         std::vector<SmVector3d> d((hu + 1) * (hv + 1), SmVector3d(0.0, 0.0, 0.0));
-        SmStatus stt = s->EvaluateSTEP(SmPoint2d(u, v), hu, hv, TRUE, TRUE, TRUE, d.data());
+        SmStatus stt = common->EvaluateSTEP(SmPoint2d(u, v), hu, hv, TRUE, TRUE, TRUE, d.data());
         o.push_back((double)stt);
         if (stt == SM_SUCCESS)
             put_derivs(o, d);
@@ -550,7 +583,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         SmBoolean upper = rd.b();
         SmBoolean nonzero = rd.b();
         std::vector<SmVector3d> d((hu + 1) * (hv + 1), SmVector3d(0.0, 0.0, 0.0));
-        SmStatus stt = s->Evaluate(SmPoint2d(u, v), hu, hv, ul, vl, upper, d.data(), nonzero);
+        SmStatus stt = common->Evaluate(SmPoint2d(u, v), hu, hv, ul, vl, upper, d.data(), nonzero);
         o.push_back((double)stt);
         if (stt == SM_SUCCESS)
             put_derivs(o, d);
@@ -561,7 +594,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         double u = rd.num();
         double v = rd.num();
         SmPoint3d p(0.0, 0.0, 0.0);
-        SmStatus stt = s->EvaluatePoint(SmPoint2d(u, v), p);
+        SmStatus stt = common->EvaluatePoint(SmPoint2d(u, v), p);
         o.push_back((double)stt);
         if (stt == SM_SUCCESS)
             put_vec(o, p);
@@ -572,7 +605,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         double u = rd.num();
         double v = rd.num();
         SmPoint2d r;
-        SmStatus stt = s->ConvertUVFromNURBSToSTEP(SmPoint2d(u, v), r);
+        SmStatus stt = common->ConvertUVFromNURBSToSTEP(SmPoint2d(u, v), r);
         o.push_back((double)stt);
         if (stt == SM_SUCCESS)
         {
@@ -592,7 +625,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
             break;
         }
         SmPoint2d r;
-        SmStatus stt = s->ConvertUVFromSTEPToNURBS(SmPoint2d(u, v), r);
+        SmStatus stt = common->ConvertUVFromSTEPToNURBS(SmPoint2d(u, v), r);
         o.push_back((double)stt);
         if (stt == SM_SUCCESS)
         {
@@ -682,6 +715,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         break;
     }
     case OP_INVERSION:
+    case 16: // common STEP inversion over an interior analytic subdomain
     {
         SmPoint3d p = rd.vec();
         double tol = rd.num();
@@ -692,8 +726,14 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         const double nan = std::nan("");
         SmPoint2d uv(nan, nan);
         SmLocationType loc = SM_LT_EXTERIOR;
-        SmStatus stt = s->STEPInversion(s->GetSTEPUVDomain(), p, tol, uv, loc,
-                                        has_guess ? &guess : NULL);
+        SmExtent2d domain = s->GetSTEPUVDomain();
+        if (op == 16) {
+            const SmPoint2d low = domain.Evaluate(0.2, 0.2);
+            const SmPoint2d high = domain.Evaluate(0.8, 0.8);
+            domain.SetMinMax(low, high);
+        }
+        SmStatus stt = common->STEPInversion(domain, p, tol, uv, loc,
+                                             has_guess ? &guess : NULL);
         o.push_back((double)stt);
         // outputs are set on success and for a point outside the sweep (SM_ERR); a
         // failed generator drop leaves the height unset
@@ -855,7 +895,31 @@ SC_EXPORT int32_t sc_surface_cone_p1_eval(int32_t op, const double* in, int64_t 
         SmCone* s = read_cone(rd, ctx, o);
         if (s)
         {
-            cone_op(op, rd, ctx, s, o);
+            if (op == 100 || op == 101 || op >= 1000)
+            {
+                const bool binary = op == 101 || op >= 1100;
+                std::ostringstream stream;
+                SmDatabaseIOStream writer(binary ? SM_BINARY : SM_ASCII, &stream);
+                SmStatus status = s->WriteToDB(writer, 30);
+                if (op < 1000) {
+                    o.push_back((double)status);
+                    if (status == SM_SUCCESS) {
+                        const std::string bytes = stream.str();
+                        for (unsigned char byte : bytes) o.push_back((double)byte);
+                    }
+                } else {
+                    SmSurface* read = NULL;
+                    std::istringstream input(stream.str());
+                    SmDatabaseIOStream reader(binary ? SM_BINARY : SM_ASCII, &input);
+                    if (status == SM_SUCCESS)
+                        status = SmSurface::ReadFromDB(s->GetType(), reader, ctx, read, 30);
+                    if (status == SM_SUCCESS && read)
+                        cone_op(op - (binary ? 1100 : 1000), rd, ctx, static_cast<SmCone*>(read), o);
+                    else o.push_back((double)status);
+                    delete read;
+                }
+            }
+            else cone_op(op, rd, ctx, s, o);
             delete s;
         }
     }

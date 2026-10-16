@@ -28,8 +28,7 @@ use serde_json::Value;
 
 use solidcore::curve::curve::p2::{Curve, CurveKind, CurvePropertyGs, CurvePropertyType};
 use solidcore::curve::curve::p3::{
-    compute_crvs_normal, crvs_fix_gaps, local_curve_intersect, BestLineFitEnfo,
-    PointSolveOptions,
+    compute_crvs_normal, crvs_fix_gaps, local_curve_intersect, BestLineFitEnfo, PointSolveOptions,
 };
 use solidcore::curve::curve::p4::{fix_chain_curves_list, FindPcExtremaEfo};
 use solidcore::curve::curve_cache::{CurveCache, CurveCacheOptions};
@@ -640,7 +639,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
     match op {
         OpIn::Normal { curves } => {
             let cs: Vec<Curve> = curves.iter().map(build).collect::<Result<_, _>>()?;
-            let n = tri!(o, compute_crvs_normal(&cs));
+            let n = tri!(o, compute_crvs_normal(&k, &cs));
             o.push(0.0);
             pv(&mut o, n);
         }
@@ -674,7 +673,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             ts,
         } => {
             let c = build(curve)?;
-            let mut efo = FindPcExtremaEfo::new(&c, v3(*p), ivl_of(*dom), *sqtol, sop_of(*sop)?);
+            let mut efo = FindPcExtremaEfo::new(&k, &c, v3(*p), ivl_of(*dom), *sqtol, sop_of(*sop)?);
             o.push(0.0);
             for &t in ts {
                 let mut fv = FunctionValue::default();
@@ -689,7 +688,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::LineFit { c1, c2, x, jac } => {
             let a = build(c1)?;
             let bb = build(c2)?;
-            let mut enfo = BestLineFitEnfo::new(&a, &bb, 1e-20);
+            let mut enfo = BestLineFitEnfo::new(&k, &a, &bb, 1e-20);
             let mut f = [0.0; 2];
             let mut m = Matrix::new(2, 2);
             let r = enfo.evaluate(x, &mut f, if *jac { Some(&mut m) } else { None });
@@ -725,7 +724,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             };
             let (found, sol) = tri!(
                 o,
-                c.local_point_solve::<Obj>(&ivl_of(*ivl), sop_of(*sop)?, v3(*p), &opts, *guess)
+                c.local_point_solve::<Obj>(&k, &ivl_of(*ivl), sop_of(*sop)?, v3(*p), &opts, *guess)
             );
             o.extend([0.0, b(found)]);
             put_sol(&mut o, &sol);
@@ -746,7 +745,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let vs: Vec<Vec3> = vecs.iter().map(|&x| v3(x)).collect();
             let (found, sol) = tri!(
                 o,
-                a.local_curve_solve(
+                a.local_curve_solve(&k, 
                     &ivl_of(*ivl1),
                     &bb,
                     &ivl_of(*ivl2),
@@ -773,7 +772,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let bb = build(c2)?;
             let r = tri!(
                 o,
-                local_curve_intersect(&a, &ivl_of(*ivl1), &bb, &ivl_of(*ivl2), *tol, g[0], g[1])
+                local_curve_intersect(&k, &a, &ivl_of(*ivl1), &bb, &ivl_of(*ivl2), *tol, g[0], g[1])
             );
             o.extend([0.0, b(r.is_some())]);
             if let Some(i) = r {
@@ -814,7 +813,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 let prop = CurvePropertyType::from_code(*prop)
                     .ok_or_else(|| harness("property"))?;
                 let vs: Vec<Vec3> = vecs.iter().map(|&x| v3(x)).collect();
-                let mut g = CurvePropertyGs::new(tree, ivl_of(*ivl), prop, Some(*val), vs)
+                let mut g = CurvePropertyGs::new(&k, tree, ivl_of(*ivl), prop, Some(*val), vs)
                     .with_curve(&c);
                 g.base.operation = sop_of(*sop)?;
                 g.base.tolerance_3d = *tol;
@@ -836,7 +835,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::IsLinear { curve, tol, want } => {
             let c = build(curve)?;
-            let r = tri!(o, c.is_linear(*tol, *want));
+            let r = tri!(o, c.is_linear(&k, *tol, *want));
             o.extend([0.0, b(r.linear)]);
             if r.linear {
                 pv(&mut o, r.line_point);
@@ -1307,12 +1306,12 @@ fn gen_curve_or_degenerate(rng: &mut Rng) -> CurveIn {
 }
 
 /// A point near the curve (or anywhere).
-fn gen_point_near(rng: &mut Rng, c: &CurveIn) -> [f64; 3] {
+fn gen_point_near(k: &Kernel, rng: &mut Rng, c: &CurveIn) -> [f64; 3] {
     let Ok(curve) = build(c) else {
         return rp(rng, 10.0);
     };
     let t = gen_t(rng, c);
-    let base = curve.evaluate_point(t).map_or([0.0; 3], |p| [p.x, p.y, p.z]);
+    let base = curve.evaluate_point(k, t).map_or([0.0; 3], |p| [p.x, p.y, p.z]);
     match rng.below(5) {
         0 => base,
         1 => rp(rng, 20.0),
@@ -1323,9 +1322,9 @@ fn gen_point_near(rng: &mut Rng, c: &CurveIn) -> [f64; 3] {
     }
 }
 
-fn gen_pc_extrema(rng: &mut Rng) -> OpIn {
+fn gen_pc_extrema(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = gen_curve_or_degenerate(rng);
-    let p = gen_point_near(rng, &curve);
+    let p = gen_point_near(k, rng, &curve);
     let dom = gen_ivl(rng, &curve);
     let sqtol = *rng.choose(&[1e-20, 1e-12, 1e-6, 1e-2]).unwrap_or(&1e-20);
     let sop = *rng.choose(&[3, 4, 5, 3]).unwrap_or(&3);
@@ -1369,13 +1368,13 @@ fn gen_line_fit(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_point_solve(rng: &mut Rng) -> OpIn {
+fn gen_point_solve(k: &Kernel, rng: &mut Rng) -> OpIn {
     let curve = gen_curve_or_degenerate(rng);
     let ivl = gen_ivl(rng, &curve);
     let sop = *rng
         .choose(&[3, 3, 3, 4, 4, 5, 5, 0, 6, 6, 8, 9])
         .unwrap_or(&3);
-    let p = gen_point_near(rng, &curve);
+    let p = gen_point_near(k, rng, &curve);
     let dist_tol = if matches!(sop, 8 | 9) || rng.chance(0.2) {
         Some(*rng.choose(&[1e-6, 1e-3, 1.0]).unwrap_or(&1e-3))
     } else {
@@ -1475,7 +1474,7 @@ fn gen_planar(rng: &mut Rng, z0: f64) -> CurveIn {
     }
 }
 
-fn gen_property_local(rng: &mut Rng) -> OpIn {
+fn gen_property_local(k: &Kernel, rng: &mut Rng) -> OpIn {
     // properties: angles (17-19), plane intersection (16), and a few that reach the
     // property analysis
     let prop = *rng
@@ -1526,7 +1525,7 @@ fn gen_property_local(rng: &mut Rng) -> OpIn {
             (-z0, vec![[0.0, 0.0, 1.0], gen_dir(rng), gen_dir(rng)])
         } else {
             let n = gen_dir(rng);
-            let p = gen_point_near(rng, &curve);
+            let p = gen_point_near(k, rng, &curve);
             let d = -(n[0] * p[0] + n[1] * p[1] + n[2] * p[2]);
             (d, vec![n, gen_dir(rng), gen_dir(rng)])
         }
@@ -1601,17 +1600,17 @@ fn gen_is_linear(rng: &mut Rng) -> OpIn {
     }
 }
 
-fn gen_case(rng: &mut Rng) -> OpIn {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     match rng.below(100) {
         0..=9 => gen_normal(rng),
         10..=19 => gen_fix_gaps(rng),
         20..=31 => gen_arc_length(rng),
-        32..=43 => gen_pc_extrema(rng),
+        32..=43 => gen_pc_extrema(k, rng),
         44..=51 => gen_line_fit(rng),
-        52..=67 => gen_point_solve(rng),
+        52..=67 => gen_point_solve(k, rng),
         68..=71 => gen_curve_solve(rng),
         72..=75 => gen_intersect(rng),
-        76..=91 => gen_property_local(rng),
+        76..=91 => gen_property_local(k, rng),
         _ => gen_is_linear(rng),
     }
 }
@@ -1637,8 +1636,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let op = gen_case(rng);
+            let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
@@ -1676,11 +1676,15 @@ mod tests {
     /// that can be ported now.
     #[test]
     fn generated_cases_are_diverse() {
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         for _ in 0..2000 {
-            let op = gen_case(&mut rng);
-            let name = serde_json::to_value(&op).unwrap()["op"].as_str().unwrap().to_string();
+            let op = gen_case(k, &mut rng);
+            let name = serde_json::to_value(&op).unwrap()["op"]
+                .as_str()
+                .unwrap()
+                .to_string();
             let out = rust(&op);
             let e = stats.entry(name).or_default();
             e[0] += 1;
@@ -1692,9 +1696,11 @@ mod tests {
             }
         }
         for (k, v) in &stats {
-            eprintln!("{k}: total {} ok {} err {} deferred/harness {}", v[0], v[1], v[2], v[3]);
+            eprintln!(
+                "{k}: total {} ok {} err {} deferred/harness {}",
+                v[0], v[1], v[2], v[3]
+            );
         }
         assert_eq!(stats.len(), 10);
     }
 }
-

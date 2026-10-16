@@ -338,6 +338,7 @@ impl Volume {
             if let Some(orient) = &self.orient_map {
                 // project ParamDomain boxes to InSpace boxes through OrientMap()
                 simple(orient).evaluate_bounding_box_simple(
+                    k,
                     param_box,
                     param_pseudo_box,
                     in_box,
@@ -364,6 +365,7 @@ impl Volume {
                 let mut proj_pseudo_box = PseudoBox::new();
                 // map from Param to Proj space
                 self.evaluate_bounding_box_simple(
+                    k,
                     param_box,
                     param_pseudo_box,
                     Some(&mut proj_box),
@@ -371,6 +373,7 @@ impl Volume {
                 )?;
                 // map from Proj to Out space
                 simple(orient).evaluate_bounding_box_simple(
+                    k,
                     &proj_box,
                     Some(&proj_pseudo_box),
                     out_box.as_deref_mut(),
@@ -379,6 +382,7 @@ impl Volume {
             } else {
                 // projSpace == OutSpace, map from Param to Out space
                 self.evaluate_bounding_box_simple(
+                    k,
                     param_box,
                     param_pseudo_box,
                     out_box.as_deref_mut(),
@@ -526,6 +530,7 @@ impl Volume {
             let mut proj_box = Extent3d::new();
             let mut proj_pseudo_box = PseudoBox::new();
             ignore_defined(self.evaluate_bounding_box_simple(
+                k,
                 &param_box,
                 has_this.then_some(&param_pseudo_box),
                 Some(&mut proj_box),
@@ -534,6 +539,7 @@ impl Volume {
 
             // map ProjBox to OutSpace
             ignore_defined(simple(orient).evaluate_bounding_box_simple(
+                k,
                 &proj_box,
                 Some(&proj_pseudo_box),
                 out_box.as_deref_mut(),
@@ -548,6 +554,7 @@ impl Volume {
             ))?;
             // map trimmed InBoxes to OutBoxes directly
             ignore_defined(self.evaluate_bounding_box_simple(
+                k,
                 &param_box,
                 None,
                 out_box.as_deref_mut(),
@@ -600,6 +607,7 @@ impl Volume {
     /// fail), including [`SolidError::Unported`] from an unbend's edge boxes.
     pub fn evaluate_bounding_box_simple(
         &self,
+        k: &Kernel,
         param_box: &Extent3d,
         param_pseudo_box: Option<&PseudoBox>,
         proj_box: Option<&mut Extent3d>,
@@ -644,7 +652,7 @@ impl Volume {
                 t.evaluate_bounding_box_simple(param_box, proj_box, proj_pseudo_box)
             }
             VolumeKind::Unbend(u) => {
-                u.evaluate_bounding_box_simple(self, param_box, proj_box, proj_pseudo_box)
+                u.evaluate_bounding_box_simple(k, self, param_box, proj_box, proj_pseudo_box)
             }
             VolumeKind::Bend(b) => {
                 b.evaluate_bounding_box_simple(param_box, proj_box, proj_pseudo_box);
@@ -897,18 +905,19 @@ impl Volume {
     /// [`SolidError::Unported`] from an unported kind.
     pub fn has_discontinuities(
         &self,
+        k: &Kernel,
         mut disconts: Option<&mut Discontinuities3d>,
         calc_geometric: bool,
     ) -> Result<bool> {
         // Pass the call along to the simple map
         let mut this_has =
-            self.has_discontinuities_simple(disconts.as_deref_mut(), calc_geometric)?;
+            self.has_discontinuities_simple(k, disconts.as_deref_mut(), calc_geometric)?;
 
         if let Some(next) = self.next_map.as_deref() {
             if let Some(d) = disconts {
                 let mut next_disconts = Discontinuities3d::new();
                 let next_has =
-                    next.has_discontinuities(Some(&mut next_disconts), calc_geometric)?;
+                    next.has_discontinuities(k, Some(&mut next_disconts), calc_geometric)?;
                 // when NextMap has discontinuities - assume unaligned discontinuities
                 if next_has {
                     let a = d.min_continuity;
@@ -922,7 +931,7 @@ impl Volume {
                 this_has |= next_has;
                 d.has_discontinuities = this_has;
             } else {
-                this_has |= next.has_discontinuities(None, false)?;
+                this_has |= next.has_discontinuities(k, None, false)?;
             }
         }
         Ok(this_has)
@@ -1702,18 +1711,19 @@ mod tests {
 
     #[test]
     fn base_sampler_samples_the_compound_map() {
+        let k = &Kernel::default();
         // a plain volume with a transform next map: the sampler's evaluations fail
         // (the plain simple map), so every sample is the undefined point
         let vol = Volume::with_maps(VolumeKind::Base, None, Some(tv(scaled())));
         let mut b = Extent3d::new();
         let mut pb = PseudoBox::new();
-        vol.evaluate_bounding_box_simple(&unit_box(), None, Some(&mut b), Some(&mut pb))
+        vol.evaluate_bounding_box_simple(k, &unit_box(), None, Some(&mut b), Some(&mut pb))
             .unwrap();
         assert_eq!(b.min(), Vec3::UNDEF);
         // unbounded input boxes give unbounded output boxes
         let mut unb = Extent3d::new();
         unb.set_unbounded();
-        vol.evaluate_bounding_box_simple(&unb, None, Some(&mut b), None)
+        vol.evaluate_bounding_box_simple(k, &unb, None, Some(&mut b), None)
             .unwrap();
         assert!(!b.is_bounded());
         // the pseudo-box sampler of a transform volume maps exactly at the corners
@@ -1776,12 +1786,13 @@ mod tests {
 
     #[test]
     fn discontinuities_of_chains() {
+        let k = &Kernel::default();
         let vol = Volume::with_maps(VolumeKind::Transform(scaled()), None, Some(tv(scaled())));
         let mut d = Discontinuities3d::new();
         d.set_unaligned();
-        assert!(!vol.has_discontinuities(Some(&mut d), true).unwrap());
+        assert!(!vol.has_discontinuities(k, Some(&mut d), true).unwrap());
         assert_eq!(d, Discontinuities3d::new());
-        assert!(!vol.has_discontinuities(None, true).unwrap());
+        assert!(!vol.has_discontinuities(k, None, true).unwrap());
     }
 
     fn ascii(s: &str) -> DatabaseReader {
@@ -1835,6 +1846,7 @@ mod tests {
 
     #[test]
     fn unbend_overrides_are_dispatched() {
+        let k = &Kernel::default();
         let vol = UnbendVolume::create(
             v(0.0, 0.0, 0.0),
             v(0.0, 0.0, 1.0),
@@ -1852,13 +1864,13 @@ mod tests {
         assert!(close(v(p[0], p[1], p[2]), v(1.5, 0.5, 0.25)));
         // its box covers the mapped corners
         let mut b = Extent3d::new();
-        vol.evaluate_bounding_box_simple(&unit_box(), None, Some(&mut b), None)
+        vol.evaluate_bounding_box_simple(k, &unit_box(), None, Some(&mut b), None)
             .unwrap();
         assert!(b.contains_point(vol.evaluate_point(v(1.0, 1.0, 1.0), true).unwrap(), 1e-9));
         // a zero-length box edge is refused (upstream reads a null line)
         let flat = Extent3d::from_points(v(0.5, 0.5, 0.5), v(0.5, 1.0, 1.0));
         assert!(vol
-            .evaluate_bounding_box_simple(&flat, None, Some(&mut b), None)
+            .evaluate_bounding_box_simple(k, &flat, None, Some(&mut b), None)
             .is_err());
     }
 

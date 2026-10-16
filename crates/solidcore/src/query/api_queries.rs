@@ -113,9 +113,13 @@ fn curve_solutions(
     )
 }
 
-fn curve_result<O: Copy>(curve: &Curve, solution: &Solution<O>) -> Result<CurveClosestPoint> {
+fn curve_result<O: Copy>(
+    k: &Kernel,
+    curve: &Curve,
+    solution: &Solution<O>,
+) -> Result<CurveClosestPoint> {
     let parameter = solution.start.param(0)?;
-    let point = curve.evaluate_point(parameter)?;
+    let point = curve.evaluate_point(k, parameter)?;
     Ok(CurveClosestPoint {
         closest: ClosestPoint {
             point,
@@ -130,6 +134,7 @@ fn curve_result<O: Copy>(curve: &Curve, solution: &Solution<O>) -> Result<CurveC
 pub fn curve_closest_point(k: &Kernel, curve: &Curve, point: Point3) -> Result<CurveClosestPoint> {
     let solutions = curve_solutions(k, curve, point, SolutionRequested::Single)?;
     curve_result(
+        k,
         curve,
         solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?,
     )
@@ -149,7 +154,7 @@ pub fn curve_closest_point_all(
     solutions
         .as_slice()
         .iter()
-        .map(|s| curve_result(curve, s))
+        .map(|s| curve_result(k, curve, s))
         .collect()
 }
 
@@ -185,11 +190,11 @@ pub fn surface_closest_point(
         }
     }
     let selected = Point2::new(best.start.param(0)?, best.start.param(1)?);
-    let point = surface.evaluate_point(selected)?;
+    let point = surface.evaluate_point(k, selected)?;
     let mut uvs = Vec::new();
     for solution in drop.solutions.as_slice() {
         let uv = Point2::new(solution.start.param(0)?, solution.start.param(1)?);
-        if let Some(candidate) = ignored(surface.evaluate_point(uv))? {
+        if let Some(candidate) = ignored(surface.evaluate_point(k, uv))? {
             if candidate.closer_than(tolerance, point) {
                 uvs.push(uv);
             }
@@ -219,6 +224,7 @@ fn solve_options(_k: &Kernel, requested: SolutionRequested) -> TopologySolveOpti
 
 // SmSolution::GetPoint using the same caller-owned geometry adapter as the solver.
 fn solution_point<O: SolutionObject>(
+    k: &Kernel,
     objects: &dyn TopologyObjects<O>,
     solution: &Solution<O>,
     index: usize,
@@ -247,7 +253,7 @@ fn solution_point<O: SolutionObject>(
                 return Ok(ignored(
                     objects
                         .curve(curve)?
-                        .evaluate_point(solution.start.param(parameter)?),
+                        .evaluate_point(k, solution.start.param(parameter)?),
                 )?
                 .unwrap_or(Point3::UNDEF));
             }
@@ -257,13 +263,14 @@ fn solution_point<O: SolutionObject>(
                 } else {
                     object
                 };
-                return Ok(
-                    ignored(objects.surface(surface)?.evaluate_point(Point2::new(
+                return Ok(ignored(objects.surface(surface)?.evaluate_point(
+                    k,
+                    Point2::new(
                         solution.start.param(parameter)?,
                         solution.start.param(parameter + 1)?,
-                    )))?
-                    .unwrap_or(Point3::UNDEF),
-                );
+                    ),
+                ))?
+                .unwrap_or(Point3::UNDEF));
             }
             return Err(SolidError::sm_err(OP));
         }
@@ -304,7 +311,7 @@ pub fn brep_closest_point<O: SolutionObject>(
     )?;
     let solution = solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?;
     Ok(ClosestPoint {
-        point: solution_point(objects, solution, 0)?,
+        point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
     })
 }
@@ -332,7 +339,7 @@ pub fn brep_closest_point_all<O: SolutionObject>(
         .iter()
         .map(|s| {
             Ok(ClosestPoint {
-                point: solution_point(objects, s, 0)?,
+                point: solution_point(k, objects, s, 0)?,
                 distance: s.start.solution_value,
             })
         })
@@ -434,9 +441,9 @@ pub fn brep_relationship<O: SolutionObject>(
     let tolerance =
         crate::geom::tol::context_zone_tol_3d(k, None, crate::geom::tol::SmallTopoType::NormalSize);
     if distance > a.brep.tolerance() + b.brep.tolerance() {
-        let pa = ignored(solution_point(objects, solution, 0))?;
+        let pa = ignored(solution_point(k, objects, solution, 0))?;
         let pb = if pa.is_some() {
-            ignored(solution_point(objects, solution, 1))?
+            ignored(solution_point(k, objects, solution, 1))?
         } else {
             None
         };
@@ -647,7 +654,7 @@ pub fn face_closest_point<O: SolutionObject>(
     let solutions = TopologySolver::shape_point_solve(k, objects, &shape, point, options)?;
     let solution = solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?;
     Ok(ClosestPoint {
-        point: solution_point(objects, solution, 0)?,
+        point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
     })
 }
@@ -692,7 +699,7 @@ pub fn edge_closest_point(
         .ok_or(SolidError::sm_err(OP))?;
     Ok(CurveClosestPoint {
         closest: ClosestPoint {
-            point: curve.evaluate_point(result.parameter)?,
+            point: curve.evaluate_point(k, result.parameter)?,
             distance: result.distance,
         },
         parameter: result.parameter,
@@ -708,14 +715,14 @@ pub fn edge_parameter_range(brep: &Brep, id: EdgeId) -> Result<Extent1d> {
 /// first with strict distance comparisons, including parameters outside the edge
 /// interval. An ordinary evaluation failure falls through to interval containment.
 pub fn edge_classify_parameter(
-    _k: &Kernel,
+    k: &Kernel,
     brep: &Brep,
     id: EdgeId,
     parameter: f64,
 ) -> Result<PointClassType> {
     let e = brep.edge(id)?;
     let curve = e.curve.as_ref().ok_or(SolidError::sm_err(OP))?;
-    if let Some(point) = ignored(curve.evaluate_point(parameter))? {
+    if let Some(point) = ignored(curve.evaluate_point(k, parameter))? {
         for v in [edge::start_vertex(brep, id)?, edge::end_vertex(brep, id)?]
             .into_iter()
             .flatten()
@@ -735,13 +742,13 @@ pub fn edge_classify_parameter(
 
 /// Unit tangent (`SmApiEdgeTangent`), evaluating from the left as upstream.
 /// A missing curve, evaluation failure or zero derivative returns an error.
-pub fn edge_tangent(brep: &Brep, id: EdgeId, parameter: f64) -> Result<Vec3> {
+pub fn edge_tangent(k: &Kernel, brep: &Brep, id: EdgeId, parameter: f64) -> Result<Vec3> {
     let curve = brep
         .edge(id)?
         .curve
         .as_ref()
         .ok_or(SolidError::sm_err(OP))?;
-    let values = curve.evaluate(parameter, 1, true, true)?;
+    let values = curve.evaluate(k, parameter, 1, true, true)?;
     values
         .get(1)
         .copied()
@@ -854,6 +861,7 @@ mod tests {
 
     #[test]
     fn solution_point_preserves_upstream_parameter_advances() {
+        let k = &Kernel::default();
         let objects = Geometry::new();
         for (preceding, expected_x) in [
             (ObjectKind::Surface, 2.5),
@@ -869,7 +877,7 @@ mod tests {
                 *solution.start.param_mut(i).unwrap() = t;
             }
             assert_eq!(
-                solution_point(&objects, &solution, 1).unwrap(),
+                solution_point(k, &objects, &solution, 1).unwrap(),
                 Point3::new(expected_x, 0., 0.),
                 "preceding {preceding:?}"
             );
@@ -878,12 +886,16 @@ mod tests {
 
     #[test]
     fn solution_point_ignores_ordinary_evaluation_failures() {
+        let k = &Kernel::default();
         let objects = Geometry {
             curve: Curve::from(BSplineCurve::new(3)),
             surface: Surface::from(BSplineSurface::new()),
         };
-        assert!(objects.curve.evaluate_point(2.).is_err());
-        assert!(objects.surface.evaluate_point(Point2::new(2., 2.)).is_err());
+        assert!(objects.curve.evaluate_point(k, 2.).is_err());
+        assert!(objects
+            .surface
+            .evaluate_point(k, Point2::new(2., 2.))
+            .is_err());
         for kind in [
             ObjectKind::Curve,
             ObjectKind::Edge,
@@ -896,7 +908,7 @@ mod tests {
             *solution.start.param_mut(0).unwrap() = 2.;
             *solution.start.param_mut(1).unwrap() = 2.;
             assert_eq!(
-                solution_point(&objects, &solution, 0).unwrap(),
+                solution_point(k, &objects, &solution, 0).unwrap(),
                 Point3::UNDEF
             );
         }

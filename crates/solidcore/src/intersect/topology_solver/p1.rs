@@ -801,7 +801,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for TopologySolver<'t, '_, O
 
     /// `SmTopologySolver::LocalSolve`.
     fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
-        self.local_solve_branch(branch)
+        let k = self.kernel;
+        self.local_solve_branch(k, branch)
     }
 }
 
@@ -877,6 +878,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// unported callees.
     pub fn solve_it(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, 'a, O>,
         object1: Option<O>,
         object2: Option<O>,
@@ -887,19 +889,19 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             }
             LocalSolverKind::PointVertex => self.solve_point_vertex(ts, object1, object2),
             LocalSolverKind::VertexVertex => self.solve_vertex_vertex(ts, object1, object2),
-            LocalSolverKind::PointCurve => self.solve_point_curve(ts, object1, object2),
-            LocalSolverKind::PointEdge => self.solve_point_edge(ts, object1, object2),
-            LocalSolverKind::VertexEdge => self.solve_vertex_edge(ts, object1, object2),
-            LocalSolverKind::PointFace => self.solve_point_face(ts, object1, object2),
-            LocalSolverKind::CurveCurve => self.solve_curve_curve(ts),
-            LocalSolverKind::CurveEdge => self.solve_curve_edge(ts, object1, object2),
-            LocalSolverKind::EdgeEdge => self.solve_edge_edge(ts, object1, object2),
-            LocalSolverKind::VertexFace => self.solve_vertex_face(ts, object1, object2),
-            LocalSolverKind::CurveVertex => self.solve_curve_vertex(ts, object1, object2),
-            LocalSolverKind::EdgeVertex => self.solve_edge_vertex(ts, object1, object2),
-            LocalSolverKind::CurveFace => self.solve_curve_face(ts, object1, object2),
-            LocalSolverKind::EdgeFace => self.solve_edge_face(ts, object1, object2),
-            LocalSolverKind::FaceFace => self.solve_face_face(ts, object1, object2),
+            LocalSolverKind::PointCurve => self.solve_point_curve(k, ts, object1, object2),
+            LocalSolverKind::PointEdge => self.solve_point_edge(k, ts, object1, object2),
+            LocalSolverKind::VertexEdge => self.solve_vertex_edge(k, ts, object1, object2),
+            LocalSolverKind::PointFace => self.solve_point_face(k, ts, object1, object2),
+            LocalSolverKind::CurveCurve => self.solve_curve_curve(k, ts),
+            LocalSolverKind::CurveEdge => self.solve_curve_edge(k, ts, object1, object2),
+            LocalSolverKind::EdgeEdge => self.solve_edge_edge(k, ts, object1, object2),
+            LocalSolverKind::VertexFace => self.solve_vertex_face(k, ts, object1, object2),
+            LocalSolverKind::CurveVertex => self.solve_curve_vertex(k, ts, object1, object2),
+            LocalSolverKind::EdgeVertex => self.solve_edge_vertex(k, ts, object1, object2),
+            LocalSolverKind::CurveFace => self.solve_curve_face(k, ts, object1, object2),
+            LocalSolverKind::EdgeFace => self.solve_edge_face(k, ts, object1, object2),
+            LocalSolverKind::FaceFace => self.solve_face_face(k, ts, object1, object2),
         }
     }
 
@@ -1144,6 +1146,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// first when swapped).
     fn solve_point_curve(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, '_, O>,
         object1: Option<O>,
         object2: Option<O>,
@@ -1152,7 +1155,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         let handle = if self.swap_order { object1 } else { object2 };
         let handle = handle.ok_or(null_deref(OP_PC, "null curve object"))?;
         let curve = objects.curve(handle)?;
-        self.point_curve(ts, curve, Some(handle))
+        self.point_curve(k, ts, curve, Some(handle))
     }
 
     /// The body of `SmTLSPointCurve::SolveIt` for `curve` named by `handle`: the
@@ -1162,6 +1165,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// when there is one.
     pub(super) fn point_curve(
         &self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, '_, O>,
         curve: &Curve,
         handle: Option<O>,
@@ -1241,7 +1245,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             // surface parameters into the output instead of the curve parameters.
             sol.num_variables = 1;
             if let Some(surface_curve) = self.surface_curve {
-                let pnt = surface_curve.evaluate_point(sol.start.param(0)?)?;
+                let pnt = surface_curve.evaluate_point(k, sol.start.param(0)?)?;
                 *sol.start.param_mut(0)? = pnt.x;
                 *sol.start.param_mut(1)? = pnt.y;
                 sol.num_variables = 2;
@@ -1264,6 +1268,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// interval of the curve's edge, solutions naming the edge.
     fn solve_point_edge(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, '_, O>,
         object1: Option<O>,
         object2: Option<O>,
@@ -1292,7 +1297,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             //   So - put curve in as both args makes sure this works
             //        no matter the value of m_bSwapOrder
             let curve = objects.curve(handle)?;
-            self.point_curve(ts, curve, Some(handle))?;
+            self.point_curve(k, ts, curve, Some(handle))?;
         }
 
         Ok(())
@@ -1302,12 +1307,13 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// vertex as the point.
     fn solve_vertex_edge(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, '_, O>,
         object1: Option<O>,
         object2: Option<O>,
     ) -> Result<()> {
         self.load_vertex(ts.objects, object1, object2)?;
-        self.solve_point_edge(ts, object1, object2)
+        self.solve_point_edge(k, ts, object1, object2)
     }
 
     /// `SmTLSPointFace::SolveIt`: ray and 3D signed solves intersect the face's
@@ -1316,6 +1322,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// only solutions the face's trim classifies inside are kept.
     pub(super) fn solve_point_face(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, '_, O>,
         object1: Option<O>,
         object2: Option<O>,
@@ -1460,7 +1467,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 sub.point = self.point;
                 sub.point_vertex = self.point_vertex;
                 // (the temporary curve has no handle)
-                sub.point_curve(ts, curve, None)?;
+                sub.point_curve(k, ts, curve, None)?;
             }
         } else {
             let best = best_answer_so_far(&ts.base);
@@ -1516,6 +1523,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// second curve's edge as the second curve.
     fn solve_curve_edge(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, 'a, O>,
         object1: Option<O>,
         object2: Option<O>,
@@ -1542,7 +1550,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             self.curve_edge2 = Some(edge);
 
             // Solve the Curve/Curve problem
-            self.solve_curve_curve(ts)?;
+            self.solve_curve_curve(k, ts)?;
         } // end iter all cureve->edges
 
         Ok(())
@@ -1552,7 +1560,11 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// or other solves (`SmCurve::GlobalCurveSolve`) of the two curves over their
     /// intervals, named by their edges, faces (UV points replacing the parameters)
     /// or the curves themselves.
-    pub(super) fn solve_curve_curve(&self, ts: &mut TopologySolver<'_, '_, O>) -> Result<()> {
+    pub(super) fn solve_curve_curve(
+        &self,
+        k: &Kernel,
+        ts: &mut TopologySolver<'_, '_, O>,
+    ) -> Result<()> {
         let objects = ts.objects;
         let mut sol_objects: [Option<O>; MAX_TREES] = [None; MAX_TREES];
         let mut count = 0;
@@ -1670,7 +1682,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             sol.num_variables = 0;
             for (uv_curve, t) in [(uv_curve1, t1), (uv_curve2, t2)] {
                 if let Some(uv_curve) = uv_curve {
-                    let pnt = uv_curve.evaluate_point(t)?;
+                    let pnt = uv_curve.evaluate_point(k, t)?;
                     *sol.start.param_mut(sol.num_variables)? = pnt.x;
                     sol.num_variables += 1;
                     *sol.start.param_mut(sol.num_variables)? = pnt.y;
@@ -1695,6 +1707,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// curve's edge (and its curve and interval) as the first curve.
     fn solve_edge_edge(
         &mut self,
+        k: &Kernel,
         ts: &mut TopologySolver<'_, 'a, O>,
         object1: Option<O>,
         object2: Option<O>,
@@ -1719,7 +1732,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 None => None,
             };
 
-            self.solve_curve_edge(ts, object1, object2)?;
+            self.solve_curve_edge(k, ts, object1, object2)?;
         }
 
         Ok(())
@@ -2158,7 +2171,8 @@ pub(crate) mod tests {
         );
         let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, false, None);
         ls.set_point(Vec3::new(0.0, 0.0, 0.0));
-        ls.solve_it(&mut ts, None, Some(Obj::Vertex(0))).unwrap();
+        ls.solve_it(&k, &mut ts, None, Some(Obj::Vertex(0)))
+            .unwrap();
         assert_eq!(ts.base.solutions.len(), 1);
         let s = ts.base.solutions.get(0).unwrap();
         assert_eq!(s.start.solution_value, 5.0);
@@ -2180,10 +2194,10 @@ pub(crate) mod tests {
             &[],
         );
         let mut ls = LocalSolver::new(LocalSolverKind::Curve, false, None);
-        assert!(ls.solve_it(&mut ts, None, None).is_err());
+        assert!(ls.solve_it(&k, &mut ts, None, None).is_err());
         let mut ls = LocalSolver::new(LocalSolverKind::FaceFace, false, None);
         assert!(matches!(
-            ls.solve_it(&mut ts, None, None),
+            ls.solve_it(&k, &mut ts, None, None),
             Err(SolidError::Upstream {
                 code: crate::error::SM_ERR_NULL_POINTER,
                 ..
@@ -2206,7 +2220,7 @@ pub(crate) mod tests {
         );
         let mut ls = LocalSolver::new(LocalSolverKind::VertexEdge, false, None);
         let curve = Obj::Curve(0, sc.curves[0].natural_interval());
-        ls.solve_it(&mut ts, Some(Obj::Vertex(0)), Some(curve))
+        ls.solve_it(&k, &mut ts, Some(Obj::Vertex(0)), Some(curve))
             .unwrap();
         let s = ts.base.solutions.get(0).unwrap();
         assert_eq!(s.objects[0], Some(Obj::Vertex(0)));

@@ -986,7 +986,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
             } else {
                 let r = match op {
                     OpIn::AddCurve { .. } => si.add_point_to_curve(id(*i)),
-                    OpIn::AddStart { .. } => si.add_start_point(id(*i)),
+                    OpIn::AddStart { .. } => si.add_start_point(&k, id(*i)),
                     _ => si.add_through_point(id(*i)),
                 };
                 st(o, r)?;
@@ -1044,7 +1044,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         OpIn::Flush | OpIn::Fic => {
             let mut outs = core::mem::take(&mut run.outs);
             let r = if matches!(op, OpIn::Flush) {
-                si.flush_curve(&mut outs)
+                si.flush_curve(&k, &mut outs)
             } else {
                 si.find_interior_curves(&k, &mut outs)
             };
@@ -1102,7 +1102,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
                     use_normal_plane_averaging: *average,
                     approx_tol_3d: *tol,
                 };
-                let r = si.do_law_intersection(&ids, &opts);
+                let r = si.do_law_intersection(&k, &ids, &opts);
                 if let Some(c) = st(o, r)? {
                     put_single(o, &c)?;
                 }
@@ -1131,7 +1131,7 @@ fn op_code(op: &OpIn) -> f64 {
     })
 }
 
-fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
+fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     let a = rust_surface(&i.a)?;
     let b_srf = match &i.b {
         Some(s) => Some(rust_surface(s)?),
@@ -1144,7 +1144,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         .map(rust_curve)
         .collect::<Result<Vec<_>, _>>()?;
     let mut o = Vec::new();
-    let mut si = match SurfaceIntersector::new(&a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet) {
+    let mut si = match SurfaceIntersector::new(k, &a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet) {
         Ok(si) => si,
         Err(e) => {
             if let Some(d) = Output::unported(&e) {
@@ -1172,10 +1172,10 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     // reject what the C++ side rejects
     ffi::encode(&ffi_program(i)).map_err(|e| harness(format!("rejected input: {e}")))?;
-    match rust_run(i) {
+    match rust_run(k, i) {
         Ok(rec) => Ok(Output::new().values("rec", rec)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(h)) => Err(h),
@@ -1926,6 +1926,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

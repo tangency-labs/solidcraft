@@ -464,7 +464,7 @@ macro_rules! tri {
     };
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut o: Vec<f64> = Vec::new();
     let vol = match i.unbend() {
         Some(u) => Some(tri!(o, build(u))),
@@ -527,7 +527,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut pseudo = PseudoBox::new();
             tri!(
                 o,
-                u.evaluate_bounding_box_simple(
+                u.evaluate_bounding_box_simple(k, 
                     v,
                     &param_box,
                     want_box.then_some(&mut proj),
@@ -956,6 +956,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

@@ -523,7 +523,7 @@ pub(crate) fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
-pub(crate) fn put_state(o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Result<()> {
+pub(crate) fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Result<()> {
     o.extend([
         flag(s.is_kind_of(SURF_OF_REVOLUTION_TYPE)?),
         flag(s.is_kind_of(B_SPLINE_SURFACE_TYPE)?),
@@ -539,7 +539,7 @@ pub(crate) fn put_state(o: &mut Vec<f64>, s: &SurfOfRevolution) -> solidcore::Re
     let d = s.step_uv_domain();
     o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
     o.extend([s.start_angle_deg(), s.end_angle_deg()]);
-    let mx = s.max_analytic_domain()?;
+    let mx = s.max_analytic_domain(k)?;
     o.extend([mx.min().x, mx.min().y, mx.max().x, mx.max().y]);
     let (gd, gp) = s.gen_dir_param_extent();
     o.extend([gd.min(), gd.max(), f64::from(gp as u8)]);
@@ -589,7 +589,7 @@ fn rust_op(
     o: &mut Vec<f64>,
 ) -> Result<solidcore::Result<()>, HarnessError> {
     let r: solidcore::Result<()> = match op {
-        OpIn::Build {} => put_state(o, s),
+        OpIn::Build {} => put_state(k, o, s),
         OpIn::EvalStep { u, v, k: kk, point } => {
             let uv = Point2::new(*u, *v);
             if *point {

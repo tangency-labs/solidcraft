@@ -843,7 +843,7 @@ fn rust_static(op: &OpIn, o: &mut Vec<f64>) -> Result<(), Fail> {
 }
 
 /// Runs a curve op on `c`; pushes its outputs (after the status) on success.
-fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), Fail> {
+fn rust_curve(k: &Kernel, op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), Fail> {
     let ivl = |a: f64, b: f64| Extent1d::from_min_max(a, b);
     match op {
         OpIn::Intersector => push_flag(o, c.is_intersector_approx()?),
@@ -887,7 +887,7 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
             o.push(gap);
             push_new(o, Some(&r));
         }
-        OpIn::Repeated { tol } => push_flag(o, c.has_repeated_end_control_points(*tol)?),
+        OpIn::Repeated { tol } => push_flag(o, c.has_repeated_end_control_points(k, *tol)?),
         OpIn::Canonical => {
             let k = c.canonical()?;
             o.extend([
@@ -917,7 +917,7 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
         OpIn::C0 => push_flag(o, c.is_piecewise_c0()?),
         OpIn::Degenerate { tol, ivl: iv } => {
             let e = iv.map(|[a, b]| ivl(a, b));
-            push_flag(o, c.is_degenerate(*tol, e.as_ref())?);
+            push_flag(o, c.is_degenerate(k, *tol, e.as_ref())?);
         }
         OpIn::Expert {
             form,
@@ -930,7 +930,7 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
             o.extend_from_slice(&v);
         }
         OpIn::MaxDomain => {
-            let d = c.max_analytic_domain()?;
+            let d = c.max_analytic_domain(k)?;
             o.extend([d.min(), d.max()]);
         }
         OpIn::Unique => o.push(c.number_of_unique_knots()? as f64),
@@ -976,7 +976,7 @@ fn rust_curve(op: &OpIn, c: &mut BSplineCurve, o: &mut Vec<f64>) -> Result<(), F
     Ok(())
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     // joins: status, new curve, then every segment
     if let OpIn::Join { segs, senses } = &i.op {
         let mut set = segs.iter().map(build_this).collect::<Result<Vec<_>, _>>()?;
@@ -1002,7 +1002,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut this = i.this.as_ref().map(build_this).transpose()?;
     let mut o = vec![0.0];
     let res = match this.as_mut() {
-        Some(c) => rust_curve(&i.op, c, &mut o),
+        Some(c) => rust_curve(k, &i.op, c, &mut o),
         None => rust_static(&i.op, &mut o),
     };
     match res {
@@ -1481,6 +1481,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

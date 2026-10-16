@@ -229,14 +229,14 @@ fn stat<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
 
 /// The upper half of the evaluation matrix of `s` at `uv` (exact tangents), with the unit
 /// normal in `[2][2]` (as the shim builds it).
-fn eval_matrix(s: &Surface, uv: [f64; 2]) -> Result<Result<[[Vec3; 3]; 3], f64>, Fail> {
+fn eval_matrix(k: &Kernel, s: &Surface, uv: [f64; 2]) -> Result<Result<[[Vec3; 3]; 3], f64>, Fail> {
     let flags = EvaluateFlags {
         u_side: Side::Left,
         v_side: Side::Left,
         only_upper_half: true,
         non_zero_tangents: false,
     };
-    let m = match stat(s.evaluate(p2(uv), 2, 2, flags))? {
+    let m = match stat(s.evaluate(k, p2(uv), 2, 2, flags))? {
         Ok(m) => m,
         Err(c) => return Ok(Err(c)),
     };
@@ -254,7 +254,7 @@ fn eval_matrix(s: &Surface, uv: [f64; 2]) -> Result<Result<[[Vec3; 3]; 3], f64>,
     }
     let n = pvv[1][0].cross(pvv[0][1]);
     pvv[2][2] = if n.length_squared() < 1e-24 {
-        match stat(s.evaluate_normal(p2(uv), Side::Left, Side::Left))? {
+        match stat(s.evaluate_normal(k, p2(uv), Side::Left, Side::Left))? {
             Ok(n) => n,
             Err(c) => return Ok(Err(c)),
         }
@@ -317,12 +317,12 @@ fn push_found(o: &mut Vec<f64>, found: Option<(f64, Vec<f64>)>) {
     }
 }
 
-fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
+fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     let mut s = surface_of(&i.surface)?;
     let mut o = Vec::new();
     match &i.op {
         OpIn::EvalGeometric { uv, fu, fv } => {
-            match stat(s.evaluate_geometric(p2(*uv), side(*fu), side(*fv)))? {
+            match stat(s.evaluate_geometric(k, p2(*uv), side(*fu), side(*fv)))? {
                 Ok(g) => {
                     o.push(0.0);
                     push_geometric(&mut o, &g);
@@ -331,7 +331,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::NormalSection { uv, fu, fv, dir } => {
-            match stat(s.evaluate_normal_section(p2(*uv), side(*fu), side(*fv), v3(*dir)))? {
+            match stat(s.evaluate_normal_section(k, p2(*uv), side(*fu), side(*fv), v3(*dir)))? {
                 Ok(sec) => {
                     o.push(0.0);
                     pv(&mut o, sec.tangent);
@@ -374,11 +374,11 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         }
         OpIn::ShapeMatch { other, uv0, uv1, tol, ang } => {
             let s2 = surface_of(other)?;
-            let mut p0 = match eval_matrix(&s, *uv0)? {
+            let mut p0 = match eval_matrix(k, &s, *uv0)? {
                 Ok(m) => m,
                 Err(c) => return Ok(vec![c]),
             };
-            let mut p1 = match eval_matrix(&s2, *uv1)? {
+            let mut p1 = match eval_matrix(k, &s2, *uv1)? {
                 Ok(m) => m,
                 Err(c) => return Ok(vec![c]),
             };
@@ -388,16 +388,16 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::FindPsNormal { p, sq_tol, pts } => {
-            run_enfo(&mut FindPsNormalEnfo::new(v3(*p), &s, *sq_tol, SolverOperation::Minimize), 2, pts, &mut o)?;
+            run_enfo(&mut FindPsNormalEnfo::new(k, v3(*p), &s, *sq_tol, SolverOperation::Minimize), 2, pts, &mut o)?;
         }
         OpIn::SssIntersect { s2, s3, pts } => {
             let (s2, s3) = (surface_of(s2)?, surface_of(s3)?);
-            run_enfo(&mut SssIntersectEnfo::new(&s, &s2, &s3, 0.0), 6, pts, &mut o)?;
+            run_enfo(&mut SssIntersectEnfo::new(k, &s, &s2, &s3, 0.0), 6, pts, &mut o)?;
         }
         OpIn::LocalPlane { other, dom1, dom2, tol, g1, g2, po, pn } => {
             let s2 = surface_of(other)?;
             match stat(s.local_plane_surface_intersect(
-                &dom_of(*dom1),
+                k, &dom_of(*dom1),
                 &s2,
                 &dom_of(*dom2),
                 *tol,
@@ -420,7 +420,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let s2 = surface_of(other)?;
             let vs = vecs3(vecs);
             match stat(s.local_surface_solve(
-                &dom_of(*dom1),
+                k, &dom_of(*dom1),
                 &s2,
                 &dom_of(*dom2),
                 sop_of(*sop)?,
@@ -441,7 +441,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::LocalSss { s2, s3, doms, g1, g2, g3 } => {
             let (s2, s3) = (surface_of(s2)?, surface_of(s3)?);
             match stat(s.local_surface_surface_intersect(
-                &dom_of(doms[0]),
+                k, &dom_of(doms[0]),
                 &s2,
                 &dom_of(doms[1]),
                 &s3,
@@ -469,8 +469,8 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    match rust_run(i) {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+    match rust_run(k, i) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(e)) => Err(e),
@@ -588,7 +588,7 @@ fn gen_guess2(rng: &mut Rng, same: bool, other: &SrfIn, dom2: [f64; 4], g1: [f64
     }
 }
 
-fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
+fn gen_op(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> OpIn {
     let is_bspline = matches!(s, SrfIn::Bspline(_) | SrfIn::Sms(_));
     match rng.below(50) {
         0..=5 => OpIn::EvalGeometric {
@@ -639,7 +639,7 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
                 })
                 .collect();
             OpIn::FindPsNormal {
-                p: gen_point_near(rng, s),
+                p: gen_point_near(k, rng, s),
                 sq_tol: *rng.choose(&[1e-24, 1e-18, 1e-12, 1e-6]).unwrap_or(&1e-12),
                 pts,
             }
@@ -669,7 +669,7 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
             let g1 = uv_in(rng, dom1);
             let g2 = gen_guess2(rng, same, &other, dom2, g1);
             // a plane through the surface point at the guess
-            let po = gen_point_near(rng, s);
+            let po = gen_point_near(k, rng, s);
             OpIn::LocalPlane {
                 other,
                 dom1,
@@ -708,9 +708,9 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
     }
 }
 
-fn gen_case(rng: &mut Rng) -> Inputs {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> Inputs {
     let surface = gen_surface3(rng);
-    let op = gen_op(rng, &surface);
+    let op = gen_op(k, rng, &surface);
     Inputs { surface, op }
 }
 
@@ -720,15 +720,16 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+let k = &Kernel::default();
         for _ in 0..64 {
-            let i = gen_case(rng);
+            let i = gen_case(k, rng);
             let Ok((op, input)) = cpp_input(&i) else {
                 continue;
             };
             if ffi::validate(op, &input).is_err() {
                 continue;
             }
-            if let Err(Fail::Harness(_)) = rust_run(&i) {
+            if let Err(Fail::Harness(_)) = rust_run(k, &i) {
                 continue;
             }
             return serde_json::to_value(i).ok();
@@ -749,7 +750,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }
 
@@ -764,6 +766,7 @@ mod tests {
     #[test]
     #[ignore = "debugging aid; needs P3_CASES"]
     fn p3_dump_case() {
+let k = &Kernel::default();
         for idx in std::env::var("P3_CASES").unwrap().split(',') {
             let i: usize = idx.parse().unwrap();
             let mut rng = Rng::new(CaseContext::seed_for("surface.surface_p3", i));
@@ -771,13 +774,14 @@ mod tests {
             let inp: Inputs = serde_json::from_value(v.clone()).unwrap();
             println!("CASE {i}: {}", serde_json::to_string(&v).unwrap());
             println!("  cpp : {:?}", cpp(&inp).map(|o| format!("{o:?}")));
-            println!("  rust: {:?}", rust(&inp).map(|o| format!("{o:?}")));
+            println!("  rust: {:?}", rust(k, &inp).map(|o| format!("{o:?}")));
         }
     }
 
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
+let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 3]> = BTreeMap::new();
         for _ in 0..1500 {
@@ -788,7 +792,7 @@ mod tests {
             let name = serde_json::to_value(&i.op).unwrap()["op"].as_str().unwrap().to_string();
             let e = stats.entry(name).or_default();
             e[0] += 1;
-            match rust_run(&i) {
+            match rust_run(k, &i) {
                 Ok(_) => e[1] += 1,
                 Err(_) => e[2] += 1,
             }

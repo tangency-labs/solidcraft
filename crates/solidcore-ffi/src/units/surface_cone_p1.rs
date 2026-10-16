@@ -664,6 +664,68 @@ pub fn cone_op(s: &Build, op: &Op) -> Result<Vec<f64>, FfiError> {
     call(op.code(), &input)
 }
 
+/// Evaluates lazy `SmSurfaceEval` position and derivatives through order two (six vectors).
+///
+/// # Errors
+///
+/// The same constructor guards as [`cone_op`], and non-finite parameters.
+pub fn lazy_cone(s: &Build, uv: [f64; 2]) -> Result<Vec<f64>, FfiError> {
+    let mut input = Vec::new();
+    push_build(&mut input, s)?;
+    finite(&uv, "lazy parameters")?;
+    input.extend(uv);
+    call(14, &input)
+}
+
+/// Native common degeneracy, normal and normal-box queries, with optional interior subdomain.
+///
+/// # Errors
+///
+/// Exactly the constructor guards of [`cone_op`]; operation parameters are native defaults.
+pub fn common_queries(s: &Build, subdomain: bool) -> Result<Vec<f64>, FfiError> {
+    let mut input = Vec::new();
+    push_build(&mut input, s)?;
+    call(if subdomain { 18 } else { 17 }, &input)
+}
+
+/// STEP inversion with the native domain restricted to its interior 60 percent.
+/// This deterministic fixture recipe accepts exactly [`Op::Inversion`]'s guarded inputs.
+///
+/// # Errors
+///
+/// The same guards as [`cone_op`], or an operation other than inversion.
+pub fn inversion_subdomain(s: &Build, op: &Op) -> Result<Vec<f64>, FfiError> {
+    if !matches!(op, Op::Inversion { .. }) { return Err(bad("inversion operation required")); }
+    let mut input = Vec::new();
+    push_build(&mut input, s)?;
+    push_op(&mut input, op)?;
+    call(16, &input)
+}
+
+/// Serializes a real native cone/cylinder using `WriteToDB` version 30.
+/// Returns construction status, write status and bytes. Only constructor input crosses FFI.
+///
+/// # Errors
+///
+/// The same constructor guards as [`cone_op`]; no caller-controlled record is read by C++.
+pub fn serialize_cone(s: &Build, binary: bool) -> Result<Vec<f64>, FfiError> {
+    let mut input = Vec::new();
+    push_build(&mut input, s)?;
+    call(if binary { 101 } else { 100 }, &input)
+}
+
+/// Runs `op` after the native writer and common `SmSurface::ReadFromDB` roundtrip.
+///
+/// # Errors
+///
+/// The exact same constructor and operation guards as [`cone_op`].
+pub fn roundtrip_op(s: &Build, op: &Op, binary: bool) -> Result<Vec<f64>, FfiError> {
+    let mut input = Vec::new();
+    push_build(&mut input, s)?;
+    push_op(&mut input, op)?;
+    call(op.code() + if binary { 1100 } else { 1000 }, &input)
+}
+
 /// `sm_TotalCoincidenceChecker(a, [a0, a1], b, [b0, b1], tol)`; returns the shim's
 /// record (layout in the module docs).
 ///
@@ -688,4 +750,55 @@ pub fn coincidence(
     input.extend_from_slice(&b_dom);
     input.push(tol);
     call(OP_COINCIDENCE, &input)
+}
+
+#[cfg(test)]
+mod dispatch_contract_tests {
+    use super::*;
+
+    fn cone(cylinder: bool) -> Build {
+        Build {
+            mode: if cylinder { Mode::CylCanonical { radius: 2.0 } }
+                else { Mode::Canonical { bot: 2.0, top: 4.0, height: 3.0, swap: false, inside: false } },
+            origin: [0.0; 3], x: [1.0, 0.0, 0.0], y: [0.0, 1.0, 0.0], oob: false,
+        }
+    }
+
+    #[test]
+    fn database_adapters_preserve_native_classes_and_statuses() {
+        for cylinder in [false, true] {
+            let build = cone(cylinder);
+            for binary in [false, true] {
+                let bytes = serialize_cone(&build, binary).unwrap();
+                assert_eq!(&bytes[..2], &[1000.0, 1000.0]);
+                assert!(bytes.len() > 2);
+                assert!(bytes[2..].iter().all(|v| (0.0..=255.0).contains(v) && v.fract() == 0.0));
+                // A caller-owned ASCII stream may round geometry. Compare the
+                // native status/class header here; the differential cases compare
+                // both readers' numerical results on the same serialized bytes.
+                let direct = cone_op(&build, &Op::Copy).unwrap();
+                let restored = roundtrip_op(&build, &Op::Copy, binary).unwrap();
+                assert!(direct.len() >= 4 && restored.len() >= 4);
+                assert_eq!(restored.get(..4), direct.get(..4));
+            }
+        }
+    }
+
+    #[test]
+    fn dispatch_adapters_keep_exact_constructor_and_parameter_guards() {
+        let mut build = cone(false);
+        build.origin[0] = f64::NAN;
+        assert!(matches!(serialize_cone(&build, false), Err(FfiError::InvalidArgument(_))));
+        assert!(matches!(lazy_cone(&build, [0.25, 0.5]), Err(FfiError::InvalidArgument(_))));
+        let build = cone(false);
+        assert!(matches!(lazy_cone(&build, [f64::INFINITY, 0.5]), Err(FfiError::InvalidArgument(_))));
+        let mut failed = cone(true);
+        failed.mode = Mode::CylCanonical { radius: 0.0 };
+        let constructor_status = cone_op(&failed, &Op::Build).unwrap();
+        assert_ne!(constructor_status.first(), Some(&1000.0));
+        assert_eq!(serialize_cone(&failed, false).unwrap(), constructor_status);
+        let lazy = lazy_cone(&build, [0.25, 0.5]).unwrap();
+        assert_eq!(&lazy[..2], &[1000.0, 1000.0]);
+        assert_eq!(lazy.len(), 20);
+    }
 }

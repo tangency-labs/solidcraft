@@ -595,10 +595,10 @@ fn extension_needs_no_retry(
     }
     let mut cur = nurb.clone();
     let mut sides = Vec::new();
-    if !v_dir && !s.is_closed(&dom, P::U, None, false)?.0 {
+    if !v_dir && !s.is_closed(&k, &dom, P::U, None, false)?.0 {
         sides.extend([(Direction::U, CurveEnd::Start, skip_umin), (Direction::U, CurveEnd::End, skip_umax)]);
     }
-    if !u_dir && !s.is_closed(&dom, P::V, None, false)?.0 {
+    if !u_dir && !s.is_closed(&k, &dom, P::V, None, false)?.0 {
         sides.extend([(Direction::V, CurveEnd::Start, skip_vmin), (Direction::V, CurveEnd::End, skip_vmax)]);
     }
     for (d, e, skipped) in sides {
@@ -1175,7 +1175,7 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
         Some(sp2::SurfaceKind::Plane(p)) => dump_bss(o, p.base()),
         // an SmSurfOfRevolution is an SmBSplineSurface: its NURB
         Some(sp2::SurfaceKind::SurfOfRevolution(r)) => dump_bss(o, r.base()),
-        // `put_state` of a surface that is not a B-spline
+        Some(sp2::SurfaceKind::Cone(c)) => dump_bss(o, c.rev().base()),
         Some(
             sp2::SurfaceKind::CurveBounded(_)
             | sp2::SurfaceKind::Step(_)
@@ -1236,7 +1236,7 @@ fn edit(s: &mut Option<Surface>, f: impl FnOnce(&mut Surface) -> solidcore::Resu
     Ok(o)
 }
 
-fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
+fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError> {
     let mut s = this_surface(t)?;
     let base = s.is_none();
     let run = match op {
@@ -1256,7 +1256,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
                 non_zero_tangents: *nzt,
             };
             let d = match &s {
-                Some(x) => x.evaluate(p2(*uv), *hu, *hv, flags)?,
+                Some(x) => x.evaluate(k, p2(*uv), *hu, *hv, flags)?,
                 None => sp2::base_evaluate()?,
             };
             for i in 0..=*hu {
@@ -1275,7 +1275,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
         }),
         OpIn::EvalPt { uv } => record(|o| {
             let p = match &s {
-                Some(x) => x.evaluate_point(p2(*uv))?,
+                Some(x) => x.evaluate_point(k, p2(*uv))?,
                 None => sp2::base_evaluate_point()?,
             };
             push3(o, p);
@@ -1414,7 +1414,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             let cont = continuity_of(*cont)?;
             record(|o| {
                 let e = match &s {
-                    Some(x) => x.create_extended_surface(&Kernel::default(), *dist, cont)?,
+                    Some(x) => x.create_extended_surface(k, *dist, cont)?,
                     None => sp2::base_create_extended_surface()?,
                 };
                 dump_state(o, Some(&e));
@@ -1426,9 +1426,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             let dir = param_of(*dir)?;
             record(|o| {
                 let e = match &s {
-                    Some(x) => {
-                        x.create_extended_surface_dir(&Kernel::default(), dir, *dist, cont)?
-                    }
+                    Some(x) => x.create_extended_surface_dir(k, dir, *dist, cont)?,
                     None => sp2::base_create_extended_surface()?,
                 };
                 dump_state(o, Some(&e));
@@ -1438,7 +1436,7 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
         OpIn::AdjustStep { dom } => edit(&mut s, |x| x.adjust_step_uv_domain(&Kernel::default(), &dom_of(*dom))),
         OpIn::MaxAnal => record(|o| {
             let d = match &s {
-                Some(x) => x.max_analytic_domain()?,
+                Some(x) => x.max_analytic_domain(k)?,
                 None => sp2::base_max_analytic_domain(),
             };
             push_dom(o, &d);
@@ -1448,8 +1446,8 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             let anal = matches!(op, OpIn::CopyAnal);
             record(|o| {
                 let c = match &s {
-                    Some(x) if anal => x.copy_and_add_analytics(&Kernel::default())?,
-                    Some(x) => x.copy(&Kernel::default())?,
+                    Some(x) if anal => x.copy_and_add_analytics(k)?,
+                    Some(x) => x.copy()?,
                     None if anal => sp2::base_copy_and_add_analytics()?,
                     None => sp2::base_copy()?,
                 };
@@ -1499,9 +1497,9 @@ fn rust_surface_op(op: &OpIn, t: &This) -> Result<Run, HarnessError> {
             record(|o| {
                 let srf = s.as_ref();
                 let mut e = match ctor {
-                    0 => SurfaceEval::new(srf),
-                    1 => SurfaceEval::with_uv(srf, uv[0], uv[1]),
-                    _ => SurfaceEval::with_uv_and_sect_dir(srf, uv[0], uv[1], v3(*dir)),
+                    0 => SurfaceEval::new(k, srf),
+                    1 => SurfaceEval::with_uv(k, srf, uv[0], uv[1]),
+                    _ => SurfaceEval::with_uv_and_sect_dir(k, srf, uv[0], uv[1], v3(*dir)),
                 };
                 let put = |o: &mut Vec<f64>, e: &SurfaceEval<'_>| {
                     o.extend(e.flags().map(flag));
@@ -1789,7 +1787,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 Err(e) if e.is_unported() => Err(e),
                 Err(e) => Ok(vec![status(&e)]),
                 Ok(secs) => {
-                    match d.skin_deriv_surface(&secs, params, &mut r1, r2.as_mut(), *tol) {
+                    match d.skin_deriv_surface(&k, &secs, params, &mut r1, r2.as_mut(), *tol) {
                         Err(e) if e.is_unported() => Err(e),
                         Err(e) => Ok(vec![0.0, status(&e)]),
                         Ok(skin) => {
@@ -1934,7 +1932,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
             let kb = [continuity_of(k2[0])?, continuity_of(k2[1])?];
             record(|o| {
                 let sols: SolutionArray<Handle> = cc_local_solve(
-                    &a,
+                    &k, &a,
                     &Extent1d::from_min_max(i1[0], i1[1]),
                     ka,
                     &b,
@@ -2034,7 +2032,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 ray_fire: *ray,
                 distance_tolerance: *tol,
                 surface_cache: None,
-                kernel: None,
+                kernel: &k,
             };
             let mut branch: Branch = Default::default();
             if let Some(slot) = branch.first_mut() {
@@ -2074,7 +2072,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 .map(|c| curve_of(c).map(SmCurve::from))
                 .collect::<Result<Vec<_>, _>>()?;
             record(|_| {
-                Surface::create_plane_with_3d_curves(&Kernel::default(), &cs, *tol)?;
+                Surface::create_plane_with_3d_curves(&k, &cs, *tol)?;
                 Ok(())
             })
         }
@@ -2098,9 +2096,9 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
     Ok(run)
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let run = match &i.this {
-        Some(t) => rust_surface_op(&i.op, t)?,
+        Some(t) => rust_surface_op(k, &i.op, t)?,
         None => rust_static_op(&i.op)?,
     };
     Ok(match run {
@@ -2738,15 +2736,24 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        cases.extend(super::surface_cone_p1::common_cases(&ctx)?);
+        Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if let Some(value) = case.inputs.get("common_cone") {
+            return super::surface_cone_p1::common_cpp(value.clone(), case.inputs.get("common_db"), case.inputs.get("common_lazy").and_then(Value::as_bool).unwrap_or(false), case.inputs.get("common_subdomain").and_then(Value::as_bool).unwrap_or(false), case.inputs.get("common_queries").and_then(Value::as_bool).unwrap_or(false));
+        }
         cpp(&case.parse()?)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+let k = &Kernel::default();
+        if let Some(value) = case.inputs.get("common_cone") {
+            return super::surface_cone_p1::common_rust(value.clone(), case.inputs.get("common_db"), case.inputs.get("common_lazy").and_then(Value::as_bool).unwrap_or(false), case.inputs.get("common_subdomain").and_then(Value::as_bool).unwrap_or(false), case.inputs.get("common_queries").and_then(Value::as_bool).unwrap_or(false));
+        }
+        rust(k, &case.parse()?)
     }
 }
 
@@ -2758,6 +2765,7 @@ mod tests {
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
+let k = &Kernel::default();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..2000u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);
@@ -2770,7 +2778,7 @@ mod tests {
             }
             let base = i.this.as_ref().is_some_and(|t| t.base);
             let name = format!("{op:?}{}", if base { " base" } else { "" });
-            let out = rust(&i).expect("harness");
+            let out = rust(k, &i).expect("harness");
             let kind = if let Some(d) = &out.deferred {
                 format!("deferred:{}", d.unit)
             } else {

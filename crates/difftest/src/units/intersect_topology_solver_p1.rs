@@ -892,7 +892,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let mut st = 0.0;
             let mut done = 0usize;
             for [o1, o2] in calls {
-                let r = ls.solve_it(&mut ts, scene.handle(*o1)?, scene.handle(*o2)?);
+                let r = ls.solve_it(&k, &mut ts, scene.handle(*o1)?, scene.handle(*o2)?);
                 done += 1;
                 if let Err(e) = r {
                     if let Some(d) = Output::unported(&e) {
@@ -1208,7 +1208,7 @@ fn on_curve(rng: &mut Rng, c: &CurveIn) -> [f64; 3] {
     };
     let k = Kernel::default();
     if let Ok(p) = build(&k, c).and_then(|cv| {
-        cv.evaluate_point(t)
+        cv.evaluate_point(&k, t)
             .map_err(|e| harness(format!("evaluate: {e}")))
     }) {
         return [p.x, p.y, p.z];

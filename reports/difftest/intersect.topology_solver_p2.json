@@ -2543,8 +2543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_3_0",
@@ -2555,8 +2555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_3_1",
@@ -2567,8 +2567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_4_0",
@@ -2579,8 +2579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_4_1",
@@ -2655,8 +2655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_3_0",
@@ -2667,8 +2667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_3_1",
@@ -2679,8 +2679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_4_0",
@@ -2691,8 +2691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_4_1",
@@ -2759,8 +2759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_3_0",
@@ -2771,8 +2771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_3_1",
@@ -2783,8 +2783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_4_0",
@@ -2795,8 +2795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmIsoCurve::SmIsoCurve (non-B-spline surface)",
-        "unit": "curve.iso_curve"
+        "symbol": "SmSurface::GetNaturalUVDomain",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_4_1",
@@ -19572,10 +19572,10 @@
   "cases_passed": 2396,
   "cases_total": 2429,
   "deferred_by_unit": {
-    "curve.iso_curve": 12,
-    "geom.tol": 6,
-    "intersect.curve_class_p2": 4,
     "intersect.surface_tracer": 8,
+    "surface.surface_p2": 12,
+    "surface.surface_p8": 6,
+    "topology.brep_p1": 4,
     "topology.edge": 3
   },
   "max_rel_err": 0.0,

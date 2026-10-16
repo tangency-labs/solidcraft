@@ -134,7 +134,7 @@ impl Plane {
     /// # Errors
     ///
     /// Those of [`Plane::transform`].
-    pub fn create_offset_surface(&self, signed_offset_distance: f64) -> Result<Self> {
+    pub fn create_offset_surface(&self, k: &Kernel, signed_offset_distance: f64) -> Result<Self> {
         // construct plane copy
         let mut off_plane = self.copy();
 
@@ -142,7 +142,7 @@ impl Plane {
         let mut trans = Axis2Placement::IDENTITY;
         let mv = self.position.z_axis() * signed_offset_distance;
         trans.translate(mv);
-        off_plane.transform(&trans, None)?;
+        off_plane.transform(k, &trans, None)?;
 
         // set output
         Ok(off_plane)
@@ -160,7 +160,12 @@ impl Plane {
     /// Those of [`BSplineSurface::transform`]; `SM_ERR` for a non-isotropic scale (the
     /// NURB is already transformed, as upstream) or when the transformed NURB is not
     /// recognised as a plane; those of [`Plane::is_nurb_surface_plane`].
-    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+    pub fn transform(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -191,7 +196,7 @@ impl Plane {
         let bss = BSplineSurface::from_nurb(nurb.clone(), true);
         let mut plane = None;
         for tol_scale in [1.0, 10.0, 100.0, 1000.0] {
-            plane = Self::is_nurb_surface_plane(&bss, tol_scale)?;
+            plane = Self::is_nurb_surface_plane(k, &bss, tol_scale)?;
             if plane.is_some() {
                 break;
             }
@@ -341,6 +346,7 @@ impl Plane {
     /// failing test-point evaluation, a degenerate Y axis; [`SolidError::Unported`]
     /// from the evaluations.
     pub fn is_nurb_surface_plane(
+        k: &Kernel,
         test: &BSplineSurface,
         tolerance_scale: f64,
     ) -> Result<Option<Self>> {
@@ -355,6 +361,7 @@ impl Plane {
         // get surface throughPoint, tangents, and normal at natural domain upper corner
         // (SE: a failed evaluation keeps the previous values)
         if let Some((p, du, dv)) = ignored(evaluate_1st_derivatives(
+            k,
             test,
             uv_domain.evaluate(1.0, 1.0),
             Side::Left,
@@ -378,6 +385,7 @@ impl Plane {
 
         // get surface throughPoint, tangents, and normal at natural domain lower corner
         if let Some((p, du, dv)) = ignored(evaluate_1st_derivatives(
+            k,
             test,
             uv_domain.evaluate(0.0, 0.0),
             Side::Left,
@@ -399,6 +407,7 @@ impl Plane {
 
         // get normal near domain center (SE)
         if let Some(n) = ignored(base_evaluate_normal(
+            k,
             test,
             uv_domain.evaluate(0.45, 0.56),
             Side::Left,
@@ -468,6 +477,7 @@ impl Plane {
     /// zone-tolerance expansion).
     pub(crate) fn bounding_boxes(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         owned: bool,
     ) -> Result<(Extent3d, PseudoBox)> {
@@ -479,7 +489,7 @@ impl Plane {
         };
         let b = self
             .base_with_nurb()?
-            .calculate_bounding_box(uv_domain, &req)?;
+            .calculate_bounding_box(k, uv_domain, &req)?;
         let mut bbox = b.normal.ok_or(SolidError::null_pointer(OP_PP))?;
         let mut pbox = b.pseudo.ok_or(SolidError::null_pointer(OP_PP))?;
         // When asked, expand the normal and pseudo boxes by the zone tolerance
@@ -505,12 +515,14 @@ impl Plane {
     /// singular); those of [`BSplineCurve::create_degenerate_curve`].
     pub fn intersect_with_plane(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         other: &Self,
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
     ) -> Result<(bool, SurfaceIntersection)> {
         self.intersect_with_plane_owned(
+            k,
             uv_domain,
             other,
             other_uv_domain,
@@ -524,6 +536,7 @@ impl Plane {
     #[allow(clippy::too_many_lines)] // one upstream function
     pub(crate) fn intersect_with_plane_owned(
         &self,
+        k: &Kernel,
         uv_domain: &Extent2d,
         other: &Self,
         other_uv_domain: &Extent2d,
@@ -568,8 +581,8 @@ impl Plane {
             }
 
             // get plane1 and plane2 bounding and pseudo boxes
-            let (bbox1, pbox1) = self.bounding_boxes(uv_domain, owned[0])?;
-            let (bbox2, pbox2) = other.bounding_boxes(other_uv_domain, owned[1])?;
+            let (bbox1, pbox1) = self.bounding_boxes(k, uv_domain, owned[0])?;
+            let (bbox2, pbox2) = other.bounding_boxes(k, other_uv_domain, owned[1])?;
 
             // no work - when bounding or pseudo boxes are disjoint
             if bbox1.are_disjoint(&bbox2, 0.0) || pbox1.are_disjoint(&pbox2, None) {
@@ -653,7 +666,7 @@ impl Plane {
 
         // get size of bounded ThisPlane
         if this_bounded {
-            (bbox1, pbox1) = self.bounding_boxes(uv_domain, owned[0])?;
+            (bbox1, pbox1) = self.bounding_boxes(k, uv_domain, owned[0])?;
             let radius1 = bbox1.sphere_bound().radius;
             bbox1.expand_absolute(tol / 2.0);
             pbox1.expand_absolute(tol / 2.0);
@@ -662,7 +675,7 @@ impl Plane {
 
         // get size of bounded OtherPlane
         if other_bounded {
-            (bbox2, pbox2) = other.bounding_boxes(other_uv_domain, owned[1])?;
+            (bbox2, pbox2) = other.bounding_boxes(k, other_uv_domain, owned[1])?;
             let radius2 = bbox2.sphere_bound().radius;
             bbox2.expand_absolute(tol / 2.0);
             pbox2.expand_absolute(tol / 2.0);
@@ -821,6 +834,7 @@ impl Plane {
                 // Skip grazing solutions.  [Boolean Restructure]
                 if solution.solution_type == SolutionType::SingleValue
                     && is_grazing_intersection(
+                        k,
                         curve,
                         solution.start.param(0)?,
                         line,
@@ -849,8 +863,8 @@ impl Plane {
 
             // skip zero length intervals at the curve start, curve end, and
             // PlaneCorner/curve intersections (statuses ignored)
-            let start_point = curve.evaluate(s_param, 1, true, true)?;
-            let end_point = curve.evaluate_point(e_param)?;
+            let start_point = curve.evaluate(k, s_param, 1, true, true)?;
+            let end_point = curve.evaluate_point(k, e_param)?;
             let p0 = start_point.first().copied().unwrap_or(Vec3::UNDEF);
             let d0 = start_point.get(1).copied().unwrap_or(Vec3::UNDEF);
             let dist = p0.distance(end_point);
@@ -894,7 +908,7 @@ impl Plane {
 
             // drop curve interval midPoint to inside of trimmed plane (statuses ignored)
             let t = (s_param + e_param) / 2.0;
-            let mid_point = curve.evaluate_point(t)?;
+            let mid_point = curve.evaluate_point(k, t)?;
             let mut t_solutions = self.drop_point_fast(
                 uv_domain,
                 SolverOperation::Normalize,
@@ -910,7 +924,7 @@ impl Plane {
                 if uv_domain.is_point_on_boundary(pt_uv, 2.0 * tol_3d).0 {
                     let frac = 0.3579; // Make it not quite the midpoint.
                     let param = s_param * frac + e_param * (1.0 - frac);
-                    let mid_point = curve.evaluate_point(param)?;
+                    let mid_point = curve.evaluate_point(k, param)?;
                     t_solutions = self.drop_point_fast(
                         uv_domain,
                         SolverOperation::Normalize,
@@ -932,7 +946,7 @@ impl Plane {
             // degenerate curves for tangency intersections
             if keep == 0 && prev_keep == Some(0) {
                 // Create a degenerate curve - at the curve point (statuses ignored)
-                let point = curve.evaluate_point(s_param)?;
+                let point = curve.evaluate_point(k, s_param)?;
                 let bsp = BSplineCurve::create_degenerate_curve(3, point)?;
                 curves_3d.push(Curve::from(bsp));
             }
@@ -1362,6 +1376,7 @@ pub(crate) fn global_surface_intersect(
             // (whether each plane has a face: SmSurface::GetFace)
             let owned = [this.face()?.is_some(), other.face()?.is_some()];
             (need_nurb_intersection, out) = plane.intersect_with_plane_owned(
+                k,
                 uv_domain,
                 other_plane,
                 other_uv_domain,
@@ -1372,6 +1387,18 @@ pub(crate) fn global_surface_intersect(
         // SurfOfRevolution/plane special case intersection: the orders and the UV
         // curves are swapped (the surface of revolution's edge flags and angle
         // tolerance are not used by it)
+        SurfaceKind::Cone(rev) => {
+            // the plane's boxes take its face's tolerance (taken as without owner
+            // there; see the module header)
+            if this.face()?.is_some() {
+                zone_tolerance(true)?;
+            }
+            let (need, mut x) =
+                rev.rev()
+                    .intersect_with_plane(k, plane, uv_domain, approx_tol_3d)?;
+            core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
+            (need_nurb_intersection, out) = (need, x);
+        }
         SurfaceKind::SurfOfRevolution(rev) => {
             // the plane's boxes take its face's tolerance (taken as without owner
             // there; see the module header)
@@ -1431,18 +1458,20 @@ mod tests {
 
     #[test]
     fn offset_moves_along_normal() {
-        let p = rect().create_offset_surface(2.0).unwrap();
+        let k = &Kernel::default();
+        let p = rect().create_offset_surface(k, 2.0).unwrap();
         assert_eq!(p.position().origin(), Vec3::new(0.0, 0.0, 2.0));
         assert_eq!(p.step_uv_domain(), dom());
     }
 
     #[test]
     fn transform_rejects_anisotropic_scale() {
+        let k = &Kernel::default();
         let mut p = rect();
-        let r = p.transform(&Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 1.0, 1.0)));
+        let r = p.transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 1.0, 1.0)));
         assert!(r.is_err());
         let mut q = rect();
-        q.transform(&Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 2.0, 2.0)))
+        q.transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 2.0, 2.0)))
             .unwrap();
         let o = q.evaluate_point(Point2::new(5.0, 3.0));
         assert!((o - Vec3::new(10.0, 6.0, 0.0)).length() < 1e-12);
@@ -1464,6 +1493,7 @@ mod tests {
 
     #[test]
     fn recognises_bilinear_plane() {
+        let k = &Kernel::default();
         let s = BSplineSurface::create_bilinear_surface(
             Vec3::ZERO,
             Vec3::new(2.0, 0.0, 0.0),
@@ -1471,7 +1501,7 @@ mod tests {
             Vec3::new(2.0, 3.0, 0.0),
         )
         .unwrap();
-        let p = Plane::is_nurb_surface_plane(&s, 1.0).unwrap().unwrap();
+        let p = Plane::is_nurb_surface_plane(k, &s, 1.0).unwrap().unwrap();
         assert!(p.base().gw_nurb().is_some());
         let twisted = BSplineSurface::create_bilinear_surface(
             Vec3::ZERO,
@@ -1480,17 +1510,18 @@ mod tests {
             Vec3::new(2.0, 3.0, 1.0),
         )
         .unwrap();
-        assert!(Plane::is_nurb_surface_plane(&twisted, 1.0)
+        assert!(Plane::is_nurb_surface_plane(k, &twisted, 1.0)
             .unwrap()
             .is_none());
     }
 
     #[test]
     fn plane_plane_intersections() {
+        let k = &Kernel::default();
         let a = Plane::from_normal(Vec3::ZERO, Vec3::Z);
         let b = Plane::from_normal(Vec3::new(1.0, 0.0, 0.0), Vec3::X);
         let d = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
-        let (more, x) = a.intersect_with_plane(&d, &b, &d, None).unwrap();
+        let (more, x) = a.intersect_with_plane(k, &d, &b, &d, None).unwrap();
         assert!(!more);
         assert_eq!(x.curves_3d.len(), 1);
         assert_eq!(x.curve_types, vec![TsectCurveType::Crossing]);
@@ -1506,17 +1537,17 @@ mod tests {
         );
         c.make_nurb().unwrap();
         let (_, x) = rect()
-            .intersect_with_plane(&dom(), &c, &c.step_uv_domain(), None)
+            .intersect_with_plane(k, &dom(), &c, &c.step_uv_domain(), None)
             .unwrap();
         assert_eq!(x.curves_3d.len(), 1);
 
         // coincident planes need the general intersector, parallel ones give nothing
         let (more, x) = rect()
-            .intersect_with_plane(&dom(), &rect(), &dom(), None)
+            .intersect_with_plane(k, &dom(), &rect(), &dom(), None)
             .unwrap();
         assert!(more && x.curves_3d.is_empty());
         let r = rect();
-        let (more, _) = r.intersect_with_plane(&dom(), &r, &dom(), None).unwrap();
+        let (more, _) = r.intersect_with_plane(k, &dom(), &r, &dom(), None).unwrap();
         assert!(!more);
     }
 

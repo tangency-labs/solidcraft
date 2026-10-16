@@ -602,8 +602,8 @@ fn initial_setup(
         // end point, snap the solution to whichever end (start or finish)
         // such that the direction that moves towards the interior of the curve
         // also moves generally towards the interior of the surface.
-        if curve.is_closed(&ivl, 0.0)? {
-            let p3 = curve.evaluate_point(t)?;
+        if curve.is_closed(k, &ivl, 0.0)? {
+            let p3 = curve.evaluate_point(k, t)?;
             let inward = offset_compute_inward_vector(surface1, uv1)?;
             let dropped = curve.drop_point(
                 k,
@@ -624,7 +624,7 @@ fn initial_setup(
         let (uv_curve, _) = edgeuse::uv_trim_curve(b, eu)?;
         let uv_curve =
             uv_curve.ok_or_else(|| SolidError::invalid_input(op, "edge use without UV curve"))?;
-        let p2d = uv_curve.evaluate_point(t)?;
+        let p2d = uv_curve.evaluate_point(k, t)?;
         let mut guess2 = Point2::new(p2d.x, p2d.y);
 
         // Before we add it drop point to other surface to get a better guess
@@ -650,14 +650,14 @@ fn initial_setup(
 
     let base1 = surface1.base_surface();
     let normal1 = base1
-        .evaluate_normal(uv1, Side::Left, Side::Left)?
+        .evaluate_normal(k, uv1, Side::Left, Side::Left)?
         .unitize()?;
     let normal2 = base2
-        .evaluate_normal(uv2, Side::Left, Side::Left)?
+        .evaluate_normal(k, uv2, Side::Left, Side::Left)?
         .unitize()?;
 
     let (plane_orig, plane_normal) = if let Some((curve, t)) = fillet_edge {
-        let pv = curve.evaluate(t, 1, true, true)?;
+        let pv = curve.evaluate(k, t, 1, true, true)?;
         let p = pv.first().copied().ok_or_else(|| SolidError::sm_err(op))?;
         let d = pv.get(1).copied().ok_or_else(|| SolidError::sm_err(op))?;
         (p, d)
@@ -732,8 +732,8 @@ fn store_initial_values(
 }
 
 /// `pBase->DropVectors(uv, TRUE, TRUE, 1, &v, &delta)`: the UV step of `v`.
-fn drop_vector(base: &Surface, uv: Point2, v: Vec3, op: &'static str) -> Result<Vec2> {
-    drop_vectors_at(base, uv, Side::Left, Side::Left, &[v])?
+fn drop_vector(k: &Kernel, base: &Surface, uv: Point2, v: Vec3, op: &'static str) -> Result<Vec2> {
+    drop_vectors_at(k, base, uv, Side::Left, Side::Left, &[v])?
         .first()
         .copied()
         .ok_or_else(|| SolidError::sm_err(op))
@@ -831,11 +831,11 @@ impl EiffelTowerFs {
             // (R1-R2)*cos(m_dTowerAngle) as our final guess sUV2
             let len1 = fs.orientation(1)? * scale_factor * rad_diff * self.tower_angle.sin();
             let v1 = len1 * s.normal2;
-            let delta1 = drop_vector(base1, uv1, v1, OP)?;
+            let delta1 = drop_vector(k, base1, uv1, v1, OP)?;
             uv1 += delta1;
             let len2 = -fs.orientation(0)? * rad_diff * self.tower_angle.cos();
             let v2 = len2 * s.normal1;
-            let delta2 = drop_vector(base2, uv2, v2, OP)?;
+            let delta2 = drop_vector(k, base2, uv2, v2, OP)?;
             uv2 += delta2;
         } else {
             let tsect = fs
@@ -856,11 +856,11 @@ impl EiffelTowerFs {
             // (R1-R2)*cos(m_dTowerAngle) as our final guess sUV2
             let len2 = fs.orientation(1)? * scale_factor * rad_diff * self.tower_angle.sin();
             let v2 = len2 * s.normal1;
-            let delta2 = drop_vector(base2, uv2, v2, OP)?;
+            let delta2 = drop_vector(k, base2, uv2, v2, OP)?;
             uv2 += delta2;
             let len1 = -fs.orientation(0)? * rad_diff * self.tower_angle.cos();
             let v1 = len1 * s.normal2;
-            let delta1 = drop_vector(base1, uv1, v1, OP)?;
+            let delta1 = drop_vector(k, base1, uv1, v1, OP)?;
             uv1 += delta1;
         }
 
@@ -1058,6 +1058,7 @@ pub struct EiffelTowerCrossSectionFsg;
 /// The cross section of `CreateSurface` at one rail parameter: `p1`, `p2` the fillet
 /// point's surface positions, `s1`, `s2` the rail points.
 fn cross_section(
+    k: &Kernel,
     p1: Point3,
     p2: Point3,
     s1: Point3,
@@ -1132,7 +1133,7 @@ fn cross_section(
             NurbCircleParam::Quadratic,
         )?;
         // Join pCrossSection with pArc2
-        cross_section.join_with(true, &mut arc2, false, None)?;
+        cross_section.join_with(k, true, &mut arc2, false, None)?;
     }
     Ok(cross_section)
 }
@@ -1187,7 +1188,7 @@ impl EiffelTowerCrossSectionFsg {
             let p2 = tsp.srf_pos(SrfIndex::Second);
             let s1 = rail1.evaluate_point(t)?;
             let s2 = rail2.evaluate_point(t)?;
-            cross_sections.push(cross_section(p1, p2, s1, s2, approx_tol_3d)?);
+            cross_sections.push(cross_section(k, p1, p2, s1, s2, approx_tol_3d)?);
         }
 
         let mut sweep = false;
@@ -1221,8 +1222,9 @@ impl EiffelTowerCrossSectionFsg {
         // See if we can create a surface of revolution
         let is_arc = |c: &BSplineCurve| {
             is_arc_base(
+                k,
                 c,
-                |c, tol| c.is_degenerate(tol, None),
+                |c, tol| c.is_degenerate(k, tol, None),
                 ANALYTIC_SAMPLES,
                 ANALYTIC_TOL,
             )
@@ -1310,7 +1312,7 @@ impl EiffelTowerCrossSectionFsg {
             ]),
             degree: 3,
         };
-        BSplineSurface::create_skinned_surface(&cross_sections, opts)
+        BSplineSurface::create_skinned_surface(k, &cross_sections, opts)
     }
 }
 
@@ -1396,7 +1398,7 @@ impl SecantConstantRadiusFs {
             // a (3-d)distance of 2*Radius*sin(theta) as our final guess point
             let len = -fs.orientation(1)? * fs.radius(1)? * self.secant_angle.sin();
             let v = len * s.normal1;
-            let delta = drop_vector(base2, uv2, v, OP)?;
+            let delta = drop_vector(k, base2, uv2, v, OP)?;
             uv2 += delta * 2.0;
         } else {
             let tsect = fs
@@ -1416,7 +1418,7 @@ impl SecantConstantRadiusFs {
             // a (3-d)distance of 2*Radius*sin(theta) as our final guess point
             let len = -fs.orientation(0)? * fs.radius(0)? * self.secant_angle.sin();
             let v = len * s.normal2;
-            let delta = drop_vector(base1, uv1, v, OP)?;
+            let delta = drop_vector(k, base1, uv1, v, OP)?;
             uv1 += delta * 2.0;
         }
 
@@ -1705,21 +1707,23 @@ mod tests {
 
     #[test]
     fn cross_section_point_curve_when_rails_meet() {
+        let k = &Kernel::default();
         let p = Point3::new(1.0, 2.0, 3.0);
-        let c = cross_section(p, p, p, p, 1e-6).expect("point curve");
+        let c = cross_section(k, p, p, p, p, 1e-6).expect("point curve");
         let q = c.evaluate_point(0.5).expect("eval");
         assert!(q.distance(p) < 1e-12);
     }
 
     #[test]
     fn cross_section_tower_arcs_end_on_rails() {
+        let k = &Kernel::default();
         // R1 = 2 swept 60 degrees, then R2 = 1 swept 30 more degrees
         let h = 3.0f64.sqrt() / 2.0;
         let s1 = Point3::new(0.0, 0.0, 0.0);
         let p1 = Point3::new(0.0, 0.0, 2.0);
         let p2 = Point3::new(0.0, h, 1.5);
         let s2 = Point3::new(0.0, h + 1.0, 1.5);
-        let c = cross_section(p1, p2, s1, s2, 1e-6).expect("tower");
+        let c = cross_section(k, p1, p2, s1, s2, 1e-6).expect("tower");
         let ivl = c.natural_interval();
         let a = c.evaluate_point(ivl.min()).expect("eval");
         let b = c.evaluate_point(ivl.max()).expect("eval");
