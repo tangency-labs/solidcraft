@@ -36,6 +36,7 @@
 //! | [`proto::find_position_from_pcs`], [`proto::PositionFromPcs`] | `sm_FindPositionFromPCs` (static) |
 //! | [`proto::are_same_curve`] | `sm_AreSameCurve` (static) |
 //! | [`proto::are_connected`] | the four `sm_AreConnected` overloads (static) |
+//! | [`ProtoTopology`] | the B-rep walks those helpers make (see Deviations) |
 //! | [`ProtoTopologyManager::which_pv_to_combine`] | `sm_WhichPVToCombine` (static) |
 //! | [`proto::is_interior`] | `sm_IsInterior` (static) |
 //! | [`proto::are_overlapping`] | `sm_AreOverlapping` (static) |
@@ -93,6 +94,7 @@
 //! | [`ProtoTopologyManager::remove_coincident_no_edge_proto_vertex`] | `SmProtoTopologyManager::RemoveCoincidentNoEdgeProtoVertex` |
 //! | [`proto::MANAGER_TYPE`], [`proto::MANAGER_TYPE_STRING`], [`proto::MANAGER_CLASS_STRING`], [`proto::manager_is_kind_of`] | `SmProtoTopologyManager::GetType`, `GetTypeString`, `GetClassString`, `IsKindOf` |
 //! | [`api_transform::transform_independent_object`], [`api_transform::TransformObject`] | `sm_TransformIndependentObject` (anonymous namespace) |
+//! | [`api_transform::PolyBrepTransform`], [`api_transform::PolyBrepTarget`] | the `SmPolyBrep*` it transforms (`SmPolyBrep::Transform`) |
 //! | [`api_transform::api_transform`], [`api_transform::api_scale`], [`api_transform::api_scale_by_pt`], [`api_transform::api_translate`], [`api_transform::api_rotate`] | `SmApiTransform`, `SmApiScale`, `SmApiScaleByPt`, `SmApiTranslate`, `SmApiRotate` |
 //!
 //! Deviations:
@@ -138,15 +140,27 @@
 //! - `sm_FindPositionFromPCs` does not compute `SmTol::GetXSectTol3d` of the two
 //!   objects: it only feeds a diagnostic message.
 //! - `CanCombineEdgeDefinitions` keeps upstream's comparison of the second curve over
-//!   the first definition's interval. Its degenerate-face branch is unreachable (two
-//!   different edges are never connected) but is ported.
+//!   the first definition's interval. Its degenerate-face branch
+//!   (`sm_FindEDOnDegenFace`) is unreachable from it (two different edges are never
+//!   connected) but is ported.
+//! - **B-rep walks.** The topology walks of `sm_AreConnected`, `GetFinalVertex` and
+//!   `sm_FindEDOnDegenFace` (`SmVertex::GetVertexuses`, `SmVertexuse::GetFaceuse`,
+//!   `SmFaceuse::GetFace`, `SmEdge::GetEdgeuses`, `SmEdgeuse::GetFace`,
+//!   `SmEdge::GetStartVertex`, `GetOtherVertex`, `GetBrep`, `GetFaces`,
+//!   `SmVertex::GetPoint`) go through a [`ProtoTopology`] for the handles;
+//!   [`Brep`](crate::topology::Brep) implements it over its own entities with units
+//!   `topology.vertex`, `topology.vertexuse`, `topology.edge` and
+//!   `topology.edgeuse_p1`. `sm_FindEDOnDegenFace`'s status, which
+//!   `CanCombineEdgeDefinitions` ignores, leaves the choice 0.
+//! - **Poly B-reps** reach `SmApiTransform` as an [`api_transform::PolyBrepTransform`]
+//!   (an [`api_transform::PolyBrepTarget`]: the poly B-rep with its notification
+//!   environment).
 //! - **Callees in units not ported yet** return [`SolidError::Unported`](crate::SolidError):
-//!   the B-rep topology walks of `sm_AreConnected` (`topology.vertex`,
-//!   `topology.edge`), `SmVertex::GetPoint`, `SmEdge::GetBrep`, `SmBrep::GetTolerance`
-//!   (`topology.brep_p1`) in the manager's fallback tolerance,
-//!   `SmBrep::Transform` (`topology.brep_p5`) and `SmPolyBrep::Transform`
-//!   (`query.poly`). `SmProtoVertex::ContainsPoint` / `DistanceTo` (unit
-//!   `query.face_p2`) are [`crate::query::face::p2`]'s.
+//!   `SmBrep::GetTolerance` (`topology.brep_p1`) in the manager's fallback tolerance,
+//!   `SmFace::GetEdges` (`topology.face_p4`) for edges sharing a face in
+//!   `sm_FindEDOnDegenFace`, and `SmBrep::Transform` (`topology.brep_p5`).
+//!   `SmProtoVertex::ContainsPoint` / `DistanceTo` (unit `query.face_p2`) are
+//!   [`crate::query::face::p2`]'s.
 //! - **Copy map.** `SetAt` takes two objects and `GetAt` of an object without an entry
 //!   is [`SolidError::InvalidInput`](crate::SolidError): upstream's release `SM_ASSERT`s
 //!   call `GetType()` on null objects there (plan/upstream-issues.md UB-98).
@@ -168,7 +182,7 @@ pub use copy_brep_map::CopyBrepMap;
 pub use owning_topology::{destroy_topology, OwningRecords, OwningTopology};
 pub use proto::{
     EdgeDefId, EdgeDefinition, ProtoEdge, ProtoEdgeId, ProtoFace, ProtoFaceId, ProtoGeometry,
-    ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId, VertexDefinition,
+    ProtoTopology, ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId, VertexDefinition,
 };
 
 #[cfg(test)]
@@ -418,6 +432,32 @@ mod tests {
         }
     }
 
+    /// The bare stand-ins: no uses, no B-rep; an edge's start vertex dereferences its
+    /// missing primary edge use.
+    impl ProtoTopology<H> for Geo {
+        fn vertex_use_faces(&self, _vertex: H) -> crate::Result<Vec<Option<H>>> {
+            Ok(Vec::new())
+        }
+        fn edge_use_faces(&self, _edge: H) -> crate::Result<Vec<Option<H>>> {
+            Ok(Vec::new())
+        }
+        fn edge_start_vertex(&self, _edge: H) -> crate::Result<Option<H>> {
+            Err(SolidError::invalid_input("test", "no primary edge use"))
+        }
+        fn edge_other_vertex(&self, _edge: H, _vertex: Option<H>) -> crate::Result<Option<H>> {
+            Ok(None)
+        }
+        fn vertex_point(&self, _vertex: H) -> crate::Result<Point3> {
+            Ok(Point3::new(0.0, 0.0, 0.0))
+        }
+        fn edge_brep(&self, _edge: H) -> crate::Result<Option<ObjectKey>> {
+            Ok(None)
+        }
+        fn edge_faces(&self, _edge: H) -> crate::Result<Vec<H>> {
+            Ok(Vec::new())
+        }
+    }
+
     fn line(p: [f64; 3], q: [f64; 3]) -> Curve {
         Curve::from(
             Line::create_line_segment(3, Vec3::from_array(p), Vec3::from_array(q), None).unwrap(),
@@ -590,13 +630,24 @@ mod tests {
         assert!(!proto::can_imprint(PointClassType::Curve));
         assert_eq!(proto::topo_dimension(R0), -1);
         assert_eq!(proto::topo_dimension(H(1, ClassObjectKind::Face)), 2);
-        assert!(proto::are_connected(Some(R0), Some(R0)).unwrap());
-        assert!(!proto::are_connected(Some(R0), Some(L0)).unwrap());
+        let bare = Geo(Vec::new());
+        assert!(proto::are_connected(&bare, Some(R0), Some(R0)).unwrap());
+        assert!(!proto::are_connected(&bare, Some(R0), Some(L0)).unwrap());
         assert!(proto::are_connected(
+            &bare,
             Some(H(1, ClassObjectKind::Edge)),
             Some(H(2, ClassObjectKind::Vertex))
         )
         .is_err());
+        let (e1, f1) = (H(1, ClassObjectKind::Edge), H(3, ClassObjectKind::Face));
+        assert!(!proto::are_connected(&bare, Some(f1), Some(e1)).unwrap());
+        assert!(
+            !proto::are_connected(&bare, Some(H(2, ClassObjectKind::Vertex)), Some(f1)).unwrap()
+        );
+        assert_eq!(
+            proto::find_ed_on_degen_face(&bare, e1, H(4, ClassObjectKind::Edge)).unwrap(),
+            0
+        );
 
         let k = Kernel::default();
         let geo = Geo(vec![
@@ -660,5 +711,80 @@ mod tests {
             Vec3::new(1.0, 0.0, 0.0)
         )
         .is_err_and(|e| e.is_unported()));
+    }
+
+    /// The B-rep walks on a wire edge from (0,0,0) to (1,0,0) of one B-rep.
+    #[test]
+    fn brep_walks() {
+        use crate::error::EntityRef;
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::topology::{
+            Brep, Edge, Edgeuse, EdgeuseId, EdgeuseOwner, Region, Shell, Vertex, VertexId,
+            Vertexuse, VertexuseId, VertexuseOwner,
+        };
+
+        let mut b = Brep::new();
+        let r = b.add_region_record(Region { in_brep: true }).unwrap();
+        let s = b
+            .add_shell_record(Shell {
+                faces: Vec::new(),
+                region: Some(r),
+            })
+            .unwrap();
+        let v: Vec<VertexId> = (0..3)
+            .map(|i| {
+                b.add_vertex_record(Vertex {
+                    point: Vec3::new(f64::from(i), 0.0, 0.0),
+                    tolerance: 1e-5,
+                    vertexuses: Vec::new(),
+                    poly_vertex: None,
+                })
+                .unwrap()
+            })
+            .collect();
+        let mut edge = Edge::new([v[0], v[1]]);
+        edge.edgeuses = vec![EdgeuseId::from_index(0), EdgeuseId::from_index(1)];
+        let e = b.add_edge_record(edge).unwrap();
+        let eus: Vec<EdgeuseId> = (0..2u32)
+            .map(|i| {
+                b.add_edgeuse_record(Edgeuse {
+                    edge: Some(e),
+                    owner: EdgeuseOwner::Shell(Some(s)),
+                    vertexuse: Some(VertexuseId::from_index(i)),
+                    orientation: if i == 0 {
+                        OrientType::Same
+                    } else {
+                        OrientType::Opposite
+                    },
+                    ..Edgeuse::default()
+                })
+                .unwrap()
+            })
+            .collect();
+        for (vi, eu) in v.iter().zip(&eus) {
+            b.add_vertexuse_record(Vertexuse {
+                vertex: Some(*vi),
+                owner: VertexuseOwner::Edgeuse(Some(*eu)),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        }
+        // the vertex records list their uses
+        let (ve, v0, v1, v2) = (
+            EntityRef::Edge(e),
+            EntityRef::Vertex(v[0]),
+            EntityRef::Vertex(v[1]),
+            EntityRef::Vertex(v[2]),
+        );
+        assert_eq!(b.edge_start_vertex(ve).unwrap(), Some(v0));
+        assert_eq!(b.edge_other_vertex(ve, Some(v0)).unwrap(), Some(v1));
+        assert_eq!(b.vertex_point(v1).unwrap(), Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(b.edge_use_faces(ve).unwrap(), vec![None, None]);
+        assert!(b.edge_faces(ve).unwrap().is_empty());
+        assert!(proto::are_connected(&b, Some(v0), Some(ve)).unwrap());
+        assert!(proto::are_connected(&b, Some(ve), Some(v1)).unwrap());
+        assert!(!proto::are_connected(&b, Some(v2), Some(ve)).unwrap());
+        assert_eq!(proto::find_ed_on_degen_face(&b, ve, ve).unwrap(), 0);
+        assert!(b.vertex_point(ve).is_err());
     }
 }

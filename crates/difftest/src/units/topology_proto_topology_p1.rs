@@ -23,10 +23,11 @@
 //!
 //! A Rust error maps to its `SmStatus` (`-1` for one upstream cannot return, e.g. a
 //! dereference the shim should have refused); an `Unported` error anywhere defers the case.
-//! Deferred: B-rep topology walks of `sm_AreConnected` (vertices, edges, faces), point
-//! classifications on topology objects, `SmProtoVertex::ContainsPoint` (`FindProtoVertex`
-//! with listed proto vertices, `sm_WhichPVToCombine` without a split vertex),
-//! `SmBrep::Transform` / `SmPolyBrep::Transform`, and the manager's fallback tolerance.
+//! The B-rep walks (`ProtoTopology`) of the bare stand-ins answer as upstream's do: no
+//! uses, no B-rep, vertices at the origin. Deferred: point classifications on topology
+//! objects (their `SmVertex::GetPoint`, `SmEdge::GetCurve`, `SmFace::GetSurface`, ...
+//! in `intersect.point_class`), `SmBrep::Transform`, and the manager's fallback
+//! tolerance.
 
 use std::collections::BTreeMap;
 
@@ -39,6 +40,7 @@ use solidcore::curve::curve::p2::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::{BoundedLineOptions, Line};
+use solidcore::geom::a_object::CacheStore;
 use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
@@ -57,17 +59,21 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::query::poly::{PolyBrep, PolyNotifyEnv, PolyObjectKind};
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
-use solidcore::topology::proto_topology::p1::api_transform::{self as api, TransformObject};
+use solidcore::topology::proto_topology::p1::api_transform::{
+    self as api, PolyBrepTarget, PolyBrepTransform, TransformObject,
+};
 use solidcore::topology::proto_topology::p1::assembly::{self as asm_mod, Assembly, AssemblyInstance};
 use solidcore::topology::proto_topology::p1::owning_topology as own_mod;
 use solidcore::topology::proto_topology::p1::proto::{self as proto_mod};
 use solidcore::topology::proto_topology::p2::ProtoBrep;
 use solidcore::topology::proto_topology::p1::{
     destroy_topology, CopyBrepMap, EdgeDefId, EdgeDefinition, OwningRecords, OwningTopology,
-    ProtoEdgeId, ProtoFaceId, ProtoGeometry, ProtoTopologyManager, ProtoVertexId, VertexDefId,
+    ProtoEdgeId, ProtoFaceId, ProtoGeometry, ProtoTopology, ProtoTopologyManager, ProtoVertexId,
+    VertexDefId,
     VertexDefinition,
 };
 use solidcore::topology::topology::{Topology, TopologyRecords};
@@ -202,7 +208,10 @@ pub(super) enum TObjIn {
     Plane { owned: bool, o: [f64; 3], n: [f64; 3] },
     Bsurf { owned: bool, s: SurfIn },
     Brep,
+    /// An empty `SmPolyBrep`.
     Poly,
+    /// An `SmPolyBrep` with poly vertices `x y z tol` (1 to 4).
+    PolyPts { pts: Vec<[f64; 4]> },
     Other,
     Null,
     /// An `SmCompositeCurve` of the curves.
@@ -378,6 +387,12 @@ pub(super) fn cpp_input(s: &Script) -> Vec<f64> {
                 }
                 TObjIn::Brep => v.push(tobj::BREP as f64),
                 TObjIn::Poly => v.push(tobj::POLY as f64),
+                TObjIn::PolyPts { pts } => {
+                    v.extend([tobj::POLY_PTS as f64, pts.len() as f64]);
+                    for q in pts {
+                        v.extend_from_slice(q);
+                    }
+                }
                 TObjIn::Other => v.push(tobj::OTHER as f64),
                 TObjIn::Null => v.push(tobj::NULL as f64),
                 TObjIn::Composite { owned, cs } => {
@@ -1178,6 +1193,46 @@ impl ProtoGeometry<H> for Pool {
     }
 }
 
+impl Pool {
+    /// The point of a live vertex made with one (`VertexAt`, the p3 ops); the p3 guards
+    /// only run paths whose vertices have one (the others are refused).
+    fn point_of(&self, vertex: H) -> Option<Point3> {
+        match self.objs.get(vertex.0) {
+            Some(PObj::VertexPt(p, _)) if self.live_h(vertex) => Some(*p),
+            _ => None,
+        }
+    }
+}
+
+/// The bare stand-ins' topology: no vertex or edge uses, no B-rep (upstream walks the
+/// empty use lists; `SmEdge::GetBrep` reports `SE(SM_ERR)` and returns `NULL`); a bare
+/// vertex sits at the origin (`SmVertex()` sets `m_vPoint(0,0,0)`). An edge's start vertex
+/// dereferences its missing primary edge use: the shim refuses that (`connect_crashes`).
+impl ProtoTopology<H> for Pool {
+    fn vertex_use_faces(&self, _vertex: H) -> solidcore::Result<Vec<Option<H>>> {
+        Ok(Vec::new())
+    }
+    fn edge_use_faces(&self, _edge: H) -> solidcore::Result<Vec<Option<H>>> {
+        Ok(Vec::new())
+    }
+    fn edge_start_vertex(&self, _edge: H) -> solidcore::Result<Option<H>> {
+        Err(SolidError::invalid_input("difftest::pool", "bare edge has no primary edge use"))
+    }
+    fn edge_other_vertex(&self, _edge: H, _vertex: Option<H>) -> solidcore::Result<Option<H>> {
+        Ok(None)
+    }
+    // A vertex made with a point (`VertexAt`, the p3 ops) sits there.
+    fn vertex_point(&self, vertex: H) -> solidcore::Result<Vec3> {
+        Ok(self.point_of(vertex).unwrap_or(Vec3::new(0.0, 0.0, 0.0)))
+    }
+    fn edge_brep(&self, _edge: H) -> solidcore::Result<Option<ObjectKey>> {
+        Ok(None)
+    }
+    fn edge_faces(&self, _edge: H) -> solidcore::Result<Vec<H>> {
+        Ok(Vec::new())
+    }
+}
+
 /// The bare stand-ins' members (upstream `SmEdge::GetInterval`, `GetCurve`, `GetTolerance`
 /// of the stand-in objects the shim makes), and new curves appended to the pool.
 impl ProtoBrep<H> for Pool {
@@ -1227,33 +1282,14 @@ impl ProtoBrep<H> for Pool {
         self.alive.push(true);
         Some(H(self.objs.len() - 1, ClassObjectKind::Curve))
     }
-    // Only the vertices made with a point have one the p3 ops read (the others are refused).
-    fn vertex_point(&self, vertex: H) -> Option<Point3> {
-        match self.objs.get(vertex.0) {
-            Some(PObj::VertexPt(p, _)) if self.live_h(vertex) => Some(*p),
-            _ => None,
-        }
-    }
-    fn edge_faces(&self, _edge: H) -> solidcore::Result<Vec<H>> {
-        Err(SolidError::invalid_input(
-            "difftest::proto_p3::edge_faces",
-            "stand-in edges have no faces",
-        ))
-    }
     fn vertex_common_edges(&self, v1: H, v2: H) -> solidcore::Result<Vec<H>> {
         // vertices with points have no vertex uses: no edges
-        if self.vertex_point(v1).is_some() && self.vertex_point(v2).is_some() {
+        if self.point_of(v1).is_some() && self.point_of(v2).is_some() {
             return Ok(Vec::new());
         }
         Err(SolidError::invalid_input(
             "difftest::proto_p3::vertex_common_edges",
             "stand-in vertices have no edges",
-        ))
-    }
-    fn edge_other_vertex(&self, _edge: H, _vertex: H) -> solidcore::Result<Option<H>> {
-        Err(SolidError::invalid_input(
-            "difftest::proto_p3::edge_other_vertex",
-            "stand-in edges have no vertices",
         ))
     }
     // The stand-ins have no B-rep faces to run `query::face::p2::curve_on_classify` on,
@@ -3367,7 +3403,7 @@ fn run_proto(
                 if skip || !ok || connect_crashes(&r.pool, t1, t2) {
                     skip = true;
                 } else {
-                    match st(proto_mod::are_connected(t1, t2))? {
+                    match st(proto_mod::are_connected(&r.pool, t1, t2))? {
                         Ok(f) => out.push(b(f)),
                         Err(s) => status = s,
                     }
@@ -3641,7 +3677,7 @@ fn run_proto(
                                     (f.final_vertex(1), t.final_vertex(1), f.final_vertex(2), t.final_vertex(2))
                                 {
                                     for (x, y) in [(a1, b1), (a2, b2)] {
-                                        match (r.pool.vertex_point(x), r.pool.vertex_point(y)) {
+                                        match (r.pool.point_of(x), r.pool.point_of(y)) {
                                             (Some(px), Some(py)) => {
                                                 // `dist > xs` is the no-glue test of the port
                                                 let xs = match (
@@ -3827,7 +3863,17 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
     let mut surface = None;
     // a curve kind the API refuses (no state is reported for it)
     let mut special: Option<Curve> = None;
+    let mut poly: Option<PolyBrep> = None;
     match obj {
+        TObjIn::Poly => poly = Some(PolyBrep::new(&k, 1.0e-5)),
+        TObjIn::PolyPts { pts } => {
+            let mut b = PolyBrep::new(&k, 1.0e-5);
+            for q in pts {
+                b.add_vertex(&k, Vec3::new(q[0], q[1], q[2]), q[3])
+                    .map_err(|e| harness(format!("poly vertex: {e}")))?;
+            }
+            poly = Some(b);
+        }
         TObjIn::Curve { owned, c } => {
             let mut c = build_curve(c)?;
             if *owned {
@@ -3879,12 +3925,28 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
         }
         _ => {}
     }
+    let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+    let mut attributes = AttributeStore::new();
+    let mut caches: CacheStore<()> = CacheStore::new();
+    let mut env = PolyNotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        caches: &mut caches,
+        context: None,
+        this: ObjectRef {
+            type_code: PolyObjectKind::Brep.type_code(),
+            key: ObjectKey(0),
+        },
+    };
+    let mut poly_target = poly.as_mut().map(|b| PolyBrepTarget { brep: b, env: &mut env });
     let target = match obj {
         TObjIn::Composite { .. } | TObjIn::CrvOnSurf { .. } => special.as_mut().map(TransformObject::Curve),
         TObjIn::Curve { .. } => curve.as_mut().map(TransformObject::Curve),
         TObjIn::Plane { .. } | TObjIn::Bsurf { .. } => surface.as_mut().map(TransformObject::Surface),
         TObjIn::Brep => Some(TransformObject::Brep),
-        TObjIn::Poly => Some(TransformObject::PolyBrep),
+        TObjIn::Poly | TObjIn::PolyPts { .. } => poly_target
+            .as_mut()
+            .map(|t| TransformObject::PolyBrep(t as &mut dyn PolyBrepTransform)),
         TObjIn::Other => Some(TransformObject::Other),
         TObjIn::Null => None,
     };
@@ -3914,6 +3976,17 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
     }
     if let Some(sf) = &surface {
         put_surface(&mut o, sf);
+    }
+    if let Some(b) = &poly {
+        // the poly B-rep's tolerance, then each vertex's point and tolerance
+        o.push(b.tolerance());
+        let vs = b.poly_vertices();
+        o.push(vs.len() as f64);
+        for v in vs {
+            let q = b.vertex_point(v).map_err(|e| harness(format!("poly vertex: {e}")))?;
+            let t = b.vertex_tolerance(v).map_err(|e| harness(format!("poly vertex: {e}")))?;
+            o.extend([q.x, q.y, q.z, t]);
+        }
     }
     Ok(o)
 }
@@ -4861,7 +4934,20 @@ fn gen_transform(rng: &mut Rng) -> Script {
             s: gen_surface(rng, scale),
         },
         16 => TObjIn::Brep,
-        17 => TObjIn::Poly,
+        17 => {
+            if rng.chance(0.2) {
+                TObjIn::Poly
+            } else {
+                let n = 1 + rng.below(4);
+                let pts = (0..n)
+                    .map(|_| {
+                        let q = rp(rng, 5.0 * scale);
+                        [q[0], q[1], q[2], 1e-5 * scale * rng.uniform(0.5, 2.0)]
+                    })
+                    .collect();
+                TObjIn::PolyPts { pts }
+            }
+        }
         18 => match rng.below(3) {
             0 => TObjIn::Other,
             1 => TObjIn::Composite {
@@ -5266,6 +5352,29 @@ fn edge_cases() -> Vec<(String, Value)> {
         ("plane", TObjIn::Plane { owned: false, o: [1.0, 2.0, 3.0], n: [0.0, 0.0, 1.0] }),
         ("other", TObjIn::Other),
         ("null", TObjIn::Null),
+        ("poly_empty", TObjIn::Poly),
+        (
+            "poly",
+            TObjIn::PolyPts {
+                pts: vec![
+                    [0.0, 0.0, 0.0, 1e-5],
+                    [1.0, 2.0, 3.0, 2e-5],
+                    [-1.0, 0.5, 0.25, 1e-6],
+                ],
+            },
+        ),
+        (
+            "poly_huge",
+            TObjIn::PolyPts {
+                pts: vec![[1e7, -3e6, 2e5, 1e-1], [-2e6, 4e7, 1e6, 3e-2]],
+            },
+        ),
+        (
+            "poly_tiny",
+            TObjIn::PolyPts {
+                pts: vec![[1e-7, -3e-6, 2e-8, 1e-12], [0.0, 0.0, 0.0, 0.0]],
+            },
+        ),
         (
             "composite",
             TObjIn::Composite {

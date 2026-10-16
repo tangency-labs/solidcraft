@@ -78,16 +78,12 @@
       "values_compared": 131
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046903685",
-      "values_compared": 0
+      "values_compared": 86
     },
     {
       "max_rel_err": 0.0,
@@ -914,16 +910,12 @@
       "values_compared": 464
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0100",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046903779",
-      "values_compared": 0
+      "values_compared": 56
     },
     {
       "max_rel_err": 0.0,
@@ -2818,16 +2810,12 @@
       "values_compared": 92
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0317",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046903996",
-      "values_compared": 0
+      "values_compared": 283
     },
     {
       "max_rel_err": 0.0,
@@ -2978,16 +2966,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0336",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904015",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -4122,16 +4106,12 @@
       "values_compared": 354
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetVertexuses",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "gen0467",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904146",
-      "values_compared": 0
+      "values_compared": 366
     },
     {
       "deferred": {
@@ -5466,16 +5446,12 @@
       "values_compared": 380
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0619",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904298",
-      "values_compared": 0
+      "values_compared": 393
     },
     {
       "deferred": {
@@ -5978,16 +5954,12 @@
       "values_compared": 106
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0678",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904357",
-      "values_compared": 0
+      "values_compared": 135
     },
     {
       "max_rel_err": 0.0,
@@ -8670,16 +8642,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0981",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904660",
-      "values_compared": 0
+      "values_compared": 125
     },
     {
       "deferred": {
@@ -9622,16 +9590,12 @@
       "values_compared": 448
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1091",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904770",
-      "values_compared": 0
+      "values_compared": 185
     },
     {
       "deferred": {
@@ -9974,16 +9938,12 @@
       "values_compared": 452
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1131",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904810",
-      "values_compared": 0
+      "values_compared": 68
     },
     {
       "max_rel_err": 0.0,
@@ -10522,16 +10482,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1195",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904874",
-      "values_compared": 0
+      "values_compared": 223
     },
     {
       "max_rel_err": 0.0,
@@ -10694,16 +10650,12 @@
       "values_compared": 104
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1215",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904894",
-      "values_compared": 0
+      "values_compared": 88
     },
     {
       "max_rel_err": 0.0,
@@ -10786,16 +10738,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1224",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904903",
-      "values_compared": 0
+      "values_compared": 82
     },
     {
       "max_rel_err": 0.0,
@@ -10874,16 +10822,12 @@
       "values_compared": 450
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1234",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904913",
-      "values_compared": 0
+      "values_compared": 67
     },
     {
       "max_rel_err": 0.0,
@@ -10950,28 +10894,20 @@
       "values_compared": 37
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1243",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904922",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1244",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904923",
-      "values_compared": 0
+      "values_compared": 85
     },
     {
       "max_rel_err": 0.0,
@@ -11394,16 +11330,12 @@
       "values_compared": 95
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904974",
-      "values_compared": 0
+      "values_compared": 71
     },
     {
       "deferred": {
@@ -11478,16 +11410,12 @@
       "values_compared": 108
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetStartVertex",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1304",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046904983",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -12062,16 +11990,12 @@
       "values_compared": 228
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen1366",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501319568046905045",
-      "values_compared": 0
+      "values_compared": 323
     },
     {
       "max_rel_err": 0.0,
@@ -13487,16 +13411,16 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 305,
+  "cases_deferred": 286,
   "cases_failed": 0,
-  "cases_passed": 1228,
+  "cases_passed": 1247,
   "cases_total": 1533,
   "deferred_by_unit": {
     "topology.brep_p9": 20,
-    "topology.edge": 123,
+    "topology.edge": 105,
     "topology.face_p1": 41,
     "topology.face_p2": 60,
-    "topology.vertex": 61
+    "topology.vertex": 60
   },
   "max_rel_err": 0.0,
   "pass": true,

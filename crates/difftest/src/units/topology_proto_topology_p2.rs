@@ -544,7 +544,7 @@ pub(super) fn run_op(
             if *skip {
                 return Ok(());
             }
-            match res(r.mgr.can_combine_vertex_definitions(&r.k, d1, d2), st, skip)? {
+            match res(r.mgr.can_combine_vertex_definitions(&r.k, &r.pool, d1, d2), st, skip)? {
                 Some(c) => out.push(c as f64),
                 None => out.push(0.0),
             }

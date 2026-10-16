@@ -610,6 +610,14 @@ struct AsmRemove
 };
 template struct Rob<AsmRemove, &SmAssembly::RemoveInstance>;
 
+// The vertex list head upstream's own SmPolyBrep code posts new poly vertices on.
+struct PolyVertexHead
+{
+    typedef SmOwningTopology* SmPolyBrep::*type;
+    friend type get(PolyVertexHead);
+};
+template struct Rob<PolyVertexHead, &SmPolyBrep::m_pPolyVertexListHead>;
+
 // ---- reading -------------------------------------------------------------------------------
 
 struct Rd
@@ -4827,6 +4835,7 @@ enum TObj : int64_t
     T_NULL = 6,
     T_COMPOSITE = 7,
     T_CRV_ON_SURF = 8,
+    T_POLY_PTS = 9,
 };
 
 // SmCrvOnSurf's UV-line constructor is protected.
@@ -4864,6 +4873,20 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
     }
     case T_BREP: obj = new (ctx) SmBrep(); break;
     case T_POLY: obj = new (ctx) SmPolyBrep(SmZoneTol3d(1.0e-5)); break;
+    case T_POLY_PTS:
+    {
+        SmPolyBrep* b = new (ctx) SmPolyBrep(SmZoneTol3d(1.0e-5));
+        int64_t n = rd.idx();
+        for (int64_t i = 0; i < n && i < 4 && !rd.bad; i++)
+        {
+            SmVector3d p = rd.vec();
+            double t = rd.num();
+            SmPolyVertex* v = new (b) SmPolyVertex(p, t);
+            (b->*get(PolyVertexHead()))->PostInsert(v);
+        }
+        obj = b;
+        break;
+    }
     case T_OTHER: obj = new (ctx) ScOwning(); break;
     case T_NULL: obj = NULL; break;
     case T_COMPOSITE:
@@ -4954,6 +4977,23 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
         put_curve(o, (SmCurve*)obj);
     else if (kind == T_PLANE || kind == T_BSURF)
         put_surface(o, (SmSurface*)obj);
+    else if (kind == T_POLY || kind == T_POLY_PTS)
+    {
+        // the poly B-rep's tolerance, then each vertex's point and tolerance
+        const SmPolyBrep* b = (const SmPolyBrep*)obj;
+        o.push_back(b->GetTolerance());
+        SmTArray<SmPolyVertex*> vs;
+        b->GetPolyVertices(vs);
+        o.push_back((double)vs.GetSize());
+        for (ULONG i = 0; i < vs.GetSize(); i++)
+        {
+            SmPoint3d p = vs[i]->GetPoint();
+            o.push_back(p.x);
+            o.push_back(p.y);
+            o.push_back(p.z);
+            o.push_back(vs[i]->GetTolerance());
+        }
+    }
     return SC_OK;
 }
 

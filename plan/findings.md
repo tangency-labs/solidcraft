@@ -4176,6 +4176,25 @@ default 3,093-case set (which the gate and CI run) is clean, and the previous ge
 - **Co-port wired:** `topology::edgeuse::p1::owning_topology_is_kind_of` (CO-PORTED in
   topology.edgeuse_p1, PR #55) now calls `owning_topology::is_kind_of`; edgeuse_p1
   difftest unchanged (2449 pass, 273 deferred).
+- **PR #144 review (2026-10-16).** The B-rep walks of `sm_AreConnected`,
+  `SmProtoVertex::GetFinalVertex` and `sm_FindEDOnDegenFace` over a real `topology::Brep`
+  (`impl ProtoTopology<EntityRef> for Brep`) are not compared against the C++: the
+  runner's pool and the C++ stand-ins have no vertex uses or edge uses, so across kinds
+  `are_connected` is only ever false (true for the same object), vertex-edge pairs are
+  refused (`connect_crashes`) and `GetFinalVertex` only finds a vertex whose edge
+  definition source is that vertex. Their connected branches are checked only by the
+  unit test `brep_walks` and were read line by line against `SmProtoTopology.cpp`
+  336-458 and 2133-2223 (they match). Follow-up: compare them on a real B-rep imported
+  as topology.edgeuse_p1 does from `.smb` files. `sm_FindEDOnDegenFace` is unreachable
+  from `CanCombineEdgeDefinitions` (two different edges are never connected), so
+  `find_ed_on_degen_face` / `degen_face_choice` are not compared either; as a global C++
+  function it could get a direct op on bare edges. Review fixtures added:
+  `review_poly_transform.json` (216 poly B-rep transforms: 0-4 vertices, zero / negative
+  / 1e300 / 1e-310 tolerances, 1e200 and 1e-300 coordinates, negative translates,
+  near-identity, EFF_ZERO, 1e300 and non-uniform scales, scale by point, 0/360/-45/1e10
+  degree rotations, a zero axis, flipped and non-orthonormal placements) and
+  `review_final_vertex.json` (4 scripts at scales 1, 1e8, 1e-8, 1e3: GetFinalVertex,
+  every non-crashing AreConnected pair and every CanCombine pair); all bit-identical.
 
 ## boolean.api_brep (`SmApiBrep.cpp` boolean entry points, PR #81, 2026-10-14)
 

@@ -2766,16 +2766,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmEdge::GetEdgeuses",
-        "unit": "topology.edge"
-      },
       "max_rel_err": 0.0,
       "name": "gen0330",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501318468535275798",
-      "values_compared": 0
+      "values_compared": 161
     },
     {
       "max_rel_err": 0.0,
@@ -4855,8 +4851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmVertex::GetVertexuses",
-        "unit": "topology.vertex"
+        "symbol": "SmBrep::Point3DClassify",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0573",
@@ -15846,16 +15842,12 @@
       "values_compared": 99
     },
     {
-      "deferred": {
-        "symbol": "SmVertex::GetVertexuses",
-        "unit": "topology.vertex"
-      },
       "max_rel_err": 0.0,
       "name": "gen1872",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=11501318468535277340",
-      "values_compared": 0
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -25615,15 +25607,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 377,
+  "cases_deferred": 375,
   "cases_failed": 0,
-  "cases_passed": 2636,
+  "cases_passed": 2638,
   "cases_total": 3013,
   "deferred_by_unit": {
-    "query.brep": 69,
-    "topology.edge": 96,
+    "query.brep": 70,
+    "topology.edge": 95,
     "topology.face_p2": 94,
-    "topology.vertex": 118
+    "topology.vertex": 116
   },
   "max_rel_err": 0.0,
   "pass": true,

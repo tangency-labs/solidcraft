@@ -4,7 +4,8 @@
 //! of `SmProtoTopology.cpp`.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
@@ -17,7 +18,9 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::query::face::p2 as face_p2;
+use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::topology as topo;
+use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId};
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 
@@ -25,12 +28,16 @@ const OP: &str = "topology::proto_topology::p1";
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
+const OP_DEGEN: &str = "topology::proto_topology::p1::find_ed_on_degen_face";
 const OP_END: &str = "topology::proto_topology::p1::ProtoTopologyManager::end_position";
 const OP_COMBINE: &str =
     "topology::proto_topology::p1::ProtoTopologyManager::can_combine_edge_definitions";
 
 /// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: i32 = 1007;
+
+/// Upstream `SmStatus` value `SM_ERR_ASSERT_FAILURE`.
+const SM_ERR_ASSERT_FAILURE: i32 = 1005;
 
 /// `SmProtoTopologyManager_TYPE` (`TOPO_BASE_TYPE + 680`).
 pub const MANAGER_TYPE: i64 = 16680;
@@ -99,6 +106,128 @@ proto_id!(
 pub trait ProtoGeometry<O>: ClassGeometry<O> {
     /// The curve of a [`ClassObjectKind::Curve`] handle.
     fn curve_mut(&mut self, o: O) -> Option<&mut Curve>;
+}
+
+/// The B-rep topology walks the proto topology makes over the handles' vertices,
+/// edges and faces (`sm_AreConnected`, `SmProtoVertex::GetFinalVertex`,
+/// `sm_FindEDOnDegenFace`). [`Brep`] answers them for [`EntityRef`] handles of its
+/// own entities.
+pub trait ProtoTopology<O> {
+    /// `SmVertex::GetVertexuses`, each use's face (`SmVertexuse::GetFaceuse`, then
+    /// `SmFaceuse::GetFace`): `None` for a use without face use or face.
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn vertex_use_faces(&self, vertex: O) -> Result<Vec<Option<O>>>;
+    /// `SmEdge::GetEdgeuses`, each use's face (`SmEdgeuse::GetFace`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn edge_use_faces(&self, edge: O) -> Result<Vec<Option<O>>>;
+    /// `SmEdge::GetStartVertex`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk (an edge without primary edge use
+    /// is a `NULL` dereference upstream).
+    fn edge_start_vertex(&self, edge: O) -> Result<Option<O>>;
+    /// `SmEdge::GetOtherVertex`: `None` when `vertex` is not an end of the edge.
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn edge_other_vertex(&self, edge: O, vertex: Option<O>) -> Result<Option<O>>;
+    /// `SmVertex::GetPoint`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's lookup.
+    fn vertex_point(&self, vertex: O) -> Result<Point3>;
+    /// `SmEdge::GetBrep`: the identity of the edge's B-rep, `None` without one.
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn edge_brep(&self, edge: O) -> Result<Option<ObjectKey>>;
+    /// `SmEdge::GetFaces`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn edge_faces(&self, edge: O) -> Result<Vec<O>>;
+}
+
+/// An [`EntityRef`] of `kind`, else an invalid-input error (a failed `dynamic_cast`
+/// that upstream never reaches).
+fn vertex_id(o: EntityRef) -> Result<VertexId> {
+    match o {
+        EntityRef::Vertex(v) => Ok(v),
+        _ => Err(dangling("handle is not a vertex")),
+    }
+}
+
+fn edge_id(o: EntityRef) -> Result<EdgeId> {
+    match o {
+        EntityRef::Edge(e) => Ok(e),
+        _ => Err(dangling("handle is not an edge")),
+    }
+}
+
+/// The walks over one B-rep's own entities, through units `topology.vertex`,
+/// `topology.vertexuse`, `topology.edge` and `topology.edgeuse_p1`.
+impl ProtoTopology<EntityRef> for Brep {
+    fn vertex_use_faces(&self, vertex: EntityRef) -> Result<Vec<Option<EntityRef>>> {
+        let mut out = Vec::new();
+        for vu in vertex::vertexuses(self, vertex_id(vertex)?)? {
+            let face = match vertexuse::faceuse(self, vu)? {
+                Some(fu) => eu1::faceuse_face(self, fu)?,
+                None => None,
+            };
+            out.push(face.map(EntityRef::Face));
+        }
+        Ok(out)
+    }
+
+    fn edge_use_faces(&self, edge: EntityRef) -> Result<Vec<Option<EntityRef>>> {
+        let mut out = Vec::new();
+        for eu in edge::edgeuses(self, edge_id(edge)?, None, None)? {
+            out.push(eu1::face(self, eu)?.map(EntityRef::Face));
+        }
+        Ok(out)
+    }
+
+    fn edge_start_vertex(&self, edge: EntityRef) -> Result<Option<EntityRef>> {
+        Ok(edge::start_vertex(self, edge_id(edge)?)?.map(EntityRef::Vertex))
+    }
+
+    fn edge_other_vertex(
+        &self,
+        edge: EntityRef,
+        vertex: Option<EntityRef>,
+    ) -> Result<Option<EntityRef>> {
+        let v = match vertex {
+            Some(v) => Some(vertex_id(v)?),
+            None => None,
+        };
+        Ok(edge::other_vertex(self, edge_id(edge)?, v)?.map(EntityRef::Vertex))
+    }
+
+    fn vertex_point(&self, vertex: EntityRef) -> Result<Point3> {
+        vertex::point(self, vertex_id(vertex)?)
+    }
+
+    fn edge_brep(&self, edge: EntityRef) -> Result<Option<ObjectKey>> {
+        Ok(eu1::edge_brep(self, edge_id(edge)?)?.map(Brep::key))
+    }
+
+    fn edge_faces(&self, edge: EntityRef) -> Result<Vec<EntityRef>> {
+        Ok(edge::faces(self, edge_id(edge)?, None)?
+            .into_iter()
+            .map(EntityRef::Face)
+            .collect())
+    }
 }
 
 /// The handle the curve point solves name (only the solution count is used).
@@ -355,27 +484,52 @@ pub fn are_same_curve<O: Copy + PartialEq>(
 }
 
 /// `sm_AreConnected(const SmVertex*, const SmFace*)`.
-fn are_connected_vertex_face() -> Result<bool> {
-    // UNPORTED(topology.vertex): SmVertex::GetVertexuses
-    Err(SolidError::unported(
-        "SmVertex::GetVertexuses",
-        "topology.vertex",
-    ))
+fn are_connected_vertex_face<O: Copy + PartialEq>(
+    topology: &impl ProtoTopology<O>,
+    vtx: O,
+    face: O,
+) -> Result<bool> {
+    for f in topology.vertex_use_faces(vtx)? {
+        if f == Some(face) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// `sm_AreConnected(const SmEdge*, const SmFace*)`.
-fn are_connected_edge_face() -> Result<bool> {
-    // UNPORTED(topology.edge): SmEdge::GetEdgeuses
-    Err(SolidError::unported("SmEdge::GetEdgeuses", "topology.edge"))
+fn are_connected_edge_face<O: Copy + PartialEq>(
+    topology: &impl ProtoTopology<O>,
+    edge: O,
+    face: O,
+) -> Result<bool> {
+    for f in topology.edge_use_faces(edge)? {
+        if f == Some(face) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// `sm_AreConnected(const SmVertex*, const SmEdge*)`.
-fn are_connected_vertex_edge() -> Result<bool> {
-    // UNPORTED(topology.edge): SmEdge::GetStartVertex
-    Err(SolidError::unported(
-        "SmEdge::GetStartVertex",
-        "topology.edge",
-    ))
+fn are_connected_vertex_edge<O: Copy + PartialEq>(
+    topology: &impl ProtoTopology<O>,
+    vertex: O,
+    edge: O,
+) -> Result<bool> {
+    let vtx = topology.edge_start_vertex(edge)?;
+    if vtx == Some(vertex) {
+        return Ok(true);
+    }
+
+    let vtx = topology.edge_other_vertex(edge, vtx)?;
+    if vtx == Some(vertex) {
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 /// Whether two topology objects are neighbours in their B-rep
@@ -385,38 +539,40 @@ fn are_connected_vertex_edge() -> Result<bool> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] for the face/edge/vertex pairs (their topology walks,
-/// units `topology.vertex` and `topology.edge`).
-pub fn are_connected<O: ClassObject>(topo1: Option<O>, topo2: Option<O>) -> Result<bool> {
+/// Those of the `topology` walks.
+pub fn are_connected<O: ClassObject>(
+    topology: &impl ProtoTopology<O>,
+    topo1: Option<O>,
+    topo2: Option<O>,
+) -> Result<bool> {
     use ClassObjectKind as K;
     if topo1 == topo2 {
         return Ok(true);
     }
-    let kind = |o: Option<O>| o.map(|o| o.class_kind());
-    let (k1, k2) = (kind(topo1), kind(topo2));
+    let of_kind = |o: Option<O>, k: K| o.filter(|o| o.class_kind() == k);
 
-    if k1 == Some(K::Face) {
-        if k2 == Some(K::Edge) {
-            return are_connected_edge_face();
+    if let Some(face1) = of_kind(topo1, K::Face) {
+        if let Some(edge2) = of_kind(topo2, K::Edge) {
+            return are_connected_edge_face(topology, edge2, face1);
         }
-        if k2 == Some(K::Vertex) {
-            return are_connected_vertex_face();
-        }
-    }
-    if k1 == Some(K::Edge) {
-        if k2 == Some(K::Face) {
-            return are_connected_edge_face();
-        }
-        if k2 == Some(K::Vertex) {
-            return are_connected_vertex_edge();
+        if let Some(vertex2) = of_kind(topo2, K::Vertex) {
+            return are_connected_vertex_face(topology, vertex2, face1);
         }
     }
-    if k1 == Some(K::Vertex) {
-        if k2 == Some(K::Face) {
-            return are_connected_vertex_face();
+    if let Some(edge1) = of_kind(topo1, K::Edge) {
+        if let Some(face2) = of_kind(topo2, K::Face) {
+            return are_connected_edge_face(topology, edge1, face2);
         }
-        if k2 == Some(K::Edge) {
-            return are_connected_vertex_edge();
+        if let Some(vertex2) = of_kind(topo2, K::Vertex) {
+            return are_connected_vertex_edge(topology, vertex2, edge1);
+        }
+    }
+    if let Some(vertex1) = of_kind(topo1, K::Vertex) {
+        if let Some(face2) = of_kind(topo2, K::Face) {
+            return are_connected_vertex_face(topology, vertex1, face2);
+        }
+        if let Some(edge2) = of_kind(topo2, K::Edge) {
+            return are_connected_vertex_edge(topology, vertex1, edge2);
         }
     }
     Ok(false)
@@ -577,15 +733,52 @@ pub fn are_overlapping<O: ClassObject>(
 }
 
 /// Which of two coincident edges of one B-rep lies on a degenerate face and can be
-/// deleted (`sm_FindEDOnDegenFace`; 0 neither, 1 the first, 2 the second).
+/// deleted (`sm_FindEDOnDegenFace`; 0 neither, 1 the first, 2 the second): 0 when the
+/// edges share no face.
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`]: the edges' B-rep and faces (unit `topology.edge`).
-pub fn find_ed_on_degen_face<O>(edge1: O, edge2: O) -> Result<u64> {
-    let _ = (edge1, edge2);
-    // UNPORTED(topology.edge): SmEdge::GetBrep
-    Err(SolidError::unported("SmEdge::GetBrep", "topology.edge"))
+/// `SM_ERR_ASSERT_FAILURE` for edges of different B-reps; those of the `topology`
+/// walks; [`SolidError::Unported`] for a shared face (`SmFace::GetEdges`, unit
+/// `topology.face_p4`).
+pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
+    topology: &impl ProtoTopology<O>,
+    edge1: O,
+    edge2: O,
+) -> Result<u64> {
+    // Check inputs
+    let brep1 = topology.edge_brep(edge1)?;
+    let brep2 = topology.edge_brep(edge2)?;
+    if brep1 != brep2 {
+        return Err(status(OP_DEGEN, SM_ERR_ASSERT_FAILURE));
+    }
+
+    // Find shared faces (FindCommonElements: the second list's faces found in the first)
+    let ed1_fs = topology.edge_faces(edge1)?;
+    let ed2_fs = topology.edge_faces(edge2)?;
+    let common: Vec<O> = ed2_fs.into_iter().filter(|f| ed1_fs.contains(f)).collect();
+
+    // Degenerate face has 2 edges within tol of edge on other brep
+    if let Some(face) = common.first() {
+        let _ = face;
+        // UNPORTED(topology.face_p4): SmFace::GetEdges
+        return Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"));
+    }
+
+    // If no common faces, or deleted common face w/out deleting edge, then we have
+    // coincident unstitched edges
+    Ok(0)
+}
+
+/// `lCanDelete` after `sm_FindEDOnDegenFace`, whose status `CanCombineEdgeDefinitions`
+/// ignores: 0 on an error return (set before any error past the B-rep check). Unported
+/// callees and undefined behaviour upstream still fail.
+fn degen_face_choice(r: Result<u64>) -> Result<u64> {
+    match r {
+        Ok(n) => Ok(n),
+        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(_) => Ok(0),
+    }
 }
 
 // ---- SmVertexDefinition -----------------------------------------------------------------
@@ -2405,12 +2598,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for deleted objects or a missing curve;
-    /// [`SolidError::Unported`] for the connectivity and position of B-rep vertices
-    /// (units `topology.edge`, `topology.vertex`).
+    /// [`SolidError::InvalidInput`] for deleted objects or a missing curve; those of
+    /// the `geometry` topology walks.
     pub fn proto_vertex_final_vertex(
         &self,
-        geometry: &impl ClassGeometry<O>,
+        geometry: &(impl ClassGeometry<O> + ProtoTopology<O>),
         pv: ProtoVertexId,
         which: i32,
         ed: EdgeDefId,
@@ -2421,23 +2613,26 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             return Ok(None);
         }
 
+        let mut ret_val = None;
+        let mut max_dist = BIG_DOUBLE;
+
         let d = self.ed(ed)?;
         let brep_topo_ed = d.src_topo(which);
-        let _ed_pos = d.end_position(geometry, at_start)?;
+        let ed_pos = d.end_position(geometry, at_start)?;
 
         for &vd in vds {
             let Some(vtx) = self.vd(vd)?.final_vertex(which) else {
                 continue;
             };
-            if are_connected(brep_topo_ed, Some(vtx))? {
-                // UNPORTED(topology.vertex): SmVertex::GetPoint
-                return Err(SolidError::unported(
-                    "SmVertex::GetPoint",
-                    "topology.vertex",
-                ));
+            if are_connected(geometry, brep_topo_ed, Some(vtx))? {
+                let dist = ed_pos.distance(geometry.vertex_point(vtx)?);
+                if dist < max_dist {
+                    max_dist = dist;
+                    ret_val = Some(vtx);
+                }
             }
         }
-        Ok(None)
+        Ok(ret_val)
     }
 
     /// Merges `other` into `pv` (`CombineProtoVertex`): the larger tolerance, all of
@@ -2890,13 +3085,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a definition without a source object;
-    /// [`SolidError::Unported`] for the connectivity of different B-rep objects and
-    /// the degenerate-face check (`sm_FindEDOnDegenFace`, unit `topology.edge`).
+    /// `SM_ERR_NULL_POINTER` for a definition without a source object; those of the
+    /// `geometry` topology walks and of [`find_ed_on_degen_face`] but its statuses.
     pub fn can_combine_edge_definitions(
         &self,
         k: &Kernel,
-        geometry: &impl ClassGeometry<O>,
+        geometry: &(impl ClassGeometry<O> + ProtoTopology<O>),
         ed1: EdgeDefId,
         ed2: EdgeDefId,
     ) -> Result<u64> {
@@ -2914,7 +3108,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // If either pair is not connected in their Brep, can't combine.
-        if !are_connected(Some(t11), Some(t21))? || !are_connected(Some(t12), Some(t22))? {
+        if !are_connected(geometry, Some(t11), Some(t21))?
+            || !are_connected(geometry, Some(t12), Some(t22))?
+        {
             return Ok(0);
         }
 
@@ -2958,12 +3154,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let is_edge = |t: O| t.class_kind() == ClassObjectKind::Edge;
         if is_edge(t11) && is_edge(t12) && is_edge(t21) && is_edge(t22) {
             if t11 != t21 && t12 == t22 {
-                let n = find_ed_on_degen_face(t11, t21)?;
+                let n = degen_face_choice(find_ed_on_degen_face(geometry, t11, t21))?;
                 if n != 0 {
                     return Ok(n);
                 }
             } else if t11 == t21 && t12 != t22 {
-                let n = find_ed_on_degen_face(t12, t22)?;
+                let n = degen_face_choice(find_ed_on_degen_face(geometry, t12, t22))?;
                 if n != 0 {
                     return Ok(n);
                 }

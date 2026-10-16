@@ -18,9 +18,9 @@
 //! - **B-rep access.** Topology objects are the caller's handles `O`, as in
 //!   [`p1`](super::p1). What these functions read from vertices and edges, and the
 //!   store new curves go to, is [`ProtoBrep`] (of `topology.proto_topology_p2`, which
-//!   gained `vertex_point`, `edge_faces`, `vertex_common_edges`, `edge_other_vertex` and
-//!   `face_curve_on_classify` (`SmFace::CurveOnClassify(TRUE, cc)`, implemented by the
-//!   B-rep owner with `query::face::p2::curve_on_classify`) for these functions), which the owner of the B-reps implements. `SmTol::GetZoneTol3d` of a vertex is
+//!   gained `vertex_common_edges` and `face_curve_on_classify` (`SmFace::CurveOnClassify(TRUE, cc)`, implemented by the
+//!   B-rep owner with `query::face::p2::curve_on_classify`) for these functions; `vertex_point`, `edge_faces` and `edge_other_vertex` are
+//!   those of its supertrait [`ProtoTopology`](super::p1::proto::ProtoTopology)), which the owner of the B-reps implements. `SmTol::GetZoneTol3d` of a vertex is
 //!   [`ProtoBrep::topology_tolerance`]; `SmTol::GetXSectTol3d(v1, v2)` is the
 //!   sum of the two.
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
@@ -1075,7 +1075,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                     .filter(|m| m.class_kind() == ClassObjectKind::Edge);
                                 let vertex_mate = ti_get_other_mate(v2)?
                                     .filter(|m| m.class_kind() == ClassObjectKind::Vertex);
-                                let other_vtx = brep.edge_other_vertex(edge, v1)?;
+                                let other_vtx = brep.edge_other_vertex(edge, Some(v1))?;
                                 let stat = if other_vtx == Some(v1) {
                                     // Can't call SqueezeEdge() in this case.
                                     brep_delete_edge(which, edge)
@@ -1581,8 +1581,8 @@ fn dimension<O: ClassObject>(topo: Option<O>) -> Result<u64> {
 
 /// `pV1->GetPoint().DistanceBetween(pV2->GetPoint())`.
 fn vertex_distance<O: Copy>(brep: &impl ProtoBrep<O>, v1: O, v2: O) -> Result<f64> {
-    let p1 = brep.vertex_point(v1).ok_or(dangling("vertex is unknown"))?;
-    let p2 = brep.vertex_point(v2).ok_or(dangling("vertex is unknown"))?;
+    let p1 = brep.vertex_point(v1)?;
+    let p2 = brep.vertex_point(v2)?;
     Ok(p1.distance(p2))
 }
 

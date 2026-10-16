@@ -29,11 +29,13 @@
 //!   plane, `2 owned surface-block`, `3` an empty `SmBrep`, `4` an empty `SmPolyBrep`, `5`
 //!   another topology object, `6` null, `7 owned n curve-block*n` an `SmCompositeCurve` of 1
 //!   to 4 curves, `8 owned surface-block a0 a1 b0 b1` an `SmCrvOnSurf` UV line on a
-//!   B-spline surface) and one API call: `0 O X Y` `SmApiTransform`, `1 S`
-//!   `SmApiScale`, `2 R S` `SmApiScaleByPt`, `3 V` `SmApiTranslate`, `4 R A deg`
-//!   `SmApiRotate`. Output: the status, then for a curve its natural interval and 5 points
-//!   (`status [P]`), for a surface its natural domain and 3x3 points (nothing more for kinds 3
-//!   to 8).
+//!   B-spline surface, `9 n (x y z tol)*n` an `SmPolyBrep` with 1 to 4 poly vertices) and
+//!   one API call: `0 O X Y` `SmApiTransform`, `1 S` `SmApiScale`, `2 R S`
+//!   `SmApiScaleByPt`, `3 V` `SmApiTranslate`, `4 R A deg` `SmApiRotate`. Output: the
+//!   status, then for a curve its natural interval and 5 points (`status [P]`), for a
+//!   surface its natural domain and 3x3 points, for a poly B-rep (kinds 4 and 9) its
+//!   tolerance, its vertex count and per vertex `x y z tol` (nothing more for the other
+//!   kinds).
 //!
 //! Each list or proto op writes `op status n outputs*n`. An op the shim refuses because it
 //! is undefined upstream (a dangling or null pointer dereference, a double delete, a crash
@@ -413,6 +415,7 @@ pub mod tobj {
     pub const NULL: i64 = 6;
     pub const COMPOSITE: i64 = 7;
     pub const CRV_ON_SURF: i64 = 8;
+    pub const POLY_PTS: i64 = 9;
 }
 
 const MAX_SLOTS: i64 = 32;
@@ -803,7 +806,14 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 }
 
 fn validate_transform(rd: &mut Reader<'_>) -> Result<(), FfiError> {
-    match rd.int(0, tobj::CRV_ON_SURF)? {
+    match rd.int(0, tobj::POLY_PTS)? {
+        tobj::POLY_PTS => {
+            let n = rd.int(1, 4)?;
+            for _ in 0..n {
+                rd.vec3()?;
+                rd.finite()?;
+            }
+        }
         tobj::COMPOSITE => {
             rd.flag()?;
             let n = rd.int(1, 4)?;
