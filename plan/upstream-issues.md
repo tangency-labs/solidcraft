@@ -1126,6 +1126,42 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash/UB (out-of-bounds read).
 - **Rust port:** `SolidError::InvalidInput` when the walk leaves the intervals; otherwise identical (the wrap is kept as an unbounded end).
 
+#### UB-115. `CreateVertexDefinition` / `CreateProtoVertex` use an unset position and gap
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp:3754` `SmProtoTopologyManager::CreateVertexDefinition`, `:3961` `SmProtoTopologyManager::CreateProtoVertex` (the ignored `sm_FindPositionFromPCs` calls; `sm_FindPositionFromPCs` at `:84`).
+- **What happens:** Both ignore the status of `sm_FindPositionFromPCs`. On its error returns (neither classification has parameters, an object point cannot be evaluated) the local `SmPoint3d` (`SmVector3d() = default`) and, on the early returns, the deviation `double` are never written, and are then used as the definition's position and gap / the proto vertex's position and tolerance.
+- **Trigger:** two classifications without parameters, or one on a region (`FindObjPoint3d` of `SM_PC_REGION` is `SM_ERR`), e.g. `CreateProtoVertex` of a region and a face classification.
+- **How found:** read during porting (unit `topology.proto_topology_p2`).
+- **Confirmed:** no (the difftest shim replays `sm_FindPositionFromPCs` on copies and refuses the call when it fails).
+- **Severity:** UB (uninitialised read).
+- **Rust port:** `SolidError::InvalidInput`.
+
+#### UB-116. `SmProtoEdge::AddEdgeDefinition` compares uninitialised tangents
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp:3189` and `:3190`, `SmProtoEdge::AddEdgeDefinition(SmEdgeDefinition*)` (def. `:3173`).
+- **What happens:** The statuses of both `EvaluateMid(NULL, &tan)` calls are ignored; `SmProtoEdge::Evaluate` / `SmEdgeDefinition::Evaluate` return before writing the tangent when an evaluation fails (and dereference `NULL` for a definition without 3d curve), so the reversal decision reads an uninitialised `SmVector3d`.
+- **Trigger:** adding a definition to a non-empty proto edge whose (or whose definitions') curve fails to evaluate at the proto edge's mid parameter, or has no curve.
+- **How found:** read during porting (unit `topology.proto_topology_p2`).
+- **Confirmed:** no (the difftest shim evaluates both first and refuses the call when either fails).
+- **Severity:** UB.
+- **Rust port:** `SolidError::InvalidInput`.
+
+#### UB-117. `UpdateEdges` dereferences its optional calling vertex definition
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp:5074`, `SmProtoTopologyManager::UpdateEdges` (def. `:4975`).
+- **What happens:** `pCallingVD` is documented "Optional ..., NULL to ignore, default:[NULL]" (and compared against at `:5013`), but once an edge was split in two `pCallingVD->GetProtoVertex()` dereferences it unconditionally.
+- **Trigger:** `UpdateEdges(iWhich, pOldEdge, {pOldEdge, pNewEdge})` without a calling definition.
+- **How found:** read during porting (unit `topology.proto_topology_p2`).
+- **Confirmed:** no (the difftest shim refuses it).
+- **Severity:** crash.
+- **Rust port:** `SolidError::InvalidInput`.
+
+#### UB-118. `SmProtoEdge::Resolve` / `SmProtoVertex::Resolve` dereference null and deleted definitions
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp:3440` and `:3454`, `SmProtoEdge::Resolve` (def. `:3391`); `:2338`/`:2356`, `SmProtoVertex::Resolve` (def. `:2278`).
+- **What happens:** For a proto edge from a proto vertex to itself whose curve is longer than twice the tolerance with ends farther apart, `m_pStartPV` is dereferenced although both ends may be `NULL`, and `pVD0` (`GetClosestVertexDefinition`, `NULL` for a proto vertex without definitions) is dereferenced. In both resolves a definition listed twice is compared with itself (`CanCombine...` picks the second) and deleted, leaving the other entry dangling for the next comparisons; two deleted edge definitions sharing a curve free it twice (`Destruct`), and a deleted curve still used by a kept definition is used after free.
+- **Trigger:** a closed proto edge on a proto vertex without vertex definitions; a duplicated entry in the definitions list (e.g. `CombineProtoEdge` of edges sharing a definition).
+- **How found:** read during porting (unit `topology.proto_topology_p2`).
+- **Confirmed:** no (the difftest shim replays both loops and refuses those calls).
+- **Severity:** crash.
+- **Rust port:** `SolidError::InvalidInput` for the null proto vertex and definition; definitions are ids (no double delete).
+
 ## Hang
 
 #### HANG-1. `SmExtent1d::PeriodicWrap` steps one period per iteration
@@ -1508,6 +1544,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes for the cusp case (the C++ returns `TRUE`).
 - **Severity:** wrong result.
 - **Rust port:** Faithful.
+
+#### WR-95. `SmProtoEdge::CombineProtoEdge` moves only every other edge definition
+- **Location:** `source/SMLib/src/SmProtoTopology.cpp:3332`, `SmProtoEdge::CombineProtoEdge` (def. `:3296`).
+- **What happens:** The loop `for(ii=0; ii<pOtherPE->m_sEdgeDefs.GetSize(); ii++)` adds `m_sEdgeDefs[ii]` to this proto edge, which (through `AddEdgeDefinition`, the definition's owner being `pOtherPE`) removes it from `pOtherPE`'s list, then advances `ii`: the definition that moved into slot `ii` is skipped. Of `n` definitions only those at even positions move; the rest stay on `pOtherPE`, whose ends were already moved to this proto edge's.
+- **Trigger:** `CombineProtoEdge` of a proto edge with two or more definitions.
+- **How found:** adversarial / edge-case fixture `edge_pe_combine_every_other_unit` (unit `topology.proto_topology_p2`).
+- **Confirmed:** yes.
+- **Severity:** wrong result.
+- **Rust port:** Ported as is.
 
 ### NLib
 

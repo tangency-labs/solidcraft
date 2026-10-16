@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` by `harness/plan/progress.py`; do not edit by hand.
 
-**178 / 261 units ported** (97 green, 81 partial), **237,992 / 387,903 upstream lines (61.4%)**. 23 claimed, 0 blocked, 60 todo.
+**179 / 261 units ported** (98 green, 81 partial), **239,274 / 387,903 upstream lines (61.7%)**. 23 claimed, 0 blocked, 59 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -14,7 +14,6 @@ _None right now; see the next section._
 
 Anything `todo` can be claimed. These need stubs for, or co-porting of, the listed dependencies (AGENTS.md section 4).
 
-- [ ] `surface.cone_p3` (1939 lines) — missing: `surface.cone_p2`
 - [ ] `intersect.surface_drop_lib_p3` (2062 lines) — missing: `surface.offset_surface`
 - [ ] `intersect.curve_class_p4` (2022 lines) — missing: `intersect.curve_class_p2`, `intersect.curve_class_p7`
 - [ ] `intersect.curve_class_p6` (2213 lines) — missing: `intersect.curve_class_p2`, `intersect.curve_class_p4`, `intersect.curve_class_p7`
@@ -73,18 +72,18 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] `blend.fillet_geom_p2` (2077 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p6`, `blend.fillet_solver_p1` +1 more
 - [ ] `blend.fillet_geom_p5` (1952 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_geom_p4` +2 more
 - [ ] `blend.fillet_corner_p2` (1892 lines) — missing: `blend.fillet_corner_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`, `blend.fillet_solver_p1`
-- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `heal.heal_data_p3` +5 more
+- [ ] `audit.recursion` (0 lines) — missing: `blend.fillet_corner_p2`, `blend.fillet_corner_p3`, `blend.hcr`, `heal.heal_data_p3` +4 more
 
 ## In progress
 
 - [ ] 🔨 `surface.cone_p2` (1656 lines) — in progress: #71 @0xlillith (draft)
 - [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
+- [ ] 🔨 `surface.cone_p3` (1939 lines) — in progress: #131 @Karl-VonRichter (draft)
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (ready for review)
 - [ ] 🔨 `surface.surface_p11` (1789 lines) — in progress: #120 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.surface_p8` (2374 lines) — in progress: #118 @froglemonade2 (ready for review)
 - [ ] 🔨 `intersect.curve_class_p7` (2248 lines) — in progress: #65 @bherbruck (ready for review)
 - [ ] 🔨 `intersect.curve_class_p2` (1928 lines) — in progress: #85 @bherbruck (ready for review)
-- [ ] 🔨 `surface.surface_point_solve_p3` (1282 lines) — in progress: #106 @damgru (ready for review)
 - [ ] 🔨 `topology.shell` (750 lines) — in progress: #80 @0xlillith (draft)
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
 - [ ] 🔨 `topology.edgeuse_p3` (2273 lines) — in progress: #117 @froglemonade2 (ready for review)
@@ -214,7 +213,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `curve.curve_p5` (2299 lines) — partial, 3097 cases
 - [x] ✅ `curve.curve_p9` (1783 lines) — green, 3093 cases
 
-### surface (33/40)
+### surface (34/40)
 
 - [ ] 🟡 `surface.volume_p1` (2014 lines) — partial, 2886 cases
 - [x] ✅ `surface.b_spline_volume` (1226 lines) — green, 2333 cases
@@ -244,7 +243,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.sphere` (2861 lines) — in progress: #100 @froglemonade2 (ready for review)
 - [ ] 🟡 `surface.surf_of_extrusion_p2` (1420 lines) — partial, 1359 cases
 - [ ] 🟡 `surface.surface_p5` (2321 lines) — partial, 3046 cases
-- [ ] ⏳ `surface.cone_p3` (1939 lines) — waiting
+- [ ] 🔨 `surface.cone_p3` (1939 lines) — in progress: #131 @Karl-VonRichter (draft)
 - [ ] 🟡 `surface.surface_p1` (2458 lines) — partial, 806 cases
 - [ ] 🟡 `surface.surface_p6` (2150 lines) — partial, 2099 cases
 - [ ] 🟡 `surface.srf_in_volume` (779 lines) — partial, 2036 cases
@@ -253,9 +252,9 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `surface.offset_surface` (1787 lines) — in progress: #62 @Pluto-XI (ready for review)
 - [ ] 🔨 `surface.surface_p11` (1789 lines) — in progress: #120 @froglemonade2 (ready for review)
 - [ ] 🔨 `surface.surface_p8` (2374 lines) — in progress: #118 @froglemonade2 (ready for review)
-- [ ] 🟡 `surface.surface_point_solve_p1` (1771 lines) — partial, 1035 cases
+- [x] ✅ `surface.surface_point_solve_p1` (1771 lines) — green, 1035 cases
 - [ ] 🟡 `surface.surface_point_solve_p2` (1882 lines) — partial, 1320 cases
-- [ ] 🔨 `surface.surface_point_solve_p3` (1282 lines) — in progress: #106 @damgru (ready for review)
+- [ ] 🟡 `surface.surface_point_solve_p3` (1282 lines) — partial, 1365 cases
 
 ### topology (13/31)
 
