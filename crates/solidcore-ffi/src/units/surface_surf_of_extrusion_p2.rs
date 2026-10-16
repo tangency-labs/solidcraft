@@ -546,8 +546,7 @@ impl Enc {
             TestSource::Raw(s) => {
                 check_nurb(s)?;
                 self.o.push(1.0);
-                self.o
-                    .extend([s.n, s.m, s.p, s.q].map(|x| x as f64));
+                self.o.extend([s.n, s.m, s.p, s.q].map(|x| x as f64));
                 for c in &s.cpts {
                     self.o.extend_from_slice(c);
                 }

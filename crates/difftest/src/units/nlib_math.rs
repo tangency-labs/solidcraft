@@ -546,7 +546,11 @@ fn net_flat(net: &[Vec<[f64; 4]>]) -> Result<(usize, usize, Vec<f64>), HarnessEr
     if net.iter().any(|r| r.len() != cols) {
         return Err(harness("ragged net"));
     }
-    Ok((rows, cols, net.iter().flatten().flatten().copied().collect()))
+    Ok((
+        rows,
+        cols,
+        net.iter().flatten().flatten().copied().collect(),
+    ))
 }
 
 fn net_rust(net: &[Vec<[f64; 4]>]) -> Vec<Vec<CPoint>> {
@@ -932,7 +936,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Item2::Real => {
                     let mut a: Vec<Vec<f64>> = items
                         .iter()
-                        .map(|r| r.iter().map(|x| x.first().copied().unwrap_or(0.0)).collect())
+                        .map(|r| {
+                            r.iter()
+                                .map(|x| x.first().copied().unwrap_or(0.0))
+                                .collect()
+                        })
                         .collect();
                     realloc_2d(&mut a, *n, *m, *k, *l)?;
                     a.get(..=*rl)
@@ -1158,8 +1166,16 @@ fn entry(rng: &mut Rng, integral: bool) -> f64 {
 /// padded. `dominant` makes the diagonal large (stable LU); `singular` zeroes a row.
 fn gen_mat(rng: &mut Rng, mtp: Mt, n: usize, m: usize, bw: usize, dominant: bool) -> Mat {
     let integral = rng.chance(0.3);
-    let pad_r = if rng.chance(0.2) { rng.below(3) as usize } else { 0 };
-    let pad_c = if rng.chance(0.2) { rng.below(3) as usize } else { 0 };
+    let pad_r = if rng.chance(0.2) {
+        rng.below(3) as usize
+    } else {
+        0
+    };
+    let pad_c = if rng.chance(0.2) {
+        rng.below(3) as usize
+    } else {
+        0
+    };
     let base_cols = if mtp == Mt::Banded {
         if bw == 1 && rng.chance(0.5) {
             2
@@ -1267,7 +1283,11 @@ fn gen_out(rng: &mut Rng, n: usize, m: usize) -> Option<Mat> {
         // Possibly too small: NL_STO_ERR.
         (n.saturating_sub(1), m.saturating_sub(rng.below(2) as usize))
     };
-    let bw = if rng.chance(0.15) { 0 } else { 1 + rng.below(3) as usize };
+    let bw = if rng.chance(0.15) {
+        0
+    } else {
+        1 + rng.below(3) as usize
+    };
     Some(Mat {
         n: on,
         m: om,
@@ -1328,7 +1348,11 @@ fn gen_srf_derivs(rng: &mut Rng) -> Inputs {
         let p = rng.below(6) as usize;
         let q = rng.below(6) as usize;
         let mut udr = rng.below(5) as usize;
-        let mut vdr = if rng.chance(0.4) { udr } else { rng.below(5) as usize };
+        let mut vdr = if rng.chance(0.4) {
+            udr
+        } else {
+            rng.below(5) as usize
+        };
         if rng.chance(0.03) {
             // NL_INP_ERR.
             udr = 5;
@@ -1407,7 +1431,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         } else {
             let n = gen_size(rng);
             let m = gen_size(rng);
-            let bw = if rng.chance(0.2) { 0 } else { 1 + rng.below(4) as usize };
+            let bw = if rng.chance(0.2) {
+                0
+            } else {
+                1 + rng.below(4) as usize
+            };
             Some(Mat {
                 n,
                 m,

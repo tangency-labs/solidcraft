@@ -159,7 +159,9 @@ fn cpp(i: Inputs) -> Result<Output, HarnessError> {
             degree,
             ul,
             ur,
-        } => ffi::reparam(&knots, i32_of(degree)?, ul, ur).map(|k| Output::new().values("knots", k)),
+        } => {
+            ffi::reparam(&knots, i32_of(degree)?, ul, ur).map(|k| Output::new().values("knots", k))
+        }
         Inputs::Compatible { knots, tol } => ffi::compatible(&knots, tol).map(|c| {
             let out = nested("knots", Output::new(), &c.adjusted);
             nested("new", out, &c.new)
@@ -240,18 +242,15 @@ fn rust(i: Inputs) -> Result<Output, HarnessError> {
             )),
             Err(e) => Err(e),
         },
-        Inputs::MakeCompatible {
-            mut r,
-            mut s,
-            p,
-            q,
-        } => bb::make_knots_compatible(&mut r, &mut s, p, q).map(|(xr, xs)| {
-            Output::new()
-                .values("r", r)
-                .values("s", s)
-                .values("xr", xr)
-                .values("xs", xs)
-        }),
+        Inputs::MakeCompatible { mut r, mut s, p, q } => {
+            bb::make_knots_compatible(&mut r, &mut s, p, q).map(|(xr, xs)| {
+                Output::new()
+                    .values("r", r)
+                    .values("s", s)
+                    .values("xr", xr)
+                    .values("xs", xs)
+            })
+        }
     };
     Ok(out.unwrap_or_else(|e| rust_err(&e)))
 }
@@ -302,7 +301,9 @@ fn gen_domain(rng: &mut Rng) -> (f64, f64, bool) {
         let a = rng.range_i64(-5, 5) as f64;
         (a, a + rng.range_i64(1, 12) as f64, true)
     } else {
-        let scale = *rng.choose(&[1e-3, 1.0, 1.0, 1.0, 100.0, 1e4]).unwrap_or(&1.0);
+        let scale = *rng
+            .choose(&[1e-3, 1.0, 1.0, 1.0, 100.0, 1e4])
+            .unwrap_or(&1.0);
         let a = rng.uniform(-10.0, 10.0) * scale;
         (a, a + rng.uniform(0.01, 20.0) * scale, false)
     }
@@ -310,7 +311,14 @@ fn gen_domain(rng: &mut Rng) -> (f64, f64, bool) {
 
 /// Sorted interior knots strictly inside `(a, b)`, at least `margin * (b-a)` from the
 /// ends, with multiplicities up to `max_mult`.
-fn gen_interior(rng: &mut Rng, a: f64, b: f64, integral: bool, max_mult: usize, margin: f64) -> Vec<f64> {
+fn gen_interior(
+    rng: &mut Rng,
+    a: f64,
+    b: f64,
+    integral: bool,
+    max_mult: usize,
+    margin: f64,
+) -> Vec<f64> {
     let n = rng.below(10) as usize;
     let lo = a + margin * (b - a);
     let hi = b - margin * (b - a);
@@ -342,7 +350,11 @@ fn gen_interior(rng: &mut Rng, a: f64, b: f64, integral: bool, max_mult: usize, 
 
 fn gen_knots(rng: &mut Rng, p: usize, shape: Shape) -> Vec<f64> {
     let (a, b, integral) = gen_domain(rng);
-    let max_mult = if shape == Shape::OverMultiple { p + 1 } else { p.max(1) };
+    let max_mult = if shape == Shape::OverMultiple {
+        p + 1
+    } else {
+        p.max(1)
+    };
     let mut inner = gen_interior(rng, a, b, integral, max_mult, 0.0);
     if shape == Shape::OverMultiple {
         let v = 0.5 * (a + b);
@@ -471,14 +483,20 @@ fn global_max_ok(knots: &[f64], i: usize, p: usize) -> bool {
 }
 
 fn gen_tol(rng: &mut Rng) -> f64 {
-    *rng
-        .choose(&[1e-14, 1e-12, 1e-10, 1e-9, 1e-8, 1e-6, 1e-4, 1e-2])
+    *rng.choose(&[1e-14, 1e-12, 1e-10, 1e-9, 1e-8, 1e-6, 1e-4, 1e-2])
         .unwrap_or(&1e-10)
 }
 
 /// A clamped knot vector over `[a, b]` with interior knots away from the ends (the
 /// `N_MakeKnotsCompatible` domain the generator keeps to).
-fn gen_clamped_for_make(rng: &mut Rng, p: usize, a: f64, b: f64, integral: bool, shared: &[f64]) -> Vec<f64> {
+fn gen_clamped_for_make(
+    rng: &mut Rng,
+    p: usize,
+    a: f64,
+    b: f64,
+    integral: bool,
+    shared: &[f64],
+) -> Vec<f64> {
     let mut inner = gen_interior(rng, a, b, integral, p.max(1), 1e-3);
     for &x in shared {
         if rng.chance(0.6) {
@@ -521,7 +539,10 @@ fn gen_make(rng: &mut Rng) -> Inputs {
     } else if mode < 0.55 {
         // Ends within NL_PTOL: no rescale.
         let d = (b - a) * 1e-15;
-        (a + d * rng.uniform(-1.0, 1.0), b + d * rng.uniform(-1.0, 1.0))
+        (
+            a + d * rng.uniform(-1.0, 1.0),
+            b + d * rng.uniform(-1.0, 1.0),
+        )
     } else {
         let (c, d, _) = gen_domain(rng);
         (c, d)
@@ -589,7 +610,10 @@ fn gen_compatible(rng: &mut Rng) -> Inputs {
     let tol = if rng.chance(0.25) {
         None
     } else {
-        Some(*rng.choose(&[1e-12, 1e-9, 1e-8, 1e-7, 1e-4, 1e-2, 0.3]).unwrap_or(&1e-8))
+        Some(
+            *rng.choose(&[1e-12, 1e-9, 1e-8, 1e-7, 1e-4, 1e-2, 0.3])
+                .unwrap_or(&1e-8),
+        )
     };
     Inputs::Compatible { knots, tol }
 }

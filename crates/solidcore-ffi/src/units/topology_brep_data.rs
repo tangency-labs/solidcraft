@@ -294,7 +294,10 @@ impl<'a> Sim<'a> {
     // ---- binary --------------------------------------------------------------------
 
     fn take(&mut self, n: usize) -> Result<&[u8], FfiError> {
-        let end = self.pos.checked_add(n).ok_or_else(|| bad("short binary data"))?;
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or_else(|| bad("short binary data"))?;
         let s = self
             .data
             .get(self.pos..end)
@@ -586,7 +589,12 @@ impl<'a> Sim<'a> {
         Ok((idx, true))
     }
 
-    fn record_attributes(&mut self, version: u64, persist: bool, lists: usize) -> Result<(), FfiError> {
+    fn record_attributes(
+        &mut self,
+        version: u64,
+        persist: bool,
+        lists: usize,
+    ) -> Result<(), FfiError> {
         if version > 30 && persist {
             for _ in 0..lists {
                 self.attributes()?;
@@ -1032,7 +1040,9 @@ impl<'a> Sim<'a> {
             return Err(bad("B-spline curve header out of range"));
         }
         if !(rat == 0 || rat == 1) || !(read_dim == 2 || read_dim == 3) {
-            return Err(bad("B-spline curve rational flag or dimension out of range"));
+            return Err(bad(
+                "B-spline curve rational flag or dimension out of range",
+            ));
         }
         let per = read_dim as usize + rat as usize;
         for _ in 0..=n {

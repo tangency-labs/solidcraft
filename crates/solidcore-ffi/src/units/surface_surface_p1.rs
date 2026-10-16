@@ -355,7 +355,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             }
             // the base body recurses without bound on a polar box (UB-84)
             if polar && (wrap || kind == Kind::CurveBounded) {
-                return Err(bad("bounding box: no polar box of curve-bounded or STEP surfaces (UB-84)"));
+                return Err(bad(
+                    "bounding box: no polar box of curve-bounded or STEP surfaces (UB-84)",
+                ));
             }
         }
         Op::DomCont => {

@@ -144,7 +144,10 @@ fn floats(v: &[Value], len: usize, what: &str) -> Result<Vec<f64>, HarnessError>
         return Ok(vec![0.0; len]);
     }
     if v.len() != len {
-        return Err(HarnessError::new(format!("{what}: {} values, want {len}", v.len())));
+        return Err(HarnessError::new(format!(
+            "{what}: {} values, want {len}",
+            v.len()
+        )));
     }
     v.iter().map(float).collect()
 }
@@ -207,7 +210,11 @@ fn parse(i: &Inputs) -> Result<Parsed, HarnessError> {
         i64::from(desired.is_some()),
         max_iter,
         i.step_cutting.map_or(-1, i64::from),
-        i.handler.as_deref().map(handler_code).transpose()?.unwrap_or(-1),
+        i.handler
+            .as_deref()
+            .map(handler_code)
+            .transpose()?
+            .unwrap_or(-1),
         i.max_hits.unwrap_or(-1),
         i64::from(i.use_intervals),
         i64::from(i.use_periodic),
@@ -243,12 +250,7 @@ fn parse(i: &Inputs) -> Result<Parsed, HarnessError> {
     })
 }
 
-fn solve_output(
-    x: Vec<f64>,
-    trace: Vec<f64>,
-    head: [i64; 5],
-    flags: Vec<i64>,
-) -> Output {
+fn solve_output(x: Vec<f64>, trace: Vec<f64>, head: [i64; 5], flags: Vec<i64>) -> Output {
     Output::new()
         .values("x", x)
         .values("trace", trace)
@@ -260,7 +262,14 @@ fn solve_output(
         .ints("flags", flags)
 }
 
-fn jacobian_output(j: Vec<f64>, x: Vec<f64>, trace: Vec<f64>, calls: i64, flags: Vec<i64>, status: i32) -> Output {
+fn jacobian_output(
+    j: Vec<f64>,
+    x: Vec<f64>,
+    trace: Vec<f64>,
+    calls: i64,
+    flags: Vec<i64>,
+    status: i32,
+) -> Output {
     Output::new()
         .values("jacobian", j)
         .values("x", x)
@@ -395,7 +404,11 @@ impl EvalNFunctions for TestEquations<'_> {
         let call = self.calls;
         self.calls += 1;
         self.trace.extend_from_slice(x);
-        let flag = if jacobian.is_some() { TRACE_JACOBIAN } else { 0 };
+        let flag = if jacobian.is_some() {
+            TRACE_JACOBIAN
+        } else {
+            0
+        };
         let mut fail = self.fail_calls.contains(&call);
         if self.fail_radius > 0.0 && x.iter().any(|xi| xi.abs() > self.fail_radius) {
             fail = true;
@@ -470,7 +483,14 @@ fn rust(p: &Parsed) -> Result<Output, HarnessError> {
     let mut intervals = ExtentNd::new(n);
     let mut jac_intervals = Vec::new();
     let mut periodic = Vec::new();
-    for (i, (lohi, &flags)) in p.ivl.as_chunks::<2>().0.iter().zip(&p.ivl_flags).enumerate() {
+    for (i, (lohi, &flags)) in p
+        .ivl
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(&p.ivl_flags)
+        .enumerate()
+    {
         let mut ext = Extent1d::from_min_max(lohi[0], lohi[1]);
         if flags & 1 != 0 {
             ext.set_unbounded();
@@ -644,7 +664,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     // "nice" problems stay bounded: only they get periodic intervals, whose upstream
     // PeriodicWrap loops once per period between a far value and the interval
     let nice = well_posed && rng.chance(0.4);
-    let nl = if rng.chance(0.3) { 0.0 } else { rng.uniform(0.0, 1.0) };
+    let nl = if rng.chance(0.3) {
+        0.0
+    } else {
+        rng.uniform(0.0, 1.0)
+    };
     let mut a: Vec<f64> = (0..n * n).map(|_| coef(rng, 2.0, nice)).collect();
     if well_posed {
         // diagonally dominant
@@ -673,12 +697,22 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     }
     let small = |rng: &mut Rng, s: f64| -> Vec<f64> {
         (0..n)
-            .map(|_| if rng.chance(0.4) { 0.0 } else { coef(rng, s, nice) })
+            .map(|_| {
+                if rng.chance(0.4) {
+                    0.0
+                } else {
+                    coef(rng, s, nice)
+                }
+            })
             .collect()
     };
     let c = small(rng, nl);
     let d = small(rng, nl);
-    let e = if rng.chance(0.25) { small(rng, 1.0) } else { vec![0.0; n] };
+    let e = if rng.chance(0.25) {
+        small(rng, 1.0)
+    } else {
+        vec![0.0; n]
+    };
     let x_star: Vec<f64> = (0..n).map(|_| rng.uniform(-2.0, 2.0)).collect();
     let b = if well_posed || rng.chance(0.5) {
         eval_f(n, &a, &c, &d, &e, &x_star)
@@ -693,7 +727,10 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         4 => 2.0,
         _ => 20.0,
     };
-    let mut guess: Vec<f64> = x_star.iter().map(|&x| x + rng.uniform(-spread, spread)).collect();
+    let mut guess: Vec<f64> = x_star
+        .iter()
+        .map(|&x| x + rng.uniform(-spread, spread))
+        .collect();
     if !nice && rng.chance(0.01) {
         put(&mut guess, 0, f64::NAN);
     }
@@ -718,12 +755,16 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let ivl: Vec<Ivl> = if use_intervals || jac_mode == 2 || rng.chance(0.2) {
         (0..n)
             .map(|i| {
-                let center = if rng.chance(0.5) { at(&x_star, i) } else { at(&guess, i) };
+                let center = if rng.chance(0.5) {
+                    at(&x_star, i)
+                } else {
+                    at(&guess, i)
+                };
                 let (lo, hi) = match rng.below(8) {
-                    0 => (center, center),                       // degenerate
-                    1 => (center + 0.5, center + 1.0),           // solution outside
-                    2 => (center - 1.0, center - 0.25),          // solution outside
-                    3 => (center + 1.0, center - 1.0),           // inverted (swapped)
+                    0 => (center, center),              // degenerate
+                    1 => (center + 0.5, center + 1.0),  // solution outside
+                    2 => (center - 1.0, center - 0.25), // solution outside
+                    3 => (center + 1.0, center - 1.0),  // inverted (swapped)
                     _ => {
                         let w = rng.uniform(0.01, 3.0);
                         (center - w * rng.unit(), center + w * rng.unit())
@@ -745,10 +786,21 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     } else {
         Vec::new()
     };
-    let fail_radius = if rng.chance(0.1) { rng.uniform(0.5, 5.0) } else { 0.0 };
-    let found_tol = if rng.chance(0.15) { 10f64.powi(-(rng.range_i64(3, 12) as i32)) } else { 0.0 };
+    let fail_radius = if rng.chance(0.1) {
+        rng.uniform(0.5, 5.0)
+    } else {
+        0.0
+    };
+    let found_tol = if rng.chance(0.15) {
+        10f64.powi(-(rng.range_i64(3, 12) as i32))
+    } else {
+        0.0
+    };
     let (size_scale, scaled_zero) = if rng.chance(0.2) {
-        (rng.uniform(0.0, 10.0), 10f64.powi(-(rng.range_i64(0, 14) as i32)))
+        (
+            rng.uniform(0.0, 10.0),
+            10f64.powi(-(rng.range_i64(0, 14) as i32)),
+        )
     } else {
         (0.0, 1.0)
     };
@@ -779,7 +831,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         2 => Some("ignore".to_string()),
         _ => None,
     };
-    let max_hits = if rng.chance(0.5) { Some(rng.range_i64(0, 8)) } else { None };
+    let max_hits = if rng.chance(0.5) {
+        Some(rng.range_i64(0, 8))
+    } else {
+        None
+    };
     let has_intervals = rng.chance(0.1);
     Inputs {
         op: if solve { "solve" } else { "jacobian" }.to_string(),

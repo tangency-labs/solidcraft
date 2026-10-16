@@ -234,7 +234,11 @@ impl CurveInfo {
     }
 
     fn polygon_length(&self) -> f64 {
-        self.pts.iter().zip(self.pts.iter().skip(1)).map(|(&a, &b)| dist(a, b)).sum()
+        self.pts
+            .iter()
+            .zip(self.pts.iter().skip(1))
+            .map(|(&a, &b)| dist(a, b))
+            .sum()
     }
 
     /// Whether `pts[i] - pts[j]` is safely normalisable.
@@ -262,7 +266,9 @@ impl CurveInfo {
         if ok {
             Ok(())
         } else {
-            Err(bad("extension: end pair not normalisable and no third point"))
+            Err(bad(
+                "extension: end pair not normalisable and no third point",
+            ))
         }
     }
 }
@@ -354,8 +360,8 @@ fn refine_knots(info: &CurveInfo, x: &[f64]) -> Result<(), FfiError> {
         return Ok(()); // Rejected before any indexing.
     }
     for &k in x {
-        let mult = info.knots.iter().filter(|&&u| u == k).count()
-            + x.iter().filter(|&&u| u == k).count();
+        let mult =
+            info.knots.iter().filter(|&&u| u == k).count() + x.iter().filter(|&&u| u == k).count();
         if mult > info.p {
             return Err(bad("refine: multiplicity above the degree"));
         }
@@ -420,7 +426,9 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
                 return Err(bad("extend by parameter: par not outside the extended end"));
             }
             if inplace && cont == 3.0 && out > G2_SPLIT * (b - a) {
-                return Err(bad("extend by parameter: in-place G2 recursion frees garbage"));
+                return Err(bad(
+                    "extend by parameter: in-place G2 recursion frees garbage",
+                ));
             }
             if cont != 4.0 {
                 info.tangent_ok(start)?;

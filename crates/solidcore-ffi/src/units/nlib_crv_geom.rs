@@ -252,8 +252,8 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             } else {
                 let [x0, y0, z0] = info.first;
                 let [x1, y1, z1] = info.last;
-                let chord = ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0) + (z1 - z0) * (z1 - z0))
-                    .sqrt();
+                let chord =
+                    ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0) + (z1 - z0) * (z1 - z0)).sqrt();
                 if tol < POLY_MIN_REL_TOL
                     || chord.is_nan()
                     || chord < POLY_MIN_CHORD * info.size

@@ -210,7 +210,9 @@ fn to_output(o: &[f64]) -> Result<Output, HarnessError> {
             }
         })
         .collect::<Result<Vec<i64>, _>>()?;
-    Ok(Output::new().int("status", status as i64).ints("record", ints))
+    Ok(Output::new()
+        .int("status", status as i64)
+        .ints("record", ints))
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -270,9 +272,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(e) => Ok(err_output(&e)),
     };
     match i {
-        Inputs::Boolean { operation, .. } => two(
-            api::boolean(&k, Brep::new(), Brep::new(), op(*operation)?).map(|_| ()),
-        ),
+        Inputs::Boolean { operation, .. } => {
+            two(api::boolean(&k, Brep::new(), Brep::new(), op(*operation)?).map(|_| ()))
+        }
         Inputs::Union { .. } => two(api::boolean_union(&k, Brep::new(), Brep::new()).map(|_| ())),
         Inputs::Difference { .. } => {
             two(api::boolean_difference(&k, Brep::new(), Brep::new()).map(|_| ()))
@@ -283,10 +285,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Merge { .. } => two(api::boolean_merge(&k, Brep::new(), Brep::new()).map(|_| ())),
         Inputs::WithOptions {
             operation, flags, ..
-        } => two(
-            api::boolean_with_options(&k, Brep::new(), Brep::new(), op(*operation)?, options(*flags))
-                .map(|_| ()),
-        ),
+        } => two(api::boolean_with_options(
+            &k,
+            Brep::new(),
+            Brep::new(),
+            op(*operation)?,
+            options(*flags),
+        )
+        .map(|_| ())),
         Inputs::MergeBreps {
             breps: list,
             operation,
@@ -298,7 +304,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(e) => {
                     // Rejected: no result (`cleared`) and the list untouched.
                     let len = i64::try_from(v.len()).map_err(|_| harness("list too long"))?;
-                    Ok(Output::new().int("status", status(&e)).ints("record", vec![1, len]))
+                    Ok(Output::new()
+                        .int("status", status(&e))
+                        .ints("record", vec![1, len]))
                 }
             }
         }
@@ -306,17 +314,15 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             breps1,
             breps2,
             operation,
-        } => two(
-            api::boolean_lists(
-                &k,
-                &breps(breps1.len()),
-                &[],
-                &breps(breps2.len()),
-                &[],
-                *operation,
-            )
-            .map(|_| ()),
-        ),
+        } => two(api::boolean_lists(
+            &k,
+            &breps(breps1.len()),
+            &[],
+            &breps(breps2.len()),
+            &[],
+            *operation,
+        )
+        .map(|_| ())),
         Inputs::Trees { breps: list, tree } => {
             let mut v = breps(list.len());
             let mut t = tree.clone();
@@ -401,11 +407,7 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
         // ---- compared: input validation --------------------------------------------
         0..=2 => {
             let (a, b) = two(rng);
-            Inputs::Boolean {
-                a,
-                b,
-                operation: 9,
-            }
+            Inputs::Boolean { a, b, operation: 9 }
         }
         3 | 4 => {
             let (a, b) = two(rng);
@@ -512,4 +514,3 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
-

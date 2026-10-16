@@ -117,7 +117,8 @@ fn cube(out: Output, nd: &[Vec<Vec<f64>>]) -> Output {
     let cols = nd.first().map_or(0, Vec::len) as i64;
     let cnt = nd.first().and_then(|r| r.first()).map_or(0, Vec::len) as i64;
     let flat: Vec<f64> = nd.iter().flatten().flatten().copied().collect();
-    out.ints("nd_shape", vec![rows, cols, cnt]).values("nd", flat)
+    out.ints("nd_shape", vec![rows, cols, cnt])
+        .values("nd", flat)
 }
 
 fn cpp(i: Inputs) -> Result<Output, HarnessError> {
@@ -141,25 +142,28 @@ fn cpp(i: Inputs) -> Result<Output, HarnessError> {
             u,
             flag,
             der,
-        } => ffi::derivs_array(&knots, i32_of(degree)?, &u, flag.side().flag(), i64_of(der)?)
-            .map(|d| cube(Output::new().ints("spans", d.spans), &d.nd)),
+        } => ffi::derivs_array(
+            &knots,
+            i32_of(degree)?,
+            &u,
+            flag.side().flag(),
+            i64_of(der)?,
+        )
+        .map(|d| cube(Output::new().ints("spans", d.spans), &d.nd)),
     };
     out.or_else(|e| cpp_err(&e))
 }
 
 fn rust(i: Inputs) -> Result<Output, HarnessError> {
     let out: Result<Output, SolidError> = match i {
-        Inputs::CompatMult {
-            mut r,
-            mut s,
-            p,
-        } => ba::compatible_knot_array_mult(&mut r, &mut s, p).map(|(xr, xs)| {
-            Output::new()
-                .values("r", r)
-                .values("s", s)
-                .values("xr", xr)
-                .values("xs", xs)
-        }),
+        Inputs::CompatMult { mut r, mut s, p } => ba::compatible_knot_array_mult(&mut r, &mut s, p)
+            .map(|(xr, xs)| {
+                Output::new()
+                    .values("r", r)
+                    .values("s", s)
+                    .values("xr", xr)
+                    .values("xs", xs)
+            }),
         Inputs::Insert { r, p, x } => {
             ba::insert_knots(&r, p, &x).map(|s| Output::new().values("s", s))
         }
@@ -443,7 +447,10 @@ fn gen_compat_mult(rng: &mut Rng) -> Inputs {
     } else if mode < 0.6 {
         // Ends within NL_PTOL: no rescale.
         let d = (b - a) * 1e-15;
-        (a + d * rng.uniform(-1.0, 1.0), b + d * rng.uniform(-1.0, 1.0))
+        (
+            a + d * rng.uniform(-1.0, 1.0),
+            b + d * rng.uniform(-1.0, 1.0),
+        )
     } else {
         let (c, d, _) = gen_domain(rng);
         (c, d)
@@ -463,7 +470,15 @@ fn gen_compat_mult(rng: &mut Rng) -> Inputs {
         p,
         sa,
         sb,
-        gen_interior(rng, sa, sb, integral && (sa, sb) == (a, b), p, 1e-3, &mapped),
+        gen_interior(
+            rng,
+            sa,
+            sb,
+            integral && (sa, sb) == (a, b),
+            p,
+            1e-3,
+            &mapped,
+        ),
     );
     if rng.chance(0.5) {
         Inputs::CompatMult { r, s, p }

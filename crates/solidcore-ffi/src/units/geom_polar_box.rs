@@ -218,7 +218,9 @@ pub fn run(prog: &[Cmd]) -> Result<Vec<f64>, FfiError> {
     let mut flat = Vec::new();
     for (i, c) in prog.iter().enumerate() {
         if c.registers().iter().any(|&r| r >= REGISTERS) {
-            return Err(FfiError::InvalidArgument(format!("command {i}: register out of range")));
+            return Err(FfiError::InvalidArgument(format!(
+                "command {i}: register out of range"
+            )));
         }
         if let Cmd::UnionSelf { r, s } = *c {
             if r == s {

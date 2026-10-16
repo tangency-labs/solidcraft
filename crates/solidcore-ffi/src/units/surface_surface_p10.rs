@@ -372,7 +372,12 @@ fn check_tree(nodes: &[NodeIn], nat: [f64; 4]) -> Result<(), FfiError> {
         if nd.aux > MAX_AUX_TYPE || nd.class > MAX_NODE_CLASS {
             return Err(bad("aux type or node class"));
         }
-        if nd.u_conts.iter().chain(&nd.v_conts).any(|&c| c > MAX_CONTINUITY) {
+        if nd
+            .u_conts
+            .iter()
+            .chain(&nd.v_conts)
+            .any(|&c| c > MAX_CONTINUITY)
+        {
             return Err(bad("continuity code"));
         }
         check_domain(nd.domain, Some(nat), true)?;
@@ -602,10 +607,16 @@ fn encode_lsi(e: &mut Enc, l: &LsiIn, nat: [f64; 4]) -> Result<(), FfiError> {
     e.num(nonneg(l.tolerance_3d)?)
 }
 
-fn encode_combine(e: &mut Enc, c: &CombineIn, nat: [f64; 4], bspline: bool) -> Result<(), FfiError> {
+fn encode_combine(
+    e: &mut Enc,
+    c: &CombineIn,
+    nat: [f64; 4],
+    bspline: bool,
+) -> Result<(), FfiError> {
     let (k0, k1) = e.curve(&c.curve)?;
     let inside_t = |t: f64| t >= k0 && t <= k1;
-    let inside_uv = |u: f64, v: f64| !bspline || (u >= nat[0] && u <= nat[2] && v >= nat[1] && v <= nat[3]);
+    let inside_uv =
+        |u: f64, v: f64| !bspline || (u >= nat[0] && u <= nat[2] && v >= nat[1] && v <= nat[3]);
     check_domain(c.uv_domain, None, false)?;
     e.nums(&c.uv_domain)?;
     if !(c.interval[0] < c.interval[1] && inside_t(c.interval[0]) && inside_t(c.interval[1])) {

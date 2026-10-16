@@ -525,7 +525,10 @@ fn finish(out: Output, flat: &[f64], at: usize) -> Result<Output, HarnessError> 
     if at == flat.len() {
         Ok(out)
     } else {
-        Err(harness(format!("record has {} extra values", flat.len() - at)))
+        Err(harness(format!(
+            "record has {} extra values",
+            flat.len() - at
+        )))
     }
 }
 
@@ -992,7 +995,11 @@ fn gen_weighted(rng: &mut Rng) -> Inputs {
     let cnt = 3 + below(rng, 28);
     let r = cnt - 1;
     // Derivatives at a few distinct, increasing points.
-    let s = if rng.chance(0.5) { 0 } else { 1 + below(rng, 3) };
+    let s = if rng.chance(0.5) {
+        0
+    } else {
+        1 + below(rng, 3)
+    };
     let mut idx: Vec<usize> = Vec::new();
     for _ in 0..s {
         let i = below(rng, cnt);

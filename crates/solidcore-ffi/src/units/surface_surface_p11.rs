@@ -56,7 +56,13 @@ pub fn intersect_surface_boundaries(
         return Err(FfiError::InvalidArgument("unsafe surface p11 input".into()));
     }
     let kinds = [a.kind, b.kind];
-    let xyz: Vec<f64> = a.net.iter().chain(b.net.iter()).flatten().copied().collect();
+    let xyz: Vec<f64> = a
+        .net
+        .iter()
+        .chain(b.net.iter())
+        .flatten()
+        .copied()
+        .collect();
     let domains: Vec<f64> = a.domain.iter().chain(b.domain.iter()).copied().collect();
     call_with_buffer(64, |buffer, len| {
         // SAFETY: fixed-length inputs (2 kinds, 54 net values, 8 domain values) checked
@@ -138,7 +144,13 @@ pub fn local_surface_intersect(
         return Err(invalid());
     }
     let kinds = [a.kind, b.kind];
-    let xyz: Vec<f64> = a.net.iter().chain(b.net.iter()).flatten().copied().collect();
+    let xyz: Vec<f64> = a
+        .net
+        .iter()
+        .chain(b.net.iter())
+        .flatten()
+        .copied()
+        .collect();
     let domains: Vec<f64> = a.domain.iter().chain(b.domain.iter()).copied().collect();
     let normal = plane_normal.unwrap_or([0.0; 3]);
     let previous = previous_uv.unwrap_or([0.0; 2]);

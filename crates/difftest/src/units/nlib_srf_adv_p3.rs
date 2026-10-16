@@ -147,7 +147,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let all = numbers(path)?;
     let mut it = all.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let m = int(path, num()?)?;
     let p = int(path, num()?)?;
@@ -163,8 +166,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -173,7 +180,10 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
     let all = numbers(path)?;
     let mut it = all.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let p = int(path, num()?)?;
     let rat = num()? != 0.0;
@@ -185,7 +195,9 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
         let w = if rat { num()? } else { NOW };
         cpts.push([x, y, z, w]);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineCrv { cpts, p, u })
 }
 
@@ -204,9 +216,15 @@ fn resolve_crv(c: &CrvIn) -> Result<InlineCrv, HarnessError> {
 }
 
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -223,7 +241,11 @@ fn encode(s: &InlineSrf, o: &mut Vec<f64>) -> Result<(), HarnessError> {
 }
 
 fn encode_crv(c: &InlineCrv, o: &mut Vec<f64>) -> Result<(), HarnessError> {
-    let n = c.cpts.len().checked_sub(1).ok_or_else(|| harness("empty curve"))?;
+    let n = c
+        .cpts
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty curve"))?;
     o.extend([n as f64, c.p as f64]);
     o.extend(c.cpts.iter().flatten());
     o.extend_from_slice(&c.u);
@@ -234,14 +256,22 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("rust surface: {e}")))
 }
 
 fn build_crv(c: &InlineCrv) -> Result<Curve, HarnessError> {
-    let pw = c.cpts.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect();
+    let pw = c
+        .cpts
+        .iter()
+        .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+        .collect();
     Curve::new(pw, c.p, c.u.clone()).map_err(|e| harness(format!("rust curve: {e}")))
 }
 
@@ -272,7 +302,12 @@ fn split_srf(flat: &[f64], at: &mut usize, mut out: Output) -> Result<Output, Ha
     Ok(out.values("v", take(flat, at, s + 1)?.to_vec()))
 }
 
-fn split_crv(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+fn split_crv(
+    flat: &[f64],
+    at: &mut usize,
+    pfx: &str,
+    mut out: Output,
+) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 3)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m) = (dim(0)?, dim(2)?);
@@ -370,12 +405,21 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             dir,
             knot_tol,
         } => {
-            let k = curves.len().checked_sub(1).ok_or_else(|| harness("no curves"))?;
+            let k = curves
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| harness("no curves"))?;
             o.push(k as f64);
             for c in curves {
                 encode_crv(&resolve_crv(c)?, &mut o)?;
             }
-            o.extend([flag(*cmp), flag(*cld), *deg as f64, f64::from(*dir), *knot_tol]);
+            o.extend([
+                flag(*cmp),
+                flag(*cld),
+                *deg as f64,
+                f64::from(*dir),
+                *knot_tol,
+            ]);
             Op::Skin
         }
         Inputs::Sweep { traj, sect } => {
@@ -583,9 +627,13 @@ fn knots_valid(u: &[f64], p: usize) -> bool {
         }
     }
     first < last
-        && runs
-            .iter()
-            .all(|&(x, k)| if x == first || x == last { k == p + 1 } else { k <= p })
+        && runs.iter().all(|&(x, k)| {
+            if x == first || x == last {
+                k == p + 1
+            } else {
+                k <= p
+            }
+        })
 }
 
 fn valid_knots(rng: &mut Rng, cnt: usize, p: usize) -> Vec<f64> {
@@ -651,7 +699,10 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
                 .map(|j| {
                     if smooth {
                         let w = if rational { weight(rng) } else { NOW };
-                        let (x, y) = (i as f64 + rng.uniform(-0.3, 0.3), j as f64 + rng.uniform(-0.3, 0.3));
+                        let (x, y) = (
+                            i as f64 + rng.uniform(-0.3, 0.3),
+                            j as f64 + rng.uniform(-0.3, 0.3),
+                        );
                         let z = rng.uniform(-1.0, 1.0);
                         if rational {
                             [x * w, y * w, z * w, w]
@@ -667,7 +718,11 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
         .collect();
     if rng.chance(0.1) {
         // Collapse a boundary row or column to one point (a pole).
-        let apex = net.first().and_then(|r| r.first()).copied().unwrap_or([0.0, 0.0, 0.0, NOW]);
+        let apex = net
+            .first()
+            .and_then(|r| r.first())
+            .copied()
+            .unwrap_or([0.0, 0.0, 0.0, NOW]);
         match rng.below(4) {
             0 => {
                 if let Some(row) = net.first_mut() {
@@ -700,7 +755,14 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
     InlineSrf { net, p, q, u, v }
 }
 
-fn gen_crv_shape(rng: &mut Rng, p: usize, n: usize, rational: bool, two_d: bool, u: Vec<f64>) -> InlineCrv {
+fn gen_crv_shape(
+    rng: &mut Rng,
+    p: usize,
+    n: usize,
+    rational: bool,
+    two_d: bool,
+    u: Vec<f64>,
+) -> InlineCrv {
     let cpts = (0..=n).map(|_| cpoint(rng, rational, two_d)).collect();
     InlineCrv { cpts, p, u }
 }
@@ -770,7 +832,11 @@ fn gen_grid(rng: &mut Rng) -> Inputs {
 
 fn gen_extend(rng: &mut Rng) -> Inputs {
     let s = gen_srf(rng);
-    let dir = if rng.chance(0.05) { 3 } else { 1 + rng.below(2) as i32 };
+    let dir = if rng.chance(0.05) {
+        3
+    } else {
+        1 + rng.below(2) as i32
+    };
     let end = 1 + rng.below(2) as i32;
     let cont = *rng.choose(&[2, 3, 4, 6]).unwrap_or(&2);
     let k = if dir == 1 { &s.u } else { &s.v };
@@ -782,7 +848,11 @@ fn gen_extend(rng: &mut Rng) -> Inputs {
         2 => 1e-6,
         _ => rng.uniform(0.01, 0.6),
     };
-    let par = if end == 1 { a - frac * (b - a) } else { b + frac * (b - a) };
+    let par = if end == 1 {
+        a - frac * (b - a)
+    } else {
+        b + frac * (b - a)
+    };
     Inputs::Extend {
         sur: SrfIn::Inline(s),
         par,
@@ -808,7 +878,11 @@ fn gen_skin(rng: &mut Rng) -> Inputs {
                     let p = 1 + rng.below(3) as usize;
                     let n = p + rng.below(3) as usize;
                     let u = knots(rng, n + p + 2, p, 0.0, 1.0);
-                    let u = if knots_valid(&u, p) { u } else { knots(rng, n + p + 2, p, 0.0, 1.0) };
+                    let u = if knots_valid(&u, p) {
+                        u
+                    } else {
+                        knots(rng, n + p + 2, p, 0.0, 1.0)
+                    };
                     gen_crv_shape(rng, p, n, rational, two_d, u)
                 }
             })
@@ -840,7 +914,11 @@ fn gen_skin(rng: &mut Rng) -> Inputs {
         }
     }
     let deg = 1 + rng.below(k.min(3) as u64) as usize;
-    let dir = if rng.chance(0.04) { 3 } else { 1 + rng.below(2) as i32 };
+    let dir = if rng.chance(0.04) {
+        3
+    } else {
+        1 + rng.below(2) as i32
+    };
     let knot_tol = match rng.below(4) {
         0 => 1e-3,
         1 => 1e-9,
@@ -940,7 +1018,12 @@ mod tests {
                         _ => {}
                     }
                 }
-                (Inputs::Skin { curves, cld: true, .. }, true) => {
+                (
+                    Inputs::Skin {
+                        curves, cld: true, ..
+                    },
+                    true,
+                ) => {
                     let f = resolve_crv(&curves[0]).unwrap();
                     let l = resolve_crv(curves.last().unwrap()).unwrap();
                     if f == l {

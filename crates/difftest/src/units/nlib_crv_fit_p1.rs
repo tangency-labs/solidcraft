@@ -253,12 +253,13 @@ fn monotone(mut uk: Vec<f64>) -> Vec<f64> {
 
 /// Fills in left-out `u` and `knots`.
 fn resolve(i: &Inputs) -> Result<Inputs, HarnessError> {
-    let params = |ptp: i32, pts: &[Vec<f64>], u: &Option<Vec<f64>>| -> Result<Vec<f64>, HarnessError> {
-        match u {
-            Some(u) => Ok(u.clone()),
-            None => chord_params(ptp, &pts4(pts)?),
-        }
-    };
+    let params =
+        |ptp: i32, pts: &[Vec<f64>], u: &Option<Vec<f64>>| -> Result<Vec<f64>, HarnessError> {
+            match u {
+                Some(u) => Ok(u.clone()),
+                None => chord_params(ptp, &pts4(pts)?),
+            }
+        };
     let out = match i.clone() {
         Inputs::Interp {
             ptp,
@@ -324,12 +325,12 @@ fn resolve(i: &Inputs) -> Result<Inputs, HarnessError> {
             let knots = if let Some(k) = knots {
                 k
             } else {
-                    let w = if whr == 1 {
-                        DerivEnd::Start
-                    } else {
-                        DerivEnd::End
-                    };
-                    monotone(fit::knot_vector_deriv(&u, p, w).map_err(|e| harness_err(&e))?)
+                let w = if whr == 1 {
+                    DerivEnd::Start
+                } else {
+                    DerivEnd::End
+                };
+                monotone(fit::knot_vector_deriv(&u, p, w).map_err(|e| harness_err(&e))?)
             };
             Inputs::Deriv {
                 ptp,
@@ -392,8 +393,7 @@ fn resolve(i: &Inputs) -> Result<Inputs, HarnessError> {
 }
 
 fn need<'a, T>(v: Option<&'a T>, what: &str) -> Result<&'a T, HarnessError> {
-    v
-        .ok_or_else(|| harness(format!("{what} not resolved")))
+    v.ok_or_else(|| harness(format!("{what} not resolved")))
 }
 
 // ---- output -----------------------------------------------------------------------
@@ -478,7 +478,10 @@ fn finish(out: Output, flat: &[f64], at: usize) -> Result<Output, HarnessError> 
     if at == flat.len() {
         Ok(out)
     } else {
-        Err(harness(format!("record has {} extra values", flat.len() - at)))
+        Err(harness(format!(
+            "record has {} extra values",
+            flat.len() - at
+        )))
     }
 }
 
@@ -568,7 +571,10 @@ fn cpp_flat(i: &Inputs) -> Result<Result<Vec<f64>, FfiError>, HarnessError> {
             let dd = pts4(d)?;
             ffi::first_deriv_and_knots(
                 &Pts { ptp: *ptp, pts: &a },
-                &Pts { ptp: *ptp, pts: &dd },
+                &Pts {
+                    ptp: *ptp,
+                    pts: &dd,
+                },
                 need(u.as_ref(), "u")?,
                 need(knots.as_ref(), "knots")?,
                 *p,
@@ -733,7 +739,10 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     match i {
         Inputs::ParamValues { ptp, pts, par } => {
             let par = par_method(*par)?;
-            by_ptp!(*ptp, pts, |a, _c| push_values(&mut o, fit::param_values(&a, par)));
+            by_ptp!(*ptp, pts, |a, _c| push_values(
+                &mut o,
+                fit::param_values(&a, par)
+            ));
         }
         Inputs::InterpKnots { u, p } => push_values(&mut o, fit::interp_knot_vector(u, *p)),
         Inputs::EndDerivsKnots { u, p } => {
@@ -1040,7 +1049,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let ptp = gen_ptp(rng);
     match below(rng, 12) {
         0 => {
-            let cnt = if rng.chance(0.05) { 1 } else { 2 + below(rng, 14) };
+            let cnt = if rng.chance(0.05) {
+                1
+            } else {
+                2 + below(rng, 14)
+            };
             Inputs::ParamValues {
                 ptp,
                 pts: gen_pts(rng, ptp, cnt),

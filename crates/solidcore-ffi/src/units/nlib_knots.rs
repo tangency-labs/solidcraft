@@ -206,9 +206,8 @@ pub fn find_span(knots: &[f64], degree: i32, u: f64, flag: i32) -> Result<i64, F
     let mut span = -1i64;
     // SAFETY: domain checked (n >= 2p+2, valid flag), so upstream indexes within
     // U[0..=m]; `span` is a valid i64.
-    let st = unsafe {
-        sys::sc_nlib_knots_find_span(knots.as_ptr(), n, degree, u, flag, &raw mut span)
-    };
+    let st =
+        unsafe { sys::sc_nlib_knots_find_span(knots.as_ptr(), n, degree, u, flag, &raw mut span) };
     check(st)?;
     Ok(span)
 }

@@ -140,8 +140,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -154,9 +158,15 @@ fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 
 /// `(n, m)` of a rectangular net.
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -176,7 +186,11 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("rust surface: {e}")))
@@ -201,7 +215,12 @@ fn count(x: f64) -> Result<usize, HarnessError> {
 
 /// Splits a surface dump starting at `at` into `<pfx>dims`, `<pfx>net`, `<pfx>u`,
 /// `<pfx>v`.
-fn split_srf(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+fn split_srf(
+    flat: &[f64],
+    at: &mut usize,
+    pfx: &str,
+    mut out: Output,
+) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 6)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m, r, s) = (dim(0)?, dim(1)?, dim(4)?, dim(5)?);
@@ -403,7 +422,11 @@ fn knots(rng: &mut Rng, cnt: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
             if mult < p {
                 mid.push(x);
             } else {
-                mid.push(rng.uniform(a, b).max(a + (b - a) * 1e-3).min(b - (b - a) * 1e-3));
+                mid.push(
+                    rng.uniform(a, b)
+                        .max(a + (b - a) * 1e-3)
+                        .min(b - (b - a) * 1e-3),
+                );
             }
         }
     }
@@ -427,9 +450,13 @@ fn knots_valid(u: &[f64], p: usize) -> bool {
         }
     }
     first < last
-        && runs
-            .iter()
-            .all(|&(x, k)| if x == first || x == last { k == p + 1 } else { k <= p })
+        && runs.iter().all(|&(x, k)| {
+            if x == first || x == last {
+                k == p + 1
+            } else {
+                k <= p
+            }
+        })
 }
 
 fn weight(rng: &mut Rng) -> f64 {
@@ -539,7 +566,11 @@ fn gen_smooth(rng: &mut Rng) -> InlineSrf {
         _ => rng.uniform(0.5, 20.0),
     };
     let (sx, sy) = (rng.uniform(0.5, 2.0) * scale, rng.uniform(0.5, 2.0) * scale);
-    let (a, b, c) = (rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5), rng.uniform(-0.3, 0.3));
+    let (a, b, c) = (
+        rng.uniform(-0.5, 0.5),
+        rng.uniform(-0.5, 0.5),
+        rng.uniform(-0.3, 0.3),
+    );
     let jitter = if rng.chance(0.5) { 0.0 } else { 0.05 };
     let rational = rng.chance(0.35);
     let two_d = rng.chance(0.08);
@@ -591,8 +622,14 @@ fn net_size(s: &InlineSrf) -> f64 {
         .collect();
     (0..3)
         .map(|k| {
-            let lo = pts.iter().filter_map(|p| p.get(k).copied()).fold(f64::INFINITY, f64::min);
-            let hi = pts.iter().filter_map(|p| p.get(k).copied()).fold(f64::NEG_INFINITY, f64::max);
+            let lo = pts
+                .iter()
+                .filter_map(|p| p.get(k).copied())
+                .fold(f64::INFINITY, f64::min);
+            let hi = pts
+                .iter()
+                .filter_map(|p| p.get(k).copied())
+                .fold(f64::NEG_INFINITY, f64::max);
             hi - lo
         })
         .fold(0.0, f64::max)

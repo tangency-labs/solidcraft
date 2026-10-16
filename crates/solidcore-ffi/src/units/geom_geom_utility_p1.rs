@@ -137,7 +137,9 @@ pub const MAX_DERIV: usize = 6;
 fn small_int(v: Option<&f64>, max: usize, what: &str) -> Result<usize, FfiError> {
     match v {
         Some(&x) if x >= 0.0 && x <= max as f64 && x.fract() == 0.0 => Ok(x as usize),
-        _ => Err(FfiError::InvalidArgument(format!("{what} must be an integer in 0..={max}"))),
+        _ => Err(FfiError::InvalidArgument(format!(
+            "{what} must be an integer in 0..={max}"
+        ))),
     }
 }
 
@@ -160,7 +162,9 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         if len >= head + 3 * min && (len - head).is_multiple_of(3) {
             Ok(())
         } else {
-            Err(FfiError::InvalidArgument(format!("bad point list length {len}")))
+            Err(FfiError::InvalidArgument(format!(
+                "bad point list length {len}"
+            )))
         }
     };
     match op {

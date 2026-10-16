@@ -566,8 +566,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             caps,
         } => {
             let cs = curves(&k, cs)?;
-            api::create_taper_extrude(&k, &refs(&cs), *height, *angle_deg, *caps, *fillet)
-                .map(drop)
+            api::create_taper_extrude(&k, &refs(&cs), *height, *angle_deg, *caps, *fillet).map(drop)
         }
         Inputs::LinearReps {
             curves: cs,
@@ -630,13 +629,19 @@ fn scaled(p: P3, s: f64, off: P3) -> P3 {
 fn gen_profile(rng: &mut Rng, s: f64, off: P3) -> Vec<CrvIn> {
     let r = s * rng.uniform(0.5, 2.0);
     match rng.below(4) {
-        0 => vec![CrvIn::Circle { center: off, radius: r }],
-        1 => vec![CrvIn::AnalyticCircle { center: off, radius: r }],
+        0 => vec![CrvIn::Circle {
+            center: off,
+            radius: r,
+        }],
+        1 => vec![CrvIn::AnalyticCircle {
+            center: off,
+            radius: r,
+        }],
         2 => {
             let (w, h) = (r, r * rng.uniform(0.3, 2.0));
             let c = [[0.0, 0.0, 0.0], [w, 0.0, 0.0], [w, h, 0.0], [0.0, h, 0.0]]
                 .map(|p| scaled(p, 1.0, off));
-c.iter()
+            c.iter()
                 .zip(c.iter().cycle().skip(1))
                 .map(|(&start, &end)| CrvIn::Line { start, end })
                 .collect()
@@ -753,7 +758,9 @@ fn has_full_circle(cs: &[CrvIn]) -> bool {
 fn gen_rotational(rng: &mut Rng, s: f64) -> (Vec<CrvIn>, P3, P3, f64) {
     let off = [0.0, s * rng.uniform(1.5, 4.0), 0.0];
     let curves = gen_consumed(rng, s, off, false);
-    let angle = *rng.choose(&[90.0, 180.0, 270.0, 360.0, 45.0]).unwrap_or(&90.0);
+    let angle = *rng
+        .choose(&[90.0, 180.0, 270.0, 360.0, 45.0])
+        .unwrap_or(&90.0);
     (curves, [0.0; 3], [1.0, 0.0, 0.0], angle)
 }
 
@@ -779,9 +786,7 @@ fn gen_sweep_in(rng: &mut Rng, s: f64) -> SweepIn {
     } else {
         (CrvIn::Null, CrvIn::Null)
     };
-    let options = rng
-        .chance(0.6)
-        .then(|| [0; 5].map(|_| rng.chance(0.4)));
+    let options = rng.chance(0.6).then(|| [0; 5].map(|_| rng.chance(0.4)));
     SweepIn {
         path,
         scale_reference,
@@ -812,7 +817,11 @@ fn gen_case_at(rng: &mut Rng, s: f64) -> Inputs {
             let curves = gen_consumed(rng, s, off, false);
             let dist = s * rng.uniform(-5.0, 10.0);
             Inputs::Linear {
-                dist: if has_full_circle(&curves) { dist.abs() } else { dist },
+                dist: if has_full_circle(&curves) {
+                    dist.abs()
+                } else {
+                    dist
+                },
                 curves,
                 dir: gen_dir(rng),
                 cap: rng.chance(0.7),

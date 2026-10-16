@@ -564,7 +564,11 @@ fn gen_case(rng: &mut Rng) -> In {
         },
         6 => {
             let r0 = val(rng, 0.1, 10.0);
-            let r1 = if rng.chance(0.5) { r0 } else { val(rng, 0.1, 10.0) };
+            let r1 = if rng.chance(0.5) {
+                r0
+            } else {
+                val(rng, 0.1, 10.0)
+            };
             In::Helix {
                 origin: pt(rng),
                 height: f(val(rng, 0.1, 50.0)),
@@ -620,7 +624,13 @@ fn gen_case(rng: &mut Rng) -> In {
             let weights = if rng.chance(0.5) {
                 Some(
                     (0..n)
-                        .map(|_| f(if rng.chance(0.05) { -1.0 } else { rng.uniform(0.2, 3.0) }))
+                        .map(|_| {
+                            f(if rng.chance(0.05) {
+                                -1.0
+                            } else {
+                                rng.uniform(0.2, 3.0)
+                            })
+                        })
                         .collect(),
                 )
             } else {

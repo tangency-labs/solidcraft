@@ -278,7 +278,7 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate, valid_knots, Op};
+    use super::{valid_knots, validate, Op};
 
     #[test]
     fn knot_validation() {

@@ -147,11 +147,8 @@ fn rust_err(e: &SolidError) -> Output {
 
 fn cpp(i: Inputs) -> Result<Output, HarnessError> {
     let out = match i {
-        Inputs::Roundtrip { buf, m, new_m } => {
-            ffi::roundtrip(&buf, i64_of(m)?, i64_of(new_m)?).map(|(m, k)| {
-                Output::new().int("m", m).values("knots", k)
-            })
-        }
+        Inputs::Roundtrip { buf, m, new_m } => ffi::roundtrip(&buf, i64_of(m)?, i64_of(new_m)?)
+            .map(|(m, k)| Output::new().int("m", m).values("knots", k)),
         Inputs::ParamChecks { knots, u } => ffi::param_checks(&knots, u).map(|(oob, end)| {
             Output::new()
                 .int("out_of_bounds", i64::from(oob))
@@ -160,8 +157,9 @@ fn cpp(i: Inputs) -> Result<Output, HarnessError> {
         Inputs::IsValid { knots, degree } => {
             ffi::is_valid(&knots, i32_of(degree)?).map(|()| Output::new().int("valid", 1))
         }
-        Inputs::SpanCount { knots, degree } => ffi::span_count(&knots, i32_of(degree)?)
-            .map(|n| Output::new().int("count", n)),
+        Inputs::SpanCount { knots, degree } => {
+            ffi::span_count(&knots, i32_of(degree)?).map(|n| Output::new().int("count", n))
+        }
         Inputs::FindSpan {
             knots,
             degree,
@@ -360,7 +358,9 @@ fn gen_knots(rng: &mut Rng, p: usize, shape: Shape) -> Vec<f64> {
         let a = rng.range_i64(-5, 5) as f64;
         (a, a + rng.range_i64(1, 12) as f64)
     } else {
-        let scale = *rng.choose(&[1e-3, 1.0, 1.0, 1.0, 100.0, 1e6]).unwrap_or(&1.0);
+        let scale = *rng
+            .choose(&[1e-3, 1.0, 1.0, 1.0, 100.0, 1e6])
+            .unwrap_or(&1.0);
         let a = rng.uniform(-10.0, 10.0) * scale;
         (a, a + rng.uniform(0.01, 20.0) * scale)
     };

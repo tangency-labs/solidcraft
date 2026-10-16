@@ -247,7 +247,9 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             let al = rd.angle()?;
             let ctp = rd.ctp()?;
             if ctp == 4.0 && sweep(al) >= 241.0 {
-                return Err(bad("quartic revolution of 241 degrees or more overflows wi[9]"));
+                return Err(bad(
+                    "quartic revolution of 241 degrees or more overflows wi[9]",
+                ));
             }
         }
     }

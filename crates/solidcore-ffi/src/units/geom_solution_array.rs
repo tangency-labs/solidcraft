@@ -90,7 +90,8 @@ fn check_solution(s: &[f64]) -> Result<(), FfiError> {
     if s.len() != SOLUTION_LEN {
         return Err(bad("truncated solution"));
     }
-    if !int_in(at(s, 0)?, 0.0, 4.0) || !int_in(at(s, 1)?, 0.0, 10.0) || !int_in(at(s, 2)?, 0.0, 5.0) {
+    if !int_in(at(s, 0)?, 0.0, 4.0) || !int_in(at(s, 1)?, 0.0, 10.0) || !int_in(at(s, 2)?, 0.0, 5.0)
+    {
         return Err(bad("solution type or counts"));
     }
     for k in 25..30 {
@@ -117,7 +118,9 @@ fn validate(prog: &[f64]) -> Result<(), FfiError> {
         }
         let op = op as i64;
         let fixed = op_fixed(op).ok_or_else(|| bad("op"))?;
-        let a = prog.get(i + 1..i + 1 + fixed).ok_or_else(|| bad("truncated program"))?;
+        let a = prog
+            .get(i + 1..i + 1 + fixed)
+            .ok_or_else(|| bad("truncated program"))?;
         let flag = |j: usize| -> Result<(), FfiError> {
             if int_in(at(a, j)?, 0.0, 1.0) {
                 Ok(())
@@ -207,13 +210,25 @@ pub fn run(prog: &[f64]) -> Result<(Vec<i64>, Vec<f64>), FfiError> {
         // SAFETY: prog valid for n reads (validated above); buf valid for buf.len()
         // writes; len valid.
         unsafe {
-            sys::sc_geom_solution_array_ints(prog.as_ptr(), n, buf.as_mut_ptr(), buf.len() as i64, &raw mut *len)
+            sys::sc_geom_solution_array_ints(
+                prog.as_ptr(),
+                n,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
         }
     })?;
     let floats = call_with_buffer(256, |buf: &mut [f64], len| {
         // SAFETY: as above.
         unsafe {
-            sys::sc_geom_solution_array_floats(prog.as_ptr(), n, buf.as_mut_ptr(), buf.len() as i64, &raw mut *len)
+            sys::sc_geom_solution_array_floats(
+                prog.as_ptr(),
+                n,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
         }
     })?;
     Ok((ints, floats))

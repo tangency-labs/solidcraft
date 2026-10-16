@@ -465,7 +465,9 @@ fn variant(rng: &mut Rng, s: &SpecIn, pool: i64) -> SpecIn {
 
 fn gen_sequence(rng: &mut Rng) -> Inputs {
     let pool = rng.range_i64(2, 6);
-    let base: Vec<SpecIn> = (0..rng.range_i64(1, 4)).map(|_| gen_spec(rng, pool)).collect();
+    let base: Vec<SpecIn> = (0..rng.range_i64(1, 4))
+        .map(|_| gen_spec(rng, pool))
+        .collect();
     let n = rng.range_i64(1, 24);
     let mut ops = Vec::new();
     for _ in 0..n {

@@ -189,7 +189,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok(())
@@ -198,7 +200,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
 /// Checks that all points are 3D and share their rational marker; returns whether
 /// they are rational.
 fn check_points(pts: &[[f64; 4]], what: &str) -> Result<bool, FfiError> {
-    let [_, _, _, w0] = *pts.first().ok_or_else(|| bad(format!("{what}: no points")))?;
+    let [_, _, _, w0] = *pts
+        .first()
+        .ok_or_else(|| bad(format!("{what}: no points")))?;
     for &[_, _, z, w] in pts {
         if z == NOZ {
             return Err(bad(format!("{what}: 2D data")));
@@ -277,9 +281,7 @@ fn validate_skin(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     if k == 0 {
         return Err(bad("skin: no cross sections"));
     }
-    let secs = (0..k)
-        .map(|_| curve(rd))
-        .collect::<Result<Vec<_>, _>>()?;
+    let secs = (0..k).map(|_| curve(rd)).collect::<Result<Vec<_>, _>>()?;
     let sync = rd.flag()?;
     rd.index(9)?;
     let tol = rd.finite()?;
@@ -317,7 +319,9 @@ fn validate_skin(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     }
     if sync {
         if has_derivs {
-            return Err(bad("skin: synchronized cross sections with derivative surfaces"));
+            return Err(bad(
+                "skin: synchronized cross sections with derivative surfaces",
+            ));
         }
         let first = secs.first().ok_or_else(|| bad("skin: no cross sections"))?;
         if secs
@@ -332,9 +336,7 @@ fn validate_skin(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 
 fn validate_corner(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let k = rd.index(8)?;
-    let crvs = (0..k)
-        .map(|_| curve(rd))
-        .collect::<Result<Vec<_>, _>>()?;
+    let crvs = (0..k).map(|_| curve(rd)).collect::<Result<Vec<_>, _>>()?;
     for _ in 0..k {
         rd.index(2)?;
     }
@@ -365,7 +367,9 @@ fn validate_corner(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             return Err(bad("corner: rational curve with a surface (DropCurve)"));
         }
         if k > 4 && bilinear && !srf {
-            return Err(bad("corner: n-sided bilinear blend without UV curve/surface"));
+            return Err(bad(
+                "corner: n-sided bilinear blend without UV curve/surface",
+            ));
         }
     }
     Ok(())

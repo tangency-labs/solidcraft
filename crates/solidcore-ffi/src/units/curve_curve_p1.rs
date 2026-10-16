@@ -389,8 +389,8 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             let c = curve_block(rd)?;
             interval(rd, &c)?;
             let sop = rd.index(24)?;
-            let need =
-                gps_vectors(sop).ok_or_else(|| bad("operation not accepted by GlobalPointSolve"))?;
+            let need = gps_vectors(sop)
+                .ok_or_else(|| bad("operation not accepted by GlobalPointSolve"))?;
             rd.vec3()?;
             tol(rd)?;
             rd.flag()?;

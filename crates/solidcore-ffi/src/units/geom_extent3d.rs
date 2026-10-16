@@ -166,8 +166,7 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
 /// Runs `op` on `input` in upstream C++ and returns its flat output.
 pub fn op(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     validate(op, input)?;
-    let n_in =
-        i64::try_from(input.len()).map_err(|_| FfiError::InvalidArgument("input".into()))?;
+    let n_in = i64::try_from(input.len()).map_err(|_| FfiError::InvalidArgument("input".into()))?;
     call_with_buffer(128, |buf: &mut [f64], len| {
         // SAFETY: `input` is valid for `n_in` reads (the shim reads at most its
         // op's input size, checked above and again in the shim); `buf` is valid for

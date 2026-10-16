@@ -447,7 +447,8 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
                         if axes(&l.pseudo_box).iter().any(|&(lo, hi)| lo > hi) {
                             return Err(bad("inverted rotated pseudo box"));
                         }
-                        let dot = |a: [f64; 3], c: [f64; 3]| a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+                        let dot =
+                            |a: [f64; 3], c: [f64; 3]| a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
                         for (i, v) in b.iter().enumerate() {
                             if (norm(*v) - 1.0).abs() > 1e-9 {
                                 return Err(bad("pseudo basis must be orthonormal"));
@@ -527,10 +528,16 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
                 }
                 rendered = Render::Built;
                 let dot = r.x[0] * r.y[0] + r.x[1] * r.y[1] + r.x[2] * r.y[2];
-                if (norm(r.x) - 1.0).abs() > 1e-9 || (norm(r.y) - 1.0).abs() > 1e-9 || dot.abs() > 1e-9 {
+                if (norm(r.x) - 1.0).abs() > 1e-9
+                    || (norm(r.y) - 1.0).abs() > 1e-9
+                    || dot.abs() > 1e-9
+                {
                     return Err(bad("renderer axes must be orthonormal"));
                 }
-                if !(1..=8).contains(&r.nx) || !(1..=8).contains(&r.ny) || !(1..=3).contains(&r.rate) {
+                if !(1..=8).contains(&r.nx)
+                    || !(1..=8).contains(&r.ny)
+                    || !(1..=3).contains(&r.rate)
+                {
                     return Err(bad("renderer size"));
                 }
                 e.int(6);

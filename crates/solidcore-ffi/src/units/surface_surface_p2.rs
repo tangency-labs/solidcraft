@@ -279,7 +279,12 @@ impl Reader<'_> {
     }
 
     fn domain(&mut self) -> Result<[f64; 4], FfiError> {
-        let d = [self.finite()?, self.finite()?, self.finite()?, self.finite()?];
+        let d = [
+            self.finite()?,
+            self.finite()?,
+            self.finite()?,
+            self.finite()?,
+        ];
         if d[0] > d[2] || d[1] > d[3] {
             return Err(bad("domain not ordered"));
         }
@@ -326,7 +331,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -350,7 +357,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, what: &str) -> Result<(), FfiErro
         if rational && !(1e-3..=1e3).contains(&w) {
             return Err(bad(format!("{what}: weight out of range")));
         }
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -438,7 +448,11 @@ fn cone_wider_than_90(s: [f64; 6], c: [f64; 6]) -> bool {
     ];
     let lo = [c[0].min(c[3]), c[1].min(c[4]), c[2].min(c[5])];
     let hi = [c[0].max(c[3]), c[1].max(c[4]), c[2].max(c[5])];
-    let ctr = [(s[0] + s[3]) / 2.0, (s[1] + s[4]) / 2.0, (s[2] + s[5]) / 2.0];
+    let ctr = [
+        (s[0] + s[3]) / 2.0,
+        (s[1] + s[4]) / 2.0,
+        (s[2] + s[5]) / 2.0,
+    ];
     ctr.iter()
         .zip(lo.iter().zip(hi.iter()))
         .zip(half.iter())

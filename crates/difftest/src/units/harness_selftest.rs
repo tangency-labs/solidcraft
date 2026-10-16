@@ -222,7 +222,11 @@ fn gen_basis(rng: &mut Rng) -> Inputs {
         let j = rng.below(knots.len() as u64 - 1) as usize;
         0.5 * (knots[j] + knots[j + 1])
     };
-    let flag = if rng.chance(0.5) { Side::Left } else { Side::Right };
+    let flag = if rng.chance(0.5) {
+        Side::Left
+    } else {
+        Side::Right
+    };
     Inputs::BasisEval {
         knots,
         degree: p as i32,

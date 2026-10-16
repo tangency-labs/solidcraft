@@ -232,7 +232,10 @@ mod tests {
     fn knot_validation() {
         assert!(valid_knots(&[0.0, 0.0, 1.0, 1.0], 1));
         assert!(valid_knots(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0], 2));
-        assert!(!valid_knots(&[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0], 2));
+        assert!(!valid_knots(
+            &[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0],
+            2
+        ));
         assert!(!valid_knots(&[0.0, 0.0, 1.0, 1.0, 1.0], 1));
         assert!(!valid_knots(&[0.0, 0.0, 0.0, 0.0], 1));
         assert!(!valid_knots(&[0.0, 0.5, 0.2, 1.0], 1));

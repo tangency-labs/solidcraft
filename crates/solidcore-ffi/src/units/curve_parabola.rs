@@ -118,8 +118,7 @@ pub fn op(op: Op, a: &Curve, b: &Curve, args: &[f64], data: &[u8]) -> Result<Vec
     let mut input = a.block();
     input.extend(b.block());
     input.extend_from_slice(args);
-    let n_in =
-        i64::try_from(input.len()).map_err(|_| FfiError::InvalidArgument("input".into()))?;
+    let n_in = i64::try_from(input.len()).map_err(|_| FfiError::InvalidArgument("input".into()))?;
     let data_len =
         i64::try_from(data.len()).map_err(|_| FfiError::InvalidArgument("data too long".into()))?;
     call_with_buffer(256, |buf: &mut [f64], len| {

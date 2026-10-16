@@ -175,13 +175,32 @@ mod tests {
         let unit = [0.0, 0.0, 1.0, 1.0];
         assert!(eval(0, false, &net, unit, 0, [2e4, 15.0, 1e6], false, line).is_ok());
         assert!(eval(1, false, &net, unit, 0, [1e-5, 0.0, 0.0], false, line).is_ok());
-        assert!(eval(2, false, &net, [2.0, 2.0, 3.0, 3.0], 0, [0.0; 3], false, line).is_ok());
+        assert!(eval(
+            2,
+            false,
+            &net,
+            [2.0, 2.0, 3.0, 3.0],
+            0,
+            [0.0; 3],
+            false,
+            line
+        )
+        .is_ok());
         assert!(matches!(
             eval(0, false, &net, unit, 0, [0.0, 0.0, 1.0], false, line),
             Err(FfiError::InvalidArgument(_))
         ));
         assert!(matches!(
-            eval(0, false, &net, [2.0, 2.0, 3.0, 3.0], 0, [0.0; 3], false, line),
+            eval(
+                0,
+                false,
+                &net,
+                [2.0, 2.0, 3.0, 3.0],
+                0,
+                [0.0; 3],
+                false,
+                line
+            ),
             Err(FfiError::InvalidArgument(_))
         ));
     }

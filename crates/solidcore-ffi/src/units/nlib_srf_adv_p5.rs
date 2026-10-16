@@ -276,7 +276,9 @@ fn validate(input: &[f64]) -> Result<(), FfiError> {
             if let Some(d) = d {
                 let b = bnd.get(i).copied().unwrap_or(1);
                 if cross_shape(d, b) != first {
-                    return Err(bad("derivative surface incompatible with the cross sections"));
+                    return Err(bad(
+                        "derivative surface incompatible with the cross sections",
+                    ));
                 }
             }
         }

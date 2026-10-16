@@ -63,30 +63,111 @@ type E4 = [f64; 4];
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Inputs {
-    FromPoints { a: P2, b: P2 },
-    FromPoint { p: P2 },
+    FromPoints {
+        a: P2,
+        b: P2,
+    },
+    FromPoint {
+        p: P2,
+    },
     New {},
-    FromExtent3d { x: [f64; 6] },
-    AddPoints { e: E4, pts: Vec<P2> },
-    SetMinMax { e: E4, min: P2, max: P2 },
-    SetMinMaxCoords { e: E4, c: E4 },
-    Queries { e: E4, tol: f64 },
-    Evaluate { e: E4, n: P2 },
-    Union { e: E4, f: E4 },
-    Intersect { e: E4, f: E4 },
-    Compare { e: E4, f: E4, tol: f64 },
-    ExpandRelative { e: E4, factor: f64 },
-    ExpandAbsolute { e: E4, amount: f64 },
-    ExpandAbsoluteVec { e: E4, d: P2 },
-    Transpose { e: E4 },
-    PointOps { e: E4, p: P2, tol: f64, tol_v: Option<f64> },
-    ContainsPeriodic { e: E4, p: P2, u_period: f64, v_period: f64, tol: f64 },
-    Inversion { e: E4, p: P2, tol: f64 },
-    ClipLine { e: E4, p: P2, v: P2, t: f64 },
-    IntersectLine { e: E4, p: P2, v: P2, tol_u: Option<f64>, tol_v: Option<f64> },
-    MapToDomain { e: E4, p: P2, f: E4, switch: bool },
-    Intervals { e: E4, u: P2, v: P2 },
-    ScaledZero { e: E4 },
+    FromExtent3d {
+        x: [f64; 6],
+    },
+    AddPoints {
+        e: E4,
+        pts: Vec<P2>,
+    },
+    SetMinMax {
+        e: E4,
+        min: P2,
+        max: P2,
+    },
+    SetMinMaxCoords {
+        e: E4,
+        c: E4,
+    },
+    Queries {
+        e: E4,
+        tol: f64,
+    },
+    Evaluate {
+        e: E4,
+        n: P2,
+    },
+    Union {
+        e: E4,
+        f: E4,
+    },
+    Intersect {
+        e: E4,
+        f: E4,
+    },
+    Compare {
+        e: E4,
+        f: E4,
+        tol: f64,
+    },
+    ExpandRelative {
+        e: E4,
+        factor: f64,
+    },
+    ExpandAbsolute {
+        e: E4,
+        amount: f64,
+    },
+    ExpandAbsoluteVec {
+        e: E4,
+        d: P2,
+    },
+    Transpose {
+        e: E4,
+    },
+    PointOps {
+        e: E4,
+        p: P2,
+        tol: f64,
+        tol_v: Option<f64>,
+    },
+    ContainsPeriodic {
+        e: E4,
+        p: P2,
+        u_period: f64,
+        v_period: f64,
+        tol: f64,
+    },
+    Inversion {
+        e: E4,
+        p: P2,
+        tol: f64,
+    },
+    ClipLine {
+        e: E4,
+        p: P2,
+        v: P2,
+        t: f64,
+    },
+    IntersectLine {
+        e: E4,
+        p: P2,
+        v: P2,
+        tol_u: Option<f64>,
+        tol_v: Option<f64>,
+    },
+    MapToDomain {
+        e: E4,
+        p: P2,
+        f: E4,
+        switch: bool,
+    },
+    Intervals {
+        e: E4,
+        u: P2,
+        v: P2,
+    },
+    ScaledZero {
+        e: E4,
+    },
 }
 
 /// Kind of an output slot.
@@ -559,7 +640,8 @@ fn coord(rng: &mut Rng, scale: f64) -> f64 {
     } else if r < 0.92 {
         rng.uniform(-1e-9, 1e-9)
     } else {
-        *rng.choose(&[0.0, -0.0, 1e6, -1e6, 1e15, -1e15]).unwrap_or(&0.0)
+        *rng.choose(&[0.0, -0.0, 1e6, -1e6, 1e15, -1e15])
+            .unwrap_or(&0.0)
     }
 }
 
@@ -646,8 +728,10 @@ fn point_near(rng: &mut Rng, e: &E4, scale: f64) -> P2 {
 }
 
 fn tol(rng: &mut Rng) -> f64 {
-    *rng.choose(&[0.0, 0.0, EFF_ZERO, 1e-12, 1e-9, 1e-6, 1.2e-8, 0.01, 0.2, 0.5, -1e-6])
-        .unwrap_or(&0.0)
+    *rng.choose(&[
+        0.0, 0.0, EFF_ZERO, 1e-12, 1e-9, 1e-6, 1.2e-8, 0.01, 0.2, 0.5, -1e-6,
+    ])
+    .unwrap_or(&0.0)
 }
 
 fn direction(rng: &mut Rng) -> P2 {
@@ -671,7 +755,8 @@ fn norm(rng: &mut Rng) -> f64 {
     if rng.chance(0.3) {
         rng.unit()
     } else {
-        *rng.choose(&[0.0, 1.0, 0.5, 0.25, 1.0 / 3.0, 0.1, 0.9]).unwrap_or(&0.0)
+        *rng.choose(&[0.0, 1.0, 0.5, 0.25, 1.0 / 3.0, 0.1, 0.9])
+            .unwrap_or(&0.0)
     }
 }
 
@@ -686,7 +771,9 @@ fn period(rng: &mut Rng, len: f64, dist: f64) -> f64 {
         0 | 1 => 0.0,
         2 => len,
         3 => len * rng.uniform(1.0, 3.0),
-        _ => *rng.choose(&[360.0, core::f64::consts::TAU, 1.0, 4.0]).unwrap_or(&1.0),
+        _ => *rng
+            .choose(&[360.0, core::f64::consts::TAU, 1.0, 4.0])
+            .unwrap_or(&1.0),
     };
     if p > 1e-6 && dist.abs() / p < 1e4 {
         p
@@ -707,14 +794,7 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             p: point(rng, scale),
         },
         2 => Inputs::FromExtent3d {
-            x: [
-                e[0],
-                e[1],
-                coord(rng, scale),
-                e[2],
-                e[3],
-                coord(rng, scale),
-            ],
+            x: [e[0], e[1], coord(rng, scale), e[2], e[3], coord(rng, scale)],
         },
         3 => {
             let n = rng.below(6) as usize;
@@ -747,7 +827,9 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             let f = if rng.chance(0.3) {
                 let mut f = e;
                 for c in &mut f {
-                    *c += *rng.choose(&[0.0, 1e-13, -1e-12, 1e-9, 0.05]).unwrap_or(&0.0);
+                    *c += *rng
+                        .choose(&[0.0, 1e-13, -1e-12, 1e-9, 0.05])
+                        .unwrap_or(&0.0);
                 }
                 f
             } else {
@@ -844,7 +926,11 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
         24 => {
             let mut ivl = || {
                 let a = coord(rng, scale);
-                let b = if rng.chance(0.2) { a } else { coord(rng, scale) };
+                let b = if rng.chance(0.2) {
+                    a
+                } else {
+                    coord(rng, scale)
+                };
                 [a, b]
             };
             let u = ivl();

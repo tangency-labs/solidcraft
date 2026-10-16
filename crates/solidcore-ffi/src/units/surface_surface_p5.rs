@@ -203,7 +203,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -229,7 +231,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -426,7 +431,10 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         Op::Lps | Op::Lps0 => {
             let d = solve_surface(dom)?;
             domain_in(&mut rd, d)?;
-            sop(&mut rd, &[SO_INTERSECT, SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE])?;
+            sop(
+                &mut rd,
+                &[SO_INTERSECT, SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE],
+            )?;
             rd.vec3()?;
             uv(&mut rd, dom)?;
         }
@@ -496,7 +504,10 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             }
             rd.vec3()?;
             rd.positive("tolerance")?;
-            sop(&mut rd, &[SO_INTERSECT, SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE])?;
+            sop(
+                &mut rd,
+                &[SO_INTERSECT, SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE],
+            )?;
             rd.flag()?;
             rd.flag()?;
         }

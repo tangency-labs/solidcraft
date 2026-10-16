@@ -180,11 +180,9 @@ fn check_clamped(knots: &[f64], p: usize) -> Result<(), FfiError> {
     if m < 2 * p + 1 {
         return Err(bad("knots: too few"));
     }
-    let (Some(start), Some(end), Some(interior)) = (
-        knots.get(..=p),
-        knots.get(m - p..),
-        knots.get(p..=m - p),
-    ) else {
+    let (Some(start), Some(end), Some(interior)) =
+        (knots.get(..=p), knots.get(m - p..), knots.get(p..=m - p))
+    else {
         return Err(bad("knots: too few"));
     };
     let (first, last) = (start.first(), end.last());
@@ -232,7 +230,11 @@ pub fn end_derivs(
     match cur {
         None => o.push(0.0),
         Some(c) => {
-            if c.knots.is_empty() || c.knots.len() > MAX_COUNT || c.n > MAX_COUNT || c.p > MAX_DEGREE {
+            if c.knots.is_empty()
+                || c.knots.len() > MAX_COUNT
+                || c.n > MAX_COUNT
+                || c.p > MAX_DEGREE
+            {
                 return Err(bad("existing curve: sizes"));
             }
             check_finite(c.knots, "existing curve knots")?;
@@ -252,7 +254,12 @@ pub fn end_derivs(
 }
 
 /// `N_FitCubicSplineInterp(P, k, Ds, De, par, cur)` with `k = len - 1`.
-pub fn cubic_spline(pts: &[[f64; 3]], ds: [f64; 3], de: [f64; 3], par: i32) -> Result<Vec<f64>, FfiError> {
+pub fn cubic_spline(
+    pts: &[[f64; 3]],
+    ds: [f64; 3],
+    de: [f64; 3],
+    par: i32,
+) -> Result<Vec<f64>, FfiError> {
     check_pts(pts)?;
     check_finite(&ds, "ds")?;
     check_finite(&de, "de")?;
@@ -269,7 +276,13 @@ pub fn cubic_spline(pts: &[[f64; 3]], ds: [f64; 3], de: [f64; 3], par: i32) -> R
 
 /// `N_FitCrvFirstDeriv(P, D, kk, p, vec, par, cur)` with `kk = len - 1 >= 1`, one
 /// derivative per point; `vec` 1 (`NL_TANGENT`) or 2 (`NL_DERIVATIVE`).
-pub fn first_derivs(pts: &[[f64; 3]], d: &[[f64; 3]], p: usize, vec: i32, par: i32) -> Result<Vec<f64>, FfiError> {
+pub fn first_derivs(
+    pts: &[[f64; 3]],
+    d: &[[f64; 3]],
+    p: usize,
+    vec: i32,
+    par: i32,
+) -> Result<Vec<f64>, FfiError> {
     check_pts(pts)?;
     if pts.len() < 2 {
         return Err(bad("needs two points"));
@@ -396,7 +409,12 @@ pub fn closed_conditions(
             return Err(bad("local interpolant degree"));
         }
     }
-    let mut o = vec![p as f64, k as f64, f64::from(par), f64::from(u8::from(d.is_some()))];
+    let mut o = vec![
+        p as f64,
+        k as f64,
+        f64::from(par),
+        f64::from(u8::from(d.is_some())),
+    ];
     push_pts(&mut o, pts);
     if let Some(d) = d {
         push_vecs(&mut o, d);
@@ -406,7 +424,13 @@ pub fn closed_conditions(
 
 /// `N_FitCrvHighDerivs(P, nn, p, Ds, kk, De, ll, par, cur)` with `nn = len - 1`,
 /// `kk = ds.len()`, `ll = de.len()` (`ds[i-1]` is `Ds[i]`).
-pub fn high_derivs(pts: &[[f64; 3]], p: usize, ds: &[[f64; 3]], de: &[[f64; 3]], par: i32) -> Result<Vec<f64>, FfiError> {
+pub fn high_derivs(
+    pts: &[[f64; 3]],
+    p: usize,
+    ds: &[[f64; 3]],
+    de: &[[f64; 3]],
+    par: i32,
+) -> Result<Vec<f64>, FfiError> {
     check_pts(pts)?;
     if p > MAX_DEGREE || ds.len() > MAX_DEGREE || de.len() > MAX_DEGREE {
         return Err(bad("degree or derivative count"));

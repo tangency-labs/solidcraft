@@ -33,8 +33,8 @@ use solidcore_ffi::FfiError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::units::nlib_srf_tool_p2::{
-    build, direction, domain, dump, encode, gen_removable, gen_srf, harness, inline, knots,
-    param, resolve, split_srf, status, take, InlineSrf, SrfIn,
+    build, direction, domain, dump, encode, gen_removable, gen_srf, harness, inline, knots, param,
+    resolve, split_srf, status, take, InlineSrf, SrfIn,
 };
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
@@ -110,10 +110,16 @@ pub(crate) fn surface(s: &Src) -> Result<InlineSrf, HarnessError> {
         } => {
             let mut sur = build(&surface(base)?)?;
             if *elevate_u > 0 {
-                sur = rs(tool2::elevate_degree(&sur, *elevate_u, Direction::U), "elevate")?;
+                sur = rs(
+                    tool2::elevate_degree(&sur, *elevate_u, Direction::U),
+                    "elevate",
+                )?;
             }
             if *elevate_v > 0 {
-                sur = rs(tool2::elevate_degree(&sur, *elevate_v, Direction::V), "elevate")?;
+                sur = rs(
+                    tool2::elevate_degree(&sur, *elevate_v, Direction::V),
+                    "elevate",
+                )?;
             }
             if !insert_u.is_empty() {
                 sur = rs(tool1::insert_knots(&sur, insert_u, Direction::U), "insert")?;
@@ -290,7 +296,10 @@ pub(crate) fn new_knots(rng: &mut Rng, k: &[f64], deg: usize) -> Vec<f64> {
     let mut x: Vec<f64> = Vec::new();
     for _ in 0..cnt {
         let t = param(rng, k, false);
-        let (a, b) = (k.first().copied().unwrap_or(0.0), k.last().copied().unwrap_or(1.0));
+        let (a, b) = (
+            k.first().copied().unwrap_or(0.0),
+            k.last().copied().unwrap_or(1.0),
+        );
         if t <= a || t >= b {
             continue;
         }
@@ -346,7 +355,11 @@ pub(crate) fn valid(k: &[f64], p: usize) -> bool {
 
 /// `w` -> NOW (Euclidean coordinates) or NOW -> random weights.
 pub(crate) fn flip_rational(rng: &mut Rng, s: &mut InlineSrf) {
-    let rational = s.net.first().and_then(|r| r.first()).is_some_and(|c| c[3] != NOW);
+    let rational = s
+        .net
+        .first()
+        .and_then(|r| r.first())
+        .is_some_and(|c| c[3] != NOW);
     for row in &mut s.net {
         for c in row.iter_mut() {
             if rational {
@@ -399,7 +412,11 @@ fn gen_join(rng: &mut Rng) -> Inputs {
                 let net: Vec<Vec<[f64; 4]>> = if d == Direction::U {
                     b.net
                         .iter()
-                        .map(|row| (0..cnt).map(|j| row.get(j).or(row.last()).copied().unwrap_or([0.0; 4])).collect())
+                        .map(|row| {
+                            (0..cnt)
+                                .map(|j| row.get(j).or(row.last()).copied().unwrap_or([0.0; 4]))
+                                .collect()
+                        })
                         .collect()
                 } else {
                     let rows = b.net.len().max(1);
@@ -437,14 +454,25 @@ fn gen_join(rng: &mut Rng) -> Inputs {
     // Shift the second piece's domain.
     if rng.chance(0.3) {
         let (lo, hi) = domain(rng);
-        let k = if d == Direction::U { &mut b.u } else { &mut b.v };
-        let (a0, b0) = (k.first().copied().unwrap_or(0.0), k.last().copied().unwrap_or(1.0));
+        let k = if d == Direction::U {
+            &mut b.u
+        } else {
+            &mut b.v
+        };
+        let (a0, b0) = (
+            k.first().copied().unwrap_or(0.0),
+            k.last().copied().unwrap_or(1.0),
+        );
         for x in k.iter_mut() {
             *x = lo + (*x - a0) / (b0 - a0) * (hi - lo);
         }
         let deg = if d == Direction::U { b.p } else { b.q };
         if !valid(if d == Direction::U { &b.u } else { &b.v }, deg) {
-            let k = if d == Direction::U { &mut b.u } else { &mut b.v };
+            let k = if d == Direction::U {
+                &mut b.u
+            } else {
+                &mut b.v
+            };
             let cnt = k.len();
             *k = knots(rng, cnt, deg, 0.0, 1.0);
         }
@@ -472,7 +500,11 @@ fn gen_compatible(rng: &mut Rng) -> Inputs {
             if let Ok(mut sur) = build(&s) {
                 if rng.chance(0.4) {
                     let t = 1 + rng.below(2) as usize;
-                    let d = if rng.chance(0.5) { Direction::U } else { Direction::V };
+                    let d = if rng.chance(0.5) {
+                        Direction::U
+                    } else {
+                        Direction::V
+                    };
                     if let Ok(e) = tool2::elevate_degree(&sur, t, d) {
                         sur = e;
                     }
@@ -565,7 +597,8 @@ mod tests {
             match (&i, ok) {
                 (Inputs::RemoveAll { sur, .. }, true) => {
                     let s = surface(sur).unwrap();
-                    let removed = flat[1] as usize + 1 < s.net.len() || flat[2] as usize + 1 < s.net[0].len();
+                    let removed =
+                        flat[1] as usize + 1 < s.net.len() || flat[2] as usize + 1 < s.net[0].len();
                     stats[usize::from(removed)] += 1;
                 }
                 (Inputs::Join { .. }, true) => stats[2] += 1,
@@ -582,7 +615,11 @@ mod tests {
     fn derived_inputs_resolve() {
         let base = InlineSrf {
             net: (0..4)
-                .map(|i| (0..3).map(|j| [f64::from(i), f64::from(j), 0.0, NOW]).collect())
+                .map(|i| {
+                    (0..3)
+                        .map(|j| [f64::from(i), f64::from(j), 0.0, NOW])
+                        .collect()
+                })
                 .collect(),
             p: 2,
             q: 1,

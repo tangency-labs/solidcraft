@@ -422,7 +422,11 @@ pub fn db_bytes(binary: bool, version: u64, r: &DbRecord) -> Result<Vec<u8>, Ffi
     let per = per_point(r);
     let n_pts = usize::try_from(r.n + 1).map_err(|_| bad("record sizes"))?;
     let (pts, knots) = r.vals.split_at(n_pts * per);
-    let (nk, na, ne) = (r.knots.len() as u64, r.angles.len() as u64, r.exact.len() as u64);
+    let (nk, na, ne) = (
+        r.knots.len() as u64,
+        r.angles.len() as u64,
+        r.exact.len() as u64,
+    );
     if binary {
         let mut b = Vec::new();
         for x in &r.head {

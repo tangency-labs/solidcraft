@@ -368,7 +368,6 @@ fn interval(rd: &mut Reader<'_>, c: &CurveInfo) -> Result<(f64, f64), FfiError> 
     Ok((lo, hi))
 }
 
-
 /// Canonical data `dim deg ncp P[3 ncp] form nk K[nk] M[nk] kt has_w [nw W[nw]]
 /// has_trim a b` (as `CreateCanonical` of `nurbs.b_spline_curve_p1`).
 fn canonical(rd: &mut Reader<'_>) -> Result<(), FfiError> {
@@ -428,14 +427,21 @@ fn check_db(bytes: &[u8], ascii: bool, version: usize) -> Result<(), FfiError> {
         let text = core::str::from_utf8(bytes).map_err(|_| bad("read_db: not text"))?;
         let mut lines = text.split('\n');
         let mut next = |min: usize| -> Result<Vec<f64>, FfiError> {
-            line_numbers(lines.next().ok_or_else(|| bad("read_db: too few lines"))?, min)
+            line_numbers(
+                lines.next().ok_or_else(|| bad("read_db: too few lines"))?,
+                min,
+            )
         };
         let get = |l: &[f64]| l.first().copied().unwrap_or(-1.0);
         let n = int_of(get(&next(1)?), MAX_DB_INDEX)?;
         let p = int_of(get(&next(1)?), MAX_DEGREE)?;
         let rat = get(&next(1)?);
         let dim = get(&next(1)?);
-        if rat.fract() != 0.0 || rat.abs() > 32767.0 || dim.fract() != 0.0 || !(0.0..=8.0).contains(&dim) {
+        if rat.fract() != 0.0
+            || rat.abs() > 32767.0
+            || dim.fract() != 0.0
+            || !(0.0..=8.0).contains(&dim)
+        {
             return Err(bad("read_db: bad rational flag or dimension"));
         }
         if version > 32 {
@@ -452,13 +458,17 @@ fn check_db(bytes: &[u8], ascii: bool, version: usize) -> Result<(), FfiError> {
         Ok(())
     } else {
         let rd8 = |at: usize| -> Result<i64, FfiError> {
-            let b = bytes.get(at..at + 8).ok_or_else(|| bad("read_db: short header"))?;
+            let b = bytes
+                .get(at..at + 8)
+                .ok_or_else(|| bad("read_db: short header"))?;
             let mut a = [0u8; 8];
             a.copy_from_slice(b);
             Ok(i64::from_ne_bytes(a))
         };
         let rd2 = |at: usize| -> Result<i16, FfiError> {
-            let b = bytes.get(at..at + 2).ok_or_else(|| bad("read_db: short header"))?;
+            let b = bytes
+                .get(at..at + 2)
+                .ok_or_else(|| bad("read_db: short header"))?;
             Ok(i16::from_ne_bytes([
                 b.first().copied().unwrap_or(0),
                 b.get(1).copied().unwrap_or(0),
@@ -510,7 +520,9 @@ fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                     return Err(bad("join: segment without NURB"));
                 }
                 if !(2..=3).contains(&c.dim) || c.three_d != (c.dim == 3) {
-                    return Err(bad("join: segment dimension must be 2 or 3 and match the data"));
+                    return Err(bad(
+                        "join: segment dimension must be 2 or 3 and match the data",
+                    ));
                 }
                 if c.p > MAX_JOIN_DEGREE {
                     return Err(bad("join: degree too high"));

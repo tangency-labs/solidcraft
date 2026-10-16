@@ -84,7 +84,10 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 fn numbers(path: &str) -> Result<Vec<f64>, HarnessError> {
     let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
     text.split_whitespace()
-        .map(|t| t.parse::<f64>().map_err(|e| harness(format!("{path}: {e}"))))
+        .map(|t| {
+            t.parse::<f64>()
+                .map_err(|e| harness(format!("{path}: {e}")))
+        })
         .collect()
 }
 
@@ -101,7 +104,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let all = numbers(path)?;
     let mut it = all.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let m = int(path, num()?)?;
     let p = int(path, num()?)?;
@@ -117,8 +123,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -130,9 +140,15 @@ fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 }
 
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -152,7 +168,11 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect())
+        .map(|row| {
+            row.iter()
+                .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("rust surface: {e}")))
@@ -205,7 +225,10 @@ fn to_output(flat: &[f64]) -> Result<Output, HarnessError> {
         out = out.values("v", take(flat, &mut at, s + 1)?.to_vec());
     }
     if at != flat.len() {
-        return Err(harness(format!("{} trailing values in record", flat.len() - at)));
+        return Err(harness(format!(
+            "{} trailing values in record",
+            flat.len() - at
+        )));
     }
     Ok(out)
 }
@@ -340,7 +363,13 @@ fn uniform_knots(n: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
 /// A planar (z = 0) curve in the xz plane offset in x: `n + 1` points, degree `p`.
 fn profile(rng: &mut Rng, n: usize, p: usize, x0: f64) -> Option<Curve> {
     let pw = (0..=n)
-        .map(|i| pt(x0 + rng.uniform(0.0, 1.5), 0.0, i as f64 + rng.uniform(-0.2, 0.2)))
+        .map(|i| {
+            pt(
+                x0 + rng.uniform(0.0, 1.5),
+                0.0,
+                i as f64 + rng.uniform(-0.2, 0.2),
+            )
+        })
         .collect();
     Curve::new(pw, p, uniform_knots(n, p, 0.0, 1.0)).ok()
 }
@@ -371,14 +400,24 @@ fn special(rng: &mut Rng, kind: Kind) -> Option<Surface> {
                 pt(2.0, 2.0, rng.uniform(-0.5, 0.5)),
             ];
             let k = rng.below(4) as usize;
-            let (a, b) = [(0, 1), (0, 2), (1, 3), (2, 3)].get(k).copied().unwrap_or((0, 1));
+            let (a, b) = [(0, 1), (0, 2), (1, 3), (2, 3)]
+                .get(k)
+                .copied()
+                .unwrap_or((0, 1));
             let first = c.get(a).copied().unwrap_or(c[0]);
             if let Some(x) = c.get_mut(b) {
                 *x = first;
             }
             let [c00, c01, c10, c11] = c;
             let net = vec![vec![c00, c01], vec![c10, c11]];
-            Surface::new(net, 1, 1, vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]).ok()
+            Surface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .ok()
         }
         Kind::LinePatch => {
             // Every control point on one line (no plane normal).
@@ -386,7 +425,14 @@ fn special(rng: &mut Rng, kind: Kind) -> Option<Surface> {
             let dir = Vec3::new(1.0, rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0));
             let at = |x: f64| pt(dir.x * x, dir.y * x, dir.z * x);
             let net = vec![vec![at(t[0]), at(t[1])], vec![at(t[2]), at(t[3])]];
-            Surface::new(net, 1, 1, vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]).ok()
+            Surface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .ok()
         }
         Kind::FlatGrid => {
             let (n, m) = (3 + rng.below(3) as usize, 3 + rng.below(3) as usize);
@@ -394,26 +440,53 @@ fn special(rng: &mut Rng, kind: Kind) -> Option<Surface> {
                 .map(|i| {
                     (0..=m)
                         .map(|j| {
-                            let (x, y) = (i as f64 + rng.uniform(-0.2, 0.2), j as f64 + rng.uniform(-0.2, 0.2));
+                            let (x, y) = (
+                                i as f64 + rng.uniform(-0.2, 0.2),
+                                j as f64 + rng.uniform(-0.2, 0.2),
+                            );
                             pt(x, y, 0.5 * x - 0.25 * y)
                         })
                         .collect()
                 })
                 .collect();
-            Surface::new(net, 3, 3, uniform_knots(n, 3, 0.0, 1.0), uniform_knots(m, 3, 0.0, 1.0)).ok()
+            Surface::new(
+                net,
+                3,
+                3,
+                uniform_knots(n, 3, 0.0, 1.0),
+                uniform_knots(m, 3, 0.0, 1.0),
+            )
+            .ok()
         }
         Kind::Cylinder | Kind::Cone => {
             let r0 = rng.uniform(0.5, 3.0);
-            let r1 = if kind == Kind::Cylinder { r0 } else { rng.uniform(0.5, 3.0) };
+            let r1 = if kind == Kind::Cylinder {
+                r0
+            } else {
+                rng.uniform(0.5, 3.0)
+            };
             let h = rng.uniform(0.5, 4.0);
-            let line = Curve::new(vec![pt(r0, 0.0, 0.0), pt(r1, 0.0, h)], 1, vec![0.0, 0.0, 1.0, 1.0]).ok()?;
+            let line = Curve::new(
+                vec![pt(r0, 0.0, 0.0), pt(r1, 0.0, h)],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .ok()?;
             let mut line = line;
             revolved_srf(&mut line, o, ez, angle, ConicType::Quadratic).ok()
         }
         Kind::Sphere | Kind::Torus => {
             let r = rng.uniform(0.5, 2.0);
-            let cx = if kind == Kind::Sphere { 0.0 } else { r + rng.uniform(0.5, 2.0) };
-            let (s, e) = if kind == Kind::Sphere { (-90.0, 90.0) } else { (0.0, 360.0) };
+            let cx = if kind == Kind::Sphere {
+                0.0
+            } else {
+                r + rng.uniform(0.5, 2.0)
+            };
+            let (s, e) = if kind == Kind::Sphere {
+                (-90.0, 90.0)
+            } else {
+                (0.0, 360.0)
+            };
             let arc = Arc {
                 center: Vec3::new(cx, 0.0, 0.0),
                 x: Vec3::new(1.0, 0.0, 0.0),
@@ -443,7 +516,11 @@ fn special(rng: &mut Rng, kind: Kind) -> Option<Surface> {
             } else {
                 Vec3::new(rng.uniform(0.3, 1.0), rng.uniform(-1.0, 1.0), 1.0)
             };
-            let dir = if rng.chance(0.5) { Direction::U } else { Direction::V };
+            let dir = if rng.chance(0.5) {
+                Direction::U
+            } else {
+                Direction::V
+            };
             extrude_crv(&mut cur, w, rng.uniform(0.5, 3.0), dir).ok()
         }
         Kind::FreeForm => None,
@@ -458,12 +535,19 @@ fn free_form(rng: &mut Rng) -> InlineSrf {
     let rational = rng.chance(0.3);
     let amp = rng.uniform(0.1, 1.0);
     // Large patches push the per-patch sample count over `slm`.
-    let scale = if rng.chance(0.5) { rng.uniform(10.0, 300.0) } else { 1.0 };
+    let scale = if rng.chance(0.5) {
+        rng.uniform(10.0, 300.0)
+    } else {
+        1.0
+    };
     let mut net: Vec<Vec<[f64; 4]>> = (0..=n)
         .map(|i| {
             (0..=m)
                 .map(|j| {
-                    let (x, y) = (i as f64 + rng.uniform(-0.2, 0.2), j as f64 + rng.uniform(-0.2, 0.2));
+                    let (x, y) = (
+                        i as f64 + rng.uniform(-0.2, 0.2),
+                        j as f64 + rng.uniform(-0.2, 0.2),
+                    );
                     let z = amp * rng.uniform(-1.0, 1.0);
                     let (x, y, z) = (scale * x, scale * y, scale * z);
                     if rational {
@@ -484,7 +568,11 @@ fn free_form(rng: &mut Rng) -> InlineSrf {
             }
         }
     }
-    let (a, b) = if rng.chance(0.5) { (0.0, 1.0) } else { (rng.uniform(-2.0, 0.0), rng.uniform(0.5, 4.0)) };
+    let (a, b) = if rng.chance(0.5) {
+        (0.0, 1.0)
+    } else {
+        (rng.uniform(-2.0, 0.0), rng.uniform(0.5, 4.0))
+    };
     let u = uniform_knots(n, p, a, b);
     let v = uniform_knots(m, q, 0.0, 1.0);
     InlineSrf { net, p, q, u, v }
@@ -514,8 +602,16 @@ fn gen_one(rng: &mut Rng) -> Inputs {
         3 => 1e-1,
         _ => 1e-3,
     };
-    let deg = if rng.chance(0.15) { 1 + rng.below(5) as usize } else { 3 };
-    let qq = if rng.chance(0.15) { 1 + rng.below(5) as usize } else { deg };
+    let deg = if rng.chance(0.15) {
+        1 + rng.below(5) as usize
+    } else {
+        3
+    };
+    let qq = if rng.chance(0.15) {
+        1 + rng.below(5) as usize
+    } else {
+        deg
+    };
     Inputs {
         sur: SrfIn::Inline(sur),
         d,
@@ -630,7 +726,10 @@ mod tests {
         eprintln!("{stats:?} slm {slm_hits}");
         assert!(slm_hits >= 5, "{slm_hits}");
         for kind in [3, 4, 5, 6, 7, 8, 10, 11] {
-            assert!(stats.get(&(kind, 0)).copied().unwrap_or(0) >= 3, "{kind}: {stats:?}");
+            assert!(
+                stats.get(&(kind, 0)).copied().unwrap_or(0) >= 3,
+                "{kind}: {stats:?}"
+            );
         }
         assert!(stats.keys().any(|&(_, st)| st != 0), "{stats:?}");
     }

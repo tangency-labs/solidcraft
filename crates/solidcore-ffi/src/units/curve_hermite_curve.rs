@@ -119,7 +119,9 @@ pub fn op(op: Op, a: &Built, b: &Built, x: &Operands) -> Result<Vec<f64>, FfiErr
             return Err(FfiError::InvalidArgument("derivative count".into()))
         }
         Op::Bbox if !matches!(x.flags & 7, 1..=7) => {
-            return Err(FfiError::InvalidArgument("no bounding box requested".into()))
+            return Err(FfiError::InvalidArgument(
+                "no bounding box requested".into(),
+            ))
         }
         Op::ReadDb if x.file_type != 0 && x.file_type != 1 => {
             return Err(FfiError::InvalidArgument("file type".into()))

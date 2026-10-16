@@ -190,7 +190,10 @@ fn net_size(input: &[f64], at: usize) -> f64 {
     let mut size: f64 = 1e-12;
     for k in 0..(n + 1) * (m + 1) {
         let b = at + 6 + 4 * k;
-        size = size.max(get(b).abs()).max(get(b + 1).abs()).max(get(b + 2).abs());
+        size = size
+            .max(get(b).abs())
+            .max(get(b + 1).abs())
+            .max(get(b + 2).abs());
     }
     size
 }
@@ -236,7 +239,9 @@ fn start_node(rd: &mut Reader<'_>, kind: Kind, srf: &Srf) -> Result<(usize, f64)
     let surf = rd.flag()?;
     // (upstream casts the node's surface to an SmBSplineSurface: an SmPlane is one)
     if aux == AUX_DATA && surf && kind == Kind::CurveBounded {
-        return Err(bad("start node: an aux node with the surface needs a B-spline or plane"));
+        return Err(bad(
+            "start node: an aux node with the surface needs a B-spline or plane",
+        ));
     }
     let mut patch_size = 0.0;
     if aux == AUX_BEZIER {
@@ -252,7 +257,9 @@ fn start_node(rd: &mut Reader<'_>, kind: Kind, srf: &Srf) -> Result<(usize, f64)
             return Err(bad("start node: the patch must be a single span"));
         }
         if kind == Kind::CurveBounded && (p != 3 || q != 3) {
-            return Err(bad("start node: patches of non B-spline caches are bicubic"));
+            return Err(bad(
+                "start node: patches of non B-spline caches are bicubic",
+            ));
         }
         if bez.dom != d {
             return Err(bad("start node: the patch domain must be the node domain"));

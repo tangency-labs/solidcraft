@@ -52,8 +52,11 @@ mod sys {
             out_ints: *mut i64,
             out_dbls: *mut f64,
         ) -> i32;
-        pub fn sc_geom_tools_find_face(path: *const c_char, pnt: *const f64, out_ints: *mut i64)
-            -> i32;
+        pub fn sc_geom_tools_find_face(
+            path: *const c_char,
+            pnt: *const f64,
+            out_ints: *mut i64,
+        ) -> i32;
     }
 }
 

@@ -290,7 +290,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     let m = knots.len() - 1;
     let short = || bad(format!("{what}: knots too short"));
     let head = knots.get(..=p).ok_or_else(short)?;
-    let tail = knots.get(m.checked_sub(p).ok_or_else(short)?..).ok_or_else(short)?;
+    let tail = knots
+        .get(m.checked_sub(p).ok_or_else(short)?..)
+        .ok_or_else(short)?;
     let inner = knots.get(p + 1..m - p).ok_or_else(short)?;
     if a >= b || head.iter().any(|&k| k != a) || tail.iter().any(|&k| k != b) {
         return Err(bad(format!("{what}: knots not clamped")));
@@ -305,7 +307,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))

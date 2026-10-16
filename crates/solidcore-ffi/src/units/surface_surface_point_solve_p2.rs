@@ -203,7 +203,14 @@ fn validate_params(op: Op, rd: &mut Reader<'_>, p: &Problem) -> Result<(), FfiEr
             uv_in(rd, &p.srf)?;
             rd.finite()?;
         }
-        Op::Adjust | Op::Norms | Op::Conv | Op::Push | Op::Snap | Op::Step | Op::Line | Op::LineB => {
+        Op::Adjust
+        | Op::Norms
+        | Op::Conv
+        | Op::Push
+        | Op::Snap
+        | Op::Step
+        | Op::Line
+        | Op::LineB => {
             uv_in(rd, &p.srf)?;
             rd.finite()?;
             match op {
@@ -297,7 +304,9 @@ pub(crate) fn rev_head(wrap: bool, surf: &RevSurf) -> Result<Vec<f64>, FfiError>
 pub fn validate_rev(op: Op, wrap: bool, surf: &RevSurf, rest: &[f64]) -> Result<(), FfiError> {
     let (status, info) = rev_info(wrap, surf)?;
     let Some((dom, num_u, num_v)) = info else {
-        return Err(bad(format!("surface of revolution not built (status {status})")));
+        return Err(bad(format!(
+            "surface of revolution not built (status {status})"
+        )));
     };
     let ordered = dom.iter().all(|v| v.is_finite()) && dom[0] < dom[2] && dom[1] < dom[3];
     if !ordered {

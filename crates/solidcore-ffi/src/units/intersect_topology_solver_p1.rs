@@ -554,7 +554,9 @@ fn objects(rd: &mut Reader<'_>) -> Result<Vec<Entry>, FfiError> {
                 out.push(Entry::Curve(c, false));
             }
             _ => {
-                let c = rd.object(out.len())?.ok_or_else(|| bad("edge without a curve"))?;
+                let c = rd
+                    .object(out.len())?
+                    .ok_or_else(|| bad("edge without a curve"))?;
                 let Some(Entry::Curve(info, owned)) = out.get_mut(c) else {
                     return Err(bad("edge curve is not a curve"));
                 };
@@ -619,7 +621,10 @@ fn solver(rd: &mut Reader<'_>, objs: &[Entry], hd: Header) -> Result<Spec, FfiEr
     }
     let point_curve = matches!(
         kind,
-        LocalKind::PointCurve | LocalKind::PointEdge | LocalKind::VertexEdge | LocalKind::CurveVertex
+        LocalKind::PointCurve
+            | LocalKind::PointEdge
+            | LocalKind::VertexEdge
+            | LocalKind::CurveVertex
     );
     if point_curve && !point_curve_op(op) {
         return Err(bad("operation not accepted by GlobalPointSolve"));
@@ -665,12 +670,7 @@ fn solver(rd: &mut Reader<'_>, objs: &[Entry], hd: Header) -> Result<Spec, FfiEr
 
 /// Checks the objects of one `SolveIt(o1, o2)` call of `spec` (and, for the point/curve
 /// solver, its interval against the curve).
-fn call(
-    spec: Spec,
-    objs: &[Entry],
-    o1: Option<usize>,
-    o2: Option<usize>,
-) -> Result<(), FfiError> {
+fn call(spec: Spec, objs: &[Entry], o1: Option<usize>, o2: Option<usize>) -> Result<(), FfiError> {
     let (first, second) = if spec.swap {
         (entry(objs, o2), entry(objs, o1))
     } else {
@@ -781,7 +781,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                         | LocalKind::EdgeEdge
                 )
             {
-                return Err(bad("tree solves only for unswapped point, curve and edge solvers"));
+                return Err(bad(
+                    "tree solves only for unswapped point, curve and edge solvers",
+                ));
             }
             // SolveTrees reaches MayContainAnswer
             if hd.short_ray() {

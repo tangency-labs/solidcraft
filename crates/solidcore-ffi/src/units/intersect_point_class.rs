@@ -311,7 +311,9 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             let d1 = rd.finite()?;
             let len = (d1 - d0).abs();
             if d0.abs() > 720.0 || d1.abs() > 720.0 || !(1e-4..=360.0).contains(&len) {
-                return Err(bad("conic: domain outside [-720, 720] or length outside [1e-4, 360]"));
+                return Err(bad(
+                    "conic: domain outside [-720, 720] or length outside [1e-4, 360]",
+                ));
             }
             for _ in 0..(if kind == 3 { 2 } else { 1 }) {
                 if rd.finite()? <= 0.0 {
@@ -408,7 +410,12 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
     rd.bounded(MAX_VALUE)?;
     rd.bounded(MAX_VALUE)?;
     let n_ops = rd.index(MAX_OPS)?;
-    let topo = |j: usize| matches!(kinds.get(j), Some(&(kind::VERTEX | kind::EDGE | kind::FACE)));
+    let topo = |j: usize| {
+        matches!(
+            kinds.get(j),
+            Some(&(kind::VERTEX | kind::EDGE | kind::FACE))
+        )
+    };
     for _ in 0..n_ops {
         let code = rd.index(op::LAST)?;
         rd.index(1)?;
@@ -478,7 +485,9 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
                 };
                 let off = rd.index(9)?;
                 if off + read > 10 {
-                    return Err(bad("LoadFromIntersection: parameters past the solution end"));
+                    return Err(bad(
+                        "LoadFromIntersection: parameters past the solution end",
+                    ));
                 }
                 rd.bounded(MAX_VALUE)?;
             }

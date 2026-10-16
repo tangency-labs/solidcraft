@@ -358,7 +358,8 @@ impl Enc {
                 domain,
             } => {
                 let c = norm(cross(*x, *y));
-                let independent = c.partial_cmp(&(1e-6 * norm(*x) * norm(*y))) == Some(Ordering::Greater);
+                let independent =
+                    c.partial_cmp(&(1e-6 * norm(*x) * norm(*y))) == Some(Ordering::Greater);
                 if !independent || norm(*x) < 1e-9 || norm(*y) < 1e-9 {
                     return Err(bad("plane axes"));
                 }
@@ -391,7 +392,10 @@ impl Enc {
             }
             CurveIn::BSpline(d) => {
                 let n1 = d.cpts.len();
-                if !(2..=MAX_CURVE_INDEX + 1).contains(&n1) || d.p == 0 || d.p > MAX_DEGREE || d.p >= n1
+                if !(2..=MAX_CURVE_INDEX + 1).contains(&n1)
+                    || d.p == 0
+                    || d.p > MAX_DEGREE
+                    || d.p >= n1
                 {
                     return Err(bad("curve size"));
                 }

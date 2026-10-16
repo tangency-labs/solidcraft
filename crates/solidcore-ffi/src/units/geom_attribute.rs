@@ -170,8 +170,12 @@ pub fn run(
     for o in ops {
         let [code, _, b, c, d, e, _] = *o;
         let beh = match code {
-            op::NEW_PLAIN | op::NEW_GENERIC | op::NEW_POINTER_LIST | op::NEW_VECTOR3D
-            | op::NEW_COLOR | op::NEW_TAG => Some(b),
+            op::NEW_PLAIN
+            | op::NEW_GENERIC
+            | op::NEW_POINTER_LIST
+            | op::NEW_VECTOR3D
+            | op::NEW_COLOR
+            | op::NEW_TAG => Some(b),
             op::NEW_LONG | op::NEW_POINTER => Some(c),
             op::MAKE_COPY..=op::FROM_CLEAR | op::NEW_MERGE_REGION => None,
             _ => return Err(FfiError::InvalidArgument(format!("op {code}"))),
@@ -180,17 +184,24 @@ pub fn run(
             return Err(FfiError::InvalidArgument(format!("behavior in op {code}")));
         }
         let counts_ok = match code {
-            op::NEW_GENERIC => (0..=n_pi).contains(&c) && (0..=n_pd).contains(&d) && (0..=n_pi).contains(&e),
+            op::NEW_GENERIC => {
+                (0..=n_pi).contains(&c) && (0..=n_pd).contains(&d) && (0..=n_pi).contains(&e)
+            }
             op::NEW_POINTER_LIST => (0..=n_pi).contains(&c),
             _ => true,
         };
         if !counts_ok {
-            return Err(FfiError::InvalidArgument(format!("payload count in op {code}")));
+            return Err(FfiError::InvalidArgument(format!(
+                "payload count in op {code}"
+            )));
         }
     }
     let (data, file_type, byte_swap) = if let Some(s) = stream {
         if !(0..=3).contains(&s.file_type) {
-            return Err(FfiError::InvalidArgument(format!("file_type {}", s.file_type)));
+            return Err(FfiError::InvalidArgument(format!(
+                "file_type {}",
+                s.file_type
+            )));
         }
         if s.file_type == 0 && !ascii_ok(s.data) {
             return Err(FfiError::InvalidArgument("ascii data out of range".into()));
@@ -198,7 +209,9 @@ pub fn run(
         (s.data, s.file_type, i32::from(s.byte_swap))
     } else {
         if ops.iter().any(|o| o[0] == op::READ_INDEXED) {
-            return Err(FfiError::InvalidArgument("READ_INDEXED needs a stream".into()));
+            return Err(FfiError::InvalidArgument(
+                "READ_INDEXED needs a stream".into(),
+            ));
         }
         (&[][..], -1, 0)
     };

@@ -137,7 +137,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
     let all = numbers(path)?;
     let mut it = all.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let p = int(path, num()?)?;
     let rat = num()? != 0.0;
@@ -149,7 +152,9 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
         let w = if rat { num()? } else { NOW };
         cpts.push([x, y, z, w]);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineCrv { cpts, p, u })
 }
 
@@ -242,9 +247,15 @@ fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 }
 
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -261,7 +272,11 @@ fn encode(s: &InlineSrf, o: &mut Vec<f64>) -> Result<(), HarnessError> {
 }
 
 fn encode_crv(c: &InlineCrv, o: &mut Vec<f64>) -> Result<(), HarnessError> {
-    let n = c.cpts.len().checked_sub(1).ok_or_else(|| harness("empty curve"))?;
+    let n = c
+        .cpts
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty curve"))?;
     o.extend([n as f64, c.p as f64]);
     o.extend(c.cpts.iter().flatten());
     o.extend_from_slice(&c.u);
@@ -272,14 +287,22 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("rust surface: {e}")))
 }
 
 fn build_crv(c: &InlineCrv) -> Result<Curve, HarnessError> {
-    let pw = c.cpts.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect();
+    let pw = c
+        .cpts
+        .iter()
+        .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+        .collect();
     Curve::new(pw, c.p, c.u.clone()).map_err(|e| harness(format!("rust curve: {e}")))
 }
 
@@ -300,17 +323,30 @@ fn count(x: f64) -> Result<usize, HarnessError> {
     Ok(x as usize)
 }
 
-fn split_srf(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+fn split_srf(
+    flat: &[f64],
+    at: &mut usize,
+    pfx: &str,
+    mut out: Output,
+) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 6)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m, r, s) = (dim(0)?, dim(1)?, dim(4)?, dim(5)?);
     out = out.values(&format!("{pfx}dims"), dims.to_vec());
-    out = out.values(&format!("{pfx}net"), take(flat, at, 4 * (n + 1) * (m + 1))?.to_vec());
+    out = out.values(
+        &format!("{pfx}net"),
+        take(flat, at, 4 * (n + 1) * (m + 1))?.to_vec(),
+    );
     out = out.values(&format!("{pfx}u"), take(flat, at, r + 1)?.to_vec());
     Ok(out.values(&format!("{pfx}v"), take(flat, at, s + 1)?.to_vec()))
 }
 
-fn split_crv(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+fn split_crv(
+    flat: &[f64],
+    at: &mut usize,
+    pfx: &str,
+    mut out: Output,
+) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 3)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m) = (dim(0)?, dim(2)?);
@@ -365,7 +401,11 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     let mut o = Vec::new();
     let flag = |b: bool| if b { 1.0 } else { 0.0 };
-    let k = i.curves.len().checked_sub(1).ok_or_else(|| harness("no curves"))?;
+    let k = i
+        .curves
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("no curves"))?;
     o.push(k as f64);
     for c in &i.curves {
         encode_crv(&resolve_crv(c)?, &mut o)?;
@@ -578,12 +618,24 @@ fn hom(x: f64, y: f64, z: f64, w: Option<f64>) -> [f64; 4] {
 }
 
 /// A cross section: a perturbed planar polyline-like curve at height `z`.
-fn section(rng: &mut Rng, p: usize, n: usize, u: &[f64], z: f64, rational: bool, two_d: bool) -> InlineCrv {
+fn section(
+    rng: &mut Rng,
+    p: usize,
+    n: usize,
+    u: &[f64],
+    z: f64,
+    rational: bool,
+    two_d: bool,
+) -> InlineCrv {
     let cpts = (0..=n)
         .map(|j| {
             let x = j as f64 + rng.uniform(-0.3, 0.3);
             let y = rng.uniform(-1.0, 1.0);
-            let zz = if two_d { NOZ } else { z + rng.uniform(-0.3, 0.3) };
+            let zz = if two_d {
+                NOZ
+            } else {
+                z + rng.uniform(-0.3, 0.3)
+            };
             let w = rational.then(|| weight(rng));
             match w {
                 Some(w) if zz == NOZ => [x * w, y * w, NOZ, w],
@@ -624,7 +676,11 @@ fn gen_free(rng: &mut Rng) -> Inputs {
             }
         })
         .collect();
-    let dir = if rng.chance(0.05) { 3 } else { 1 + rng.below(2) as i32 };
+    let dir = if rng.chance(0.05) {
+        3
+    } else {
+        1 + rng.below(2) as i32
+    };
     let mut der = None;
     let mut bnd = [2, 1];
     if dir != 3 && rng.chance(0.6) {
@@ -642,7 +698,11 @@ fn gen_free(rng: &mut Rng) -> Inputs {
             if rng.chance(0.2) {
                 return None;
             }
-            let s = if rng.chance(0.15) { 0.05 } else { rng.uniform(0.3, 3.0) };
+            let s = if rng.chance(0.15) {
+                0.05
+            } else {
+                rng.uniform(0.3, 3.0)
+            };
             let d = [rng.uniform(-0.5, 0.5) * s, rng.uniform(-0.5, 0.5) * s, s];
             let w = (rational && rng.chance(0.3)).then(|| weight(rng));
             Some(SrfIn::Strip {
@@ -676,7 +736,9 @@ fn gen_free(rng: &mut Rng) -> Inputs {
     } else {
         None
     };
-    let dfl = der.as_ref().map_or(0, |d: &[Option<SrfIn>; 2]| d.iter().flatten().count());
+    let dfl = der
+        .as_ref()
+        .map_or(0, |d: &[Option<SrfIn>; 2]| d.iter().flatten().count());
     let kns = match (&ts, rng.chance(0.3)) {
         (Some(t), true) if dfl == 0 && deg <= k => interp_knot_vector(t, deg).ok(),
         _ => None,
@@ -733,9 +795,7 @@ fn gen_railed(rng: &mut Rng) -> Option<Inputs> {
         .collect::<SolidResult<Vec<_>>>()
         .ok()?;
     let k = pr + rng.below(4) as usize;
-    let mut ts: Vec<f64> = (0..=k)
-        .map(|i| a + (b - a) * i as f64 / k as f64)
-        .collect();
+    let mut ts: Vec<f64> = (0..=k).map(|i| a + (b - a) * i as f64 / k as f64).collect();
     if let Some(t) = ts.last_mut() {
         *t = b;
     }
@@ -782,11 +842,19 @@ fn gen_railed(rng: &mut Rng) -> Option<Inputs> {
                 return None;
             }
             let t = *ts.get(if end == 0 { 0 } else { k })?;
-            let h = if cnt.get(end) == Some(&1) || rng.chance(0.3) { 1.0 } else { rng.uniform(0.3, 2.0) };
+            let h = if cnt.get(end) == Some(&1) || rng.chance(0.3) {
+                1.0
+            } else {
+                rng.uniform(0.3, 2.0)
+            };
             let sec = curves.get(if end == 0 { 0 } else { k })?;
             let rows: Vec<[f64; 4]> = cols
                 .iter()
-                .map(|c| c.derivs_at_knot(t, Side::Left, 1).ok().and_then(|d| d.get(1).copied()))
+                .map(|c| {
+                    c.derivs_at_knot(t, Side::Left, 1)
+                        .ok()
+                        .and_then(|d| d.get(1).copied())
+                })
                 .collect::<Option<Vec<_>>>()?
                 .iter()
                 .map(|d| d.to_array())
@@ -797,12 +865,25 @@ fn gen_railed(rng: &mut Rng) -> Option<Inputs> {
                     .iter()
                     .zip(&rows)
                     .map(|(c, d)| {
-                        let w = if c[3] == NOW { NOW } else { c[3] + s * h * d[3] };
-                        [c[0] + s * h * d[0], c[1] + s * h * d[1], c[2] + s * h * d[2], w]
+                        let w = if c[3] == NOW {
+                            NOW
+                        } else {
+                            c[3] + s * h * d[3]
+                        };
+                        [
+                            c[0] + s * h * d[0],
+                            c[1] + s * h * d[1],
+                            c[2] + s * h * d[2],
+                            w,
+                        ]
                     })
                     .collect()
             };
-            let (mut r_a, mut r_b) = if end == 0 { (shift(-1.0), sec.cpts.clone()) } else { (sec.cpts.clone(), shift(1.0)) };
+            let (mut r_a, mut r_b) = if end == 0 {
+                (shift(-1.0), sec.cpts.clone())
+            } else {
+                (sec.cpts.clone(), shift(1.0))
+            };
             if rational && rng.chance(0.4) {
                 // Rescale the off-boundary row in homogeneous space: the same Euclidean
                 // strip, no longer G1 with the rails in 4-D (upstream adjusts it).
@@ -867,7 +948,11 @@ fn gen_railed(rng: &mut Rng) -> Option<Inputs> {
             }
         }
     }
-    let cmp = flags_ok && curves.windows(2).all(|w| w.first().map(|c| &c.u) == w.get(1).map(|c| &c.u)) && rng.chance(0.7);
+    let cmp = flags_ok
+        && curves
+            .windows(2)
+            .all(|w| w.first().map(|c| &c.u) == w.get(1).map(|c| &c.u))
+        && rng.chance(0.7);
     Some(Inputs {
         curves: curves.into_iter().map(CrvIn::Inline).collect(),
         der,
@@ -934,7 +1019,10 @@ mod tests {
             let i = gen_case(&mut rng);
             let flat = rust_flat(&i).unwrap();
             let ok = flat.first() == Some(&0.0);
-            let has_der = i.der.as_ref().is_some_and(|d| d.iter().any(Option::is_some));
+            let has_der = i
+                .der
+                .as_ref()
+                .is_some_and(|d| d.iter().any(Option::is_some));
             match (&i.rail, ok) {
                 (None, true) => stats[0] += 1,
                 (None, false) => stats[1] += 1,

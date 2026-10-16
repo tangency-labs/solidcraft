@@ -176,7 +176,12 @@ fn global_max_domain(knots: &[f64], index: i64, p: usize) -> Result<(), FfiError
 }
 
 /// Upstream `N_BasisFindGlobalMax(knots, index, degree, tol)`: `(max, u)`.
-pub fn global_max(knots: &[f64], index: i64, degree: i32, tol: f64) -> Result<(f64, f64), FfiError> {
+pub fn global_max(
+    knots: &[f64],
+    index: i64,
+    degree: i32,
+    tol: f64,
+) -> Result<(f64, f64), FfiError> {
     let (n, p) = basis_domain(knots, degree)?;
     global_max_domain(knots, index, p)?;
     let mut out = [0.0f64; 2];

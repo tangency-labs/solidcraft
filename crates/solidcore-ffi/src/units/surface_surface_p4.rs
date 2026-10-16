@@ -111,7 +111,10 @@ fn points(rd: &mut Reader<'_>, dim: usize, bounds: &[(f64, f64)]) -> Result<(), 
 /// The bounds of the `(u, v)` parameters of a surface (one domain length around it).
 fn uv_bounds(dom: Domain) -> Vec<(f64, f64)> {
     match dom {
-        Some([u0, v0, u1, v1]) => vec![(u0 - (u1 - u0), u1 + (u1 - u0)), (v0 - (v1 - v0), v1 + (v1 - v0))],
+        Some([u0, v0, u1, v1]) => vec![
+            (u0 - (u1 - u0), u1 + (u1 - u0)),
+            (v0 - (v1 - v0), v1 + (v1 - v0)),
+        ],
         None => vec![(-1e4, 1e4), (-1e4, 1e4)],
     }
 }
@@ -166,7 +169,13 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             domain_in(&mut rd, dom)?;
             let s = sop(
                 &mut rd,
-                &[SO_INTERSECT, SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_AT_DISTANCE],
+                &[
+                    SO_INTERSECT,
+                    SO_MINIMIZE,
+                    SO_MAXIMIZE,
+                    SO_NORMALIZE,
+                    SO_AT_DISTANCE,
+                ],
             )?;
             rd.vec3()?;
             rd.positive("tolerance")?;
@@ -183,7 +192,10 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         }
         Op::CsNormalize => {
             let (a, b) = curve(&mut rd)?;
-            let s = sop(&mut rd, &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN])?;
+            let s = sop(
+                &mut rd,
+                &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN],
+            )?;
             let n = vectors(&mut rd)?;
             let directed = s == SO_SIGNED_MIN;
             if directed && n == 0 {
@@ -213,7 +225,10 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         }
         Op::SsNormalize => {
             let d2 = surface(&mut rd)?;
-            let s = sop(&mut rd, &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN])?;
+            let s = sop(
+                &mut rd,
+                &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN],
+            )?;
             let n = vectors(&mut rd)?;
             let directed = s == SO_SIGNED_MIN;
             if directed && n == 0 {

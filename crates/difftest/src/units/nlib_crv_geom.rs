@@ -75,11 +75,11 @@ impl Param {
     fn get(self, c: &InlineCrv) -> Result<f64, HarnessError> {
         match self {
             Param::Value(v) => Ok(v),
-            Param::Knot { knot } => c
-                .u
-                .get(knot)
-                .copied()
-                .ok_or_else(|| harness(format!("no knot {knot}"))),
+            Param::Knot { knot } => {
+                c.u.get(knot)
+                    .copied()
+                    .ok_or_else(|| harness(format!("no knot {knot}")))
+            }
         }
     }
 }
@@ -183,7 +183,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let p = int(path, num()?)?;
     let rat = num()? != 0.0;
@@ -195,7 +198,9 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
         let w = if rat { num()? } else { NOW };
         cpts.push([x, y, z, w]);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineCrv { cpts, p, u })
 }
 
@@ -234,7 +239,13 @@ fn count(x: f64) -> Result<usize, HarnessError> {
 }
 
 /// Splits `k` values at `at` into `key`.
-fn vals(flat: &[f64], at: &mut usize, key: &str, k: usize, out: Output) -> Result<Output, HarnessError> {
+fn vals(
+    flat: &[f64],
+    at: &mut usize,
+    key: &str,
+    k: usize,
+    out: Output,
+) -> Result<Output, HarnessError> {
     Ok(out.values(key, take(flat, at, k)?.to_vec()))
 }
 
@@ -285,7 +296,10 @@ fn encode_crv(c: &InlineCrv, o: &mut Vec<f64>) -> Result<(), HarnessError> {
         .len()
         .checked_sub(1)
         .ok_or_else(|| harness("empty curve"))?;
-    let m = c.u.len().checked_sub(1).ok_or_else(|| harness("empty knots"))?;
+    let m =
+        c.u.len()
+            .checked_sub(1)
+            .ok_or_else(|| harness("empty knots"))?;
     o.extend([n as f64, c.p as f64, m as f64]);
     o.extend(c.cpts.iter().flatten());
     o.extend_from_slice(&c.u);
@@ -305,13 +319,19 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     encode_crv(&c, &mut o)?;
     let op = match i {
-        Inputs::Closest { p, u0, top, toc, .. } => {
+        Inputs::Closest {
+            p, u0, top, toc, ..
+        } => {
             o.extend_from_slice(p);
             o.extend([u0.get(&c)?, *top, *toc]);
             Op::Closest
         }
         Inputs::ArcLength {
-            ul, ur, tol, relative, ..
+            ul,
+            ur,
+            tol,
+            relative,
+            ..
         } => {
             o.extend([ul.get(&c)?, ur.get(&c)?, *tol, tflag(*relative)]);
             Op::ArcLength
@@ -350,12 +370,15 @@ fn push3(o: &mut Vec<f64>, v: Vec3) {
 
 fn rust_body(i: &Inputs, c: &InlineCrv, cur: &Curve, o: &mut Vec<f64>) -> Result<(), SolidError> {
     match i {
-        Inputs::Closest { p, u0, top, toc, .. } => {
+        Inputs::Closest {
+            p, u0, top, toc, ..
+        } => {
             let u0 = u0.get(c).map_err(|_| SolidError::InvalidInput {
                 operation: "difftest::nlib_crv_geom",
                 reason: "bad knot index",
             })?;
-            let s = cur.closest_pt_search(Vec3::new(p[0], p[1], p[2]), u0, *top, *toc, ITER_LIMIT)?;
+            let s =
+                cur.closest_pt_search(Vec3::new(p[0], p[1], p[2]), u0, *top, *toc, ITER_LIMIT)?;
             if let Some(e) = &s.error {
                 if let Some(slot) = o.first_mut() {
                     *slot = status(e);
@@ -368,7 +391,11 @@ fn rust_body(i: &Inputs, c: &InlineCrv, cur: &Curve, o: &mut Vec<f64>) -> Result
             push3(o, q);
         }
         Inputs::ArcLength {
-            ul, ur, tol, relative, ..
+            ul,
+            ur,
+            tol,
+            relative,
+            ..
         } => {
             let bad = |_| SolidError::InvalidInput {
                 operation: "difftest::nlib_crv_geom",
@@ -506,7 +533,11 @@ fn gen_circle(rng: &mut Rng) -> InlineCrv {
     } else {
         rng.uniform(0.2, 2.0 * std::f64::consts::PI - 0.2)
     };
-    let narcs = if full { 4 } else { 1 + (sweep / (0.5 * std::f64::consts::PI)) as usize };
+    let narcs = if full {
+        4
+    } else {
+        1 + (sweep / (0.5 * std::f64::consts::PI)) as usize
+    };
     let narcs = narcs.min(4);
     let r = rng.uniform(0.1, 20.0);
     let o = rng.point3(-10.0, 10.0);
@@ -626,11 +657,7 @@ fn gen_any_crv(rng: &mut Rng) -> InlineCrv {
 /// Distinct interior knots of the curve.
 fn interior(c: &InlineCrv) -> Vec<f64> {
     let p = c.p;
-    let mut v: Vec<f64> = c
-        .u
-        .get(p + 1..c.u.len() - p - 1)
-        .unwrap_or(&[])
-        .to_vec();
+    let mut v: Vec<f64> = c.u.get(p + 1..c.u.len() - p - 1).unwrap_or(&[]).to_vec();
     v.dedup();
     v
 }
@@ -648,7 +675,10 @@ fn gen_u_in(rng: &mut Rng, c: &InlineCrv) -> f64 {
             b
         }
     } else if roll < 0.3 && !knots.is_empty() {
-        knots.get(rng.below(knots.len() as u64) as usize).copied().unwrap_or(a)
+        knots
+            .get(rng.below(knots.len() as u64) as usize)
+            .copied()
+            .unwrap_or(a)
     } else {
         rng.uniform(a, b)
     }
@@ -690,8 +720,12 @@ fn gen_closest(rng: &mut Rng, c: InlineCrv) -> Inputs {
     } else {
         gen_u_in(rng, &c)
     };
-    let top = *rng.choose(&[1e-12, 1e-9, 1e-7, 1e-4, 1e-2]).unwrap_or(&1e-7);
-    let toc = *rng.choose(&[1e-12, 1e-9, 1e-7, 1e-4, 1e-2]).unwrap_or(&1e-7);
+    let top = *rng
+        .choose(&[1e-12, 1e-9, 1e-7, 1e-4, 1e-2])
+        .unwrap_or(&1e-7);
+    let toc = *rng
+        .choose(&[1e-12, 1e-9, 1e-7, 1e-4, 1e-2])
+        .unwrap_or(&1e-7);
     Inputs::Closest {
         crv: CrvIn::Inline(c),
         p,
@@ -744,7 +778,8 @@ fn gen_polyline(rng: &mut Rng, c: InlineCrv) -> Inputs {
         .flat_map(|k| euclid(&c, k))
         .fold(0.0f64, |m, x| m.max(x.abs()));
     let (e0, e1) = (euclid(&c, 0), euclid(&c, c.cpts.len().saturating_sub(1)));
-    let chord = ((e1[0] - e0[0]).powi(2) + (e1[1] - e0[1]).powi(2) + (e1[2] - e0[2]).powi(2)).sqrt();
+    let chord =
+        ((e1[0] - e0[0]).powi(2) + (e1[1] - e0[1]).powi(2) + (e1[2] - e0[2]).powi(2)).sqrt();
     let relative = chord >= 1e-2 * size && rng.chance(0.4);
     let tol = if relative {
         *rng.choose(&[1e-2, 1e-3, 1e-4, 1e-5]).unwrap_or(&1e-3)
@@ -806,7 +841,10 @@ mod tests {
         let mut rng = Rng::new(7);
         for _ in 0..600 {
             let i = gen_case(&mut rng);
-            let op = serde_json::to_value(&i).unwrap()["op"].as_str().unwrap().to_string();
+            let op = serde_json::to_value(&i).unwrap()["op"]
+                .as_str()
+                .unwrap()
+                .to_string();
             let c = resolve(i.crv()).unwrap();
             let cur = to_curve(&c).unwrap();
             let mut o = vec![0.0];
@@ -818,7 +856,10 @@ mod tests {
         }
         eprintln!("{tally:?}");
         for op in ["closest", "arc_length", "polyline"] {
-            assert!(tally.contains_key(&(op.to_string(), 0)), "{op} never succeeds");
+            assert!(
+                tally.contains_key(&(op.to_string(), 0)),
+                "{op} never succeeds"
+            );
         }
         assert!(tally.keys().any(|(op, s)| op == "closest" && *s == 12));
         assert!(tally.keys().any(|(op, s)| op == "arc_length" && *s != 0));

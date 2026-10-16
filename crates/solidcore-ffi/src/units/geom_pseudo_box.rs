@@ -160,7 +160,12 @@ pub struct Cmd {
 }
 
 fn validate(i: usize, c: &Cmd) -> Result<(), FfiError> {
-    let bad = |m: &str| Err(FfiError::InvalidArgument(format!("command {i} ({:?}): {m}", c.op)));
+    let bad = |m: &str| {
+        Err(FfiError::InvalidArgument(format!(
+            "command {i} ({:?}): {m}",
+            c.op
+        )))
+    };
     let (n_regs, n_args) = c.op.arity();
     if c.regs.len() != n_regs || c.args.len() != n_args {
         return bad("wrong operand count");

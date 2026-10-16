@@ -126,7 +126,10 @@ fn surface(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let net = rd.slice(4 * (n + 1) * (m + 1))?;
     let (pts, _) = net.as_chunks::<4>();
     for &[x, y, z, w] in pts {
-        if [x, y, z].iter().any(|v| v.abs() > MAX_COORD * w.abs().max(1.0)) {
+        if [x, y, z]
+            .iter()
+            .any(|v| v.abs() > MAX_COORD * w.abs().max(1.0))
+        {
             return Err(bad("coordinate too large"));
         }
         if !(w == NOW || w > 0.0) {

@@ -312,7 +312,10 @@ fn finish(out: Output, flat: &[f64], at: usize) -> Result<Output, HarnessError> 
     if at == flat.len() {
         Ok(out)
     } else {
-        Err(harness(format!("record has {} extra values", flat.len() - at)))
+        Err(harness(format!(
+            "record has {} extra values",
+            flat.len() - at
+        )))
     }
 }
 
@@ -322,7 +325,13 @@ fn cpp_flat(i: &Inputs) -> Result<Result<Vec<f64>, FfiError>, HarnessError> {
     Ok(match i {
         Inputs::ParamValues { ptp, grid, par } => {
             let g = grid4(grid)?;
-            ffi::param_values(&Grid { ptp: *ptp, rows: &g }, *par)
+            ffi::param_values(
+                &Grid {
+                    ptp: *ptp,
+                    rows: &g,
+                },
+                *par,
+            )
         }
         Inputs::InterpParams {
             ptp,
@@ -331,7 +340,14 @@ fn cpp_flat(i: &Inputs) -> Result<Result<Vec<f64>, FfiError>, HarnessError> {
             dir,
         } => {
             let g = grid4(grid)?;
-            ffi::interp_params(&Grid { ptp: *ptp, rows: &g }, *par, *dir)
+            ffi::interp_params(
+                &Grid {
+                    ptp: *ptp,
+                    rows: &g,
+                },
+                *par,
+                *dir,
+            )
         }
         Inputs::Interp {
             ptp,
@@ -345,7 +361,10 @@ fn cpp_flat(i: &Inputs) -> Result<Result<Vec<f64>, FfiError>, HarnessError> {
         } => {
             let g = grid4(grid)?;
             ffi::interp_given_knots(
-                &Grid { ptp: *ptp, rows: &g },
+                &Grid {
+                    ptp: *ptp,
+                    rows: &g,
+                },
                 need(u.as_ref(), "u")?,
                 need(v.as_ref(), "v")?,
                 need(u_knots.as_ref(), "u_knots")?,
@@ -516,13 +535,37 @@ fn below(rng: &mut Rng, n: usize) -> usize {
 fn gen_grid(rng: &mut Rng, ptp: i32, rows: usize, cols: usize) -> GridIn {
     let degenerate = rng.chance(0.03);
     let flat = rng.chance(0.2);
-    let origin = [rng.uniform(-10.0, 10.0), rng.uniform(-10.0, 10.0), rng.uniform(-10.0, 10.0)];
-    let du = [rng.uniform(0.2, 3.0), rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)];
-    let dv = [rng.uniform(-1.0, 1.0), rng.uniform(0.2, 3.0), rng.uniform(-1.0, 1.0)];
+    let origin = [
+        rng.uniform(-10.0, 10.0),
+        rng.uniform(-10.0, 10.0),
+        rng.uniform(-10.0, 10.0),
+    ];
+    let du = [
+        rng.uniform(0.2, 3.0),
+        rng.uniform(-1.0, 1.0),
+        rng.uniform(-1.0, 1.0),
+    ];
+    let dv = [
+        rng.uniform(-1.0, 1.0),
+        rng.uniform(0.2, 3.0),
+        rng.uniform(-1.0, 1.0),
+    ];
     let amp = rng.uniform(0.0, 2.0);
-    let noise = if rng.chance(0.5) { rng.uniform(0.0, 0.5) } else { 0.0 };
-    let rep_row = if rows > 2 && rng.chance(0.08) { Some(1 + below(rng, rows - 1)) } else { None };
-    let rep_col = if cols > 2 && rng.chance(0.08) { Some(1 + below(rng, cols - 1)) } else { None };
+    let noise = if rng.chance(0.5) {
+        rng.uniform(0.0, 0.5)
+    } else {
+        0.0
+    };
+    let rep_row = if rows > 2 && rng.chance(0.08) {
+        Some(1 + below(rng, rows - 1))
+    } else {
+        None
+    };
+    let rep_col = if cols > 2 && rng.chance(0.08) {
+        Some(1 + below(rng, cols - 1))
+    } else {
+        None
+    };
     let mut g: GridIn = Vec::with_capacity(rows);
     for i in 0..rows {
         let mut row: Vec<Vec<f64>> = Vec::with_capacity(cols);
@@ -568,7 +611,11 @@ fn gen_grid(rng: &mut Rng, ptp: i32, rows: usize, cols: usize) -> GridIn {
     if ptp == 2 {
         for row in &mut g {
             for p in row.iter_mut() {
-                let w = if rng.chance(0.2) { 1.0 } else { rng.uniform(0.3, 3.0) };
+                let w = if rng.chance(0.2) {
+                    1.0
+                } else {
+                    rng.uniform(0.3, 3.0)
+                };
                 for c in p.iter_mut() {
                     *c *= w;
                 }
@@ -628,8 +675,16 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let ptp = gen_ptp(rng);
     match below(rng, 10) {
         0 => {
-            let rows = if rng.chance(0.05) { 1 } else { 2 + below(rng, 9) };
-            let cols = if rng.chance(0.05) { 1 } else { 2 + below(rng, 9) };
+            let rows = if rng.chance(0.05) {
+                1
+            } else {
+                2 + below(rng, 9)
+            };
+            let cols = if rng.chance(0.05) {
+                1
+            } else {
+                2 + below(rng, 9)
+            };
             Inputs::ParamValues {
                 ptp,
                 grid: gen_grid(rng, ptp, rows, cols),
@@ -637,8 +692,16 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             }
         }
         1 => {
-            let rows = if rng.chance(0.05) { 1 } else { 2 + below(rng, 9) };
-            let cols = if rng.chance(0.05) { 1 } else { 2 + below(rng, 9) };
+            let rows = if rng.chance(0.05) {
+                1
+            } else {
+                2 + below(rng, 9)
+            };
+            let cols = if rng.chance(0.05) {
+                1
+            } else {
+                2 + below(rng, 9)
+            };
             Inputs::InterpParams {
                 ptp,
                 grid: gen_grid(rng, ptp, rows, cols),

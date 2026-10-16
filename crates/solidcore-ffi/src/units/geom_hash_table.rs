@@ -83,7 +83,10 @@ fn sizes_ok(a: &[f64]) -> bool {
 fn validate(prog: &[f64]) -> Result<(), FfiError> {
     let mut i = 0usize;
     while i < prog.len() {
-        let op = prog.get(i).copied().ok_or_else(|| bad("truncated program"))?;
+        let op = prog
+            .get(i)
+            .copied()
+            .ok_or_else(|| bad("truncated program"))?;
         if !int_in(op, 0.0, 11.0) {
             return Err(bad("op"));
         }

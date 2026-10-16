@@ -351,7 +351,13 @@ fn check_weights<'a>(mut ws: impl Iterator<Item = &'a [f64; 4]>) -> Result<(), F
         return Err(bad("no control points"));
     };
     let rational = first[3] != NOW;
-    let ok = |w: f64| if rational { w > 0.0 && w <= MAX_COORD } else { w == NOW };
+    let ok = |w: f64| {
+        if rational {
+            w > 0.0 && w <= MAX_COORD
+        } else {
+            w == NOW
+        }
+    };
     if !ok(first[3]) || ws.any(|c| !ok(c[3])) {
         return Err(bad("weights"));
     }

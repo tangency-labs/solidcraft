@@ -127,7 +127,10 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         }
         Op::Net => {
             let side = |k: usize| -> Result<usize, FfiError> {
-                let v = input.get(k).copied().ok_or_else(|| bad("net: missing shape"))?;
+                let v = input
+                    .get(k)
+                    .copied()
+                    .ok_or_else(|| bad("net: missing shape"))?;
                 if v.fract() != 0.0 || v < 1.0 || v > MAX_NET_SIDE as f64 {
                     return Err(bad("net: bad shape"));
                 }

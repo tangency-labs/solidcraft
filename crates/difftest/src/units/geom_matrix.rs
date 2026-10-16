@@ -141,8 +141,8 @@ fn ints_of(v: &[usize]) -> Vec<i64> {
 fn rust_run(op: Op, i: &Inputs) -> Result<solidcore::Result<Output>, HarnessError> {
     let m = floats(&i.m)?;
     let v = floats(&i.v)?;
-    let mut a = Matrix::from_row_major(i.rows, i.cols, m)
-        .map_err(|e| HarnessError::new(e.to_string()))?;
+    let mut a =
+        Matrix::from_row_major(i.rows, i.cols, m).map_err(|e| HarnessError::new(e.to_string()))?;
     let dims = |a: &Matrix| vec![a.num_rows() as i64, a.num_columns() as i64];
     Ok((|| -> solidcore::Result<Output> {
         Ok(match op {
@@ -163,7 +163,11 @@ fn rust_run(op: Op, i: &Inputs) -> Result<solidcore::Result<Output>, HarnessErro
                 let (r, c) = (idx(i.i), idx(i.j));
                 a.add_to(r, c, i.s)?;
                 let mut out = vec![a.at(r, c)?];
-                out.push(a.row(r).and_then(|row| row.get(c).copied()).unwrap_or(f64::NAN));
+                out.push(
+                    a.row(r)
+                        .and_then(|row| row.get(c).copied())
+                        .unwrap_or(f64::NAN),
+                );
                 a.set_at(r, c, -i.s)?;
                 let after = a
                     .row_mut(r)
@@ -271,7 +275,11 @@ fn square(rng: &mut Rng, n: usize, symmetric: bool) -> Vec<f64> {
             // duplicate or scaled row -> singular
             if n > 1 {
                 let (a, b) = (rng.below(n as u64) as usize, rng.below(n as u64) as usize);
-                let k = if rng.chance(0.5) { 1.0 } else { rng.uniform(-3.0, 3.0) };
+                let k = if rng.chance(0.5) {
+                    1.0
+                } else {
+                    rng.uniform(-3.0, 3.0)
+                };
                 for c in 0..n {
                     let x = get(&m, a, c) * k;
                     set(&mut m, b, c, x);
@@ -450,10 +458,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 (dim(rng) as i64, dim(rng) as i64)
             }
         }
-        Op::Access => (
-            rng.below(rows as u64) as i64,
-            rng.below(cols as u64) as i64,
-        ),
+        Op::Access => (rng.below(rows as u64) as i64, rng.below(cols as u64) as i64),
         _ => (0, 0),
     };
     Inputs {

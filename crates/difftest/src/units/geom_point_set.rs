@@ -127,7 +127,14 @@ fn rust_flat(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             Cmd::Bbox { z } => {
                 let mut zv = z.map(v3);
                 let e = seq.bbox(zv.as_mut())?;
-                out.extend([e.u_min(), e.v_min(), e.w_min(), e.u_max(), e.v_max(), e.w_max()]);
+                out.extend([
+                    e.u_min(),
+                    e.v_min(),
+                    e.w_min(),
+                    e.u_max(),
+                    e.v_max(),
+                    e.w_max(),
+                ]);
                 push(&mut out, zv.unwrap_or(Vec3::ZERO));
             }
             Cmd::Tight { z } => {
@@ -154,7 +161,10 @@ fn rust_flat(i: &Inputs) -> solidcore::Result<Vec<f64>> {
 fn split(i: &Inputs, prog: &[FCmd], flat: &[f64]) -> Result<Output, HarnessError> {
     let expected = 3 + prog.iter().map(|c| c.output_len()).sum::<usize>();
     if flat.len() != expected {
-        return Err(harness(format!("output length {} != {expected}", flat.len())));
+        return Err(harness(format!(
+            "output length {} != {expected}",
+            flat.len()
+        )));
     }
     let (head, mut rest) = flat.split_at(3);
     let mut out = Output::new().values("ctor_normal", head.to_vec());
@@ -222,7 +232,11 @@ fn polygon(rng: &mut Rng, c: V3, nrm: V3, n: usize, star: bool) -> Vec<V3> {
             if !ccw {
                 t = -t;
             }
-            let r = if star && i % 2 == 1 { r0 * rng.uniform(0.2, 0.8) } else { r0 };
+            let r = if star && i % 2 == 1 {
+                r0 * rng.uniform(0.2, 0.8)
+            } else {
+                r0
+            };
             add(c, add(scale(u, r * t.cos()), scale(v, r * t.sin())))
         })
         .collect()
@@ -230,7 +244,11 @@ fn polygon(rng: &mut Rng, c: V3, nrm: V3, n: usize, star: bool) -> Vec<V3> {
 
 /// An axis-aligned rectangle in a z = const plane with extra points on its edges.
 fn rectangle(rng: &mut Rng) -> Vec<V3> {
-    let (x0, y0, z) = (rng.uniform(-10.0, 10.0), rng.uniform(-10.0, 10.0), rng.uniform(-5.0, 5.0));
+    let (x0, y0, z) = (
+        rng.uniform(-10.0, 10.0),
+        rng.uniform(-10.0, 10.0),
+        rng.uniform(-5.0, 5.0),
+    );
     let (w, h) = (rng.uniform(0.5, 10.0), rng.uniform(0.5, 10.0));
     let k = 1 + rng.below(4) as usize;
     let mut pts = Vec::new();
@@ -261,14 +279,18 @@ fn gen_points(rng: &mut Rng) -> (Vec<V3>, Option<V3>) {
         4 => {
             let d = unit(rng);
             let n = 2 + rng.below(9) as usize;
-            let pts = (0..n).map(|_| add(c, scale(d, rng.uniform(-10.0, 10.0)))).collect();
+            let pts = (0..n)
+                .map(|_| add(c, scale(d, rng.uniform(-10.0, 10.0))))
+                .collect();
             (pts, None)
         }
         5 => {
             let n = 1 + rng.below(5) as usize;
             let e = rng.uniform(0.0, 1e-13);
             (
-                (0..n).map(|_| add(c, scale(rng.point3(-1.0, 1.0), e))).collect(),
+                (0..n)
+                    .map(|_| add(c, scale(rng.point3(-1.0, 1.0), e)))
+                    .collect(),
                 None,
             )
         }
@@ -294,7 +316,12 @@ fn gen_points(rng: &mut Rng) -> (Vec<V3>, Option<V3>) {
         }
         _ => {
             // polygon in a coordinate plane (axis-aligned normal)
-            let axis = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]];
+            let axis = [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, -1.0],
+            ];
             let a = *rng.choose(&axis).unwrap_or(&[0.0, 0.0, 1.0]);
             let n = 3 + rng.below(12) as usize;
             let star = rng.chance(0.3);
@@ -306,7 +333,10 @@ fn gen_points(rng: &mut Rng) -> (Vec<V3>, Option<V3>) {
 fn gen_z(rng: &mut Rng, plane: Option<V3>) -> Option<V3> {
     match rng.below(8) {
         0 => Some(unit(rng)),
-        1 => Some(scale(plane.unwrap_or([0.0, 0.0, 1.0]), rng.uniform(0.5, 3.0))),
+        1 => Some(scale(
+            plane.unwrap_or([0.0, 0.0, 1.0]),
+            rng.uniform(0.5, 3.0),
+        )),
         2 => Some([0.0, 0.0, 0.0]),
         3 => Some([0.0, 0.0, 1.0]),
         _ => None,
@@ -314,7 +344,11 @@ fn gen_z(rng: &mut Rng, plane: Option<V3>) -> Option<V3> {
 }
 
 fn gen_point(rng: &mut Rng, pts: &[V3], plane: Option<V3>) -> V3 {
-    let pick = |rng: &mut Rng| pts.get(rng.below(pts.len() as u64) as usize).copied().unwrap_or_default();
+    let pick = |rng: &mut Rng| {
+        pts.get(rng.below(pts.len() as u64) as usize)
+            .copied()
+            .unwrap_or_default()
+    };
     match rng.below(7) {
         0 => pick(rng),
         1 => {
@@ -329,28 +363,46 @@ fn gen_point(rng: &mut Rng, pts: &[V3], plane: Option<V3>) -> V3 {
             // off-plane offset of a centroid
             let n = pts.len().max(1) as f64;
             let c = scale(pts.iter().fold([0.0; 3], |s, p| add(s, *p)), 1.0 / n);
-            add(c, scale(plane.unwrap_or([0.0, 0.0, 1.0]), rng.uniform(-1e-6, 1e-6)))
+            add(
+                c,
+                scale(plane.unwrap_or([0.0, 0.0, 1.0]), rng.uniform(-1e-6, 1e-6)),
+            )
         }
         4 => rng.point3(-50.0, 50.0),
         _ => {
             // a random convex combination of three vertices
             let (a, b, c) = (pick(rng), pick(rng), pick(rng));
             let (s, t) = (rng.unit(), rng.unit());
-            let (s, t) = if s + t > 1.0 { (1.0 - s, 1.0 - t) } else { (s, t) };
-            add(a, add(scale(add(b, scale(a, -1.0)), s), scale(add(c, scale(a, -1.0)), t)))
+            let (s, t) = if s + t > 1.0 {
+                (1.0 - s, 1.0 - t)
+            } else {
+                (s, t)
+            };
+            add(
+                a,
+                add(
+                    scale(add(b, scale(a, -1.0)), s),
+                    scale(add(c, scale(a, -1.0)), t),
+                ),
+            )
         }
     }
 }
 
 fn gen_inputs(rng: &mut Rng) -> Inputs {
     let (pts, plane) = gen_points(rng);
-    let tol = *rng.choose(&[0.0, 1e-12, 1e-9, 1e-6, 1e-3, 0.1]).unwrap_or(&1e-9);
+    let tol = *rng
+        .choose(&[0.0, 1e-12, 1e-9, 1e-6, 1e-3, 0.1])
+        .unwrap_or(&1e-9);
     let closed = rng.chance(0.85);
     let normal = if rng.chance(0.3) {
         match rng.below(4) {
             0 => Some(unit(rng)),
             1 => Some([0.0, 0.0, 0.0]),
-            _ => Some(scale(plane.unwrap_or([0.0, 0.0, 1.0]), rng.uniform(0.5, 3.0))),
+            _ => Some(scale(
+                plane.unwrap_or([0.0, 0.0, 1.0]),
+                rng.uniform(0.5, 3.0),
+            )),
         }
     } else {
         None
@@ -363,18 +415,30 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
         let c = match rng.below(12) {
             0 => Cmd::Centroid,
             1 => Cmd::Normal,
-            2 => Cmd::Bbox { z: gen_z(rng, plane) },
-            3 | 4 if tight_ok => Cmd::Tight { z: gen_z(rng, plane) },
+            2 => Cmd::Bbox {
+                z: gen_z(rng, plane),
+            },
+            3 | 4 if tight_ok => Cmd::Tight {
+                z: gen_z(rng, plane),
+            },
             5 => Cmd::Clear,
             6 => Cmd::Size,
             7 if !pts.is_empty() => Cmd::Area,
-            8..=11 if !pts.is_empty() => Cmd::Contain { p: gen_point(rng, &pts, plane) },
+            8..=11 if !pts.is_empty() => Cmd::Contain {
+                p: gen_point(rng, &pts, plane),
+            },
             _ if tight_ok => Cmd::Tight { z: None },
             _ => Cmd::Normal,
         };
         prog.push(c);
     }
-    Inputs { pts, tol, closed, normal, prog }
+    Inputs {
+        pts,
+        tol,
+        closed,
+        normal,
+        prog,
+    }
 }
 
 impl UnitDiff for Runner {
@@ -385,7 +449,8 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let prog = lower(&i);
-        let flat = ffi::run(&i.pts, i.tol, i.closed, i.normal, &prog).map_err(|e| harness(e.to_string()))?;
+        let flat = ffi::run(&i.pts, i.tol, i.closed, i.normal, &prog)
+            .map_err(|e| harness(e.to_string()))?;
         split(&i, &prog, &flat)
     }
 
@@ -432,6 +497,9 @@ mod tests {
                 }
             }
         }
-        assert!(contain[1] > 0 && contain[2] > 0 && contain[3] > 0, "{contain:?}");
+        assert!(
+            contain[1] > 0 && contain[2] > 0 && contain[3] > 0,
+            "{contain:?}"
+        );
     }
 }

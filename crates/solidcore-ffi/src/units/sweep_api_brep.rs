@@ -504,11 +504,13 @@ fn check_curve_sweep_profile(profile: &[CurveSpec], a: &SweepArgs) -> Result<(),
 fn check_taper_curves(curves: &[CurveSpec]) -> Result<(), FfiError> {
     if copies_ok(curves)
         && curves
-        .iter()
-        .filter_map(extent)
-        .any(|e| e < MIN_TAPER_EXTENT)
+            .iter()
+            .filter_map(extent)
+            .any(|e| e < MIN_TAPER_EXTENT)
     {
-        return Err(bad("draft / taper: profile curve below 2e-5 (upstream crash)"));
+        return Err(bad(
+            "draft / taper: profile curve below 2e-5 (upstream crash)",
+        ));
     }
     Ok(())
 }
@@ -525,7 +527,9 @@ fn check_linear(curves: &[CurveSpec], dist: f64, refused: bool) -> Result<(), Ff
         _ => false,
     };
     if dist < 0.0 && !refused && copies_ok(curves) && curves.iter().any(full_circle) {
-        return Err(bad("linear sweep: negative distance with a full circle (upstream hang)"));
+        return Err(bad(
+            "linear sweep: negative distance with a full circle (upstream hang)",
+        ));
     }
     Ok(())
 }

@@ -175,7 +175,11 @@ struct CurveInfo {
 
 impl CurveInfo {
     fn polygon_length(&self) -> f64 {
-        self.pts.iter().zip(self.pts.iter().skip(1)).map(|(&a, &b)| dist(a, b)).sum()
+        self.pts
+            .iter()
+            .zip(self.pts.iter().skip(1))
+            .map(|(&a, &b)| dist(a, b))
+            .sum()
     }
 
     /// Whether `pts[i] - pts[j]` is safely normalisable.
@@ -273,7 +277,9 @@ fn tangent_ok(info: &CurveInfo, start: bool) -> Result<(), FfiError> {
     if ok {
         Ok(())
     } else {
-        Err(bad("extension: end pair not normalisable and no third point"))
+        Err(bad(
+            "extension: end pair not normalisable and no third point",
+        ))
     }
 }
 
@@ -332,7 +338,9 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
                 return Err(bad("extend by parameter: par not outside the extended end"));
             }
             if inplace && cont == 3.0 && out > G2_SPLIT * (b - a) {
-                return Err(bad("extend by parameter: in-place G2 recursion frees garbage"));
+                return Err(bad(
+                    "extend by parameter: in-place G2 recursion frees garbage",
+                ));
             }
             if cont != 4.0 {
                 tangent_ok(&info, start)?;

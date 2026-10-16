@@ -225,7 +225,9 @@ fn bounds(d: [f64; 4], what: &str) -> Result<(), FfiError> {
     finite(&d, what)?;
     let [a, b, c, e] = d;
     if !(a < c && b < e) {
-        return Err(bad(format!("{what}: domain not ordered with positive extents")));
+        return Err(bad(format!(
+            "{what}: domain not ordered with positive extents"
+        )));
     }
     Ok(())
 }

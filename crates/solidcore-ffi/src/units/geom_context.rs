@@ -132,7 +132,12 @@ pub fn validate(n_ctx: usize, n_slots: usize, steps: &[Step]) -> Result<(), FfiE
         let null_ok = matches!(o, op::TOL_CTX | op::CALC_EDGE | op::CALC_VERTEX);
         let no_ctx = matches!(
             o,
-            op::LOCK_DEFAULT | op::LOCK_NEWMARK | op::LOCK_DROP | op::LOCK_INFO | op::MASS | op::API
+            op::LOCK_DEFAULT
+                | op::LOCK_NEWMARK
+                | op::LOCK_DROP
+                | op::LOCK_INFO
+                | op::MASS
+                | op::API
         );
         if need_slot && !(0..n_slots).contains(&s.slot) {
             return bad("slot index");

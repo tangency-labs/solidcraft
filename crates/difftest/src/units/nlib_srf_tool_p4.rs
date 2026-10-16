@@ -34,8 +34,7 @@ use solidcore_ffi::FfiError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::units::nlib_srf_tool_p2::{
-    build, direction, dump, encode, gen_srf, harness, inline, split_srf, status, take,
-    InlineSrf,
+    build, direction, dump, encode, gen_srf, harness, inline, split_srf, status, take, InlineSrf,
 };
 use crate::units::nlib_srf_tool_p3::{
     flip_rational, gen_dir, gen_refined, gen_tol, new_knots, plain, surface, valid, Src,
@@ -100,7 +99,9 @@ fn resolve_keep(keep: Option<&Keep>, k: &[f64]) -> Option<Vec<f64>> {
             let mut l: Vec<f64> = if x.is_empty() {
                 Vec::new()
             } else {
-                pick.iter().filter_map(|&i| x.get(i % x.len()).copied()).collect()
+                pick.iter()
+                    .filter_map(|&i| x.get(i % x.len()).copied())
+                    .collect()
             };
             if *ends {
                 l.extend(k.first().copied());
@@ -116,7 +117,11 @@ fn resolve_keep(keep: Option<&Keep>, k: &[f64]) -> Option<Vec<f64>> {
 /// The resolved inputs of `RemoveConstrained`: surface and both lists.
 type Resolved = (InlineSrf, Option<Vec<f64>>, Option<Vec<f64>>);
 
-fn resolve_remove(sur: &Src, ku: Option<&Keep>, kv: Option<&Keep>) -> Result<Resolved, HarnessError> {
+fn resolve_remove(
+    sur: &Src,
+    ku: Option<&Keep>,
+    kv: Option<&Keep>,
+) -> Result<Resolved, HarnessError> {
     let s = surface(sur)?;
     let lu = resolve_keep(ku, &s.u);
     let lv = resolve_keep(kv, &s.v);
@@ -422,12 +427,7 @@ mod tests {
             let Ok(flat) = rust_flat(&i) else { continue };
             let ok = flat.first() == Some(&0.0);
             match (&i, ok) {
-                (
-                    Inputs::RemoveConstrained {
-                        sur, tol, dir, ..
-                    },
-                    true,
-                ) => {
+                (Inputs::RemoveConstrained { sur, tol, dir, .. }, true) => {
                     let s = build(&surface(sur).unwrap()).unwrap();
                     let all = solidcore::nurbs::srf_tool::p3::remove_all_knots(
                         &s,

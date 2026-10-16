@@ -267,7 +267,10 @@ impl Reader<'_> {
 
 /// Checks a clamped knot vector of degree `p` with `m + 1` knots.
 fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
-    let m = knots.len().checked_sub(1).ok_or_else(|| bad(format!("{what}: no knots")))?;
+    let m = knots
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| bad(format!("{what}: no knots")))?;
     if knots.windows(2).any(|w| w.first() > w.last()) {
         return Err(bad(format!("{what}: knots not non-decreasing")));
     }
@@ -291,7 +294,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok(())
@@ -299,7 +304,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
 
 /// Checks that all points share their 2D / rational markers; returns whether 3D.
 fn check_points(pts: &[[f64; 4]], what: &str) -> Result<bool, FfiError> {
-    let [_, _, z0, w0] = *pts.first().ok_or_else(|| bad(format!("{what}: no points")))?;
+    let [_, _, z0, w0] = *pts
+        .first()
+        .ok_or_else(|| bad(format!("{what}: no points")))?;
     for &[_, _, z, w] in pts {
         if (z == NOZ) != (z0 == NOZ) || (w == NOW) != (w0 == NOW) {
             return Err(bad(format!("{what}: mixed dimension or rationality")));
@@ -323,7 +330,9 @@ fn surface(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
     let r = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
     let s = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
     if p == 0 || p > n || q == 0 || q > m || r != n + p + 1 || s != m + q + 1 {
-        return Err(bad("surface: need 1 <= p <= n, 1 <= q <= m, r = n+p+1, s = m+q+1"));
+        return Err(bad(
+            "surface: need 1 <= p <= n, 1 <= q <= m, r = n+p+1, s = m+q+1",
+        ));
     }
     let pts = points(rd, (n + 1) * (m + 1))?;
     let u = rd.finites(r + 1)?;
@@ -371,7 +380,10 @@ fn line_numbers(line: &str, min: usize) -> Result<Vec<f64>, FfiError> {
     }
     toks.iter()
         .map(|t| {
-            if !t.bytes().all(|c| c.is_ascii_digit() || b"+-.eE".contains(&c)) {
+            if !t
+                .bytes()
+                .all(|c| c.is_ascii_digit() || b"+-.eE".contains(&c))
+            {
                 return Err(bad("read_db: not a plain number"));
             }
             match t.parse::<f64>() {
@@ -396,7 +408,10 @@ fn check_db(bytes: &[u8], ascii: bool, version: usize) -> Result<(), FfiError> {
         let text = core::str::from_utf8(bytes).map_err(|_| bad("read_db: not text"))?;
         let mut lines = text.split('\n');
         let mut next = |min: usize| -> Result<Vec<f64>, FfiError> {
-            line_numbers(lines.next().ok_or_else(|| bad("read_db: too few lines"))?, min)
+            line_numbers(
+                lines.next().ok_or_else(|| bad("read_db: too few lines"))?,
+                min,
+            )
         };
         let l0 = next(2)?;
         let l1 = next(2)?;
@@ -429,14 +444,21 @@ fn check_db(bytes: &[u8], ascii: bool, version: usize) -> Result<(), FfiError> {
         Ok(())
     } else {
         let rd8 = |at: usize| -> Result<i64, FfiError> {
-            let b = bytes.get(at..at + 8).ok_or_else(|| bad("read_db: short header"))?;
+            let b = bytes
+                .get(at..at + 8)
+                .ok_or_else(|| bad("read_db: short header"))?;
             let mut a = [0u8; 8];
             a.copy_from_slice(b);
             Ok(i64::from_ne_bytes(a))
         };
         let rd2 = |at: usize| -> Result<i16, FfiError> {
-            let b = bytes.get(at..at + 2).ok_or_else(|| bad("read_db: short header"))?;
-            Ok(i16::from_ne_bytes([b.first().copied().unwrap_or(0), b.get(1).copied().unwrap_or(0)]))
+            let b = bytes
+                .get(at..at + 2)
+                .ok_or_else(|| bad("read_db: short header"))?;
+            Ok(i16::from_ne_bytes([
+                b.first().copied().unwrap_or(0),
+                b.get(1).copied().unwrap_or(0),
+            ]))
         };
         let size = |v: i64, max: usize| -> Result<usize, FfiError> {
             usize::try_from(v)

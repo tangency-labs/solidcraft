@@ -242,10 +242,13 @@ pub struct ShapeSelection {
 /// box), then `IsInShape` of every B-rep face, edge and vertex. Out-of-range
 /// indices are rejected by the shim.
 pub fn shape(source: &ShapeSource, sel: &ShapeSelection) -> Result<Vec<f64>, FfiError> {
-    let empty = !sel.whole_brep && sel.faces.is_empty() && sel.edges.is_empty() && sel.vertices.is_empty();
+    let empty =
+        !sel.whole_brep && sel.faces.is_empty() && sel.edges.is_empty() && sel.vertices.is_empty();
     let (code, bx, path) = match source {
         ShapeSource::None if empty => (0, [0.0; 6], None),
-        ShapeSource::None => return Err(FfiError::InvalidArgument("selection without B-rep".into())),
+        ShapeSource::None => {
+            return Err(FfiError::InvalidArgument("selection without B-rep".into()))
+        }
         ShapeSource::Box(b) => (1, *b, None),
         ShapeSource::File(p, ascii) => (
             2,

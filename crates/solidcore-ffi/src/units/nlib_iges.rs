@@ -174,7 +174,12 @@ pub fn iges_128(
     call(2, &input)
 }
 
-fn curve_input(p: usize, cpts: &[[f64; 4]], knots: &[f64], b: [f64; 2]) -> Result<Vec<f64>, FfiError> {
+fn curve_input(
+    p: usize,
+    cpts: &[[f64; 4]],
+    knots: &[f64],
+    b: [f64; 2],
+) -> Result<Vec<f64>, FfiError> {
     if p == 0 || p > MAX_DEGREE {
         return Err(bad("curve: degree outside 1..=17"));
     }
@@ -202,7 +207,9 @@ pub fn clamp_curve(
 ) -> Result<Vec<f64>, FfiError> {
     let input = curve_input(p, cpts, knots, b)?;
     if !valid_knots(knots, p, b) {
-        return Err(bad("clamp curve: knots / bounds fail the N_IgesValidate test"));
+        return Err(bad(
+            "clamp curve: knots / bounds fail the N_IgesValidate test",
+        ));
     }
     call(3, &input)
 }
@@ -211,7 +218,9 @@ pub fn clamp_curve(
 pub fn correct_curve(p: usize, cpts: &[[f64; 4]], knots: &[f64]) -> Result<Vec<f64>, FfiError> {
     let input = curve_input(p, cpts, knots, [0.0, 0.0])?;
     if !clamped_knots(knots, p) {
-        return Err(bad("correct curve: knots are not clamped and non-decreasing"));
+        return Err(bad(
+            "correct curve: knots are not clamped and non-decreasing",
+        ));
     }
     call(4, &input)
 }
@@ -238,7 +247,9 @@ fn surface_input(a: &SurfaceArgs<'_>, ub: [f64; 2], vb: [f64; 2]) -> Result<Vec<
     }
     let [rows, cols] = a.size;
     let n = rows.checked_sub(1).ok_or_else(|| bad("surface: no rows"))?;
-    let m = cols.checked_sub(1).ok_or_else(|| bad("surface: no columns"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| bad("surface: no columns"))?;
     index("n", n, MAX_INDEX)?;
     index("m", m, MAX_INDEX)?;
     index("net size", rows * cols, MAX_NET)?;
@@ -256,10 +267,16 @@ fn surface_input(a: &SurfaceArgs<'_>, ub: [f64; 2], vb: [f64; 2]) -> Result<Vec<
 }
 
 /// Upstream `N_IgesClampSrf` with bounds `ub`, `vb`.
-pub fn clamp_surface(a: &SurfaceArgs<'_>, ub: [f64; 2], vb: [f64; 2]) -> Result<Vec<f64>, FfiError> {
+pub fn clamp_surface(
+    a: &SurfaceArgs<'_>,
+    ub: [f64; 2],
+    vb: [f64; 2],
+) -> Result<Vec<f64>, FfiError> {
     let input = surface_input(a, ub, vb)?;
     if !valid_knots(a.u, a.deg[0], ub) || !valid_knots(a.v, a.deg[1], vb) {
-        return Err(bad("clamp surface: knots / bounds fail the N_IgesValidate test"));
+        return Err(bad(
+            "clamp surface: knots / bounds fail the N_IgesValidate test",
+        ));
     }
     call(5, &input)
 }
@@ -268,7 +285,9 @@ pub fn clamp_surface(a: &SurfaceArgs<'_>, ub: [f64; 2], vb: [f64; 2]) -> Result<
 pub fn correct_surface(a: &SurfaceArgs<'_>) -> Result<Vec<f64>, FfiError> {
     let input = surface_input(a, [0.0, 0.0], [0.0, 0.0])?;
     if !clamped_knots(a.u, a.deg[0]) || !clamped_knots(a.v, a.deg[1]) {
-        return Err(bad("correct surface: knots are not clamped and non-decreasing"));
+        return Err(bad(
+            "correct surface: knots are not clamped and non-decreasing",
+        ));
     }
     call(6, &input)
 }

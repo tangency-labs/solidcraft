@@ -125,7 +125,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let p = int(path, num()?)?;
     let rat = num()? != 0.0;
@@ -137,7 +140,9 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
         let w = if rat { num()? } else { NOW };
         cpts.push([x, y, z, w]);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineCrv { cpts, p, u })
 }
 
@@ -206,7 +211,10 @@ fn encode(i: &Inputs, c: &InlineCrv) -> Result<Vec<f64>, HarnessError> {
         .len()
         .checked_sub(1)
         .ok_or_else(|| harness("empty curve"))?;
-    let m = c.u.len().checked_sub(1).ok_or_else(|| harness("empty knots"))?;
+    let m =
+        c.u.len()
+            .checked_sub(1)
+            .ok_or_else(|| harness("empty knots"))?;
     let mut o = vec![n as f64, c.p as f64, m as f64];
     o.extend(c.cpts.iter().flatten());
     o.extend_from_slice(&c.u);
@@ -483,7 +491,11 @@ fn gen_line(rng: &mut Rng, pl: &Plane) -> InlineCrv {
 /// A circular arc or circle built by the port's `N_CreateCircArc`.
 fn gen_circle(rng: &mut Rng, pl: &Plane) -> Option<InlineCrv> {
     let full = rng.chance(0.3);
-    let end = if full { 360.0 } else { rng.uniform(10.0, 350.0) };
+    let end = if full {
+        360.0
+    } else {
+        rng.uniform(10.0, 350.0)
+    };
     let ctp = *rng.choose(&[ConicType::Quadratic, ConicType::Quartic, ConicType::Quintic])?;
     let [cx, cy, cz] = pl.point(0.0, 0.0);
     let cz = if pl.xy { 0.0 } else { cz };

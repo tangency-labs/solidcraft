@@ -371,7 +371,9 @@ fn tree(rd: &mut Reader<'_>, srf: &[f64; 4]) -> Result<usize, FfiError> {
         let c2 = rd.opt_index(n as i64)?;
         let aux = rd.index(6)?;
         if !matches!(aux, 4 | 6) {
-            return Err(bad("tree: aux type must be SM_AD_BEZIER_SURFACE_HEAD or SM_AD_AUX_DATA"));
+            return Err(bad(
+                "tree: aux type must be SM_AD_BEZIER_SURFACE_HEAD or SM_AD_AUX_DATA",
+            ));
         }
         rd.index(2)?;
         rd.flag()?;
@@ -459,7 +461,10 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
         }
         Op::BuildSub => {
             need(driver != 0, "build: upstream reads the driver unchecked")?;
-            need(n == 0, "build with subdivision: the tree must not exist (it would leak)")?;
+            need(
+                n == 0,
+                "build with subdivision: the tree must not exist (it would leak)",
+            )?;
         }
         Op::Implant => {
             let e = edges.ok_or_else(|| bad("implant: needs a poly B-rep"))?;

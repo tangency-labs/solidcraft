@@ -308,7 +308,9 @@ impl Sim {
                 self.int(i64::from(v));
             }
             op::GET_MODEL => {
-                let c = self.opt_ctx(s.ctx).ok_or_else(|| harness("context index"))?;
+                let c = self
+                    .opt_ctx(s.ctx)
+                    .ok_or_else(|| harness("context index"))?;
                 let a = c.this_model_size_estimate(&self.k);
                 let b = tol::context_model_size_estimate(&self.k, c);
                 self.float(a);
@@ -401,7 +403,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     ffi::validate(i.contexts.len(), i.slots, &steps).map_err(harness)?;
     let mut sim = Sim {
         k: kernel(i.sys_model, i.sys_ratio),
-        ctxs: i.contexts.iter().map(|c| Context::new(c[0], c[1])).collect(),
+        ctxs: i
+            .contexts
+            .iter()
+            .map(|c| Context::new(c[0], c[1]))
+            .collect(),
         slots: vec![None; i.slots],
         out: Vec::new(),
         api: None,

@@ -548,7 +548,9 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
     let mut state = State {
         knots: prog.knots.as_ref().is_some_and(|k| !k.is_empty()),
         breaks: prog.breaks.is_some(),
-        wi_max: prog.working_interval.map(|[a, b]| if a > b { a } else { b }),
+        wi_max: prog
+            .working_interval
+            .map(|[a, b]| if a > b { a } else { b }),
     };
     for arr in [&prog.knots, &prog.breaks] {
         e.flag(arr.is_some());

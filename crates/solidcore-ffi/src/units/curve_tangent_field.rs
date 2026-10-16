@@ -178,7 +178,9 @@ fn bspline(rd: &mut Reader<'_>, dim: usize) -> Result<(f64, f64), FfiError> {
     let (cpts, _) = cps.as_chunks::<4>();
     let [_, _, z0, w0] = *cpts.first().ok_or_else(|| bad("empty curve"))?;
     if (z0 == NOZ) != (dim == 2) {
-        return Err(bad("curve: 2D curves need z = f64::MAX, 3D curves a finite z"));
+        return Err(bad(
+            "curve: 2D curves need z = f64::MAX, 3D curves a finite z",
+        ));
     }
     for &[x, y, z, w] in cpts {
         if (z == NOZ) != (z0 == NOZ) || (w == NOW) != (w0 == NOW) {

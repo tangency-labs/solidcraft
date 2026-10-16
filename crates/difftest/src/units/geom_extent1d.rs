@@ -186,9 +186,7 @@ fn split(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
                 .ints("status_count", head)
                 .values("intervals", take(r, 2 * n, flat)?.to_vec())
         }
-        Inputs::DisjointPeriodic { .. } => {
-            Output::new().ints("disjoint", ints(take(r, 1, flat)?))
-        }
+        Inputs::DisjointPeriodic { .. } => Output::new().ints("disjoint", ints(take(r, 1, flat)?)),
         Inputs::ClampVector {
             exts, prior_counts, ..
         } => {
@@ -237,7 +235,12 @@ fn flat_input(i: &Inputs) -> (Op, Vec<f64>) {
             v.extend([*center, *half]);
             Op::ApproximateUnbounded
         }
-        Inputs::PeriodicValue { e, v: x, period, tol } => {
+        Inputs::PeriodicValue {
+            e,
+            v: x,
+            period,
+            tol,
+        } => {
             v.extend(e);
             v.extend([*x, *period, *tol]);
             Op::PeriodicValue
@@ -498,7 +501,8 @@ fn value(rng: &mut Rng, scale: f64) -> f64 {
     } else if r < 0.92 {
         rng.uniform(-1e-9, 1e-9)
     } else {
-        *rng.choose(&[0.0, -0.0, 360.0, 90.0, 1e6, -1e6]).unwrap_or(&0.0)
+        *rng.choose(&[0.0, -0.0, 360.0, 90.0, 1e6, -1e6])
+            .unwrap_or(&0.0)
     }
 }
 
@@ -564,8 +568,19 @@ fn value_near(rng: &mut Rng, e: &E2, scale: f64) -> f64 {
 }
 
 fn tol(rng: &mut Rng) -> f64 {
-    *rng.choose(&[0.0, 0.0, EFF_ZERO, 1e-9, 1e-6, EFF_ZERO_DEG, 0.01, 0.5, -1e-6, -1.0])
-        .unwrap_or(&0.0)
+    *rng.choose(&[
+        0.0,
+        0.0,
+        EFF_ZERO,
+        1e-9,
+        1e-6,
+        EFF_ZERO_DEG,
+        0.01,
+        0.5,
+        -1e-6,
+        -1.0,
+    ])
+    .unwrap_or(&0.0)
 }
 
 /// A period: a common domain length, `e`'s length (closed), nearly it, 0 or random.
@@ -573,7 +588,9 @@ fn period(rng: &mut Rng, e: &E2, scale: f64) -> f64 {
     let len = e[1] - e[0];
     match rng.below(8) {
         0 => 0.0,
-        1 => *rng.choose(&[360.0, TWO_PI, 1.0, 2.0, 4.0, 5.0, 10.0]).unwrap_or(&1.0),
+        1 => *rng
+            .choose(&[360.0, TWO_PI, 1.0, 2.0, 4.0, 5.0, 10.0])
+            .unwrap_or(&1.0),
         2 | 3 => len,
         4 => len + *rng.choose(&NUDGES).unwrap_or(&0.0),
         5 => len * rng.uniform(1.0, 3.0),
@@ -634,12 +651,18 @@ fn gen_once(rng: &mut Rng) -> Inputs {
             } else {
                 interval(rng, scale)
             };
-            Inputs::Binary { e, f, tol: tol(rng) }
+            Inputs::Binary {
+                e,
+                f,
+                tol: tol(rng),
+            }
         }
         9 => Inputs::ApproximateUnbounded {
             e,
             center: value(rng, scale),
-            half: *rng.choose(&[33.0, 1.0, 10.0, 0.0, -5.0, 1e-3]).unwrap_or(&33.0),
+            half: *rng
+                .choose(&[33.0, 1.0, 10.0, 0.0, -5.0, 1e-3])
+                .unwrap_or(&33.0),
         },
         10..=13 => {
             let p = period(rng, &e, scale);

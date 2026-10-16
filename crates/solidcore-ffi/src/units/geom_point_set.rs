@@ -110,18 +110,28 @@ pub fn run(
     normal: Option<[f64; 3]>,
     prog: &[Cmd],
 ) -> Result<Vec<f64>, FfiError> {
-    if points.is_empty() && prog.iter().any(|c| matches!(c, Cmd::Area | Cmd::Containment(_))) {
-        return Err(FfiError::InvalidArgument("area/containment of an empty point set".into()));
+    if points.is_empty()
+        && prog
+            .iter()
+            .any(|c| matches!(c, Cmd::Area | Cmd::Containment(_)))
+    {
+        return Err(FfiError::InvalidArgument(
+            "area/containment of an empty point set".into(),
+        ));
     }
-    if points.is_empty() && normal.is_some() && prog.iter().any(|c| matches!(c, Cmd::TightPBox(_))) {
-        return Err(FfiError::InvalidArgument("tight box of an empty planar point set".into()));
+    if points.is_empty() && normal.is_some() && prog.iter().any(|c| matches!(c, Cmd::TightPBox(_)))
+    {
+        return Err(FfiError::InvalidArgument(
+            "tight box of an empty planar point set".into(),
+        ));
     }
     let flat_pts: Vec<f64> = points.iter().flatten().copied().collect();
     let mut flat = Vec::new();
     for c in prog {
         c.encode(&mut flat);
     }
-    let n_pts = i64::try_from(points.len()).map_err(|_| FfiError::InvalidArgument("points".into()))?;
+    let n_pts =
+        i64::try_from(points.len()).map_err(|_| FfiError::InvalidArgument("points".into()))?;
     let n_prog = i64::try_from(flat.len()).map_err(|_| FfiError::InvalidArgument("prog".into()))?;
     let nrm = normal.unwrap_or([0.0; 3]);
     let cap_hint = 3 + prog.iter().map(|c| c.output_len()).sum::<usize>();

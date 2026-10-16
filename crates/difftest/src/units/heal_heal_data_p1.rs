@@ -216,17 +216,13 @@ fn gen_script(rng: &mut Rng) -> Script {
         steps.push(Step::FaceSnapshot);
     }
     if rng.chance(0.2) {
-        steps.push(Step::MoveToNotYet {
-            sel: rng.below(64),
-        });
+        steps.push(Step::MoveToNotYet { sel: rng.below(64) });
     }
     if rng.chance(0.7) {
         steps.push(Step::FixBadSheets);
     }
     if rng.chance(0.3) {
-        steps.push(Step::RemoveFaceProps {
-            sel: rng.below(64),
-        });
+        steps.push(Step::RemoveFaceProps { sel: rng.below(64) });
     }
     if rng.chance(0.5) {
         steps.push(Step::SetDoneHealOp {

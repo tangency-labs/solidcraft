@@ -205,7 +205,8 @@ impl CurveInfo {
         }
         let far = |i: usize, j: usize| match (self.pts.get(i), self.pts.get(j)) {
             (Some(a), Some(b)) => {
-                let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+                let d =
+                    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
                 d > 1e-150 && d < 1e150
             }
             _ => false,

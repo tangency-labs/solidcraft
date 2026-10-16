@@ -431,7 +431,12 @@ pub fn check_mem(
     if !(MT_FULL..=MT_BANDED).contains(&req.2) {
         return Err(bad(format!("matrix type {}", req.2)));
     }
-    let r = [i64_of(req.0)?, i64_of(req.1)?, i64::from(req.2), i64_of(req.3)?];
+    let r = [
+        i64_of(req.0)?,
+        i64_of(req.1)?,
+        i64::from(req.2),
+        i64_of(req.3)?,
+    ];
     let mut out = [0i64; 5];
     // SAFETY: data/meta are null or valid (meta has 6 entries, data rows*cols); upstream
     // only reads the metadata; r has 4 entries, out 5 writable.

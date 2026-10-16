@@ -82,7 +82,9 @@ fn validate_spatial(prog: &[f64]) -> Result<(), FfiError> {
         if i + 1 + sz > prog.len() {
             return Err(bad("truncated program"));
         }
-        let a = prog.get(i + 1..i + 1 + sz).ok_or_else(|| bad("truncated program"))?;
+        let a = prog
+            .get(i + 1..i + 1 + sz)
+            .ok_or_else(|| bad("truncated program"))?;
         if (op <= 1) != (i == 0) {
             return Err(bad("constructor must be first and only"));
         }
@@ -173,7 +175,9 @@ pub fn subdiv(desc: &[i64], prog: &[i64]) -> Result<Vec<i64>, FfiError> {
         if i + 1 + sz > prog.len() {
             return Err(bad("truncated program"));
         }
-        let a = prog.get(i + 1..i + 1 + sz).ok_or_else(|| bad("truncated program"))?;
+        let a = prog
+            .get(i + 1..i + 1 + sz)
+            .ok_or_else(|| bad("truncated program"))?;
         if sz >= 1 && !(0..n_nodes).contains(&at(a, 0)?) {
             return Err(bad("node index"));
         }

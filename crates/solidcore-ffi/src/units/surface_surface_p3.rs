@@ -97,7 +97,10 @@ fn points(rd: &mut Reader<'_>, bounds: &[(f64, f64)]) -> Result<(), FfiError> {
 /// The bounds of the `(u, v)` parameters of a surface (one domain length around it).
 fn uv_bounds(dom: Domain) -> Vec<(f64, f64)> {
     match dom {
-        Some([u0, v0, u1, v1]) => vec![(u0 - (u1 - u0), u1 + (u1 - u0)), (v0 - (v1 - v0), v1 + (v1 - v0))],
+        Some([u0, v0, u1, v1]) => vec![
+            (u0 - (u1 - u0), u1 + (u1 - u0)),
+            (v0 - (v1 - v0), v1 + (v1 - v0)),
+        ],
         None => vec![(-1e4, 1e4), (-1e4, 1e4)],
     }
 }
@@ -183,7 +186,10 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             let d2 = surface_rev(&mut rd)?;
             domain_in(&mut rd, dom)?;
             domain_in(&mut rd, d2)?;
-            let s = sop(&mut rd, &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN])?;
+            let s = sop(
+                &mut rd,
+                &[SO_MINIMIZE, SO_MAXIMIZE, SO_NORMALIZE, SO_SIGNED_MIN],
+            )?;
             let n = vectors(&mut rd)?;
             if s == SO_SIGNED_MIN && n == 0 {
                 return Err(bad("signed directed solve needs a vector"));

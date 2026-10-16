@@ -189,7 +189,10 @@ fn entity<'a>(rd: &mut Reader<'a>, width: usize, zero: Zero) -> Result<Entity<'a
 }
 
 fn function<'a>(rd: &mut Reader<'a>, zero: Zero) -> Result<&'a [f64], FfiError> {
-    let Entity { coefs: values, knots } = entity(rd, 1, zero)?;
+    let Entity {
+        coefs: values,
+        knots,
+    } = entity(rd, 1, zero)?;
     if values.iter().any(|v| !v.is_finite()) {
         return Err(bad("function: non-finite value"));
     }

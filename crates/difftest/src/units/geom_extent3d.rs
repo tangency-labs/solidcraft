@@ -62,31 +62,108 @@ type E6 = [f64; 6];
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Inputs {
-    FromPoints { a: P3, b: P3 },
-    FromPoint { p: P3 },
+    FromPoints {
+        a: P3,
+        b: P3,
+    },
+    FromPoint {
+        p: P3,
+    },
     New {},
-    AddPoints { e: E6, pts: Vec<P3> },
-    SetMinMax { e: E6, min: P3, max: P3 },
-    SetMinMaxCoords { e: E6, c: E6 },
-    SetBound { e: E6, which: u8, v: f64 },
-    Queries { e: E6, tol: f64 },
-    Evaluate { e: E6, n: P3 },
-    Union { e: E6, f: E6 },
-    Intersect { e: E6, f: E6 },
-    Distances { e: E6, f: E6 },
-    ExpandRelative { e: E6, factor: f64 },
-    ExpandAbsolute { e: E6, amount: f64 },
-    CornersEdgesPlanes { e: E6 },
-    SphereBound { e: E6 },
-    ConeBoundTo { e: E6, f: E6 },
-    DisjointContained { e: E6, f: E6, tol: f64 },
-    PointPredicates { e: E6, p: P3, tol: f64 },
-    ContainsLineSeg { e: E6, p: P3, q: P3, tol: f64 },
-    IntersectLine { e: E6, p: P3, v: P3 },
-    SetUnbounded { e: E6 },
-    ApproximateUnbounded { e: E6, center: Option<P3>, half_size: f64 },
-    Circumscribe { basis: [P3; 3], intervals: [[f64; 2]; 3] },
-    Intervals { e: E6, u: [f64; 2], v: [f64; 2] },
+    AddPoints {
+        e: E6,
+        pts: Vec<P3>,
+    },
+    SetMinMax {
+        e: E6,
+        min: P3,
+        max: P3,
+    },
+    SetMinMaxCoords {
+        e: E6,
+        c: E6,
+    },
+    SetBound {
+        e: E6,
+        which: u8,
+        v: f64,
+    },
+    Queries {
+        e: E6,
+        tol: f64,
+    },
+    Evaluate {
+        e: E6,
+        n: P3,
+    },
+    Union {
+        e: E6,
+        f: E6,
+    },
+    Intersect {
+        e: E6,
+        f: E6,
+    },
+    Distances {
+        e: E6,
+        f: E6,
+    },
+    ExpandRelative {
+        e: E6,
+        factor: f64,
+    },
+    ExpandAbsolute {
+        e: E6,
+        amount: f64,
+    },
+    CornersEdgesPlanes {
+        e: E6,
+    },
+    SphereBound {
+        e: E6,
+    },
+    ConeBoundTo {
+        e: E6,
+        f: E6,
+    },
+    DisjointContained {
+        e: E6,
+        f: E6,
+        tol: f64,
+    },
+    PointPredicates {
+        e: E6,
+        p: P3,
+        tol: f64,
+    },
+    ContainsLineSeg {
+        e: E6,
+        p: P3,
+        q: P3,
+        tol: f64,
+    },
+    IntersectLine {
+        e: E6,
+        p: P3,
+        v: P3,
+    },
+    SetUnbounded {
+        e: E6,
+    },
+    ApproximateUnbounded {
+        e: E6,
+        center: Option<P3>,
+        half_size: f64,
+    },
+    Circumscribe {
+        basis: [P3; 3],
+        intervals: [[f64; 2]; 3],
+    },
+    Intervals {
+        e: E6,
+        u: [f64; 2],
+        v: [f64; 2],
+    },
 }
 
 /// Kind of an output slot.
@@ -145,7 +222,9 @@ fn layout(i: &Inputs) -> &'static [(&'static str, usize, K)] {
         Inputs::SphereBound { .. } => &[("center", 3, K::F), ("radii", 2, K::F)],
         Inputs::ConeBoundTo { .. } => &[("status", 1, K::I), ("axis", 3, K::F), ("angle", 1, K::F)],
         Inputs::DisjointContained { .. } => &[("disjoint_contained", 2, K::I)],
-        Inputs::PointPredicates { .. } => &[("contains_on_boundary", 2, K::I), ("binormal", 3, K::F)],
+        Inputs::PointPredicates { .. } => {
+            &[("contains_on_boundary", 2, K::I), ("binormal", 3, K::F)]
+        }
         Inputs::ContainsLineSeg { .. } => &[("contains", 1, K::I)],
         Inputs::IntersectLine { .. } => &[("status", 1, K::I), ("count", 1, K::I), ("t", 2, K::F)],
         Inputs::ApproximateUnbounded { .. } => &[("approx", 6, K::F), ("expanded", 6, K::F)],
@@ -267,7 +346,10 @@ fn flat_input(i: &Inputs) -> (Op, Vec<f64>) {
             v.extend(n);
             Op::Evaluate
         }
-        Inputs::Union { e, f } | Inputs::Intersect { e, f } | Inputs::Distances { e, f } | Inputs::ConeBoundTo { e, f } => {
+        Inputs::Union { e, f }
+        | Inputs::Intersect { e, f }
+        | Inputs::Distances { e, f }
+        | Inputs::ConeBoundTo { e, f } => {
             v.extend(e);
             v.extend(f);
             match i {
@@ -404,7 +486,14 @@ fn rust_flat(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
         Inputs::Queries { e, tol } => {
             let x = ext(*e);
             o.extend(x.mid().to_array());
-            o.extend([x.u_min(), x.u_max(), x.v_min(), x.v_max(), x.w_min(), x.w_max()]);
+            o.extend([
+                x.u_min(),
+                x.u_max(),
+                x.v_min(),
+                x.v_max(),
+                x.w_min(),
+                x.w_max(),
+            ]);
             for k in 0..4 {
                 o.push(x.min_at(k));
                 o.push(x.max_at(k));
@@ -508,10 +597,7 @@ fn rust_flat(i: &Inputs) -> Result<Result<Vec<f64>, Output>, HarnessError> {
         }
         Inputs::Circumscribe { basis, intervals } => {
             let ivl = |i: [f64; 2]| Extent1d::from_min_max(i[0], i[1]);
-            let pb = PseudoBox::from_basis_intervals(
-                basis.map(pt),
-                intervals.map(ivl),
-            );
+            let pb = PseudoBox::from_basis_intervals(basis.map(pt), intervals.map(ivl));
             o.extend(ext6(&Extent3d::from_pseudo_box(&pb)));
         }
         Inputs::Intervals { e, u, v } => {
@@ -548,7 +634,8 @@ fn coord(rng: &mut Rng, scale: f64) -> f64 {
     } else if r < 0.92 {
         rng.uniform(-1e-9, 1e-9)
     } else {
-        *rng.choose(&[0.0, -0.0, 1e6, -1e6, 1e15, -1e15]).unwrap_or(&0.0)
+        *rng.choose(&[0.0, -0.0, 1e6, -1e6, 1e15, -1e15])
+            .unwrap_or(&0.0)
     }
 }
 
@@ -623,8 +710,16 @@ fn point_near(rng: &mut Rng, e: &E6, scale: f64) -> P3 {
             0 => l,
             1 => h,
             2 => l + rng.uniform(0.0, 1.0) * (h - l),
-            3 => l - *rng.choose(&[1e-13, 1e-12, 2e-12, 1e-6, 0.5]).unwrap_or(&0.0),
-            _ => h + *rng.choose(&[1e-13, 1e-12, 2e-12, 1e-6, 0.5]).unwrap_or(&0.0),
+            3 => {
+                l - *rng
+                    .choose(&[1e-13, 1e-12, 2e-12, 1e-6, 0.5])
+                    .unwrap_or(&0.0)
+            }
+            _ => {
+                h + *rng
+                    .choose(&[1e-13, 1e-12, 2e-12, 1e-6, 0.5])
+                    .unwrap_or(&0.0)
+            }
         };
     }
     p
@@ -723,7 +818,11 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
         14 => Inputs::CornersEdgesPlanes { e },
         15 => Inputs::SphereBound { e },
         16 => {
-            let f = if rng.chance(0.2) { e } else { extent(rng, scale) };
+            let f = if rng.chance(0.2) {
+                e
+            } else {
+                extent(rng, scale)
+            };
             Inputs::ConeBoundTo { e, f }
         }
         17 => Inputs::DisjointContained {
@@ -761,7 +860,11 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
         23 => {
             let mut ivl = || {
                 let a = coord(rng, scale);
-                let b = if rng.chance(0.2) { a } else { coord(rng, scale) };
+                let b = if rng.chance(0.2) {
+                    a
+                } else {
+                    coord(rng, scale)
+                };
                 [a, b]
             };
             let u = ivl();

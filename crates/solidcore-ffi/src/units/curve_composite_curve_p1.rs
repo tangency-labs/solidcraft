@@ -400,7 +400,11 @@ fn check_approx(curves: &[CurveInfo]) -> Result<(), FfiError> {
         if c.kind == 2 || c.dim != 3 {
             return Err(bad("approx: only 3D B-spline and Hermite segments"));
         }
-        let d = [c.end[0] - c.start[0], c.end[1] - c.start[1], c.end[2] - c.start[2]];
+        let d = [
+            c.end[0] - c.start[0],
+            c.end[1] - c.start[1],
+            c.end[2] - c.start[2],
+        ];
         if c.kind == 1 && len_sq(d) < 1e-6 {
             return Err(bad("approx: degenerate Hermite segment"));
         }
@@ -409,8 +413,16 @@ fn check_approx(curves: &[CurveInfo]) -> Result<(), FfiError> {
         let (Some(p), Some(q)) = (w.first(), w.last()) else {
             continue;
         };
-        let size = p.end.iter().chain(&q.start).fold(1.0f64, |m, v| m.max(v.abs()));
-        let d = [q.start[0] - p.end[0], q.start[1] - p.end[1], q.start[2] - p.end[2]];
+        let size = p
+            .end
+            .iter()
+            .chain(&q.start)
+            .fold(1.0f64, |m, v| m.max(v.abs()));
+        let d = [
+            q.start[0] - p.end[0],
+            q.start[1] - p.end[1],
+            q.start[2] - p.end[2],
+        ];
         if len_sq(d).sqrt() > 1e-9 * size {
             return Err(bad("approx: segments not connected (the join fails)"));
         }
@@ -426,7 +438,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
         }
         Op::Knots => {
             if composite_block(rd)?.len() > 1 {
-                return Err(bad("knots: more than one segment reads past the knot array"));
+                return Err(bad(
+                    "knots: more than one segment reads past the knot array",
+                ));
             }
         }
         Op::BBox => {

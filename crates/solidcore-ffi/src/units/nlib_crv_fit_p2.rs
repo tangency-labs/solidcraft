@@ -411,7 +411,12 @@ pub fn knots_derivs(u: &[f64], p: usize) -> Result<Vec<f64>, FfiError> {
 }
 
 /// `N_FitCalcKnotsHighEndDerivs(u, n, p, k, l, knt)` with `n = len - 1`.
-pub fn knots_high_end_derivs(u: &[f64], p: usize, k: usize, l: usize) -> Result<Vec<f64>, FfiError> {
+pub fn knots_high_end_derivs(
+    u: &[f64],
+    p: usize,
+    k: usize,
+    l: usize,
+) -> Result<Vec<f64>, FfiError> {
     check_count(u.len(), "parameters")?;
     check_finite(u, "parameters")?;
     if p > MAX_KNOT_DEGREE || k > MAX_KNOT_DEGREE || l > MAX_KNOT_DEGREE {

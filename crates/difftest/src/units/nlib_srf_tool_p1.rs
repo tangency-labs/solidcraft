@@ -151,8 +151,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -165,9 +169,15 @@ fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 
 /// `(n, m)` of a rectangular net.
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -187,7 +197,11 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("rust surface: {e}")))
@@ -212,7 +226,12 @@ fn count(x: f64) -> Result<usize, HarnessError> {
 
 /// Splits a surface dump starting at `at` into `<pfx>dims`, `<pfx>net`, `<pfx>u`,
 /// `<pfx>v`.
-fn split_srf(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+fn split_srf(
+    flat: &[f64],
+    at: &mut usize,
+    pfx: &str,
+    mut out: Output,
+) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 6)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m, r, s) = (dim(0)?, dim(1)?, dim(4)?, dim(5)?);
@@ -243,7 +262,9 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
     out = out.values("status", status);
     if ok {
         match i {
-            Inputs::InsertKnot { .. } | Inputs::InsertKnots { .. } | Inputs::ExtractPatch { .. } => {
+            Inputs::InsertKnot { .. }
+            | Inputs::InsertKnots { .. }
+            | Inputs::ExtractPatch { .. } => {
                 out = split_srf(flat, &mut at, "", out)?;
             }
             Inputs::Split { .. } => {
@@ -283,7 +304,11 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let flag = |b: bool| if b { 1.0 } else { 0.0 };
     let op = match i {
         Inputs::InsertKnot {
-            t, mt, dir, inplace, ..
+            t,
+            mt,
+            dir,
+            inplace,
+            ..
         } => {
             o.extend([*t, *mt as f64, f64::from(*dir), flag(*inplace)]);
             Op::InsertKnot
@@ -297,7 +322,9 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             o.extend([*t, f64::from(*dir)]);
             Op::IsoCurve
         }
-        Inputs::InsertKnots { x, dir, inplace, .. } => {
+        Inputs::InsertKnots {
+            x, dir, inplace, ..
+        } => {
             o.extend([f64::from(*dir), flag(*inplace), x.len() as f64]);
             o.extend_from_slice(x);
             Op::InsertKnots
@@ -448,7 +475,11 @@ fn knots(rng: &mut Rng, cnt: usize, p: usize, a: f64, b: f64) -> Vec<f64> {
             if mult < p {
                 mid.push(x);
             } else {
-                mid.push(rng.uniform(a, b).max(a + (b - a) * 1e-3).min(b - (b - a) * 1e-3));
+                mid.push(
+                    rng.uniform(a, b)
+                        .max(a + (b - a) * 1e-3)
+                        .min(b - (b - a) * 1e-3),
+                );
             }
         }
     }
@@ -472,9 +503,13 @@ fn knots_valid(u: &[f64], p: usize) -> bool {
         }
     }
     first < last
-        && runs
-            .iter()
-            .all(|&(x, k)| if x == first || x == last { k == p + 1 } else { k <= p })
+        && runs.iter().all(|&(x, k)| {
+            if x == first || x == last {
+                k == p + 1
+            } else {
+                k <= p
+            }
+        })
 }
 
 fn weight(rng: &mut Rng) -> f64 {
@@ -581,7 +616,11 @@ fn gen_dir(rng: &mut Rng) -> i32 {
 fn gen_case(rng: &mut Rng) -> Inputs {
     let s = gen_srf(rng);
     let dir = gen_dir(rng);
-    let (k, deg) = if dir == 2 { (s.v.clone(), s.q) } else { (s.u.clone(), s.p) };
+    let (k, deg) = if dir == 2 {
+        (s.v.clone(), s.q)
+    } else {
+        (s.u.clone(), s.p)
+    };
     let inplace = rng.chance(0.3);
     match rng.below(6) {
         0 => {
@@ -608,7 +647,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         },
         3 => {
             // Iso-curve: the parameter is in the other direction's knots.
-            let (k2, _) = if dir == 1 { (s.v.clone(), s.q) } else { (s.u.clone(), s.p) };
+            let (k2, _) = if dir == 1 {
+                (s.v.clone(), s.q)
+            } else {
+                (s.u.clone(), s.p)
+            };
             let t = param(rng, &k2, true);
             Inputs::IsoCurve {
                 sur: SrfIn::Inline(s),
@@ -617,7 +660,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             }
         }
         4 => {
-            let cnt = if rng.chance(0.05) { 0 } else { 1 + rng.below(6) as usize };
+            let cnt = if rng.chance(0.05) {
+                0
+            } else {
+                1 + rng.below(6) as usize
+            };
             let mut x: Vec<f64> = (0..cnt).map(|_| param(rng, &k, false)).collect();
             x.sort_by(f64::total_cmp);
             Inputs::InsertKnots {

@@ -334,7 +334,9 @@ fn encode(d: &PolyDesc, op: &Op) -> Result<Vec<f64>, FfiError> {
             normal,
         } => {
             if *pseudo && points.is_none() {
-                return Err(bad("pseudo box without a point array (upstream null dereference)"));
+                return Err(bad(
+                    "pseudo box without a point array (upstream null dereference)",
+                ));
             }
             v.push(b(*pseudo));
             match points {
@@ -445,7 +447,14 @@ fn encode(d: &PolyDesc, op: &Op) -> Result<Vec<f64>, FfiError> {
                         if c < nf {
                             return Err(bad("not a composite face"));
                         }
-                        [5.0, live_face(&face_alive, c)?, idx(f, n_all_faces, "face")?, 0.0, 0.0, 0.0]
+                        [
+                            5.0,
+                            live_face(&face_alive, c)?,
+                            idx(f, n_all_faces, "face")?,
+                            0.0,
+                            0.0,
+                            0.0,
+                        ]
                     }
                     Mutation::SetNormalUninit(f) => {
                         [6.0, live_face(&face_alive, f)?, 0.0, 0.0, 0.0, 0.0]
@@ -492,7 +501,10 @@ pub fn run(d: &PolyDesc, op: &Op) -> Result<Vec<Section>, FfiError> {
     let mut secs = Vec::new();
     let mut at = 0usize;
     while at < out.len() {
-        let &[key, kind, n] = out.get(at..at + 3).ok_or_else(|| bad("truncated section"))? else {
+        let &[key, kind, n] = out
+            .get(at..at + 3)
+            .ok_or_else(|| bad("truncated section"))?
+        else {
             return Err(bad("truncated section"));
         };
         let (key, n) = (key as i32, n as usize);

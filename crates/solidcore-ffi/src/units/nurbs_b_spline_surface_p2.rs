@@ -244,7 +244,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok(())
@@ -252,7 +254,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
 
 /// Checks that all points are 3D and share their rational marker.
 fn check_points(pts: &[[f64; 4]], what: &str) -> Result<(), FfiError> {
-    let [_, _, _, w0] = *pts.first().ok_or_else(|| bad(format!("{what}: no points")))?;
+    let [_, _, _, w0] = *pts
+        .first()
+        .ok_or_else(|| bad(format!("{what}: no points")))?;
     for &[_, _, z, w] in pts {
         if z == NOZ {
             return Err(bad(format!("{what}: 2D data")));

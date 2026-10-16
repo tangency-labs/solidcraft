@@ -159,10 +159,24 @@ fn output(open_status: i64, recs: &[Rec]) -> Output {
         .int("open_status", open_status)
         .ints("status", recs.iter().map(|r| r.status).collect::<Vec<_>>())
         .ints("state", recs.iter().map(|r| r.state).collect::<Vec<_>>())
-        .ints("position", recs.iter().map(|r| r.position).collect::<Vec<_>>())
-        .ints("n_ints", recs.iter().map(|r| r.ints.len() as i64).collect::<Vec<_>>())
-        .ints("n_dbls", recs.iter().map(|r| r.dbls.len() as i64).collect::<Vec<_>>())
-        .ints("ints", recs.iter().flat_map(|r| r.ints.iter().copied()).collect::<Vec<_>>())
+        .ints(
+            "position",
+            recs.iter().map(|r| r.position).collect::<Vec<_>>(),
+        )
+        .ints(
+            "n_ints",
+            recs.iter().map(|r| r.ints.len() as i64).collect::<Vec<_>>(),
+        )
+        .ints(
+            "n_dbls",
+            recs.iter().map(|r| r.dbls.len() as i64).collect::<Vec<_>>(),
+        )
+        .ints(
+            "ints",
+            recs.iter()
+                .flat_map(|r| r.ints.iter().copied())
+                .collect::<Vec<_>>(),
+        )
         .ints("dbl_bits", bits)
         .values("dbls", dbls)
 }
@@ -298,9 +312,7 @@ fn rust_op(r: &mut DatabaseReader, code: i64, arg: i64) -> Result<Rec, HarnessEr
             status_of(&e)?
         }
     };
-    let state = r
-        .in_stream()
-        .map_or(-1, |s| i64::from(s.state().bits()));
+    let state = r.in_stream().map_or(-1, |s| i64::from(s.state().bits()));
     let position = r.in_stream().map_or(-1, |s| s.position() as i64);
     Ok(Rec {
         status,
@@ -318,7 +330,10 @@ fn run_rust_script(i: &Inputs) -> Result<Output, HarnessError> {
     let mut reader = match i.source {
         SourceKind::Bytes => DatabaseReader::with_stream(ft, InputStream::new(bytes_of(i))),
         SourceKind::File => {
-            let path = i.path.as_deref().ok_or_else(|| HarnessError::new("no path"))?;
+            let path = i
+                .path
+                .as_deref()
+                .ok_or_else(|| HarnessError::new("no path"))?;
             // The caller loads the file (the library has no filesystem access); a
             // file that cannot be opened is upstream's SM_ERR_INVALID_INPUT.
             if let Ok(bytes) = std::fs::read(path) {
@@ -379,16 +394,68 @@ fn run_cpp_script(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generator ------------------------------------------------------------------
 
 const ASCII_TOKENS: &[&str] = &[
-    "0", "00", "7", "-12", "+5", "-", "+", "+-3", "123456789", "-0", "0x1F", "99999999999999999999",
-    "9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809",
-    "18446744073709551615", "18446744073709551616", "-1", "40000", "-40000", "3000000000",
-    "-3000000000", "1.5", "-0.25", "1e3", "1E-3", "1e", "1e+", "1e-x", ".5", "5.", ".", "-.5",
-    "1.2.3", "1e999", "-1e999", "1e-400", "4.9e-324", "2.2250738585072014e-308", "0.1",
-    "6.2831853070000000", "13.1710542148281780", "00012.5e-2", "nan", "inf", "Object", "Type",
-    "Curve", "Dim", "SmLine", "//PolyBrep", "-", "abc", "x9", "9x", "1,5",
+    "0",
+    "00",
+    "7",
+    "-12",
+    "+5",
+    "-",
+    "+",
+    "+-3",
+    "123456789",
+    "-0",
+    "0x1F",
+    "99999999999999999999",
+    "9223372036854775807",
+    "9223372036854775808",
+    "-9223372036854775808",
+    "-9223372036854775809",
+    "18446744073709551615",
+    "18446744073709551616",
+    "-1",
+    "40000",
+    "-40000",
+    "3000000000",
+    "-3000000000",
+    "1.5",
+    "-0.25",
+    "1e3",
+    "1E-3",
+    "1e",
+    "1e+",
+    "1e-x",
+    ".5",
+    "5.",
+    ".",
+    "-.5",
+    "1.2.3",
+    "1e999",
+    "-1e999",
+    "1e-400",
+    "4.9e-324",
+    "2.2250738585072014e-308",
+    "0.1",
+    "6.2831853070000000",
+    "13.1710542148281780",
+    "00012.5e-2",
+    "nan",
+    "inf",
+    "Object",
+    "Type",
+    "Curve",
+    "Dim",
+    "SmLine",
+    "//PolyBrep",
+    "-",
+    "abc",
+    "x9",
+    "9x",
+    "1,5",
 ];
 
-const SEPARATORS: &[&str] = &[" ", " ", " ", "  ", "\t", "\n", "\n", "\r\n", "\x0b", "\x0c", ""];
+const SEPARATORS: &[&str] = &[
+    " ", " ", " ", "  ", "\t", "\n", "\n", "\r\n", "\x0b", "\x0c", "",
+];
 
 const ASCII_OPS: &[&str] = &[
     "extract_word",

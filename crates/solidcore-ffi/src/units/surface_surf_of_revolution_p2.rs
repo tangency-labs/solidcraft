@@ -24,7 +24,7 @@
 //! `[-360, 360]` and at most 360 long), non-negative tolerances, independent plane axes,
 //! and finite non-negative tolerance scales.
 
-use super::surface_surf_of_revolution_p1::{check_surface, push_surf, SurfaceData, Surf};
+use super::surface_surf_of_revolution_p1::{check_surface, push_surf, Surf, SurfaceData};
 use crate::{call_with_buffer, FfiError};
 
 mod sys {

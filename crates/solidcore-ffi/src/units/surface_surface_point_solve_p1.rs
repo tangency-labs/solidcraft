@@ -230,7 +230,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                 (p.srf.dom[0], p.srf.dom[2])
             };
             if c < lo || c > hi {
-                return Err(bad("drop to iso curve: crease value outside the surface domain"));
+                return Err(bad(
+                    "drop to iso curve: crease value outside the surface domain",
+                ));
             }
             rd.finite()?;
         }

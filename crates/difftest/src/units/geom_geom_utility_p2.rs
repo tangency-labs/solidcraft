@@ -196,9 +196,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             .values("plane", take(v, 1, 8)),
         Op::Mult4x4 | Op::Inverse4x4 => Output::new().values("m", take(v, 0, 16)),
         Op::Frenet => Output::new().values("frame", v.clone()),
-        Op::Continuity => {
-            Output::new().int("type", v.first().copied().unwrap_or(-1.0) as i64)
-        }
+        Op::Continuity => Output::new().int("type", v.first().copied().unwrap_or(-1.0) as i64),
     })
 }
 
@@ -280,9 +278,9 @@ fn rust_run(op: Op, i: &Inputs) -> solidcore::Result<Output> {
                 gu::CurveIntersection::Points(p) => Output::new()
                     .int("count", p.len() as i64)
                     .values("points", flat(&p)),
-                gu::CurveIntersection::Coincident => Output::new()
-                    .int("count", 3)
-                    .values("points", Vec::new()),
+                gu::CurveIntersection::Coincident => {
+                    Output::new().int("count", 3).values("points", Vec::new())
+                }
             }
         }
         Op::LineEllipse => {
@@ -386,7 +384,11 @@ fn unit(rng: &mut Rng) -> Vec3 {
     let v = match rng.below(6) {
         0 => pick(rng, &[Vec3::X, Vec3::Y, Vec3::Z]) * if rng.chance(0.5) { 1.0 } else { -1.0 },
         1 => Vec3::new(1.0, rng.uniform(-1e-7, 1e-7), rng.uniform(-1e-7, 1e-7)),
-        _ => Vec3::new(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)),
+        _ => Vec3::new(
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+        ),
     };
     v.unitize().unwrap_or(Vec3::Z)
 }
@@ -411,7 +413,11 @@ fn near(rng: &mut Rng, p: Vec3) -> Vec3 {
 /// Two segments in one of several relative configurations.
 fn segments(rng: &mut Rng) -> [Vec3; 4] {
     let s1 = point(rng);
-    let e1 = if rng.chance(0.1) { near(rng, s1) } else { point(rng) };
+    let e1 = if rng.chance(0.1) {
+        near(rng, s1)
+    } else {
+        point(rng)
+    };
     let d = e1 - s1;
     match rng.below(8) {
         0 => {
@@ -430,7 +436,12 @@ fn segments(rng: &mut Rng) -> [Vec3; 4] {
             // crossing through an interior point
             let c = s1 + rng.uniform(0.0, 1.0) * d;
             let w = point(rng);
-            [s1, e1, near(rng, c - 0.5 * w), c + rng.uniform(0.1, 2.0) * w]
+            [
+                s1,
+                e1,
+                near(rng, c - 0.5 * w),
+                c + rng.uniform(0.1, 2.0) * w,
+            ]
         }
         3 => {
             // end touching
@@ -530,7 +541,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         }
         Op::SegSegProjected => {
             push(&mut x, &segments(rng));
-            let nrm = if rng.chance(0.8) { unit(rng) } else { point(rng) };
+            let nrm = if rng.chance(0.8) {
+                unit(rng)
+            } else {
+                point(rng)
+            };
             push(&mut x, &[nrm]);
             x.push(tol(rng));
         }
@@ -557,7 +572,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 1 => (cn + Vec3::new(1e-7, 0.0, 0.0)).unitize().unwrap_or(cn),
                 _ => unit(rng),
             };
-            let pp = if rng.chance(0.4) { o + rng.uniform(-2.0, 2.0) * pn } else { point(rng) };
+            let pp = if rng.chance(0.4) {
+                o + rng.uniform(-2.0, 2.0) * pn
+            } else {
+                point(rng)
+            };
             push(&mut x, &[o, cn, pp, pn]);
         }
         Op::LineEllipse => {
@@ -565,7 +584,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let xa = unit(rng);
             let ya = xa.normal_in_plane(unit(rng)).unitize().unwrap_or(Vec3::Y);
             let rx = rng.uniform(0.1, 10.0);
-            let ry = if rng.chance(0.2) { rx } else { rng.uniform(0.1, 10.0) };
+            let ry = if rng.chance(0.2) {
+                rx
+            } else {
+                rng.uniform(0.1, 10.0)
+            };
             let lp = c + rng.uniform(-12.0, 12.0) * xa + rng.uniform(-12.0, 12.0) * ya;
             let lv = rng.uniform(-3.0, 3.0) * xa + rng.uniform(-3.0, 3.0) * ya;
             push(&mut x, &[lp, lv, c, xa, ya]);
@@ -581,7 +604,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 _ => unit(rng),
             };
             let d1 = rng.uniform(-r, r);
-            let d2 = if rng.chance(0.15) { d1 } else { rng.uniform(-r, r) };
+            let d2 = if rng.chance(0.15) {
+                d1
+            } else {
+                rng.uniform(-r, r)
+            };
             push(&mut x, &[c]);
             x.push(r);
             push(&mut x, &[c + d1 * n1, n1, c + d2 * n2, n2]);
@@ -589,7 +616,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         }
         Op::TwoPlanes => {
             let p1 = point(rng);
-            let v1 = if rng.chance(0.05) { point(rng) } else { unit(rng) };
+            let v1 = if rng.chance(0.05) {
+                point(rng)
+            } else {
+                unit(rng)
+            };
             let v2 = match rng.below(5) {
                 0 => v1,
                 1 => -v1,
@@ -631,7 +662,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         Op::Inverse4x4 => x = matrix4(rng),
         Op::Frenet => {
             n = rng.below(4) as i64;
-            let d1 = if rng.chance(0.1) { Vec3::ZERO } else { point(rng) };
+            let d1 = if rng.chance(0.1) {
+                Vec3::ZERO
+            } else {
+                point(rng)
+            };
             let d2 = match rng.below(6) {
                 0 => Vec3::ZERO,
                 1 => d1 * rng.uniform(-2.0, 2.0),
@@ -641,7 +676,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         }
         Op::Continuity => {
             let p = point(rng);
-            let v = if rng.chance(0.05) { Vec3::ZERO } else { point(rng) };
+            let v = if rng.chance(0.05) {
+                Vec3::ZERO
+            } else {
+                point(rng)
+            };
             let s = point(rng);
             let t = point(rng);
             let p2 = match rng.below(4) {

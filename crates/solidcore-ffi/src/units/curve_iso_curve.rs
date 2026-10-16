@@ -131,7 +131,9 @@ impl Nurb {
         if !clamped(&self.u, self.p) || !clamped(&self.v, self.q) {
             return bad("knots not clamped");
         }
-        if self.net.iter().flatten().any(|c| !c.iter().all(|x| x.is_finite()) || c.get(3).is_none_or(|&w| w != NOW && w <= 0.0)) {
+        if self.net.iter().flatten().any(|c| {
+            !c.iter().all(|x| x.is_finite()) || c.get(3).is_none_or(|&w| w != NOW && w <= 0.0)
+        }) {
             return bad("control points");
         }
         let n = rows - 1;
@@ -262,7 +264,12 @@ pub fn op(op: Op, a: &CurveBlock, params: &Params) -> Result<Vec<f64>, FfiError>
             if *n > MAX_DERIVS || !t.is_finite() {
                 return bad("evaluate parameters");
             }
-            input.extend([*t, *n as f64, f64::from(u8::from(*fl)), f64::from(u8::from(*nz))]);
+            input.extend([
+                *t,
+                *n as f64,
+                f64::from(u8::from(*fl)),
+                f64::from(u8::from(*nz)),
+            ]);
         }
         (Op::EvaluatePoint | Op::Continuities, Params::Value(t)) => {
             if !t.is_finite() {

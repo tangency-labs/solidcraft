@@ -497,7 +497,7 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             }
             interval(rd, &c)?; // solver interval
             rd.index(28)?; // property
-            // the property analysis reads values and vectors without NULL checks
+                           // the property analysis reads values and vectors without NULL checks
             if !rd.flag()? {
                 return Err(bad("property needs a value"));
             }

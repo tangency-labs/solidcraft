@@ -278,7 +278,9 @@ fn vec3(p: &[f64; 3]) -> Vec3 {
 }
 
 fn cpoints(c: &[[f64; 4]]) -> Vec<CPoint> {
-    c.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect()
+    c.iter()
+        .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+        .collect()
 }
 
 fn net_rows(net: &[[f64; 4]], size: [usize; 2]) -> Result<Vec<Vec<CPoint>>, HarnessError> {
@@ -744,4 +746,3 @@ impl UnitDiff for Runner {
         serde_json::to_value(i).ok()
     }
 }
-

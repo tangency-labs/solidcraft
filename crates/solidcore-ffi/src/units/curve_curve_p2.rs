@@ -300,13 +300,20 @@ fn bspline(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
         if (z == NOZ) != (z0 == NOZ) || (w == NOW) != (w0 == NOW) {
             return Err(bad("curve: mixed dimension or rationality"));
         }
-        if !x.is_finite() || !y.is_finite() || (z != NOZ && !z.is_finite()) || (w != NOW && !w.is_finite()) {
+        if !x.is_finite()
+            || !y.is_finite()
+            || (z != NOZ && !z.is_finite())
+            || (w != NOW && !w.is_finite())
+        {
             return Err(bad("curve: non-finite control point"));
         }
         if w != NOW && w <= 1e-3 {
             return Err(bad("curve: non-positive weight"));
         }
-        if euclid([x, y, z, w]).iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if euclid([x, y, z, w])
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad("curve: Euclidean point out of range"));
         }
     }

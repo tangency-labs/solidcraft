@@ -131,7 +131,10 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
     if at == flat.len() {
         Ok(out)
     } else {
-        Err(harness(format!("record has {} extra values", flat.len() - at)))
+        Err(harness(format!(
+            "record has {} extra values",
+            flat.len() - at
+        )))
     }
 }
 
@@ -266,7 +269,9 @@ fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
 fn gen_radius(rng: &mut Rng) -> f64 {
     match rng.below(10) {
         0 => 0.0,
-        1 => *rng.choose(&[5e-8, -5e-8, 1e-7, -1e-7, 2e-7]).unwrap_or(&0.0),
+        1 => *rng
+            .choose(&[5e-8, -5e-8, 1e-7, -1e-7, 2e-7])
+            .unwrap_or(&0.0),
         2 => log_uniform(rng, 1e-7, 1e-5),
         _ => log_uniform(rng, 1e-4, 1e3),
     }
@@ -297,7 +302,9 @@ fn gen_spiral_any(rng: &mut Rng) -> Inputs {
         _ => log_uniform(rng, 1e-4, 1e4),
     };
     let turns = match rng.below(20) {
-        0 => *rng.choose(&[0.0, -1.0, 5e-8, 1e-7, 1e-4, 0.00125, 124.25, 125.0]).unwrap_or(&1.0),
+        0 => *rng
+            .choose(&[0.0, -1.0, 5e-8, 1e-7, 1e-4, 0.00125, 124.25, 125.0])
+            .unwrap_or(&1.0),
         1 => log_uniform(rng, 1e-7, 0.00124), // zero spans: fit input error
         2 | 3 => log_uniform(rng, 1e-3, 150.0),
         _ => log_uniform(rng, 0.05, 20.0),

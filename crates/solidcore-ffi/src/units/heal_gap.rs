@@ -171,7 +171,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -195,7 +197,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -211,7 +216,9 @@ fn nurb_curve(rd: &mut Reader<'_>, dim: usize) -> Result<(), FfiError> {
         return Err(bad("curve: need 1 <= p <= n and m = n + p + 1"));
     }
     check_points(rd, n + 1, dim == 2, "curve")?;
-    let knots = (0..=m).map(|_| rd.finite()).collect::<Result<Vec<_>, _>>()?;
+    let knots = (0..=m)
+        .map(|_| rd.finite())
+        .collect::<Result<Vec<_>, _>>()?;
     check_knots(&knots, p, "curve")?;
     Ok(())
 }
@@ -232,8 +239,12 @@ fn bspline_surface(rd: &mut Reader<'_>) -> Result<(), FfiError> {
         ));
     }
     check_points(rd, (n + 1) * (m + 1), false, "surface")?;
-    let u = (0..=r).map(|_| rd.finite()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..=s).map(|_| rd.finite()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..=r)
+        .map(|_| rd.finite())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..=s)
+        .map(|_| rd.finite())
+        .collect::<Result<Vec<_>, _>>()?;
     check_knots(&u, p, "surface u")?;
     check_knots(&v, q, "surface v")?;
     Ok(())

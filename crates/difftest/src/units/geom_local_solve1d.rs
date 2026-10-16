@@ -536,7 +536,9 @@ fn pair_rust(r: solidcore::Result<(f64, f64)>, f: TestFn) -> Result<Output, Harn
 
 /// Random test function.
 fn gen_func(rng: &mut Rng) -> Func {
-    let kind = *rng.choose(&[0u32, 0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 6, 99]).unwrap_or(&0);
+    let kind = *rng
+        .choose(&[0u32, 0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 6, 99])
+        .unwrap_or(&0);
     let p: Vec<f64> = match kind {
         0 => {
             let deg = 1 + rng.below(5) as usize;
@@ -685,9 +687,7 @@ impl UnitDiff for Runner {
             let guesses = (0..n)
                 .map(|_| match interval {
                     _ if wide => rng.uniform(-2.0, 2.0),
-                    Some([lo, hi]) if rng.chance(0.9) => {
-                        lo + rng.uniform(-0.05, 1.05) * (hi - lo)
-                    }
+                    Some([lo, hi]) if rng.chance(0.9) => lo + rng.uniform(-0.05, 1.05) * (hi - lo),
                     _ => rng.uniform(-3.0, 3.0),
                 })
                 .collect();

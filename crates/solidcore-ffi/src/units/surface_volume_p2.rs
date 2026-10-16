@@ -419,7 +419,17 @@ fn inv_map_undefined(chain: &[Map], i: usize, has_dom: bool, comp: bool) -> bool
     if !comp || i + 1 >= chain.len() {
         return false;
     }
-    (has_dom && mpb_undefined(chain, i, Wants { bx: false, pb: true }, false, true))
+    (has_dom
+        && mpb_undefined(
+            chain,
+            i,
+            Wants {
+                bx: false,
+                pb: true,
+            },
+            false,
+            true,
+        ))
         || inv_map_undefined(chain, i + 1, has_dom, true)
 }
 
@@ -442,7 +452,13 @@ fn inv_eval_undefined(chain: &[Map], has_dom: bool, comp: bool) -> bool {
 /// the in-space outputs `inside` may reach an unbend's `EvaluateBoundingBoxSimple`
 /// with a too-flat box: on map `i` itself with the caller's box (`flat`), on a later
 /// map with a computed box (rejected whatever its size).
-fn ebb_unbend(chain: &[Map], i: usize, (out, inside): (Wants, Wants), comp: bool, flat: bool) -> bool {
+fn ebb_unbend(
+    chain: &[Map],
+    i: usize,
+    (out, inside): (Wants, Wants),
+    comp: bool,
+    flat: bool,
+) -> bool {
     let Some(m) = chain.get(i) else {
         return false;
     };
@@ -490,7 +506,17 @@ fn inv_map_unbend(chain: &[Map], i: usize, has_dom: bool, comp: bool) -> bool {
     if !comp || i + 1 >= chain.len() {
         return false;
     }
-    (has_dom && mpb_unbend(chain, i, Wants { bx: false, pb: true }, false, true))
+    (has_dom
+        && mpb_unbend(
+            chain,
+            i,
+            Wants {
+                bx: false,
+                pb: true,
+            },
+            false,
+            true,
+        ))
         || inv_map_unbend(chain, i + 1, has_dom, true)
 }
 
@@ -536,7 +562,11 @@ impl<'a> Text<'a> {
             self.at += 1;
         }
         let start = self.at;
-        while self.b.get(self.at).is_some_and(|c| !c.is_ascii_whitespace()) {
+        while self
+            .b
+            .get(self.at)
+            .is_some_and(|c| !c.is_ascii_whitespace())
+        {
             self.at += 1;
         }
         if start == self.at {
@@ -574,7 +604,9 @@ impl<'a> Text<'a> {
                 if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
                     return Err(bad("database integer token malformed"));
                 }
-                let v: i64 = w.parse().map_err(|_| bad("database integer out of range"))?;
+                let v: i64 = w
+                    .parse()
+                    .map_err(|_| bad("database integer out of range"))?;
                 if v.unsigned_abs() > i32::MAX as u64 {
                     return Err(bad("database integer out of range"));
                 }
@@ -651,7 +683,9 @@ impl<'a> Text<'a> {
             self.next_line();
             let ot = self.map_type()?;
             if ot != TRANSFORM_TYPE {
-                return Err(bad("orient map not a transform (null or mistyped upstream)"));
+                return Err(bad(
+                    "orient map not a transform (null or mistyped upstream)",
+                ));
             }
             self.volume(ot, depth + 1)?;
         } else {
@@ -752,7 +786,8 @@ pub fn check(op: Op, input: &[f64], data: &[u8]) -> Result<(), FfiError> {
                     pb: r.flag()?,
                 };
                 let (comp, trim) = (r.flag()?, r.flag()?);
-                mpb_undefined(&chain, 0, outs, comp, trim) || mpb_unbend(&chain, 0, outs, comp, trim)
+                mpb_undefined(&chain, 0, outs, comp, trim)
+                    || mpb_unbend(&chain, 0, outs, comp, trim)
             }
             Op::Eval1st => {
                 r.nums(3)?;

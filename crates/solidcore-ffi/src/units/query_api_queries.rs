@@ -40,7 +40,11 @@ pub fn eval(op: i32, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     {
         return Err(bad());
     }
-    let a: &[f64; 22] = input.get(..22).ok_or_else(bad)?.try_into().map_err(|_| bad())?;
+    let a: &[f64; 22] = input
+        .get(..22)
+        .ok_or_else(bad)?
+        .try_into()
+        .map_err(|_| bad())?;
     if !(0.0..=13.0).contains(&a[21])
         || a[21].fract() != 0.0
         || a[6] <= 1e-10
@@ -148,7 +152,13 @@ mod tests {
         a[10] = 1.;
         a[16] = 1.;
         for op in 1..=25 {
-            a[21] = if op <= 2 { 0. } else if op == 3 { 4. } else { 6. };
+            a[21] = if op <= 2 {
+                0.
+            } else if op == 3 {
+                4.
+            } else {
+                6.
+            };
             a[8] = if op <= 2 { 1. } else { 0. };
             assert_eq!(eval(op, &a).unwrap(), vec![1007.], "native op {op}");
         }

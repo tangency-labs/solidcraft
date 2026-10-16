@@ -212,7 +212,11 @@ pub fn run(source: &Source<'_>, file_type: i32, ops: &[(i64, i64)]) -> Result<Sc
             usize::try_from(ints_len).unwrap_or(0),
             usize::try_from(dbls_len).unwrap_or(0),
         );
-        if st == SC_ERR_BUFFER && attempt == 0 && need.0 <= ints_cap.max(1) && need.1 <= dbls_cap.max(1) {
+        if st == SC_ERR_BUFFER
+            && attempt == 0
+            && need.0 <= ints_cap.max(1)
+            && need.1 <= dbls_cap.max(1)
+        {
             caps = (need.0.max(1), need.1.max(1));
             attempt += 1;
             continue;
@@ -229,14 +233,12 @@ pub fn run(source: &Source<'_>, file_type: i32, ops: &[(i64, i64)]) -> Result<Sc
         .as_chunks::<5>()
         .0
         .iter()
-        .map(|&[status, state, position, n_ints, n_dbls]| {
-            Record {
-                status,
-                state,
-                position,
-                ints: ints_it.by_ref().take(n_ints.max(0) as usize).collect(),
-                dbls: dbls_it.by_ref().take(n_dbls.max(0) as usize).collect(),
-            }
+        .map(|&[status, state, position, n_ints, n_dbls]| Record {
+            status,
+            state,
+            position,
+            ints: ints_it.by_ref().take(n_ints.max(0) as usize).collect(),
+            dbls: dbls_it.by_ref().take(n_dbls.max(0) as usize).collect(),
         })
         .collect();
     Ok(Script {

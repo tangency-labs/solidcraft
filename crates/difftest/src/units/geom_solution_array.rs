@@ -22,8 +22,8 @@ use serde_json::Value;
 
 use solidcore::geom::object::OBJECT_TYPE;
 use solidcore::geom::solution_array::{
-    ObjectKind, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey, MAX_PARAMS,
-    MAX_TREES,
+    ObjectKind, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
+    MAX_PARAMS, MAX_TREES,
 };
 use solidcore::geom::tree::NodeId;
 use solidcore::math::Vec3;
@@ -94,28 +94,85 @@ struct Sol {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Op {
-    New { cap: i64 },
-    Add { s: Sol },
-    AddSorted { key: i64, s: Sol },
-    InsertAt { idx: i64, count: i64, s: Sol },
-    RemoveAt { idx: i64, count: i64 },
-    Swap { i: i64, j: i64 },
-    SetSize { n: i64 },
-    SetAt { idx: i64, s: Sol },
-    GetAt { idx: i64 },
+    New {
+        cap: i64,
+    },
+    Add {
+        s: Sol,
+    },
+    AddSorted {
+        key: i64,
+        s: Sol,
+    },
+    InsertAt {
+        idx: i64,
+        count: i64,
+        s: Sol,
+    },
+    RemoveAt {
+        idx: i64,
+        count: i64,
+    },
+    Swap {
+        i: i64,
+        j: i64,
+    },
+    SetSize {
+        n: i64,
+    },
+    SetAt {
+        idx: i64,
+        s: Sol,
+    },
+    GetAt {
+        idx: i64,
+    },
     Reset,
-    Append { sols: Vec<Sol> },
+    Append {
+        sols: Vec<Sol>,
+    },
     Dump,
     Info,
-    Classify { start: bool, a: Sol, b: Sol },
-    IsEqual { a: Sol, b: Sol },
-    GetIndex { obj: i64, flag: bool, s: Sol },
-    PointAt { idx: i64, end: bool, s: Sol },
-    PointOf { obj: i64, flag: bool, end: bool, s: Sol },
-    ObjIndexForParam { pidx: i64, s: Sol },
-    ParamInterval { pidx: i64, s: Sol },
-    ObjTol { idx: i64, s: Sol },
-    Copy { s: Sol },
+    Classify {
+        start: bool,
+        a: Sol,
+        b: Sol,
+    },
+    IsEqual {
+        a: Sol,
+        b: Sol,
+    },
+    GetIndex {
+        obj: i64,
+        flag: bool,
+        s: Sol,
+    },
+    PointAt {
+        idx: i64,
+        end: bool,
+        s: Sol,
+    },
+    PointOf {
+        obj: i64,
+        flag: bool,
+        end: bool,
+        s: Sol,
+    },
+    ObjIndexForParam {
+        pidx: i64,
+        s: Sol,
+    },
+    ParamInterval {
+        pidx: i64,
+        s: Sol,
+    },
+    ObjTol {
+        idx: i64,
+        s: Sol,
+    },
+    Copy {
+        s: Sol,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,7 +354,12 @@ impl From<HarnessError> for RunError {
 }
 
 /// Applies one op to `arr`, appending its outputs.
-fn apply(arr: &mut SolutionArray<Obj>, op: &Op, oi: &mut Vec<i64>, of: &mut Vec<f64>) -> Result<(), RunError> {
+fn apply(
+    arr: &mut SolutionArray<Obj>,
+    op: &Op,
+    oi: &mut Vec<i64>,
+    of: &mut Vec<f64>,
+) -> Result<(), RunError> {
     match op {
         Op::New { cap } => *arr = SolutionArray::with_capacity(usz(*cap)?),
         Op::Add { s } => oi.push(arr.add(&to_sol(s)?) as i64),
@@ -333,7 +395,11 @@ fn apply(arr: &mut SolutionArray<Obj>, op: &Op, oi: &mut Vec<i64>, of: &mut Vec<
             oi.push(i64::from(arr.is_kind_of(OBJECT_TYPE)));
             oi.push(i64::from(arr.is_kind_of(CURVE_TYPE)));
         }
-        Op::Classify { start, a, b } => oi.push(i64::from(to_sol(a)?.classify_solution_end(&to_sol(b)?, *start)?.code())),
+        Op::Classify { start, a, b } => oi.push(i64::from(
+            to_sol(a)?
+                .classify_solution_end(&to_sol(b)?, *start)?
+                .code(),
+        )),
         Op::IsEqual { a, b } => oi.push(i64::from(to_sol(a)?.is_equal(&to_sol(b)?)?)),
         Op::GetIndex { obj: o, flag, s } => match to_sol(s)?.index_of(obj(*o), *flag)? {
             Some((i, p)) => oi.extend([0, i as i64, p as i64]),
@@ -343,14 +409,21 @@ fn apply(arr: &mut SolutionArray<Obj>, op: &Op, oi: &mut Vec<i64>, of: &mut Vec<
             let r = to_sol(s)?.point(usz(*idx)?, *end)?;
             put_point(oi, of, r);
         }
-        Op::PointOf { obj: o, flag, end, s } => {
+        Op::PointOf {
+            obj: o,
+            flag,
+            end,
+            s,
+        } => {
             let r = to_sol(s)?.point_of(obj(*o), *flag, *end)?;
             put_point(oi, of, r);
         }
-        Op::ObjIndexForParam { pidx, s } => match to_sol(s)?.object_index_for_parameter_index(usz(*pidx)?)? {
-            Some((i, d)) => oi.extend([0, i as i64, d as i64]),
-            None => oi.push(SM_ERR),
-        },
+        Op::ObjIndexForParam { pidx, s } => {
+            match to_sol(s)?.object_index_for_parameter_index(usz(*pidx)?)? {
+                Some((i, d)) => oi.extend([0, i as i64, d as i64]),
+                None => oi.push(SM_ERR),
+            }
+        }
         Op::ParamInterval { pidx, s } => match to_sol(s)?.parameter_interval(usz(*pidx)?)? {
             Some(ivl) => {
                 oi.push(0);
@@ -447,9 +520,15 @@ fn value(rng: &mut Rng) -> f64 {
     let base = *rng
         .choose(&[0.0, 1.0, 2.0, -1.0, 0.5, 0.25, 1e-3, 3.0, 1e5, -2.5])
         .unwrap_or(&0.0);
-    let base = if rng.chance(0.15) { rng.uniform(-10.0, 10.0) } else { base };
+    let base = if rng.chance(0.15) {
+        rng.uniform(-10.0, 10.0)
+    } else {
+        base
+    };
     let nudge = *rng
-        .choose(&[0.0, 0.0, 0.0, 1e-14, 1e-13, 5e-13, 2e-12, 1e-9, 5e-7, 1e-6, 2e-6, 1e-4, 1e-2])
+        .choose(&[
+            0.0, 0.0, 0.0, 1e-14, 1e-13, 5e-13, 2e-12, 1e-9, 5e-7, 1e-6, 2e-6, 1e-4, 1e-2,
+        ])
         .unwrap_or(&0.0);
     if rng.chance(0.5) {
         base + nudge
@@ -465,11 +544,23 @@ fn gen_sol(rng: &mut Rng, pool: &Pool) -> Sol {
         8 => 3,
         _ => *rng.choose(&[0, 4]).unwrap_or(&4),
     };
-    let nv = if rng.chance(0.1) { rng.range_i64(0, 10) } else { rng.range_i64(0, 4) };
-    let no = if rng.chance(0.1) { rng.range_i64(0, 5) } else { rng.range_i64(0, 3) };
+    let nv = if rng.chance(0.1) {
+        rng.range_i64(0, 10)
+    } else {
+        rng.range_i64(0, 4)
+    };
+    let no = if rng.chance(0.1) {
+        rng.range_i64(0, 5)
+    } else {
+        rng.range_i64(0, 3)
+    };
     let mut sp = [0.0; MAX_PARAMS];
     let mut ep = [0.0; MAX_PARAMS];
-    let used = if rng.chance(0.2) { MAX_PARAMS } else { nv as usize };
+    let used = if rng.chance(0.2) {
+        MAX_PARAMS
+    } else {
+        nv as usize
+    };
     for (a, b) in sp.iter_mut().zip(ep.iter_mut()).take(used) {
         *a = value(rng);
         *b = if rng.chance(0.3) { *a } else { value(rng) };
@@ -511,7 +602,9 @@ fn near(rng: &mut Rng, s: &Sol) -> Sol {
             v
         } else {
             v + *rng
-                .choose(&[1e-14, -1e-13, 1e-12, 1e-9, -1e-7, 1e-6, -3e-6, 1e-4, 0.5, -1.0])
+                .choose(&[
+                    1e-14, -1e-13, 1e-12, 1e-9, -1e-7, 1e-6, -3e-6, 1e-4, 0.5, -1.0,
+                ])
                 .unwrap_or(&0.0)
         }
     };
@@ -554,7 +647,10 @@ fn non_null(s: &mut Sol) {
 /// would dereference them).
 fn interval_safe(s: &mut Sol, rng: &mut Rng) {
     without(s, rng, &[VOLUME]);
-    if s.objs.first().is_some_and(|&o| GEOM_KINDS.contains(&kind(o))) {
+    if s.objs
+        .first()
+        .is_some_and(|&o| GEOM_KINDS.contains(&kind(o)))
+    {
         non_null(s);
     }
 }
@@ -574,7 +670,10 @@ fn gen_array(rng: &mut Rng) -> Inputs {
     let key = rng.range_i64(0, 4);
     for _ in 0..n {
         let mut s = if !prev.is_empty() && rng.chance(0.35) {
-            let base = rng.choose(&prev).cloned().unwrap_or_else(|| gen_sol(rng, &pool));
+            let base = rng
+                .choose(&prev)
+                .cloned()
+                .unwrap_or_else(|| gen_sol(rng, &pool));
             near(rng, &base)
         } else {
             gen_sol(rng, &pool)
@@ -584,7 +683,11 @@ fn gen_array(rng: &mut Rng) -> Inputs {
         let size = model.len() as i64;
         let op = if sorted && rng.chance(0.75) {
             Op::AddSorted {
-                key: if rng.chance(0.8) { key } else { rng.range_i64(0, 4) },
+                key: if rng.chance(0.8) {
+                    key
+                } else {
+                    rng.range_i64(0, 4)
+                },
                 s,
             }
         } else {
@@ -680,7 +783,11 @@ fn classify_pair(rng: &mut Rng, mut a: Sol) -> (Sol, Sol) {
             _ => value(rng),
         }
     };
-    for ((os, oe), (&lo, &hi)) in o.sp.iter_mut().zip(o.ep.iter_mut()).zip(a.sp.iter().zip(&a.ep)) {
+    for ((os, oe), (&lo, &hi)) in
+        o.sp.iter_mut()
+            .zip(o.ep.iter_mut())
+            .zip(a.sp.iter().zip(&a.ep))
+    {
         *os = place(rng, lo, hi);
         *oe = place(rng, lo, hi);
     }
@@ -716,7 +823,11 @@ fn gen_queries(rng: &mut Rng) -> Inputs {
             }
             1 => {
                 interval_safe(&mut s, rng);
-                let mut o = if rng.chance(0.85) { near(rng, &s) } else { gen_sol(rng, &pool) };
+                let mut o = if rng.chance(0.85) {
+                    near(rng, &s)
+                } else {
+                    gen_sol(rng, &pool)
+                };
                 interval_safe(&mut o, rng);
                 Op::IsEqual { a: s, b: o }
             }
@@ -802,7 +913,11 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let i = if rng.chance(0.5) { gen_array(rng) } else { gen_queries(rng) };
+        let i = if rng.chance(0.5) {
+            gen_array(rng)
+        } else {
+            gen_queries(rng)
+        };
         serde_json::to_value(i).ok()
     }
 

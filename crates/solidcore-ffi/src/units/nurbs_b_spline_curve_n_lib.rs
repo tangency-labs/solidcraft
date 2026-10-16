@@ -273,7 +273,9 @@ impl CurveInfo {
         if ok {
             Ok(())
         } else {
-            Err(bad("extension: end pair not normalisable and no third point"))
+            Err(bad(
+                "extension: end pair not normalisable and no third point",
+            ))
         }
     }
 
@@ -409,7 +411,8 @@ fn refine_knots(info: &CurveInfo, x: &[f64]) -> Result<(), FfiError> {
         return Ok(()); // Rejected before any indexing.
     }
     for &k in x {
-        let mult = info.knots.iter().filter(|&&u| u == k).count() + x.iter().filter(|&&u| u == k).count();
+        let mult =
+            info.knots.iter().filter(|&&u| u == k).count() + x.iter().filter(|&&u| u == k).count();
         if mult > info.p {
             return Err(bad("refine: multiplicity above the degree"));
         }
@@ -534,7 +537,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, this: Option<&CurveInfo>) -> Result<
                 let q0 = if r0 < mtol { 0.0 } else { r0 };
                 let q1 = if r1 < mtol { 0.0 } else { r1 };
                 if h < mtol || (q0 + q1) < mtol || turns < mtol {
-                    return Err(bad("helix: N_CrvApproxSpiral early input error crashes upstream"));
+                    return Err(bad(
+                        "helix: N_CrvApproxSpiral early input error crashes upstream",
+                    ));
                 }
                 if turns > MAX_TURNS || tol < 1e-7 {
                     return Err(bad("helix: too many turns or too small a tolerance"));
@@ -609,7 +614,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, this: Option<&CurveInfo>) -> Result<
                 return Err(bad("dampen: multiplicity above the degree"));
             }
             if dampen_splits(&c.unique_knots(), factor).is_none() {
-                return Err(bad("dampen: splitting does not finish (upstream loops forever)"));
+                return Err(bad(
+                    "dampen: splitting does not finish (upstream loops forever)",
+                ));
             }
         }
         Op::DegRed => {

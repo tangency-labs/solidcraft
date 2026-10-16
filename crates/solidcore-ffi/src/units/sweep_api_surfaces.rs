@@ -254,7 +254,10 @@ fn check_curve(c: &CurveSpec, need: Need, nullable: bool) -> Result<(), FfiError
             if !(1..=3).contains(dim) {
                 return Err(bad("nurb: dimension must be 1 to 3"));
             }
-            let n = cpts.len().checked_sub(1).ok_or_else(|| bad("nurb: no points"))?;
+            let n = cpts
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| bad("nurb: no points"))?;
             if n > MAX_INDEX || *p == 0 || *p > n || *p > MAX_DEGREE {
                 return Err(bad("nurb: need 1 <= p <= n, p <= 17, n <= 512"));
             }
@@ -299,7 +302,9 @@ fn check_curve(c: &CurveSpec, need: Need, nullable: bool) -> Result<(), FfiError
                 return Err(bad("circle: radius must be positive"));
             }
             if matches!(c, CurveSpec::AnalyticCircle { .. }) && need != Need::AnyCurve {
-                return Err(bad("analytic circle where upstream takes an SmBSplineCurve"));
+                return Err(bad(
+                    "analytic circle where upstream takes an SmBSplineCurve",
+                ));
             }
         }
         CurveSpec::LineSegment { start, end } => {

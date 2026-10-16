@@ -338,7 +338,9 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             let s = rd.index(c.p)?;
             let at = |i: usize| c.knots.get(i).copied();
             if r < c.p + 1 || at(r) == at(r + 1) {
-                return Err(bad("max_err: r must be an interior knot with U[r] != U[r+1]"));
+                return Err(bad(
+                    "max_err: r must be an interior knot with U[r] != U[r+1]",
+                ));
             }
             let mult = (0..=r).rev().take_while(|&k| at(k) == at(r)).count();
             if s != mult {

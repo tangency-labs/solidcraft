@@ -78,12 +78,25 @@ struct NodeDesc {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum DOp {
-    Neighbors { node: i64 },
-    Propagate { node: i64 },
-    Set { node: i64, marked: bool, class: i64, face: i64 },
+    Neighbors {
+        node: i64,
+    },
+    Propagate {
+        node: i64,
+    },
+    Set {
+        node: i64,
+        marked: bool,
+        class: i64,
+        face: i64,
+    },
     Dump,
-    FirstPatch { node: i64 },
-    OwnerObject { node: i64 },
+    FirstPatch {
+        node: i64,
+    },
+    OwnerObject {
+        node: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,7 +408,11 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
             DOp::Dump => {
                 for n in t.nodes() {
                     if let NodeData::Surface(a) = &n.data {
-                        o.extend([i64::from(a.is_marked), i64::from(a.node_class.code()), obj_id(a.face)]);
+                        o.extend([
+                            i64::from(a.is_marked),
+                            i64::from(a.node_class.code()),
+                            obj_id(a.face),
+                        ]);
                     }
                 }
             }
@@ -404,7 +421,9 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
                 o.push(i64::from(p.is_some()));
             }
             DOp::OwnerObject { node } => {
-                o.push(i64::from(t.node_owner_object(NodeId(*node as usize))?.is_some()));
+                o.push(i64::from(
+                    t.node_owner_object(NodeId(*node as usize))?.is_some(),
+                ));
             }
         }
     }
@@ -580,7 +599,11 @@ fn gen_subdiv(rng: &mut Rng) -> Inputs {
         n.marked = rng.chance(0.5);
         n.class = rng.range_i64(0, 3);
         n.face = rng.range_i64(-1, 3);
-        n.surface = if first_patch && rng.chance(0.1) { 7 } else { -1 };
+        n.surface = if first_patch && rng.chance(0.1) {
+            7
+        } else {
+            -1
+        };
     }
     let count = nodes.len() as i64;
     let mut ops = Vec::new();
@@ -628,7 +651,8 @@ impl UnitDiff for Runner {
                 Ok(Output::new().ints("ints", oi).values("floats", of))
             }
             Inputs::Subdiv { nodes, ops } => {
-                let o = ffi::subdiv(&subdiv_desc(&nodes), &subdiv_prog(&ops)).map_err(|e| ffi_err(&e))?;
+                let o = ffi::subdiv(&subdiv_desc(&nodes), &subdiv_prog(&ops))
+                    .map_err(|e| ffi_err(&e))?;
                 Ok(Output::new().ints("ints", o))
             }
         }

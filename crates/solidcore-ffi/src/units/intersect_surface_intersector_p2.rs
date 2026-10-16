@@ -389,7 +389,12 @@ impl Enc {
                 self.nums(a)?;
                 self.nums(b)
             }
-            CurveIn::BSpline { dim, p, cpts, knots } => {
+            CurveIn::BSpline {
+                dim,
+                p,
+                cpts,
+                knots,
+            } => {
                 if !(2..=3).contains(dim) || !(1..=8).contains(p) {
                     return Err(bad("curve dim or degree"));
                 }

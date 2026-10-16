@@ -226,7 +226,9 @@ fn check_reach(t: f64, k: &[f64]) -> Result<(), FfiError> {
     if t.abs() > 1.0e12 || (t >= a - MAX_REACH * len && t <= b + MAX_REACH * len) {
         Ok(())
     } else {
-        Err(bad("unbounded evaluation parameter too far from the domain"))
+        Err(bad(
+            "unbounded evaluation parameter too far from the domain",
+        ))
     }
 }
 

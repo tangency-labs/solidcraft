@@ -359,7 +359,9 @@ fn cache(rd: &mut Reader<'_>, c: &CurveInfo) -> Result<(), FfiError> {
     if aux && !full {
         // parents passing the tests become leaves holding SmBezierAux1d data, which
         // LocalSolve casts to SmBezierSpan (reading past the object)
-        return Err(bad("a pruned tree (aux data without full tree) has non-span leaves"));
+        return Err(bad(
+            "a pruned tree (aux data without full tree) has non-span leaves",
+        ));
     }
     tol(rd)?; // max 3d
     let ratio = rd.finite()?;
@@ -433,7 +435,7 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             let c = cached_curve(rd)?;
             interval(rd, &c)?;
             rd.index(28)?; // property
-            // the property solvers read values and vectors without NULL checks
+                           // the property solvers read values and vectors without NULL checks
             if !rd.flag()? {
                 return Err(bad("property needs a value"));
             }

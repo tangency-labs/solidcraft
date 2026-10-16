@@ -220,7 +220,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -246,7 +248,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -323,7 +328,8 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
         2 => {
             let dom = surface(rd)?;
             let d = rd.finites(4)?;
-            let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
+            let (Some(&a), Some(&b2), Some(&c), Some(&e)) =
+                (d.first(), d.get(1), d.get(2), d.get(3))
             else {
                 return Err(bad("domain too short"));
             };
@@ -364,7 +370,6 @@ pub fn counts(export: &[f64]) -> Option<[usize; 10]> {
     }
     Some(c)
 }
-
 
 /// Largest point count of `Points`.
 pub const MAX_POINTS: usize = 4096;

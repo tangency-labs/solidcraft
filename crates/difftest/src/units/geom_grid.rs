@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::extent3d::Extent3d;
-use solidcore::geom::grid::{ElementId, ElementSource, Grid, GridItem, HierarchyElement, HierarchyId};
+use solidcore::geom::grid::{
+    ElementId, ElementSource, Grid, GridItem, HierarchyElement, HierarchyId,
+};
 use solidcore::geom::tree::NodeId;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::SolidError;
@@ -58,16 +60,40 @@ struct GridDesc {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Op {
-    Add { kind: Kind, obj: i64, bbox: E6 },
-    AddHier { surface: bool, obj: i64, tol: f64, bbox: E6 },
-    Find { bbox: E6 },
-    Address { p: P3 },
-    VoxelBox { a: [i64; 3] },
-    Setup { p: P3, v: P3 },
-    Step { t: f64 },
+    Add {
+        kind: Kind,
+        obj: i64,
+        bbox: E6,
+    },
+    AddHier {
+        surface: bool,
+        obj: i64,
+        tol: f64,
+        bbox: E6,
+    },
+    Find {
+        bbox: E6,
+    },
+    Address {
+        p: P3,
+    },
+    VoxelBox {
+        a: [i64; 3],
+    },
+    Setup {
+        p: P3,
+        v: P3,
+    },
+    Step {
+        t: f64,
+    },
     Dump,
-    Expand { h: i64 },
-    AddSurface { bbox: E6 },
+    Expand {
+        h: i64,
+    },
+    AddSurface {
+        bbox: E6,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -389,7 +415,10 @@ impl Gen {
     }
 
     fn diag(&self) -> f64 {
-        (0..3).map(|k| self.ext_len(k) * self.ext_len(k)).sum::<f64>().sqrt()
+        (0..3)
+            .map(|k| self.ext_len(k) * self.ext_len(k))
+            .sum::<f64>()
+            .sqrt()
     }
 
     fn center(&self) -> P3 {
@@ -456,7 +485,11 @@ fn gen_dir(rng: &mut Rng, g: &Gen, start: P3, boxes: &[E6]) -> P3 {
         }
         3 => {
             let k = rng.below(3) as usize;
-            let mut d = [rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)];
+            let mut d = [
+                rng.uniform(-1.0, 1.0),
+                rng.uniform(-1.0, 1.0),
+                rng.uniform(-1.0, 1.0),
+            ];
             set(&mut d, k, 0.0);
             d
         }
@@ -486,10 +519,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     ];
     let (lo, hi) = if rng.chance(0.35) {
         let o = rng.choose(&[0.0, -1.0, 2.0]).copied().unwrap_or(0.0) * scale;
-        (
-            [o, o, o],
-            size.map(|n| o + n as f64 * scale),
-        )
+        ([o, o, o], size.map(|n| o + n as f64 * scale))
     } else {
         let c = rng.point3(-scale, scale);
         let e = [0, 1, 2].map(|_| rng.uniform(0.2, 2.0) * scale);
@@ -501,13 +531,24 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let n_elems = rng.range_i64(0, 16);
     let mut boxes = Vec::new();
     for obj in 0..n_elems {
-        let kind = if rng.chance(0.5) { Kind::Poly } else { Kind::User };
+        let kind = if rng.chance(0.5) {
+            Kind::Poly
+        } else {
+            Kind::User
+        };
         let bbox = match boxes.last() {
             // a box overlapping the previous one (several hits in one voxel)
             Some(prev) if rng.chance(0.3) => {
                 let p: E6 = *prev;
                 let j = [0, 1, 2].map(|k| (at(&p, k + 3) - at(&p, k)) * rng.uniform(-0.5, 0.5));
-                [p[0] + j[0], p[1] + j[1], p[2] + j[2], p[3] + j[0], p[4] + j[1], p[5] + j[2]]
+                [
+                    p[0] + j[0],
+                    p[1] + j[1],
+                    p[2] + j[2],
+                    p[3] + j[0],
+                    p[4] + j[1],
+                    p[5] + j[2],
+                ]
             }
             _ => g.rand_box(rng),
         };
@@ -529,7 +570,9 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     }
     for _ in 0..rng.range_i64(0, 3) {
         match rng.below(3) {
-            0 => ops.push(Op::Find { bbox: g.rand_box(rng) }),
+            0 => ops.push(Op::Find {
+                bbox: g.rand_box(rng),
+            }),
             1 => {
                 let p = if rng.chance(0.3) {
                     g.lattice_point(rng)
@@ -553,7 +596,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             0 | 1 => {
                 // outside, on a sphere around the grid
                 let c = g.center();
-                let d = [rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)];
+                let d = [
+                    rng.uniform(-1.0, 1.0),
+                    rng.uniform(-1.0, 1.0),
+                    rng.uniform(-1.0, 1.0),
+                ];
                 let r = g.diag() * rng.uniform(0.6, 2.0);
                 [c[0] + d[0] * r, c[1] + d[1] * r, c[2] + d[2] * r]
             }
@@ -595,7 +642,10 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         _ => true,
     });
     Inputs {
-        grid: GridDesc { bbox: [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]], size },
+        grid: GridDesc {
+            bbox: [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]],
+            size,
+        },
         ops,
     }
 }
@@ -615,7 +665,9 @@ impl UnitDiff for Runner {
         let i: Inputs = case.parse()?;
         match run_rust(&i, &mut Stats::default()) {
             Ok((oi, of)) => Ok(Output::new().ints("ints", oi).values("floats", of)),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))),
+            Err(e) => {
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+            }
         }
     }
 

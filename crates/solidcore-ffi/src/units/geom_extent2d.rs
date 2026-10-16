@@ -95,11 +95,7 @@ impl Op {
             Op::Queries | Op::ExpandRelative | Op::ExpandAbsolute => 5,
             Op::FromExtent3d | Op::Evaluate | Op::ExpandAbsoluteVec => 6,
             Op::Inversion => 7,
-            Op::SetMinMax
-            | Op::SetMinMaxCoords
-            | Op::Union
-            | Op::Intersect
-            | Op::Intervals => 8,
+            Op::SetMinMax | Op::SetMinMaxCoords | Op::Union | Op::Intersect | Op::Intervals => 8,
             Op::Compare | Op::PointOps | Op::ContainsPeriodic | Op::ClipLine => 9,
             Op::MapToDomain => 11,
             Op::IntersectLine => 12,
@@ -123,8 +119,7 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
 /// Runs `op` on `input` in upstream C++ and returns its flat output.
 pub fn op(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     validate(op, input)?;
-    let n_in =
-        i64::try_from(input.len()).map_err(|_| FfiError::InvalidArgument("input".into()))?;
+    let n_in = i64::try_from(input.len()).map_err(|_| FfiError::InvalidArgument("input".into()))?;
     call_with_buffer(64, |buf: &mut [f64], len| {
         // SAFETY: `input` is valid for `n_in` reads (the shim reads at most its
         // op's input size, checked above and again in the shim); `buf` is valid for

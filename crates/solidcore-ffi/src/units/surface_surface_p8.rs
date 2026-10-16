@@ -243,7 +243,9 @@ fn dist_to_axis(p: [f64; 3], o: [f64; 3], a: [f64; 3]) -> f64 {
 fn surface_kind(rd: &mut Reader<'_>) -> Result<(Domain, bool), FfiError> {
     let kind = rd.index(3)?;
     if kind == 2 {
-        return Err(bad("curve-bounded surfaces are not part of this unit's harness"));
+        return Err(bad(
+            "curve-bounded surfaces are not part of this unit's harness",
+        ));
     }
     if kind == 3 {
         let a = rd.vec3()?;

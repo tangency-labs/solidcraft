@@ -139,8 +139,12 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -153,9 +157,15 @@ pub(crate) fn resolve(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 
 /// `(n, m)` of a rectangular net.
 fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -175,7 +185,11 @@ pub(crate) fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|row| row.iter().map(|c| CPoint::new(c[0], c[1], c[2], c[3])).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| CPoint::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        })
         .collect();
     Surface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("rust surface: {e}")))
@@ -183,7 +197,11 @@ pub(crate) fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
 
 // ---- output layout ----------------------------------------------------------------
 
-pub(crate) fn take<'a>(flat: &'a [f64], at: &mut usize, k: usize) -> Result<&'a [f64], HarnessError> {
+pub(crate) fn take<'a>(
+    flat: &'a [f64],
+    at: &mut usize,
+    k: usize,
+) -> Result<&'a [f64], HarnessError> {
     let part = flat
         .get(*at..*at + k)
         .ok_or_else(|| harness(format!("record too short ({} values)", flat.len())))?;
@@ -200,7 +218,12 @@ pub(crate) fn count(x: f64) -> Result<usize, HarnessError> {
 
 /// Splits a surface dump starting at `at` into `<pfx>dims`, `<pfx>net`, `<pfx>u`,
 /// `<pfx>v`.
-pub(crate) fn split_srf(flat: &[f64], at: &mut usize, pfx: &str, mut out: Output) -> Result<Output, HarnessError> {
+pub(crate) fn split_srf(
+    flat: &[f64],
+    at: &mut usize,
+    pfx: &str,
+    mut out: Output,
+) -> Result<Output, HarnessError> {
     let dims = take(flat, at, 6)?;
     let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
     let (n, m, r, s) = (dim(0)?, dim(1)?, dim(4)?, dim(5)?);
@@ -261,12 +284,27 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             Op::RemoveConditional
         }
         Inputs::RemoveOneKnot {
-            r, s, f, l, dir, mr, ..
+            r,
+            s,
+            f,
+            l,
+            dir,
+            mr,
+            ..
         } => {
-            o.extend([*r as f64, *s as f64, *f as f64, *l as f64, f64::from(*dir), *mr]);
+            o.extend([
+                *r as f64,
+                *s as f64,
+                *f as f64,
+                *l as f64,
+                f64::from(*dir),
+                *mr,
+            ]);
             Op::RemoveOneKnot
         }
-        Inputs::Elevate { t, dir, inplace, .. } => {
+        Inputs::Elevate {
+            t, dir, inplace, ..
+        } => {
             o.extend([*t as f64, f64::from(*dir), flag(*inplace)]);
             Op::ElevateDegree
         }
@@ -326,7 +364,13 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             }
         }
         Inputs::RemoveOneKnot {
-            r, s: m, f, l, dir, mr, ..
+            r,
+            s: m,
+            f,
+            l,
+            dir,
+            mr,
+            ..
         } => {
             let r = tool::remove_one_knot(&s, *r, *m, *f, *l, direction(*dir)?, *mr);
             o.push(status(&r));
@@ -380,7 +424,11 @@ pub(crate) fn knots(rng: &mut Rng, cnt: usize, p: usize, a: f64, b: f64) -> Vec<
             if mult < p {
                 mid.push(x);
             } else {
-                mid.push(rng.uniform(a, b).max(a + (b - a) * 1e-3).min(b - (b - a) * 1e-3));
+                mid.push(
+                    rng.uniform(a, b)
+                        .max(a + (b - a) * 1e-3)
+                        .min(b - (b - a) * 1e-3),
+                );
             }
         }
     }
@@ -404,9 +452,13 @@ pub(crate) fn knots_valid(u: &[f64], p: usize) -> bool {
         }
     }
     first < last
-        && runs
-            .iter()
-            .all(|&(x, k)| if x == first || x == last { k == p + 1 } else { k <= p })
+        && runs.iter().all(|&(x, k)| {
+            if x == first || x == last {
+                k == p + 1
+            } else {
+                k <= p
+            }
+        })
 }
 
 pub(crate) fn weight(rng: &mut Rng) -> f64 {
@@ -514,7 +566,10 @@ fn gen_dir(rng: &mut Rng) -> i32 {
 pub(crate) fn inline(s: &Surface) -> InlineSrf {
     let (p, q) = s.degrees();
     InlineSrf {
-        net: s.rows().map(|row| row.iter().map(|c| c.to_array()).collect()).collect(),
+        net: s
+            .rows()
+            .map(|row| row.iter().map(|c| c.to_array()).collect())
+            .collect(),
         p,
         q,
         u: s.u_knots().to_vec(),
@@ -533,7 +588,11 @@ pub(crate) fn gen_removable(rng: &mut Rng) -> InlineSrf {
         return s;
     };
     for _ in 0..=rng.below(3) {
-        let dir = if rng.chance(0.5) { Direction::U } else { Direction::V };
+        let dir = if rng.chance(0.5) {
+            Direction::U
+        } else {
+            Direction::V
+        };
         let (k, deg) = if dir == Direction::U {
             (sur.u_knots().to_vec(), sur.p())
         } else {
@@ -584,9 +643,19 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let s = gen_removable(rng);
     let dir = gen_dir(rng);
     let (k, deg, hi, other) = if dir == 2 {
-        (s.v.clone(), s.q, s.net.first().map_or(0, Vec::len) - 1, s.net.len() - 1)
+        (
+            s.v.clone(),
+            s.q,
+            s.net.first().map_or(0, Vec::len) - 1,
+            s.net.len() - 1,
+        )
     } else {
-        (s.u.clone(), s.p, s.net.len() - 1, s.net.first().map_or(0, Vec::len) - 1)
+        (
+            s.u.clone(),
+            s.p,
+            s.net.len() - 1,
+            s.net.first().map_or(0, Vec::len) - 1,
+        )
     };
     let inplace = rng.chance(0.3);
     match rng.below(3) {
@@ -616,7 +685,8 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         1 => {
             // Keep the arguments inside upstream's arrays (as the FFI demands); a
             // Bezier direction has no interior knot, so elevate instead.
-            let Some((r, mut m)) = interior_knot(rng, &k).filter(|&(r, m)| r > deg && m <= deg && r - m < hi)
+            let Some((r, mut m)) =
+                interior_knot(rng, &k).filter(|&(r, m)| r > deg && m <= deg && r - m < hi)
             else {
                 return Inputs::Elevate {
                     sur: SrfIn::Inline(s),

@@ -115,7 +115,10 @@ pub fn op(op: Op, input: &[f64], ival: i64) -> Result<OpResult, FfiError> {
                 input.len()
             )))
         }
-        None if input.is_empty() || !(input.len() - 1).is_multiple_of(3) || input.len() > 3 * 4096 + 1 => {
+        None if input.is_empty()
+            || !(input.len() - 1).is_multiple_of(3)
+            || input.len() > 3 * 4096 + 1 =>
+        {
             return Err(FfiError::InvalidArgument(format!(
                 "{op:?} needs 3k + 1 inputs, got {}",
                 input.len()
@@ -127,7 +130,9 @@ pub fn op(op: Op, input: &[f64], ival: i64) -> Result<OpResult, FfiError> {
         return Err(FfiError::InvalidArgument(format!("frenet n {ival}")));
     }
     if op == Op::Continuity && !(0..=3).contains(&ival) {
-        return Err(FfiError::InvalidArgument(format!("continuity flags {ival}")));
+        return Err(FfiError::InvalidArgument(format!(
+            "continuity flags {ival}"
+        )));
     }
     let mut out = vec![0.0f64; CAP];
     let mut n: i64 = 0;

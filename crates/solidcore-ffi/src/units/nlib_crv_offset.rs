@@ -112,7 +112,10 @@ fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
         }
         let zz = if z == f64::MAX { 0.0 } else { z };
         let ww = if w == -f64::MAX { 1.0 } else { w };
-        if [x / ww, y / ww, zz / ww].iter().any(|c| !c.is_finite() || c.abs() > 1e100) {
+        if [x / ww, y / ww, zz / ww]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > 1e100)
+        {
             return Err(bad("curve: Euclidean point out of range"));
         }
     }

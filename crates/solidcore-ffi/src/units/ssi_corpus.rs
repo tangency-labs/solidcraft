@@ -252,10 +252,14 @@ impl SsiSurfaceIn {
                 }
                 finite(knots_u)?;
                 finite(knots_v)?;
-                if knots_u.windows(2).chain(knots_v.windows(2)).any(|w| match w {
-                    [a, b] => a > b,
-                    _ => false,
-                }) {
+                if knots_u
+                    .windows(2)
+                    .chain(knots_v.windows(2))
+                    .any(|w| match w {
+                        [a, b] => a > b,
+                        _ => false,
+                    })
+                {
                     return Err(bad("decreasing knots"));
                 }
                 if weights.iter().any(|w| !(w.is_finite() && *w > 0.0)) {

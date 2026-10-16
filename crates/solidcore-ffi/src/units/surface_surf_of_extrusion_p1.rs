@@ -695,8 +695,16 @@ pub fn surface_op(s: &Surf, op: &Op) -> Result<Vec<f64>, FfiError> {
     // EvaluateSTEP allows order 5 (its MAXDER comment), but a B-spline generator
     // evaluates through sm_CrvDerivs, whose NL_DERIVATIVES rows stop at NL_MAXDER = 4:
     // order 5 smashes the stack. The analytic generators evaluate order 5 fine.
-    if let (Op::EvalStep { k: 5, point: false, .. }, Gen::BSpline(_)) = (op, &s.gen) {
-        return Err(bad("eval: order 5 of a B-spline generator overruns NL_MAXDER"));
+    if let (
+        Op::EvalStep {
+            k: 5, point: false, ..
+        },
+        Gen::BSpline(_),
+    ) = (op, &s.gen)
+    {
+        return Err(bad(
+            "eval: order 5 of a B-spline generator overruns NL_MAXDER",
+        ));
     }
     let mut input = Vec::new();
     push_surf(&mut input, s)?;

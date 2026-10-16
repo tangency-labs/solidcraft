@@ -450,7 +450,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     }
     let mut s = State {
         ctxs: vec![ctx],
-        recs: (0..n).map(|k| (ObjectKey(k as u64), Topology::new())).collect(),
+        recs: (0..n)
+            .map(|k| (ObjectKey(k as u64), Topology::new()))
+            .collect(),
         n,
         store: AttributeStore::new(),
         locks: Vec::new(),
@@ -559,18 +561,27 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             79..=92 if n_trackers > 0 => {
                 let o = *rng
                     .choose(&[
-                    op::TRACK_START,
-                    op::TRACK_STOP,
-                    op::TRACK_IS,
-                    op::TRACK_IS,
-                    op::TRACK_LISTS,
-                    op::TRACK_RESET,
-                    op::TRACK_DROP,
-                ])
+                        op::TRACK_START,
+                        op::TRACK_STOP,
+                        op::TRACK_IS,
+                        op::TRACK_IS,
+                        op::TRACK_LISTS,
+                        op::TRACK_RESET,
+                        op::TRACK_DROP,
+                    ])
                     .unwrap_or(&op::TRACK_IS);
                 [o, rng.range_i64(0, n_trackers - 1), 0, 0, 0, 0, 0, 0]
             }
-            93..=95 => [op::SYS_FOREIGN, i64::from(rng.chance(0.5)), 0, 0, 0, 0, 0, 0],
+            93..=95 => [
+                op::SYS_FOREIGN,
+                i64::from(rng.chance(0.5)),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
             96..=97 => [op::DESTROY, obj(rng), 0, 0, 0, 0, 0, 0],
             _ => [op::IS_MARKED, obj(rng), 1, 0, 0, 0, 0, 0],
         };

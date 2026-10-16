@@ -412,7 +412,9 @@ fn flatten(case: &Case) -> Result<Vec<f64>, FfiError> {
         let [a, b] = edge.interval;
         finite(&[a, b, edge.tol], "edge")?;
         if a > b || a < lo || b > hi {
-            return Err(bad(format!("edge use {i}: interval outside its trim curve")));
+            return Err(bad(format!(
+                "edge use {i}: interval outside its trim curve"
+            )));
         }
         if i == 0 && (b - a).abs() <= EFF_ZERO {
             return Err(bad("first edge use: degenerate interval"));

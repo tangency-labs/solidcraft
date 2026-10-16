@@ -115,7 +115,10 @@ fn float(v: &Value) -> Result<f64, HarnessError> {
     }
 }
 
-fn tcv_inputs(init: &Value, steps: &[(i64, Value)]) -> Result<(f64, Vec<(i64, f64)>), HarnessError> {
+fn tcv_inputs(
+    init: &Value,
+    steps: &[(i64, Value)],
+) -> Result<(f64, Vec<(i64, f64)>), HarnessError> {
     let s = steps
         .iter()
         .map(|(op, x)| Ok((*op, float(x)?)))
@@ -377,7 +380,11 @@ fn tcv_run<T: TcvValue>(init: T, steps: &[(i64, f64)]) -> Result<Vec<f64>, Harne
                     g.set(&mut var, x);
                     g
                 };
-                out.push(g.get().map(|v| v.to_f64()).ok_or_else(|| harness("no value"))?);
+                out.push(
+                    g.get()
+                        .map(|v| v.to_f64())
+                        .ok_or_else(|| harness("no value"))?,
+                );
                 let closed = tcv_level(&mut g, steps, &mut pos, &mut out)?;
                 drop(g);
                 out.push(var.to_f64());
@@ -411,7 +418,14 @@ fn put_tree<O: Copy + PartialEq>(o: &mut Vec<f64>, t: &Tree<O>) -> Result<(), So
         Some(top) => {
             o.push(1.0);
             let b = t.node(top)?.bbox;
-            o.extend([b.min().x, b.min().y, b.min().z, b.max().x, b.max().y, b.max().z]);
+            o.extend([
+                b.min().x,
+                b.min().y,
+                b.min().z,
+                b.max().x,
+                b.max().y,
+                b.max().z,
+            ]);
         }
         None => o.push(0.0),
     }
@@ -426,9 +440,18 @@ fn rust_shape(
 ) -> Result<Vec<f64>, SolidError> {
     let b = BrepId::from_index(0);
     let breps: Vec<BrepId> = if whole_brep { vec![b] } else { Vec::new() };
-    let f: Vec<_> = faces.iter().map(|&i| (b, FaceId::from_index(i as u32))).collect();
-    let e: Vec<_> = edges.iter().map(|&i| (b, EdgeId::from_index(i as u32))).collect();
-    let v: Vec<_> = vertices.iter().map(|&i| (b, VertexId::from_index(i as u32))).collect();
+    let f: Vec<_> = faces
+        .iter()
+        .map(|&i| (b, FaceId::from_index(i as u32)))
+        .collect();
+    let e: Vec<_> = edges
+        .iter()
+        .map(|&i| (b, EdgeId::from_index(i as u32)))
+        .collect();
+    let v: Vec<_> = vertices
+        .iter()
+        .map(|&i| (b, VertexId::from_index(i as u32)))
+        .collect();
     let shape = Shape::new(&breps, &f, &e, &v)?;
     let mut o = vec![
         shape.faces().len() as f64,
@@ -480,7 +503,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generation --------------------------------------------------------------------
 
 fn gen_types(rng: &mut Rng) -> Inputs {
-    const CODES: [i64; 10] = [11001, 16500, 11000, 11002, 16000, 12150, 0, -1, 16501, 22001];
+    const CODES: [i64; 10] = [
+        11001, 16500, 11000, 11002, 16000, 12150, 0, -1, 16501, 22001,
+    ];
     let n = rng.range_i64(1, 12);
     let ts = (0..n)
         .map(|_| {
@@ -589,7 +614,9 @@ fn gen_shape(rng: &mut Rng) -> Inputs {
     ];
     let pick = |rng: &mut Rng, n: i64, p: f64| -> Vec<i64> {
         if rng.chance(p) {
-            (0..rng.range_i64(1, 4)).map(|_| rng.range_i64(0, n - 1)).collect()
+            (0..rng.range_i64(1, 4))
+                .map(|_| rng.range_i64(0, n - 1))
+                .collect()
         } else {
             Vec::new()
         }
