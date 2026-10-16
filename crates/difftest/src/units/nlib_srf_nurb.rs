@@ -37,6 +37,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -572,10 +573,6 @@ fn side(f: i32) -> Result<Side, HarnessError> {
 
 fn direction(dir: i32) -> Result<Direction, HarnessError> {
     Direction::from_flag(dir).ok_or_else(|| harness(format!("bad direction flag {dir}")))
-}
-
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
 }
 
 /// Pushes the status and, on success, what `f` writes.

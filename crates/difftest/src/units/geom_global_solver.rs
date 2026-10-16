@@ -37,6 +37,7 @@ use solidcore_ffi::units::geom_global_solver as ffi;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -135,14 +136,6 @@ struct Inputs {
 
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
-}
-
-fn flag(v: bool) -> f64 {
-    if v {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 fn enc_sol(v: &mut Vec<f64>, s: &Sol) {

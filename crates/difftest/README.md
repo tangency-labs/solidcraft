@@ -223,6 +223,9 @@ impl UnitDiff for Runner {
 `.topology(Topology::new().count("faces", n).entities("edges", ids).adjacency("face_loops", adj))`,
 `Output::err("normalised error")`.
 
+Shared conversions live in `crate::util` (`v3`, `p2`, `flag`): import them
+instead of redefining them in the runner.
+
 * `Ok(Output::err(..))` = the *operation* failed (both sides must fail with the
   same string). `Err(HarnessError)` = the *harness* failed (bad inputs) and
   always fails the case.

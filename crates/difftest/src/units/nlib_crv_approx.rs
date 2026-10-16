@@ -28,12 +28,13 @@ use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
 use solidcore::nurbs::crv_fit::p3::ParamSource;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
-use solidcore::{SolidError, Vec3};
+use solidcore::SolidError;
 use solidcore_ffi::units::nlib_crv_approx::{self as ffi, Op};
 use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -369,10 +370,6 @@ fn status(e: &SolidError) -> f64 {
         SolidError::InvalidInput { reason, .. } if *reason == BARE_FLAG_REASON => 1000.0,
         _ => -1.0,
     }
-}
-
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
 }
 
 fn push_crv(o: &mut Vec<f64>, c: &Curve) {

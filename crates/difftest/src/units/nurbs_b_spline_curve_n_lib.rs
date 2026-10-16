@@ -47,6 +47,7 @@ use solidcore_ffi::units::nurbs_b_spline_curve_n_lib::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::{flag, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -316,10 +317,6 @@ fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
     Ok(InlineCrv { cpts, p, u })
 }
 
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
-}
-
 fn of_curve(c: &Curve) -> InlineCrv {
     InlineCrv {
         cpts: c.cpts().iter().map(|p| [p.x, p.y, p.z, p.w]).collect(),
@@ -369,10 +366,6 @@ fn resolve(c: &CrvIn) -> Result<InlineCrv, HarnessError> {
 }
 
 // ---- C++ side ---------------------------------------------------------------------
-
-fn flag(b: bool) -> f64 {
-    f64::from(u8::from(b))
-}
 
 fn encode_crv(c: &InlineCrv, o: &mut Vec<f64>) {
     let n = c.cpts.len().saturating_sub(1);

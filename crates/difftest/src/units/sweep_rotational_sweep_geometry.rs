@@ -56,6 +56,7 @@ use solidcore_ffi::units::sweep_rotational_sweep_geometry::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::{flag, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// The difftest runner.
@@ -214,14 +215,6 @@ struct Inputs {
 }
 
 // ---- C++ ------------------------------------------------------------------------------
-
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
-}
 
 fn push3(v: &mut Vec<f64>, p: [f64; 3]) {
     v.extend(p);
@@ -399,10 +392,6 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 // ---- Rust -----------------------------------------------------------------------------
-
-fn v3(p: [f64; 3]) -> Vec3 {
-    Vec3::from_array(p)
-}
 
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.

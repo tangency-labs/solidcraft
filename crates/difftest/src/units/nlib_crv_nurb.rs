@@ -34,6 +34,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::{flag, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -481,14 +482,6 @@ fn encode_crv(c: &InlineCrv, o: &mut Vec<f64>) -> Result<(), HarnessError> {
     Ok(())
 }
 
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
-}
-
 
 fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let mut o = Vec::new();
@@ -626,10 +619,6 @@ fn status(e: &SolidError) -> f64 {
     }
 }
 
-
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
-}
 
 fn push3(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);

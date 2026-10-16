@@ -38,6 +38,7 @@ use solidcore_ffi::units::surface_b_spline_volume::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// The runner.
@@ -278,10 +279,6 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 // ---- Rust side ----------------------------------------------------------------------
-
-fn v3(p: [f64; 3]) -> Vec3 {
-    Vec3::from_array(p)
-}
 
 fn transform_of(t: Tf) -> Transform {
     let [o, x, y, z] = t;

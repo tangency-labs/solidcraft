@@ -57,6 +57,7 @@ use solidcore_ffi::units::intersect_curve_class_p3::{self as ffi, kind, op};
 
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -233,10 +234,6 @@ struct Script {
 }
 
 // ---- objects ----------------------------------------------------------------------------
-
-fn v3(p: [f64; 3]) -> Vec3 {
-    Vec3::from_array(p)
-}
 
 fn b(x: bool) -> f64 {
     f64::from(u8::from(x))

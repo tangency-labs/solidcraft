@@ -48,6 +48,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -274,14 +275,6 @@ impl Inputs {
 
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
-}
-
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 fn sum_diff(minus: bool) -> SumDiff {

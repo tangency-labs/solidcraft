@@ -25,7 +25,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::math::Vec3;
 use solidcore::nurbs::crv_adv::p1::BARE_FLAG_REASON;
 use solidcore::nurbs::crv_basic::{Boundary, Curve};
 use solidcore::nurbs::knots::KnotVector;
@@ -38,6 +37,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -251,10 +251,6 @@ fn build_crv(c: &CrvIn) -> Result<Curve, HarnessError> {
     let c = resolve_crv(c)?;
     let pw = c.cpts.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect();
     Curve::new(pw, c.p, c.u.clone()).map_err(|e| harness(format!("rust curve: {e}")))
-}
-
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
 }
 
 fn cp(a: [f64; 4]) -> CPoint {

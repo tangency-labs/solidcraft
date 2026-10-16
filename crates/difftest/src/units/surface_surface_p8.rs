@@ -46,6 +46,7 @@ use solidcore_ffi::units::surface_surface_p8::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::{p2, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -1057,14 +1058,6 @@ fn push_crv(o: &mut Vec<f64>, c: &CrvIn) {
             o.extend_from_slice(u);
         }
     }
-}
-
-fn v3(p: [f64; 3]) -> Vec3 {
-    Vec3::from_array(p)
-}
-
-fn p2(p: [f64; 2]) -> Point2 {
-    Point2::new(p[0], p[1])
 }
 
 fn dom_of(d: [f64; 4]) -> Extent2d {

@@ -61,6 +61,7 @@ use solidcore_ffi::units::geom_pseudo_box::{self as ffi, Cmd as FCmd, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -397,14 +398,6 @@ fn split(prog: &[FCmd], flat: &[f64]) -> Result<Output, HarnessError> {
 
 fn put(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
-}
-
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 /// The upstream status a Rust error stands for.

@@ -25,6 +25,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -109,14 +110,6 @@ fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Result<T, HarnessError> {
         .find(|(n, _)| *n == name)
         .map(|(_, x)| *x)
         .ok_or_else(|| HarnessError::new(format!("unknown name {name}")))
-}
-
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 fn status_code(e: &SolidError) -> f64 {

@@ -43,6 +43,7 @@ use solidcore_ffi::units::geom_polar_box::{self as ffi, Cmd as FCmd, SM_ERR_INVA
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::{flag, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -245,20 +246,8 @@ fn split(prog: &[FCmd], flat: &[f64]) -> Result<Output, HarnessError> {
     Ok(cur.out)
 }
 
-fn v3(a: V3) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
-}
-
 fn put(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
-}
-
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 fn reg_mut(reg: &mut [PolarBox], r: usize) -> Result<&mut PolarBox, HarnessError> {

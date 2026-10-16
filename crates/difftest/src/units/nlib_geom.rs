@@ -36,6 +36,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::{flag, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -333,10 +334,6 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side --------------------------------------------------------------------
 
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
-}
-
 fn c4(a: [f64; 4]) -> CPoint {
     CPoint::new(a[0], a[1], a[2], a[3])
 }
@@ -409,14 +406,6 @@ fn push_matrix(o: &mut Vec<f64>, r: &SolidResult<RealMatrix>) -> SolidResult<()>
 /// `N_PtsAreEqual` is `==` on `Vec3` (false for NaN, even against itself).
 fn pts_are_equal(p: Vec3, q: Vec3) -> bool {
     p == q
-}
-
-fn flag(b: bool) -> f64 {
-    if b {
-        1.0
-    } else {
-        0.0
-    }
 }
 
 #[allow(clippy::too_many_lines)]

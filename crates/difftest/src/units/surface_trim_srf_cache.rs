@@ -43,6 +43,7 @@ use solidcore_ffi::units::surface_trim_srf_cache::{self as ffi, Op};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -261,10 +262,6 @@ fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
         return Err(harness("net rows differ in length"));
     }
     Ok((n, m))
-}
-
-fn flag(b: bool) -> f64 {
-    f64::from(u8::from(b))
 }
 
 // ---- C++ side -----------------------------------------------------------------------

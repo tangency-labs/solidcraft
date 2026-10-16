@@ -37,6 +37,7 @@ use solidcore_ffi::units::query_poly as ffi;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -359,10 +360,6 @@ fn put_box(o: &mut Vec<f64>, b: &Extent3d) {
 
 fn opt<T: Copy>(x: Option<T>, f: impl Fn(T) -> u32) -> f64 {
     x.map_or(-1.0, |v| f64::from(f(v)))
-}
-
-fn v3(a: [f64; 3]) -> Vec3 {
-    Vec3::new(a[0], a[1], a[2])
 }
 
 /// The `SmStatus` of a Rust error (`SM_ERR_INVALID_INPUT` for invalid input).

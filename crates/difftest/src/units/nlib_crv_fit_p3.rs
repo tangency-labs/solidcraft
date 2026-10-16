@@ -33,6 +33,7 @@ use solidcore_ffi::FfiError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
+use crate::util::v3;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -258,10 +259,6 @@ fn curve_record(r: &SolidResult<Curve>) -> Vec<f64> {
         push_curve(&mut o, c);
     }
     o
-}
-
-fn v3(p: [f64; 3]) -> Vec3 {
-    Vec3::new(p[0], p[1], p[2])
 }
 
 fn vs(v: &[[f64; 3]]) -> Vec<Vec3> {
