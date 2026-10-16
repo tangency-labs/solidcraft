@@ -474,6 +474,10 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         int64_t which = rd.idx();
         SmBoolean flag = rd.bflag();
         bool want_out = rd.flag();
+        // review: compare the values of gaps the op (re)computes
+        bool fg0 = (p->*EuPeek::face_gap()).IsInit();
+        bool cg0 = (p->*EuPeek::ccw_gap()).IsInit();
+        std::vector<double> vals;
         if (which == 0)
             o.push_back(p->GetMaxEdgeFaceGap(flag) ? 1.0 : 0.0);
         else if (which == 1)
@@ -483,18 +487,39 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             SmEdgeFaceGap gap;
             o.push_back(st(p->CalcMaxEdgeFaceGap(want_out ? &gap : NULL, flag)));
             o.push_back(flg(gap.IsInit()));
+            if (want_out && gap.IsInit())
+            {
+                SmPoint2d uv = gap.GetFaceUV();
+                vals = {gap.m_dGap3d, gap.GetEdgeT(), uv.x, uv.y};
+            }
         }
         else
         {
             SmEdgeEdgeGap gap;
             o.push_back(st(p->CalcEdgeCCWEdgeGap(want_out ? &gap : NULL, flag)));
             o.push_back(flg(gap.IsInit()));
+            if (want_out && gap.IsInit())
+                vals = {gap.m_dGap3d, gap.GetEdgeT(0), gap.GetEdgeT(1)};
+        }
+        bool fcomp = p->IsLoopEdgeuse() && ((which == 0 && (flag || !fg0)) || (which == 2 && flag));
+        bool ccomp = p->IsLoopEdgeuse() && ((which == 1 && (flag || !cg0)) || (which == 3 && flag));
+        if (fcomp && (p->*EuPeek::face_gap()).IsInit())
+        {
+            const SmEdgeFaceGap& fg = p->*EuPeek::face_gap();
+            SmPoint2d uv = fg.GetFaceUV();
+            vals.insert(vals.end(), {fg.m_dGap3d, fg.GetEdgeT(), uv.x, uv.y});
+        }
+        if (ccomp && (p->*EuPeek::ccw_gap()).IsInit())
+        {
+            const SmEdgeEdgeGap& cg = p->*EuPeek::ccw_gap();
+            vals.insert(vals.end(), {cg.m_dGap3d, cg.GetEdgeT(0), cg.GetEdgeT(1)});
         }
         o.push_back(flg((p->*EuPeek::face_gap()).IsInit()));
         o.push_back(flg((p->*EuPeek::ccw_gap()).IsInit()));
         bool prim = p->GetEdgeuseType() == SmShell_TYPE || (p->GetEdge() && p->GetEdge()->GetPrimaryEdgeuse());
         SmEdgeuse* mate = prim ? p->GetMate() : nullptr;
         o.push_back(mate ? flg((mate->*EuPeek::face_gap()).IsInit()) : -1.0);
+        o.insert(o.end(), vals.begin(), vals.end());
         break;
     }
     case OP_SET_ORIENT:

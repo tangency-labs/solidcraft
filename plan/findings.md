@@ -3711,9 +3711,10 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   results as traversal indices. UV trim curves are imported exactly: they are often
   `SmLine`s (upstream converts linear UV curves), whose evaluation differs from a plain
   B-spline's by an ulp (`Mouse.smb` gave `0` vs `2.2e-16` before lines were imported as
-  `Line`s, via `Line::from_parts`). Edge 3D curves of other kinds are imported as their
-  B-spline part; they are only evaluated before `SmSurface::DropPoint`, which is deferred.
-  Wire that import exactly when `surface.surface_p5` lands.
+  `Line`s, via `Line::from_parts`). Edge 3D curves of other kinds and analytic
+  `SmBSplineSurface` subclasses (cone, sphere, torus, revolution, extrusion) are imported
+  as their B-spline part, so any case that evaluates them is deferred (see the second
+  review below).
 - **Not wired**, still `UNPORTED(topology.edgeuse_p1)`: `surface::trim_srf_cache`
   (`SmEdgeuse::GetUVTrimCurve` of the cache's edge uses), `intersect::point_class`
   (`SmEdgeuse::GetBrep`, `GetEdge`) and the `SmTol` object dispatch in `geom::tol`. Those
@@ -3732,6 +3733,27 @@ cases, 169 deferred; `SmSurface::EvaluateNormal` and `DropVectors` now call the
   The Seam case generator copied curve 0's knots onto curve 1 of a different degree
   (invalid curve; `--seeds 6000` case `gen5286` was a harness error); it now requires
   equal degrees.
+- **Review fixes (2026-10-16, follow-up to PR #55).** Since `heal.gap` and
+  `surface.surface_p5` were wired, `CalcMaxEdgeFaceGap` / `CalcEdgeCCWEdgeGap` really
+  evaluate the edge curve and face surface, but the runner compared only statuses and
+  `IsInit` flags. Comparing the values (`gap_3d`, `edge_t`, `face_uv`; `edge_t0`,
+  `edge_t1`, only for gaps the op recomputes) gave 16 failures on the upstream `.smb`
+  fixtures (Mouse, cone, disk, surf_extrude, surf_rev, torus, toruswvy, vase_rev
+  `_gaps0`/`_gaps2`, e.g. `disk_gaps0` face_uv C++ `(-0.5,-1.7535)` vs Rust
+  `(-1.7535,0.5)`; `torus_gaps0` edge_t C++ 60 vs Rust 85). Two harness causes, no
+  library defect: (1) an `SmPlane` was exported as origin + normal and rebuilt with
+  `Plane::from_normal`, whose UV frame is rotated 90 degrees from the C++ one; the shared
+  `sc_edgeuse_graph.h` now exports origin, X/Y axes, UV scale and STEP domain and the
+  import builds the exact `Plane` (as `sc_topology_fixture.h` does); (2) cases evaluating
+  geometry imported as its B-spline part were not deferred; `inexact_geometry` now defers
+  them (gap ops on loop edge uses, the 3D-drop branch of `GetStartPointUVLoopGap`) to
+  `surface.cone_p1`, `surface.sphere`, `surface.surf_of_extrusion_p2` or
+  `topology.brep_p7`, with the mapping of `topology.edgeuse_p2`. With the exact import,
+  every computed gap agrees bit for bit. `fixtures/topology.edgeuse_p1/review_gap_values.json`
+  (1680 cases) keeps them compared. The units sharing the import (`topology.edgeuse_p2`,
+  `topology.loopuse`, `query.api_queries`, `query.edge`, `query.face_p2`) give unchanged
+  results. Open: `calc_max_edge_face_gap` uses `context_xsect_tol_3d(k, None)` (upstream
+  takes the edge use's, edge's or face's context); revisit once B-rep records carry one.
 
 ## surface.surf_of_extrusion_p2 (`SmSurfOfExtrusion`, part 2, 2026-10-14)
 

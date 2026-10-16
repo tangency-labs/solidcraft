@@ -8,13 +8,15 @@
 //! is no Rust B-rep reader or builder yet (units `topology.brep_*`), so the Rust side
 //! imports the graph the shim exports in traversal order (raw members: list owners,
 //! list order, loop neighbours, orientations, UV trim curves, cached gap states,
-//! tolerances, face UV domains, geometry as B-splines; an `SmPlane` face surface as a
-//! [`Plane`] through its origin and normal, which only its kind is observed of) into a
-//! [`Brep`] and runs the ported functions on
-//! it; their results are compared as traversal indices. The geometry is only evaluated
-//! in paths that are deferred today (`SmSurface::DropPoint`), apart from the UV trim
-//! curves, which are the exact B-splines. The skeleton fields no ported function reads
-//! (`Loop::edges`, `Shell::faces`, `Face::loops`) are filled minimally.
+//! tolerances, face UV domains, geometry as B-splines; an `SmPlane` face surface as the
+//! exact [`Plane`] (origin, axes, scales, analytic domain), an `SmLine` edge curve as
+//! the exact [`Line`]) into a [`Brep`] and runs the ported functions on it; their
+//! results are compared as traversal indices, and the gaps the gap ops compute by
+//! value. A case that evaluates a face surface or edge curve the import holds only as
+//! its B-spline part (an analytic subclass: cone, sphere, torus, revolution, extrusion,
+//! circle, ...) is deferred ([`inexact_geometry`]): the gap calculations and the 3D
+//! drop branch of `GetStartPointUVLoopGap`. The skeleton fields no ported function
+//! reads (`Loop::edges`, `Shell::faces`, `Face::loops`) are filled minimally.
 //!
 //! Index arguments are selectors taken modulo the entity count (so generated cases
 //! need no counts); `-1` selects null.
@@ -673,11 +675,13 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<Option<Surface>, HarnessError> {
         return Ok(None);
     }
     if kind == 1.0 {
-        // an SmPlane: its kind is what the ported paths observe; the plane is rebuilt
-        // from its origin and normal (not bit-exact: never evaluated off deferred paths)
+        // an SmPlane: origin, axes, scales, analytic domain (exact)
         let o = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
-        let n = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
-        return Ok(Some(Surface::from(Plane::from_normal(o, n))));
+        let x = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
+        let y = Vec3::new(rd.num()?, rd.num()?, rd.num()?);
+        let sc = solidcore::geom::vector2d::Vec2::new(rd.num()?, rd.num()?);
+        let d = Extent2d::from_bounds(rd.num()?, rd.num()?, rd.num()?, rd.num()?);
+        return Ok(Some(Surface::from(Plane::new(o, x, y, sc, &d))));
     }
     if kind != 0.0 {
         return Err(harness("export: a surface is neither a plane nor a B-spline"));
@@ -1035,15 +1039,82 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let Some(c) = ffi::counts(&ex) else {
         return Ok(build_failure(&ex));
     };
-    let mut b = import(&ex)?;
+    let (mut b, types) = import_with_types(&ex)?;
     let Some(op) = resolve(&i.op, c) else {
         return Ok(no_entity());
     };
+    if let Some(o) = inexact_geometry(&b, &types, &op) {
+        return Ok(o);
+    }
     match run_rust_brep(&mut b, &op) {
         Ok(o) => Ok(o),
         Err(Fail::Solid(e)) => rust_err(&e),
         Err(Fail::Harness(h)) => Err(h),
     }
+}
+
+/// `SmBSplineSurface_TYPE`, `SmPlane_TYPE`; `SmBSplineCurve_TYPE`, `SmLine_TYPE`.
+const EXACT_SURFACES: [i64; 2] = [15002, 15011];
+const EXACT_CURVES: [i64; 2] = [14033, 14010];
+
+/// The deferral of a case that evaluates a face surface or edge curve the import holds
+/// only as its B-spline part (an analytic `SmBSplineSurface` / `SmBSplineCurve`
+/// subclass): the gap calculations and the 3D-drop branch of `GetStartPointUVLoopGap`.
+fn inexact_geometry(b: &Brep, types: &ImportTypes, op: &OpIn) -> Option<Output> {
+    let surface_of = |e: EdgeuseId| {
+        eu1::face(b, e)
+            .ok()
+            .flatten()
+            .and_then(|f| types.face_surface_types.get(f.index() as usize).copied())
+            .unwrap_or(-1)
+    };
+    let curve_of = |e: Option<EdgeuseId>| {
+        e.and_then(|e| eu1::edge(b, e).ok().flatten())
+            .and_then(|x| types.edge_curve_types.get(x.index() as usize).copied())
+            .unwrap_or(-1)
+    };
+    let (e, surface, other) = match op {
+        OpIn::Gaps { eu, which, .. } => {
+            let e = eid(*eu);
+            if !eu1::is_loop_edgeuse(b, e).unwrap_or(false) {
+                return None;
+            }
+            if *which == 0 || *which == 2 {
+                (e, true, None)
+            } else {
+                (e, false, eu1::ccw_edgeuse(b, e).ok().flatten())
+            }
+        }
+        OpIn::UvLoopGap { eu } => {
+            let e = eid(*eu);
+            let r = b.edgeuse(e).ok()?;
+            let cw = r.cw?;
+            let both = eu1::uv_trim_curve(b, e).ok().and_then(|x| x.0).is_some()
+                && eu1::uv_trim_curve(b, cw).ok().and_then(|x| x.0).is_some();
+            if both {
+                return None;
+            }
+            (e, true, Some(cw))
+        }
+        _ => return None,
+    };
+    let st = if surface { surface_of(e) } else { -1 };
+    if st >= 0 && !EXACT_SURFACES.contains(&st) {
+        let (unit, symbol) = match st {
+            15012 | 15013 => ("surface.cone_p1", "SmCone (no SurfaceKind)"),
+            15014 => ("surface.sphere", "SmSphere"),
+            15015 => ("surface.torus", "SmTorus (no SurfaceKind)"),
+            15030 => ("surface.surf_of_extrusion_p2", "SurfaceKind::SurfOfExtrusion"),
+            _ => ("topology.brep_p7", "SmBrep::ReadFromFile"),
+        };
+        return Some(Output::deferred(unit, symbol));
+    }
+    for t in [curve_of(Some(e)), curve_of(other)] {
+        if t >= 0 && !EXACT_CURVES.contains(&t) {
+            return Some(Output::deferred("topology.brep_p7", "SmBrep::ReadFromFile"));
+        }
+    }
+    None
 }
 
 enum Fail {
@@ -1263,19 +1334,46 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         } => {
             let e = eid(*eu);
             let mut out = Vec::new();
+            let fg0 = b.edgeuse(e)?.max_edge_face_gap.is_init();
+            let cg0 = b.edgeuse(e)?.edge_ccw_edge_gap.is_init();
+            let mut vals: Vec<f64> = Vec::new();
             match which {
                 0 => out.push(flag(eu1::max_edge_face_gap(&Kernel::default(), b, e, *f)?.is_some())),
                 1 => out.push(flag(eu1::edge_ccw_edge_gap(b, e, *f)?.is_some())),
                 2 => match eu1::calc_max_edge_face_gap(&Kernel::default(), b, e, *f) {
-                    Ok(g) => out.extend([0.0, flag(*want_out && g.is_init())]),
+                    Ok(g) => {
+                        out.extend([0.0, flag(*want_out && g.is_init())]);
+                        if *want_out && g.is_init() {
+                            vals.extend([g.gap_3d, g.edge_t, g.face_uv.x, g.face_uv.y]);
+                        }
+                    }
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),
                 },
                 _ => match eu1::calc_edge_ccw_edge_gap(b, e, *want_out, *f) {
-                    Ok(g) => out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]),
+                    Ok(g) => {
+                        out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
+                        if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {
+                            vals.extend([g.gap_3d, g.edge_t0, g.edge_t1]);
+                        }
+                    }
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),
                 },
+            }
+            let is_loop = eu1::is_loop_edgeuse(b, e)?;
+            let fcomp = is_loop && ((*which == 0 && (*f || !fg0)) || (*which == 2 && *f));
+            let ccomp = is_loop && ((*which == 1 && (*f || !cg0)) || (*which == 3 && *f));
+            {
+                let r = b.edgeuse(e)?;
+                let g = r.max_edge_face_gap;
+                if fcomp && g.is_init() {
+                    vals.extend([g.gap_3d, g.edge_t, g.face_uv.x, g.face_uv.y]);
+                }
+                let g = r.edge_ccw_edge_gap;
+                if ccomp && g.is_init() {
+                    vals.extend([g.gap_3d, g.edge_t0, g.edge_t1]);
+                }
             }
             let r = b.edgeuse(e)?;
             out.push(flag(r.max_edge_face_gap.is_init()));
@@ -1285,6 +1383,7 @@ fn run_rust_brep(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 Some(m) => flag(b.edgeuse(m)?.max_edge_face_gap.is_init()),
                 None => -1.0,
             });
+            out.extend(vals);
             Ok(Output::new().values("state", out))
         }
         OpIn::SetOrient { eu, orient } => {
