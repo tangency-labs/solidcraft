@@ -1834,7 +1834,11 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     }
 
     /// The surface a node's `mBA_pSurface` handle refers to.
-    pub(super) fn node_surface(&self, handle: Option<O>) -> Result<&Surface> {
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` without a handle or for a handle the cache does not hold.
+    pub fn node_surface(&self, handle: Option<O>) -> Result<&Surface> {
         let h = handle.ok_or_else(|| invalid(OP_POLAR, "node has no surface"))?;
         if Some(h) == self.surface_handle {
             return Ok(&self.surface);

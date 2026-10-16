@@ -116,6 +116,15 @@ fn static_output(flat: &[f64]) -> Output {
         .scalar("status", flat.first().copied().unwrap_or(-1.0))
         .values("static", flat.get(1..).unwrap_or_default().to_vec())
 }
+/// The shim's `id(object)` of a solution object: the vertex index, `999` for the
+/// curve, `-2` for anything else (the faces and surfaces of face/face solves).
+fn static_object_id(h: StaticHandle) -> f64 {
+    if (0..=999).contains(&h.0) {
+        f64::from(h.0)
+    } else {
+        -2.0
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct StaticHandle(i32);
 impl SolutionObject for StaticHandle {
@@ -427,8 +436,8 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
                     f64::from(s.solution_type.code()),
                     s.num_variables as f64,
                     s.num_objects as f64,
-                    s.objects[0].map_or(-1.0, |h| f64::from(h.0)),
-                    s.objects[1].map_or(-1.0, |h| f64::from(h.0)),
+                    s.objects[0].map_or(-1.0, static_object_id),
+                    s.objects[1].map_or(-1.0, static_object_id),
                     s.start.solution_value,
                 ]);
                 flat.extend(s.start.parameters.iter().take(s.num_variables).copied());

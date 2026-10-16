@@ -4038,6 +4038,69 @@ pub fn cs_are_perpen_disjoint<O>(
     Ok(false)
 }
 
+/// [`cs_are_perpen_disjoint`] for a surface node `surface_id` whose Bezier patch is
+/// held by `cache` (the polar box is computed without being stored,
+/// [`SurfaceCache::polar_box_unstored`]; the span's ends are those stored when the
+/// curve tree was built). Added for the leaf solve of unit `surface.surface_p11`.
+///
+/// # Errors
+///
+/// Those of the patch and polar box lookups; [`SolidError::Unported`] propagates.
+pub fn cs_are_perpen_disjoint_in<O: Copy + PartialEq>(
+    curve_tree: &Tree<O>,
+    curve_node: &TreeNode<O>,
+    surface_node: &TreeNode<O>,
+    cache: &SurfaceCache<O>,
+    surface_id: crate::geom::tree::NodeId,
+) -> Result<bool> {
+    // Surface node has a polar box
+    if surface_node.aux_type == AuxDataType::BezierSurface
+        || surface_node.aux_type == AuxDataType::BezierSurfaceHead
+    {
+        // (SER inside a SmBoolean function: a failed cone bound returns its non-zero
+        // status, TRUE)
+        let Some((cone_vec, cone_angle_rad)) =
+            crate::error::ignored(surface_node.bbox.cone_bound_to(&curve_node.bbox))?
+        else {
+            return Ok(true);
+        };
+        if cone_angle_rad > PI / 2.0 {
+            return Ok(false);
+        }
+
+        if cache
+            .polar_box_unstored(surface_id)?
+            .is_disjoint_with_cone(cone_vec, cone_angle_rad)
+        {
+            return Ok(true);
+        }
+
+        if curve_node.aux_type != AuxDataType::BezierCurve
+            && curve_node.aux_type != AuxDataType::CurveData
+        {
+            return Ok(false);
+        }
+
+        let span = curve_tree.curve_aux(curve_node)?;
+        let [start, end] = span.ends;
+        let line_vec = end - start;
+        if line_vec.length_squared() > EFF_ZERO_SQ {
+            let curve_angle_rad = span.max_turning_angle_deg * PI / 180.0 + 3.0 * PI / 180.0;
+            if crate::geom::geom_utility::p1::cones_are_disjoint_perpen(
+                line_vec,
+                curve_angle_rad,
+                cone_vec,
+                cone_angle_rad,
+            ) {
+                return Ok(true);
+            }
+        }
+    }
+
+    // node does not have a polar box to check
+    Ok(false)
+}
+
 // ---- SmLSIGlobalSolver ------------------------------------------------------------------------
 
 /// The line/surface intersection global solver (`SmLSIGlobalSolver`): one tree (the

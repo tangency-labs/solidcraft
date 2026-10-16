@@ -29,7 +29,9 @@ use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
-use solidcore::geom::solution_array::{SolutionArray, SolutionEnd, SolutionObject, ObjectKind};
+use solidcore::geom::solution_array::{
+    ObjectKind, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
+};
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -741,6 +743,61 @@ impl SolutionObject for Obj {
     }
 }
 
+/// The handles of the global curve and surface solves (wired by unit
+/// `surface.surface_p11`): the solved curve or surface, with the natural interval or
+/// domain upstream reads through the object pointer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Handle {
+    id: u8,
+    interval: Option<Extent1d>,
+    domain: Option<Extent2d>,
+}
+
+impl SolutionObject for Handle {
+    fn kind(&self) -> ObjectKind {
+        if self.interval.is_some() {
+            ObjectKind::Curve
+        } else {
+            ObjectKind::Surface
+        }
+    }
+    fn natural_interval(&self) -> Option<Extent1d> {
+        self.interval
+    }
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        self.domain
+    }
+}
+
+fn surface_handle(id: u8, s: &Surface) -> Handle {
+    Handle {
+        id,
+        interval: None,
+        domain: Some(s.natural_uv_domain()),
+    }
+}
+
+/// The first [`SOLS_OUT`] solutions of a global solve, as the shim's `put_sols`
+/// writes them: type, value, variable count (at most 4), the start parameters and,
+/// for a range, the end parameters.
+const SOLS_OUT: usize = 16;
+
+fn put_sols(o: &mut Vec<f64>, sols: &SolutionArray<Handle>) -> Result<(), Fail> {
+    for s in sols.as_slice().iter().take(SOLS_OUT) {
+        let n = s.num_variables.min(4);
+        o.extend([f64::from(s.solution_type as i32), s.start.solution_value, n as f64]);
+        for j in 0..n {
+            o.push(s.start.param(j).map_err(|e| harness(e.to_string()))?);
+        }
+        if s.solution_type == SolutionType::RangeOfValues {
+            for j in 0..n {
+                o.push(s.end.param(j).map_err(|e| harness(e.to_string()))?);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let s = surface_of(&i.surface)?;
     let mut o = Vec::new();
@@ -953,7 +1010,14 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         } => {
             let c = curve_of(curve)?;
             let vecs: Vec<Vec3> = vecs.iter().map(|p| v3(*p)).collect();
-            let r: solidcore::Result<SolutionArray<Obj>> = s.global_curve_solve(
+            let k = solidcore::kernel::Kernel::default();
+            let curve_handle = Some(Handle {
+                id: 0,
+                interval: Some(c.natural_interval()),
+                domain: None,
+            });
+            let r: solidcore::Result<SolutionArray<Handle>> = s.global_curve_solve(
+                &k,
                 &dom_of(*dom),
                 &c,
                 &Extent1d::from_min_max(ivl[0], ivl[1]),
@@ -962,9 +1026,13 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 *target,
                 &vecs,
                 req_of(*req)?,
+                [curve_handle, Some(surface_handle(1, &s))],
             );
             match st(r)? {
-                Ok(a) => o.extend([0.0, a.len() as f64]),
+                Ok(a) => {
+                    o.extend([0.0, a.len() as f64]);
+                    put_sols(&mut o, &a)?;
+                }
                 Err(c) => o.extend([c, 0.0]),
             }
         }
@@ -980,7 +1048,10 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         } => {
             let s2 = surface_of(other)?;
             let vecs: Vec<Vec3> = vecs.iter().map(|p| v3(*p)).collect();
-            let r: solidcore::Result<SolutionArray<Obj>> = s.global_surface_solve(
+            let k = solidcore::kernel::Kernel::default();
+            let handles = [Some(surface_handle(1, &s)), Some(surface_handle(2, &s2))];
+            let r: solidcore::Result<SolutionArray<Handle>> = s.global_surface_solve(
+                &k,
                 &dom_of(*dom),
                 &s2,
                 &dom_of(*dom2),
@@ -989,9 +1060,13 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 *target,
                 &vecs,
                 req_of(*req)?,
+                handles,
             );
             match st(r)? {
-                Ok(a) => o.extend([0.0, a.len() as f64]),
+                Ok(a) => {
+                    o.extend([0.0, a.len() as f64]);
+                    put_sols(&mut o, &a)?;
+                }
                 Err(c) => o.extend([c, 0.0]),
             }
         }
@@ -1412,6 +1487,33 @@ pub(crate) fn gen_vecs(rng: &mut Rng, n: usize) -> Vec<[f64; 3]> {
         .collect()
 }
 
+/// A non-zero direction (the signed directed solves' `m_cpOptVectors[0]`).
+fn gen_direction(rng: &mut Rng) -> [f64; 3] {
+    let mut d = rng.point3(-1.0, 1.0);
+    d[2] += if d[2] < 0.0 { -0.5 } else { 0.5 };
+    d
+}
+
+/// The `z` range of a B-spline surface's control points (homogeneous, weight `NOW`
+/// for non-rational).
+fn z_range(bs: &BssIn) -> (f64, f64) {
+    bs.net
+        .iter()
+        .flatten()
+        .map(|p| p[2] / if p[3] == NOW { 1.0 } else { p[3] })
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)))
+}
+
+/// Moves `other` in `z` so its control hull (and so the surface) lies `gap` above
+/// `below`'s.
+fn lift_above(other: &mut BssIn, below: &BssIn, gap: f64) {
+    let dz = z_range(below).1 - z_range(other).0 + gap;
+    for p in other.net.iter_mut().flatten() {
+        let w = if p[3] == NOW { 1.0 } else { p[3] };
+        p[2] += dz * w;
+    }
+}
+
 fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
     // planes and curve-bounded surfaces: not for the B-spline-only ops
     let is_plane = !matches!(s, SrfIn::Bspline(_) | SrfIn::Sms(_));
@@ -1516,13 +1618,16 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
         32 if !is_plane => {
             let c = gen_curve(rng);
             let (a, bb) = (c.u.first().copied().unwrap_or(0.0), c.u.last().copied().unwrap_or(1.0));
+            // minimize, maximize, normalize and signed directed minimize (along a
+            // non-zero vector) reach every branch of SmCSGlobalSolver::LocalSolve
+            let sop = *rng.choose(&[3u8, 4, 5, 9]).unwrap_or(&3);
             OpIn::Gcs {
                 dom: gen_dom(rng, s),
                 curve: c,
                 ivl: [a, bb],
-                sop: *rng.choose(&[3u8, 4]).unwrap_or(&3),
+                sop,
                 tol: 1e-6,
-                vecs: Vec::new(),
+                vecs: if sop == 9 { vec![gen_direction(rng)] } else { Vec::new() },
                 target: None,
                 req: 0,
             }
@@ -1542,9 +1647,32 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
                 guess_t: 0.5 * (a + bb),
             }
         }
-        // surface/surface global solves are fixture-only: two random surfaces often
-        // intersect, and minimizing over the intersection curve's continuum of zero
-        // distances takes upstream minutes (the Rust side defers anyway)
+        // surface/surface global solves: a bumpy patch lifted clear above a B-spline
+        // surface (two random surfaces often intersect, and minimizing over the
+        // intersection curve's continuum of zero distances takes upstream minutes);
+        // intersect (for the node pairs) on the crossing surfaces
+        34 => match s {
+            SrfIn::Bspline(bs) => {
+                let sop = *rng.choose(&[0u8, 3, 4, 5, 9]).unwrap_or(&3);
+                let mut other = gen_bss(rng, Shape::Bumpy);
+                if sop != 0 {
+                    let gap = *rng.choose(&[0.05, 0.5, 2.0]).unwrap_or(&0.5);
+                    lift_above(&mut other, bs, gap);
+                }
+                let other = SrfIn::Bspline(other);
+                OpIn::Gss {
+                    dom: gen_dom(rng, s),
+                    dom2: gen_dom(rng, &other),
+                    other,
+                    sop,
+                    tol: 1e-6,
+                    vecs: if sop == 9 { vec![gen_direction(rng)] } else { Vec::new() },
+                    target: None,
+                    req: if sop == 0 { 3 } else { rng.below(2) as u8 },
+                }
+            }
+            _ => OpIn::Brep,
+        },
         35 if !is_plane => OpIn::Proj {
             dom: gen_dom(rng, s),
             curve: gen_curve(rng),
@@ -1606,7 +1734,7 @@ fn gen_op(rng: &mut Rng, s: &SrfIn) -> OpIn {
     }
 }
 
-/// The ops that run an upstream global solve (all deferred on the Rust side).
+/// The ops that run a global solve.
 fn is_solve(op: &OpIn) -> bool {
     matches!(
         op,
@@ -1653,12 +1781,18 @@ impl UnitDiff for Runner {
             if ffi::validate(op, &input).is_err() {
                 continue;
             }
-            if let Err(Fail::Harness(_)) = rust_run(&i) {
+            // keep the global solves and the projection off extreme scales, where the
+            // subdivision of both sides runs for minutes (checked before the Rust run
+            // below, which runs the solve too)
+            if is_solve(&i.op) && !unit_scale(&i.surface) {
                 continue;
             }
-            // the global solves and the projection always defer (surface cache); keep
-            // their C++ side off extreme scales, where its subdivision runs for minutes
-            if is_solve(&i.op) && !unit_scale(&i.surface) {
+            if let OpIn::Gss { other, .. } = &i.op {
+                if !unit_scale(other) {
+                    continue;
+                }
+            }
+            if let Err(Fail::Harness(_)) = rust_run(&i) {
                 continue;
             }
             return serde_json::to_value(i).ok();

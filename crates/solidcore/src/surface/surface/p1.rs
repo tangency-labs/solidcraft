@@ -1575,8 +1575,8 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the surface cache; [`SolidError::Unported`]: `SmSurfaceSilhouette`
-    /// (`intersect.surface_silhouette`).
+    /// Those of the surface cache; [`SolidError::Unported`]: `SmSurfaceTracer::DoTrace`
+    /// (`intersect.surface_tracer`).
     pub fn create_silhouette_curves(
         &self,
         k: &Kernel,
@@ -1590,10 +1590,10 @@ impl Surface {
         // check only signals upstream)
         let _ = (cache.surface_continuity(uv_domain)? as i32) <= (ContinuityType::C0 as i32);
 
-        // UNPORTED(intersect.surface_silhouette): SmSurfaceSilhouette::DoTrace
+        // UNPORTED(intersect.surface_tracer): SmSurfaceTracer::DoTrace (inherited by SmSurfaceSilhouette)
         Err(SolidError::unported(
-            "SmSurfaceSilhouette::DoTrace",
-            "intersect.surface_silhouette",
+            "SmSurfaceTracer::DoTrace",
+            "intersect.surface_tracer",
         ))
     }
 
@@ -2672,6 +2672,14 @@ pub struct CsGlobalSolver<'t, 's, O> {
     pub interval: Extent1d,
     /// `m_crUVDomain`.
     pub uv_domain: Extent2d,
+    /// The curve of the curve tree (its owner object), for the leaf solve (part 11).
+    pub curve: Option<&'s Curve>,
+    /// The cache holding the patches of the surface tree's nodes, for the leaf solve
+    /// (part 11; upstream reaches it through the node's tree owner).
+    pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// The kernel (upstream's `SmContext`) the leaf solve's evaluations and solves run
+    /// with (part 11).
+    pub kernel: Option<&'s Kernel>,
 }
 
 impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
@@ -2689,12 +2697,16 @@ impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
             surface,
             interval,
             uv_domain,
+            curve: None,
+            surface_cache: None,
+            kernel: None,
         }
     }
 
     /// `BranchMayContainAnswers`: when normalizing, false if the surface node's
-    /// normals provably miss the curve node ([`cs_are_perpen_disjoint`]); then the
-    /// base test.
+    /// normals provably miss the curve node ([`cs_are_perpen_disjoint`], or
+    /// [`super::p2::cs_are_perpen_disjoint_in`] when `surface_cache` holds the
+    /// patches); then the base test.
     ///
     /// # Errors
     ///
@@ -2706,7 +2718,19 @@ impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
             let curve_node = self.base.branch_node(branch, 0)?;
             let surface_node = self.base.branch_node(branch, 1)?;
             let curve_tree = self.base.tree(0)?;
-            if cs_are_perpen_disjoint(curve_tree, curve_node, surface_node)? {
+            // with the solve's surface cache (unit surface.surface_p11 hands it over)
+            // the patch's polar box is reachable
+            let disjoint = match (self.surface_cache, branch.get(1).copied().flatten()) {
+                (Some(cache), Some(surface_id)) => super::p2::cs_are_perpen_disjoint_in(
+                    curve_tree,
+                    curve_node,
+                    surface_node,
+                    cache,
+                    surface_id,
+                )?,
+                _ => cs_are_perpen_disjoint(curve_tree, curve_node, surface_node)?,
+            };
+            if disjoint {
                 return Ok(false);
             }
         }
@@ -2779,6 +2803,7 @@ impl<'t, 's, O: SolutionObject> SsGlobalSolver<'t, 's, O> {
             uv_domain1,
             uv_domain2,
             kernel,
+            caches: [None, None],
         }
     }
 }

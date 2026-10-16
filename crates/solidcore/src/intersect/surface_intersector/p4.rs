@@ -48,17 +48,17 @@
 //!   2 does.
 //! - **Interior node pairs.** `FindInteriorCurves` walks the tree node pairs of an
 //!   `SM_SR_NODES` global surface solve, reading each node's box and Bezier patch UV
-//!   domain. [`Surface::global_surface_solve`] does not return its trees yet, so the
-//!   walk over the pairs is [`SurfaceIntersector::find_interior_curves_from_node_pairs`]
-//!   and the step from the solutions to the pairs is unported.
+//!   domain: [`Surface::global_surface_solve_with`] returns them with the solutions,
+//!   and the walk over the pairs is
+//!   [`SurfaceIntersector::find_interior_curves_from_node_pairs`].
 //! - **Offset surfaces.** `DoLawIntersection` needs both surfaces to be
 //!   `SmOffsetSurface`s (else `SM_ERR_NULL_POINTER`). No [`SurfaceKind`] is one yet
 //!   (unit `surface.offset_surface`), so with the surfaces that exist the call ends
 //!   there.
 //! - **Unported callees.** `SmSurface::IsSingularity` of a surface that is not a plane
-//!   (`surface.surface_p5`), `SmSurface::LocalSurfaceIntersect` (`surface.surface_p11`,
-//!   through part 1) and the global surface solve (`surface.surface_p11`, through
-//!   `surface.surface_p7`) return [`SolidError::Unported`], which always propagates
+//!   (`surface.surface_p5`) and the callees of `SmSurface::LocalSurfaceIntersect` and of
+//!   the global surface solve's leaf solve that are not ported yet (`surface.surface_p3`,
+//!   `surface.surface_p8`) return [`SolidError::Unported`], which always propagates
 //!   (also where upstream ignores the status).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps), the
 //!   `SM_ASSERT`s and the point-count warnings (`MSG`).
@@ -591,10 +591,12 @@ impl SurfaceIntersector<'_> {
             return Err(SolidError::sm_err(OP_FIC));
         }
 
-        // Find node pairs in the tree
-        let solutions = self
+        // Find node pairs in the tree (SER: checked; surface::surface::p7, its leaf
+        // solve SmSSGlobalSolver::LocalSolve in surface::surface::p11)
+        let (_, nodes) = self
             .surface(SrfIndex::First)
-            .global_surface_solve::<SolveSurface>(
+            .global_surface_solve_with::<SolveSurface>(
+                k,
                 &self.uv_domains[0],
                 self.surface(SrfIndex::Second),
                 &self.uv_domains[1],
@@ -603,16 +605,18 @@ impl SurfaceIntersector<'_> {
                 None,
                 &[],
                 SolutionRequested::Nodes,
+                [Some(SolveSurface(0)), Some(SolveSurface(1))],
             )?;
-        let _ = (solutions, k, out);
-        // (each solution's two tree nodes: their boxes and Bezier patch UV domains,
-        // then find_interior_curves_from_node_pairs; the solve itself is stubbed in
-        // surface.surface_p11, which must return the SM_SR_NODES node pairs with it)
-        // UNPORTED(surface.surface_p11): SmSurface::GlobalSurfaceSolve (SM_SR_NODES tree nodes)
-        Err(SolidError::unported(
-            "SmSurface::GlobalSurfaceSolve",
-            "surface.surface_p11",
-        ))
+
+        // each solution's two tree nodes: their boxes and Bezier patch UV domains
+        let pairs: Vec<InteriorNodePair> = nodes
+            .iter()
+            .map(|n| InteriorNodePair {
+                bboxes: n.bboxes,
+                uv_domains: n.uv_domains,
+            })
+            .collect();
+        self.find_interior_curves_from_node_pairs(k, &pairs, out)
     }
 
     /// The loop of `FindInteriorCurves` over the node pairs of the global solve: a
@@ -1378,15 +1382,15 @@ mod tests {
         si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out)
             .unwrap();
         assert_eq!(out.curves_3d.len(), 1);
-        // a far pair reaches the local intersection
+        // a far pair reaches the local intersection (surface.surface_p11, ported): it
+        // succeeds, or stops at an unported boundary solve (surface.surface_p8)
         let far = Extent3d::from_bounds(5.0, 5.0, 5.0, 6.0, 6.0, 6.0);
         let pair = InteriorNodePair {
             bboxes: [far, far],
             uv_domains: [unit(), unit()],
         };
-        assert!(matches!(
-            si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out),
-            Err(SolidError::Unported { .. })
-        ));
+        if let Err(e) = si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out) {
+            assert!(e.is_unported(), "{e}");
+        }
     }
 }

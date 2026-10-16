@@ -599,6 +599,26 @@ void put_uv(std::vector<double>& o, const SmVector2d& v)
     o.push_back(v.y);
 }
 
+// The first SOLS_OUT solutions of a global solve: type, value, variable count (at most
+// 4), the start parameters and, for a range, the end parameters (surface.surface_p11).
+const ULONG SOLS_OUT = 16;
+void put_sols(std::vector<double>& o, SmSolutionArray& sols)
+{
+    for (ULONG i = 0; i < sols.GetSize() && i < SOLS_OUT; i++)
+    {
+        SmSolution& s = sols[i];
+        ULONG n = s.m_lNumVariables < 4 ? s.m_lNumVariables : 4;
+        o.push_back((double)s.m_eSolutionType);
+        o.push_back(s.m_vStart.m_dSolutionValue);
+        o.push_back((double)n);
+        for (ULONG j = 0; j < n; j++)
+            o.push_back(s.m_vStart[j]);
+        if (s.m_eSolutionType == SM_ST_RANGE_OF_VALUES)
+            for (ULONG j = 0; j < n; j++)
+                o.push_back(s.m_vEnd[j]);
+    }
+}
+
 const SmContext& the_context()
 {
     static SmContext* p = new SmContext();
@@ -891,6 +911,8 @@ void run(int32_t op, Rd& rd, std::vector<double>& o)
             SmStatus r = s->GlobalCurveSolve(d, *c, SmExtent1d(a, b), sop, tol, pt, pv, req, sols);
             o.push_back(st(r));
             o.push_back((double)sols.GetSize());
+            if (r == SM_SUCCESS)
+                put_sols(o, sols);
         }
         else
         {
@@ -927,6 +949,8 @@ void run(int32_t op, Rd& rd, std::vector<double>& o)
         SmStatus r = s->GlobalSurfaceSolve(d, *s2, d2, sop, tol, pt, vecs.empty() ? NULL : vecs.data(), req, sols);
         o.push_back(st(r));
         o.push_back((double)sols.GetSize());
+        if (r == SM_SUCCESS)
+            put_sols(o, sols);
         delete s2;
         break;
     }
