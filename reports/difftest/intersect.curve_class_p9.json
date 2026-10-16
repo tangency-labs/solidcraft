@@ -1,0 +1,4215 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "isolated_vertex_uv",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#0 (upstream tests/prog_test/src/smTopoTest.cpp:3040 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "isolated_vertex_3d",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#1 (upstream tests/prog_test/src/smTopoTest.cpp:3040 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cached_vertex_dedup",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#2 (upstream source/SMLib/src/SmCurveClass.cpp:16220 (cached marks))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_edges_defaults",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#3 (upstream source/SMLib/inc/SmCurveClass.h:775 (default flags))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "same_curve_overlap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#4 (upstream source/SMLib/src/SmCurveClass.cpp:15651 (pointer identity shortcut))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "same_curve_disjoint",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#5 (upstream source/SMLib/src/SmCurveClass.cpp:15651 (pointer identity empty overlap))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "trim_rectangle_interior",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#6 (upstream tests/prog_test/src/smTopoTest.cpp:3015 (my_test_get_loop_crossings rectangular sheet, restricted interior subdomain))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "trim_rectangle_crossing",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#7 (upstream source/SMLib/src/SmCurveClass.cpp:16100 (trim curve intersection))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "uv_vertex_at_source_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#8 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "uv_vertex_at_source_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#9 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "uv_vertex_near_source_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#10 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "uv_vertex_outside_source",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#11 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_vertex_loops_order",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#12 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cached_two_vertex_loops_order",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#13 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_subdomain",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#14 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "uv_hit_but_3d_gap_rejected",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#15 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "zero_source_zone",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#16 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cached_no_intersecting_nodes",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#17 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "singular_vertex_3d_drop",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#18 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "singular_vertex_checked",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#19 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "native_default_uv_parameter",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#20 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "lifted_uv_source_to_3d",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#21 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "lifted_plane_dispatch_gap",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#22 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "same_curve_touching_intervals",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#23 (upstream source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression))",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "tiny_vertex_check_3d_explicit_zone",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#24 (upstream source/SMLib/inc/SmVertex.h:269 (explicit shrinking fixture tolerance))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "tiny_edge_explicit_zone_miss",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#25 (upstream source/SMLib/inc/SmEdge.h:431 (explicit shrinking fixture tolerance))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "rectangle_near_corner_vertex_only",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#26 (upstream source/SMLib/src/SmCurveClass.cpp:15920 (vertex and edge tolerances differ))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cached_pole_disjoint_v_leaf",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#27 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "wide_zone_tolerance",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#28 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "large_scale_1e8",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#29 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "extended_source_interval",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#30 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "point_source_interval",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#31 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_outside_uv_square",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#32 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "vertex_gap_over_one",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#33 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "extended_target_interval",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#34 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "kind": 2,
+        "op": 1,
+        "rectangle": true
+      },
+      "max_rel_err": 0.0,
+      "name": "collapsed_rectangle_setup_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native topology fixture construction failed",
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#35 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "inputs": {
+        "op": 1,
+        "rectangle": true,
+        "scale": 1e-6,
+        "zone": 0
+      },
+      "max_rel_err": 0.0,
+      "name": "tiny_zero_zone_rectangle_setup_rejected",
+      "outcome": "rejected",
+      "pass": false,
+      "rejected": "native topology fixture construction failed",
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#36 (upstream source/SMLib/src/SmCurveClass.cpp:16225; review #151)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_at_source_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#37 (upstream source/SMLib/src/SmCurveClass.cpp:16030 (positive boundary endpoint classification))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_at_source_end",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#38 (upstream source/SMLib/src/SmCurveClass.cpp:16030 (positive boundary endpoint classification))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "checked_vertex_at_source_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/intersect.curve_class_p9/usage.json#39 (upstream source/SMLib/src/SmCurveClass.cpp:16030 (positive boundary endpoint classification))",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780694",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780695",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780696",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780697",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780698",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780699",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780700",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780701",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780702",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780703",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780704",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780705",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780706",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780707",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780708",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780709",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780710",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780711",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780712",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780713",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780714",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780715",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780716",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780717",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780718",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780719",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780720",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780721",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780722",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780723",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780724",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780725",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780726",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780727",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780728",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780729",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780730",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780731",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780732",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780733",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780734",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780735",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780736",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780737",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780738",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780739",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780740",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780741",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780742",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780743",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780744",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780745",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780746",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780747",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780748",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780749",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780750",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780751",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780752",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780753",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780754",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780755",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780756",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780757",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780758",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780759",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780760",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780761",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780762",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780763",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780764",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780765",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780766",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780767",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780768",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780769",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780770",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780771",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780772",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780773",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780774",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780775",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780776",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780777",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780778",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780779",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780780",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780781",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780782",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780783",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780784",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780785",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780786",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780787",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780788",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780789",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0096",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780790",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0097",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780791",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0098",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780792",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0099",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780793",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0100",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780794",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0101",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780795",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0102",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780796",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0103",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780797",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0104",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780798",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0105",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780799",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0106",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780800",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0107",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780801",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0108",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780802",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0109",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780803",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0110",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780804",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0111",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780805",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0112",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780806",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0113",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780807",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0114",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780808",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0115",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780809",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0116",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780810",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0117",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780811",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0118",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780812",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0119",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780813",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0120",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780814",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0121",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780815",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0122",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780816",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0123",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780817",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0124",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780818",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0125",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780819",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0126",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780820",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0127",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780821",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0128",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780822",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0129",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780823",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0130",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780824",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0131",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780825",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0132",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780826",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0133",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780827",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0134",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780828",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0135",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780829",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0136",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780830",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0137",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780831",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0138",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780832",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0139",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780833",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0140",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780834",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0141",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780835",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0142",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780836",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0143",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780837",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0144",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780838",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0145",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780839",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0146",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780840",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0147",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780841",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0148",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780842",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0149",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780843",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0150",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780844",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0151",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780845",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0152",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780846",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0153",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780847",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0154",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780848",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0155",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780849",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0156",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780850",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0157",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780851",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0158",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780852",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0159",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780853",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0160",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780854",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0161",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780855",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0162",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780856",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0163",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780857",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0164",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780858",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0165",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780859",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0166",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780860",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0167",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780861",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0168",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780862",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0169",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780863",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0170",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780864",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0171",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780865",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0172",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780866",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0173",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780867",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0174",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780868",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0175",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780869",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0176",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780870",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0177",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780871",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0178",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780872",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0179",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780873",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0180",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780874",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0181",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780875",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0182",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780876",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0183",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780877",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0184",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780878",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0185",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780879",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0186",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780880",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0187",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780881",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0188",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780882",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0189",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780883",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0190",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780884",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0191",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780885",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0192",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780886",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0193",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780887",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0194",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780888",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0195",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780889",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0196",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780890",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0197",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780891",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0198",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780892",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0199",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780893",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0200",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780894",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0201",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780895",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0202",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780896",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0203",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780897",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0204",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780898",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0205",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780899",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0206",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780900",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0207",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780901",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0208",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780902",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0209",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780903",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0210",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780904",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0211",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780905",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0212",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780906",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0213",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780907",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0214",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780908",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0215",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780909",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0216",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780910",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0217",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780911",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0218",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780912",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0219",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780913",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0220",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780914",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0221",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780915",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0222",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780916",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0223",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780917",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0224",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780918",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0225",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780919",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0226",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780920",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0227",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780921",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0228",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780922",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0229",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780923",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0230",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780924",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0231",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780925",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0232",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780926",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0233",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780927",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0234",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780928",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0235",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780929",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0236",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780930",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0237",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780931",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0238",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780932",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0239",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780933",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0240",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780934",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0241",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780935",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0242",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780936",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0243",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780937",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0244",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780938",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0245",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780939",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0246",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780940",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0247",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780941",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0248",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780942",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0249",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780943",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0250",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780944",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0251",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780945",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0252",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780946",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0253",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780947",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0254",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780948",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0255",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780949",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0256",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780950",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0257",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780951",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0258",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780952",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0259",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780953",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0260",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780954",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0261",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780955",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0262",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780956",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0263",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780957",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0264",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780958",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0265",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780959",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0266",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780960",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0267",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780961",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0268",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780962",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0269",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780963",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0270",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780964",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0271",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780965",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0272",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780966",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0273",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780967",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0274",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780968",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0275",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780969",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0276",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780970",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0277",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780971",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0278",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780972",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0279",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780973",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0280",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780974",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0281",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780975",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0282",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780976",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0283",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780977",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0284",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780978",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0285",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780979",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0286",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780980",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0287",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780981",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0288",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780982",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0289",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780983",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0290",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780984",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0291",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780985",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0292",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780986",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0293",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780987",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0294",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780988",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0295",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780989",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0296",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780990",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0297",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780991",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0298",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780992",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0299",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780993",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0300",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780994",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0301",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780995",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0302",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780996",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0303",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780997",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0304",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050780998",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0305",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050780999",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0306",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781000",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0307",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781001",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0308",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781002",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0309",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781003",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0310",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781004",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0311",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781005",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0312",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781006",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0313",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781007",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0314",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781008",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0315",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781009",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0316",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781010",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0317",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781011",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0318",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781012",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0319",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781013",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0320",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781014",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0321",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781015",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0322",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781016",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0323",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781017",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0324",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781018",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0325",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781019",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0326",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781020",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0327",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781021",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0328",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781022",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0329",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781023",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0330",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781024",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0331",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781025",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0332",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781026",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0333",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781027",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0334",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781028",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0335",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781029",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0336",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781030",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0337",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781031",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0338",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781032",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0339",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781033",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0340",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781034",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0341",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781035",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0342",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781036",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0343",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781037",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0344",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781038",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0345",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781039",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0346",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781040",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0347",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781041",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0348",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781042",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0349",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781043",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0350",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781044",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0351",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781045",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0352",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781046",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0353",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781047",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0354",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781048",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0355",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781049",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0356",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781050",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0357",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781051",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0358",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781052",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0359",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781053",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0360",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781054",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0361",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781055",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0362",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781056",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0363",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781057",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0364",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781058",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCrvOnSurf over a generic Surface",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0365",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781059",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0366",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781060",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0367",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781061",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0368",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781062",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0369",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781063",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0370",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781064",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0371",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781065",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0372",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781066",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0373",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781067",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0374",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781068",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0375",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781069",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0376",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781070",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0377",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781071",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0378",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781072",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::InsertAt",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0379",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781073",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmCurveClassification::SmCurveClassification",
+        "unit": "intersect.curve_class_p4"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0380",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781074",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0381",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=12816342691050781075",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0382",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781076",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "sm_InsertSolutions edge branch (InsertAt / GetPointClassByIndex)",
+        "unit": "intersect.curve_class_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0383",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=12816342691050781077",
+      "values_compared": 0
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 197,
+  "cases_failed": 0,
+  "cases_passed": 225,
+  "cases_rejected": 2,
+  "cases_total": 424,
+  "deferred_by_unit": {
+    "curve.crv_on_surf": 24,
+    "intersect.curve_class_p2": 163,
+    "intersect.curve_class_p4": 10
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "intersect.curve_class_p9"
+}

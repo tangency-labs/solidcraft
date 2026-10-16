@@ -1,0 +1,726 @@
+{
+  "cases": [
+    {
+      "name": "isolated_vertex_uv",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3040 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "isolated_vertex_3d",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3040 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary)",
+      "inputs": {
+        "op": 1,
+        "check3d": true,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "cached_vertex_dedup",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16220 (cached marks)",
+      "inputs": {
+        "op": 1,
+        "state": 4,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_edges_defaults",
+      "upstream_ref": "source/SMLib/inc/SmCurveClass.h:775 (default flags)",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "defaults": true
+      }
+    },
+    {
+      "name": "same_curve_overlap",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15651 (pointer identity shortcut)",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "edges": [
+          {
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              0
+            ],
+            "same": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "same_curve_disjoint",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15651 (pointer identity empty overlap)",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "interval": [
+          0.5,
+          1
+        ],
+        "edges": [
+          {
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              0
+            ],
+            "same": true,
+            "interval": [
+              0,
+              0.4
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "trim_rectangle_interior",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3015 (my_test_get_loop_crossings rectangular sheet, restricted interior subdomain)",
+      "inputs": {
+        "op": 1,
+        "rectangle": true
+      }
+    },
+    {
+      "name": "trim_rectangle_crossing",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16100 (trim curve intersection)",
+      "inputs": {
+        "op": 1,
+        "rectangle": true,
+        "source": [
+          [
+            -0.5,
+            0.5,
+            0
+          ],
+          [
+            1.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "uv_vertex_at_source_start",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.2,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "uv_vertex_at_source_end",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.8,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "uv_vertex_near_source_start",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.1999999,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "uv_vertex_outside_source",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.19,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "two_vertex_loops_order",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.35,
+            0.5,
+            0
+          ],
+          [
+            0.65,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "cached_two_vertex_loops_order",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.35,
+            0.5,
+            0
+          ],
+          [
+            0.65,
+            0.5,
+            0
+          ]
+        ],
+        "state": 4
+      }
+    },
+    {
+      "name": "vertex_subdomain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.35,
+            0.5,
+            0
+          ]
+        ],
+        "interval": [
+          0.25,
+          0.75
+        ]
+      }
+    },
+    {
+      "name": "uv_hit_but_3d_gap_rejected",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0.001
+          ]
+        ],
+        "check3d": true
+      }
+    },
+    {
+      "name": "zero_source_zone",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ],
+        "zone": 0
+      }
+    },
+    {
+      "name": "cached_no_intersecting_nodes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ],
+        "source": [
+          [
+            2,
+            2,
+            0
+          ],
+          [
+            3,
+            2,
+            0
+          ]
+        ],
+        "state": 4
+      }
+    },
+    {
+      "name": "singular_vertex_3d_drop",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "kind": 2,
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ]
+        ],
+        "source": [
+          [
+            0,
+            0.2,
+            0
+          ],
+          [
+            0,
+            0.8,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "singular_vertex_checked",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 1,
+        "kind": 2,
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ]
+        ],
+        "source": [
+          [
+            0,
+            0.2,
+            0
+          ],
+          [
+            0,
+            0.8,
+            0
+          ]
+        ],
+        "check3d": true
+      }
+    },
+    {
+      "name": "native_default_uv_parameter",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "defaults": true,
+        "edges": [
+          {
+            "a": [
+              0.5,
+              0.7,
+              -1
+            ],
+            "b": [
+              0.5,
+              0.7,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "lifted_uv_source_to_3d",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 0,
+        "dim3": false,
+        "uv": false,
+        "edges": [
+          {
+            "a": [
+              0.5,
+              0.7,
+              -1
+            ],
+            "b": [
+              0.5,
+              0.7,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "lifted_plane_dispatch_gap",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 0,
+        "dim3": false,
+        "uv": false,
+        "kind": 1
+      }
+    },
+    {
+      "name": "same_curve_touching_intervals",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15270-16520 (boundary/tolerance regression)",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "interval": [
+          0.5,
+          1
+        ],
+        "edges": [
+          {
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              0
+            ],
+            "same": true,
+            "interval": [
+              0,
+              0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "tiny_vertex_check_3d_explicit_zone",
+      "upstream_ref": "source/SMLib/inc/SmVertex.h:269 (explicit shrinking fixture tolerance)",
+      "inputs": {
+        "op": 1,
+        "scale": 1e-06,
+        "zone": 1e-13,
+        "check3d": true,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "tiny_edge_explicit_zone_miss",
+      "upstream_ref": "source/SMLib/inc/SmEdge.h:431 (explicit shrinking fixture tolerance)",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "scale": 1e-06,
+        "zone": 1e-13,
+        "edges": [
+          {
+            "a": [
+              0.5,
+              0.500001,
+              -1
+            ],
+            "b": [
+              0.5,
+              0.500001,
+              1
+            ],
+            "zone": 1e-13
+          }
+        ]
+      }
+    },
+    {
+      "name": "rectangle_near_corner_vertex_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15920 (vertex and edge tolerances differ)",
+      "inputs": {
+        "op": 1,
+        "rectangle": true,
+        "source": [
+          [
+            -1.2e-06,
+            -1.2e-06,
+            0
+          ],
+          [
+            -2.2e-06,
+            -1.2e-06,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "cached_pole_disjoint_v_leaf",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "kind": 2,
+        "state": 6,
+        "source": [
+          [
+            0,
+            0.75,
+            0
+          ],
+          [
+            0.2,
+            0.75,
+            0
+          ]
+        ],
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "wide_zone_tolerance",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "zone": 5,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "large_scale_1e8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "scale": 100000000.0,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "extended_source_interval",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "interval": [
+          -0.5,
+          1.5
+        ],
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "point_source_interval",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "interval": [
+          0.5,
+          0.5
+        ],
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "vertex_outside_uv_square",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            1.2,
+            -0.2,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "vertex_gap_over_one",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.5,
+            0.5,
+            2
+          ]
+        ],
+        "check3d": true
+      }
+    },
+    {
+      "name": "extended_target_interval",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 0,
+        "dim3": true,
+        "edges": [
+          {
+            "a": [
+              0.5,
+              0.5,
+              -1
+            ],
+            "b": [
+              0.5,
+              0.5,
+              1
+            ],
+            "interval": [
+              -0.5,
+              1.5
+            ],
+            "zone": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "collapsed_rectangle_setup_rejected",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "kind": 2,
+        "rectangle": true
+      }
+    },
+    {
+      "name": "tiny_zero_zone_rectangle_setup_rejected",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16225; review #151",
+      "inputs": {
+        "op": 1,
+        "scale": 1e-06,
+        "zone": 0,
+        "rectangle": true
+      }
+    },
+    {
+      "name": "vertex_at_source_start",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16030 (positive boundary endpoint classification)",
+      "inputs": {
+        "op": 1,
+        "vertices": [
+          [
+            0.2,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "vertex_at_source_end",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16030 (positive boundary endpoint classification)",
+      "inputs": {
+        "op": 1,
+        "state": 6,
+        "vertices": [
+          [
+            0.8,
+            0.5,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "checked_vertex_at_source_start",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:16030 (positive boundary endpoint classification)",
+      "inputs": {
+        "op": 1,
+        "check3d": true,
+        "vertices": [
+          [
+            0.2,
+            0.5,
+            0
+          ]
+        ]
+      }
+    }
+  ]
+}
