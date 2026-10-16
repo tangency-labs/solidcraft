@@ -163,7 +163,7 @@ enum Inputs {
         ops: Vec<[i64; 4]>,
     },
     Heal {
-        brep: BIn,
+        brep: Box<BIn>,
         #[serde(default)]
         validate_only: bool,
         /// Compute the cached gaps right after building (C++; the Rust side imports
@@ -861,14 +861,14 @@ fn restore(b: &mut Brep, extra: &[f64], c: [usize; 10]) -> Result<(), HarnessErr
     }
     let eu_of = |x: f64| -> Result<Option<EdgeuseId>, HarnessError> {
         match x {
-            x if x == -1.0 => Ok(None),
+            -1.0 => Ok(None),
             x if x >= 0.0 => Ok(Some(EdgeuseId::from_index(x as u32))),
             _ => Err(harness("unregistered edge use in a gap")),
         }
     };
     let vu_of = |x: f64| -> Result<Option<VertexuseId>, HarnessError> {
         match x {
-            x if x == -1.0 => Ok(None),
+            -1.0 => Ok(None),
             x if x >= 0.0 => Ok(Some(VertexuseId::from_index(x as u32))),
             _ => Err(harness("unregistered vertex use in a gap")),
         }
@@ -1268,7 +1268,7 @@ fn gen_heal(rng: &mut Rng) -> Inputs {
         [1 + rng.below(16), 1 + rng.below(16), 1 + rng.below(16)]
     };
     Inputs::Heal {
-        brep,
+        brep: Box::new(brep),
         validate_only: rng.chance(0.1),
         init_gaps: rng.chance(0.5),
         targets: gen_targets(rng),

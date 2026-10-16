@@ -67,6 +67,12 @@
 //!   6; the x86-64 conversion of a negative value wraps, which
 //!   [`edge_len_histogram_index`] reproduces (a NaN length, an index past the
 //!   histogram upstream, is [`SolidError::InvalidInput`]).
+//! - **`pbNewProbs` out-params** become the returned `bool`. Upstream
+//!   `Cache_CoinVertices` returns early on its no-work path (no target vertices or
+//!   no new ones) before writing `*pbNewProbs = FALSE`, leaving the caller's value;
+//!   [`HealData::cache_coin_vertices`] returns `false` there. Its only caller,
+//!   `HealTgts`, initialises that flag to `FALSE` once per call and runs the step
+//!   at most once, so the caller sees the same value.
 //! - **Unported callees** (`UNPORTED` stubs): `SmBrep::GetThisModelSizeEstimate`,
 //!   `SmBrep::SetThisModelSizeEstimate` and `SmBrep::GetTolerance` (the `SmBrep`
 //!   overloads of `SmTol::GetModelSizeEstimate`, `SetModelSizeEstimate`,
