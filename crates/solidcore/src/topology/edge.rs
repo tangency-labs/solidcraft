@@ -18,7 +18,7 @@
 //! | [`is_closed`], [`is_wire`]              | `SmEdge::IsClosed`, `IsWire`                      |
 //! | [`create_trimmed_nurbs_curve`]          | `SmEdge::CreateTrimmedNURBSCurve`                 |
 //! | [`edgeuse_of_face`], [`upward_edgeuse_of_face`] | `SmEdge::GetEdgeuseOfFace`, `GetUpwardEdgeuseOfFace` |
-//! | [`find_radial_sector`], [`find_radial_sector_of_curve`], [`RadialSector`] | `SmEdge::FindRadialSector`, `FindRadialSectorOfCurve` |
+//! | [`find_radial_sector`], [`find_radial_sector_between`], [`find_radial_sector_of_curve`], [`RadialSector`] | `SmEdge::FindRadialSector`, `FindRadialSectorOfCurve` |
 //! | [`reset_primary_edgeuse`]               | `SmEdge::ResetPrimaryEdgeuse`                     |
 //! | [`brep`]                                | `SmEdge::GetBrep`                                 |
 //! | [`set_curve`], [`SetCurveOptions`]      | `SmEdge::SetCurve`                                |
@@ -121,9 +121,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
-use crate::query::edge::{
-    radial_sector_classify, radial_sector_of_curve_classify, CurveSectorClass, RadialSectorClass,
-};
+use crate::query::edge::{radial_sector_of_curve_classify, CurveSectorClass, RadialSectorClass};
 use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
@@ -653,6 +651,30 @@ pub fn find_radial_sector(
     required_orientation: OrientType,
     inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<RadialSector> {
+    find_radial_sector_between(
+        k,
+        b,
+        e,
+        b,
+        classify_eu,
+        region,
+        required_orientation,
+        inside_faceuses,
+    )
+}
+
+/// `FindRadialSector` with a classified edge use from another B-rep.
+/// The returned ids belong to `b`; `classify_eu` belongs to `other`.
+pub fn find_radial_sector_between(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    other: &Brep,
+    classify_eu: EdgeuseId,
+    region: Option<RegionId>,
+    required_orientation: OrientType,
+    inside_faceuses: Option<&[FaceuseId]>,
+) -> Result<RadialSector> {
     let _ = inside_faceuses; // LocalMerge, unused by RadialSectorClassify
     let mut out = RadialSector::default();
 
@@ -696,7 +718,15 @@ pub fn find_radial_sector(
         // for every candidate edgeuse
         for &eu in &cands {
             // classify given edgeuse against current candidate edgeuse
-            let class = match radial_sector_classify(k, b, e, param, eu, classify_eu) {
+            let class = match crate::query::edge::radial_sector_classify_between(
+                k,
+                b,
+                e,
+                param,
+                eu,
+                other,
+                classify_eu,
+            ) {
                 Ok(c) => c,
                 Err(err) => {
                     failed(err)?;

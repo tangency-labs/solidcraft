@@ -1,0 +1,2388 @@
+{
+  "abs_floors": [],
+  "cases": [
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_00_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#0 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_00_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#1 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_01_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#2 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_01_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#3 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_02_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#4 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_02_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#5 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_03_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#6 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_03_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#7 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_04_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#8 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_04_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#9 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_05_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#10 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_05_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#11 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_06_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#12 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_06_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#13 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_07_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#14 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_07_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#15 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_08_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#16 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_08_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#17 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_09_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#18 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_09_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#19 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_10_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#20 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_10_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#21 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_11_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#22 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_11_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#23 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_12_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#24 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_12_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#25 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_13_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#26 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_13_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#27 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_14_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#28 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_14_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#29 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_15_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#30 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_15_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#31 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_16_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#32 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_16_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#33 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_17_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#34 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_17_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#35 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_18_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#36 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_18_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#37 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_19_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#38 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_19_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#39 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_20_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#40 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_20_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#41 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_21_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#42 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_21_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#43 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_22_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#44 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_22_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#45 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_23_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#46 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_23_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#47 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_24_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#48 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_24_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#49 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_25_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#50 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_25_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#51 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_26_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#52 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_26_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#53 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_27_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#54 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_27_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#55 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_28_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#56 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_28_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#57 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_29_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#58 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_29_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#59 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_30_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#60 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_30_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#61 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_31_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#62 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "control_mask_31_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#63 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_plane_0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#64 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_plane_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#65 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_plane_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#66 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_plane_1_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#67 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_plane_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#68 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_plane_1_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#69 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_wire_0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#70 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_wire_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#71 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_wire_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#72 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_wire_1_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#73 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_wire_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#74 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_wire_1_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#75 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_network_0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#76 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_network_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#77 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_network_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#78 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_network_1_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#79 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_network_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#80 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_network_1_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#81 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "coincident_rectangle_mates_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#82 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "coincident_rectangle_mates_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#83 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424)",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "coincident_rectangle_mates_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#84 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_0_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#85 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_0_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#86 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_0_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#87 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_0_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#88 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_1_0_0_null_region",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#89 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_1_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#90 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_1_1_0_null_region",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#91 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "copy_vertex_1_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#92 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_0_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#93 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_0_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#94 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_0_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#95 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 19
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "region_attrs_0_1_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#96 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_1_0_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#97 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_1_0_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#98 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_1_1_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#99 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "region_attrs_1_1_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#100 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "single_region_face_fast_path",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#101 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 50
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "wire_border_is_void",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#102 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "temporary_shift",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#103 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_file_plane_square.smb",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#104 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "coincident_file_plane_square.smb",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#105 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 54
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "regions_file_plane_square.smb",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#106 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 50
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_file_plane_circ.smb",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#107 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "coincident_file_plane_circ.smb",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#108 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 21
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "regions_file_plane_circ.smb",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#109 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "cleanup_file_sphere.smb",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#110 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "coincident_file_sphere.smb",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#111 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 29
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::Point3DClassify",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "regions_file_sphere.smb",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/helpers.json#112 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_10_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#0 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_10_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#1 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_10_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#2 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_10_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#3 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_11_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#4 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_11_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#5 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_11_6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#6 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_11_7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#7 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_20_8",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#8 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_20_9",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#9 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_20_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#10 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_20_11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#11 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_21_12",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#12 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_21_13",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#13 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_21_14",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#14 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "vertex_tolerance_21_15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#15 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 24
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#16 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#17 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#18 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_0.001_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#19 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_0.001_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#20 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_0.001_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#21 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_1000000.0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#22 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_1000000.0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#23 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_8_1000000.0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#24 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#25 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#26 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#27 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_0.001_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#28 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_0.001_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#29 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_0.001_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#30 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_1000000.0_0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#31 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_1000000.0_1",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#32 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "cross_radial_9_1000000.0_2",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#33 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cross_wire_sector_0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#34 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cross_wire_sector_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#35 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "mated_face_region_plane_square.smb",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#36 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 50
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "mated_face_region_sphere.smb",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#37 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmEdgeuse::EvaluateBinormalStepOff",
+        "unit": "topology.edgeuse_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "mated_face_region_box_with_large_fillet.smb",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/boolean.merge_p1/review.json#38 (upstream source/SMLib/src/SmMerge.cpp)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::MakeShellVertex",
+        "unit": "topology.brep_p9"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0000",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314509",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0001",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314510",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314511",
+      "values_compared": 50
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314512",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314513",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314514",
+      "values_compared": 53
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314515",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0007",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314516",
+      "values_compared": 17
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0008",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314517",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0009",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314518",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0010",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314519",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314520",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314521",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314522",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314523",
+      "values_compared": 50
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314524",
+      "values_compared": 50
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314525",
+      "values_compared": 54
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0017",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314526",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0018",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314527",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0019",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314528",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0020",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314529",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0021",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314530",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0022",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314531",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0023",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314532",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314533",
+      "values_compared": 19
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0025",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314534",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0026",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314535",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0027",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314536",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314537",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314538",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314539",
+      "values_compared": 24
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314540",
+      "values_compared": 53
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0032",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314541",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0033",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314542",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0034",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314543",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314544",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314545",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0037",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314546",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0038",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314547",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0039",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314548",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0040",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314549",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0041",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314550",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0042",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314551",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314552",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0044",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314553",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0045",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314554",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0046",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314555",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0047",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314556",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314557",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0049",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314558",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0050",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314559",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0051",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314560",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0052",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314561",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0053",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314562",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0054",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314563",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0055",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314564",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314565",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314566",
+      "values_compared": 53
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0058",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314567",
+      "values_compared": 50
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0059",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314568",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0060",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314569",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0061",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314570",
+      "values_compared": 17
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314571",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0063",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314572",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0064",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314573",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0065",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314574",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0066",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314575",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0067",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314576",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0068",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314577",
+      "values_compared": 15
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0069",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314578",
+      "values_compared": 17
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0070",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314579",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0071",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314580",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0072",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314581",
+      "values_compared": 19
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0073",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314582",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0074",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314583",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0075",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314584",
+      "values_compared": 58
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0076",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314585",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0077",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314586",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0078",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314587",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0079",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314588",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetShells",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0080",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314589",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0081",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314590",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0082",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314591",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0083",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314592",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::GetEdges",
+        "unit": "topology.brep_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0084",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314593",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0085",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314594",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0086",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314595",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0087",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314596",
+      "values_compared": 50
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0088",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314597",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0089",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314598",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0090",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314599",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0091",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314600",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0092",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314601",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0093",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314602",
+      "values_compared": 23
+    },
+    {
+      "deferred": {
+        "symbol": "SmRegion::IsVoid",
+        "unit": "topology.shell"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0094",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=5645105664643314603",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "gen0095",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=5645105664643314604",
+      "values_compared": 50
+    }
+  ],
+  "cases_both_errored": 0,
+  "cases_deferred": 95,
+  "cases_failed": 0,
+  "cases_passed": 153,
+  "cases_total": 248,
+  "deferred_by_unit": {
+    "query.brep": 14,
+    "topology.brep_p1": 33,
+    "topology.brep_p9": 3,
+    "topology.edgeuse_p2": 20,
+    "topology.face_p2": 3,
+    "topology.shell": 22
+  },
+  "max_rel_err": 0.0,
+  "pass": true,
+  "rel_tol": 1e-9,
+  "seeds": 16,
+  "status": "partial",
+  "unit": "boolean.merge_p1"
+}

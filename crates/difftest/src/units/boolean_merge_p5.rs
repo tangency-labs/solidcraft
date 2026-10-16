@@ -4,9 +4,13 @@ use super::topology_vertexuse::{self as shared, BrepIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use solidcore::boolean::merge::p5::{process_wires_and_shell_vertices, WireRelations};
+use solidcore::boolean::merge::p1::VertexCopy;
+use solidcore::boolean::merge::p5::process_wires_and_shell_vertices;
+use solidcore::boolean::topology_intersector::p1::Relations;
 use solidcore::geom::a_object::BooleanOperation;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::context::MarkLock;
+use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
 use solidcore::topology::topology_traverser::{Entity, Marks};
 use solidcore::topology::{edge, vertex, vertexuse, ArenaId, Brep, EdgeId, VertexId, VertexuseId};
@@ -336,7 +340,7 @@ impl UnitDiff for Runner {
             mb,
             &flags(bc, i.other_pre, &i.other_unmark),
         );
-        let mut mates = BTreeMap::new();
+        let mut relations = Relations::default();
         // Fixture setup mirrors SmTopologyIntersector::Relate, including the
         // tolerance propagation it performs BEFORE the unit under test is called.
         for (j, m) in edge_mates.into_iter().enumerate() {
@@ -353,12 +357,21 @@ impl UnitDiff for Runner {
             if bt < at {
                 edge::set_tolerance(&mut b, oe, at, true, true).map_err(|e| err(&e))?;
             }
-            mates.insert(oe, e);
+            relations.edges.record(e, oe).map_err(|e| err(&e))?;
         }
-        let vertices = BTreeMap::new();
-        let relations = WireRelations {
-            other_edges: &mates,
-            vertices: &vertices,
+        let mut records = BTreeMap::new();
+        let mut attributes = AttributeStore::new();
+        let mut copy = VertexCopy {
+            records: &mut records,
+            attributes: &mut attributes,
+            source_key: &|v| ObjectRef {
+                key: ObjectKey(1_000_000 + u64::from(v.index())),
+                type_code: 16021,
+            },
+            destination_key: &|v| ObjectRef {
+                key: ObjectKey(u64::from(v.index())),
+                type_code: 16021,
+            },
         };
         let operation =
             BooleanOperation::from_code(i.operation).ok_or_else(|| err("boolean operation"))?;
@@ -369,7 +382,18 @@ impl UnitDiff for Runner {
                 keep.push(EdgeId::from_index(0));
             }
             match process_wires_and_shell_vertices(
-                &k, &mut a, &b, &mut am, &mut bm, relations, operation, ma, mb, &mut keep,
+                &k,
+                &mut a,
+                &b,
+                &mut am,
+                &mut bm,
+                &mut relations,
+                &mut copy,
+                None,
+                operation,
+                ma,
+                mb,
+                &mut keep,
             ) {
                 Ok(()) => {
                     ids.extend([0, keep.len() as i64]);

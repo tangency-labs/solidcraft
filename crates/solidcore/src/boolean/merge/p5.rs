@@ -5,43 +5,34 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`process_wires_and_shell_vertices`] | `SmMerge::ProcessWiresAndShellVertices` |
-//! | [`WireRelations`] | borrowed edge/vertex mate lookups from `m_vTI` |
+//! | [`Relations`] | shared bidirectional mate lookups from `m_vTI` |
 //!
 //! Deviations: operands, marks and mate maps are borrowed explicitly instead of
 //! reading `SmMerge::m_vTI`; ids replace pointers. Output stays mutable because
 //! upstream preserves its partial contents on failure. Classification (including
 //! face/edge-to-region resolution) waits for `query.brep`; graph deletion waits
-//! for `topology.brep_p4`; copying waits for `boolean.merge_p1` / `_p2`. B-rep
+//! for `topology.brep_p4`; edge copying waits for `boolean.merge_p2`. Vertex
+//! copying delegates to [`p1::merge_vertex`]. B-rep
 //! caches are not attached to arena B-reps yet, so the optional cache resizing is
 //! absent. The deletion retry loop is iterative; wire collection uses the bounded
 //! explicit stack of `topology_traverser`. No input-dependent recursion is added.
-//! Mate maps and `other` are read-only while copying is unported: wiring
-//! `MergeEdge` / `MergeVertex` must make relation state mutable so their
-//! `Relate` updates are visible to subsequent edges and vertices in this stage.
+//! Relations are shared mutably with `merge_p1`; notifications use its caller-owned
+//! records and attribute store. Newly created vertex relationships still wait on
+//! the full intersector `Relate` implementation.
 //! Missing/dangling mates are rejected only when added to the keep list:
 //! typed ids cannot represent the null pointer upstream can append there.
 
-use std::collections::BTreeMap;
-
+use crate::boolean::merge::p1::{self, VertexCopy};
+use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
-use crate::geom::context::MarkType;
+use crate::geom::context::{Context, MarkType};
 use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::topology::topology_traverser::{collect_wire_edges, Entity, Marks};
 use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, RegionId, VertexId};
 
 const OP: &str = "boolean::merge::p5::process_wires_and_shell_vertices";
-
-/// The subset of the intersector's mate lookups this stage needs. Ids are scoped
-/// to their operand: edge keys belong to `other`, vertex keys belong to `brep`.
-#[derive(Debug, Clone, Copy)]
-pub struct WireRelations<'a> {
-    /// `GetThisMate`: other edge -> matching primary edge.
-    pub other_edges: &'a BTreeMap<EdgeId, EdgeId>,
-    /// `GetOtherMate`: primary vertex -> matching other vertex.
-    pub vertices: &'a BTreeMap<VertexId, VertexId>,
-}
 
 // Result contract of Point3DClassify followed by the upstream region lookup.
 // This is not a new topology record: region data remains owned by the B-rep.
@@ -92,14 +83,6 @@ fn merge_edge(_brep: &mut Brep, _other: &Brep, _edge: EdgeId, _region: RegionId)
     Err(SolidError::unported(
         "SmMerge::MergeEdge",
         "boolean.merge_p2",
-    ))
-}
-
-fn merge_vertex(_brep: &mut Brep, _other: &Brep, _v: VertexId, _region: RegionId) -> Result<()> {
-    // UNPORTED(boolean.merge_p1): SmMerge::MergeVertex
-    Err(SolidError::unported(
-        "SmMerge::MergeVertex",
-        "boolean.merge_p1",
     ))
 }
 
@@ -156,7 +139,9 @@ pub fn process_wires_and_shell_vertices(
     other: &Brep,
     brep_marks: &mut Marks,
     other_marks: &mut Marks,
-    relations: WireRelations<'_>,
+    relations: &mut Relations,
+    copy: &mut VertexCopy<'_>,
+    mut context: Option<&mut Context>,
     operation: BooleanOperation,
     brep_mark: MarkType,
     other_mark: MarkType,
@@ -207,7 +192,8 @@ pub fn process_wires_and_shell_vertices(
                     }
                     delete_edge(brep, edge_id)?;
                     for v in [Some(v1), (v1 != v2).then_some(v2)].into_iter().flatten() {
-                        if vertex::is_shell_vertex(brep, v)? && !relations.vertices.contains_key(&v)
+                        if vertex::is_shell_vertex(brep, v)?
+                            && relations.vertices.other(v).is_none()
                         {
                             delete_vertex(brep, v)?;
                         }
@@ -227,9 +213,8 @@ pub fn process_wires_and_shell_vertices(
                 | BooleanOperation::Merge
                 | BooleanOperation::PartialMerge => {
                     let mate = relations
-                        .other_edges
-                        .get(&id)
-                        .copied()
+                        .edges
+                        .primary(id)
                         .ok_or_else(|| SolidError::null_pointer(OP))?;
                     brep.edge(mate)?;
                     keep_as_wires.push(mate);
@@ -298,7 +283,15 @@ pub fn process_wires_and_shell_vertices(
         }
     }
     for (vertex, region) in keep_vertices {
-        merge_vertex(brep, other, vertex, region)?;
+        p1::merge_vertex(
+            brep,
+            other,
+            Some(vertex),
+            Some(region),
+            relations,
+            copy,
+            context.as_deref_mut(),
+        )?;
     }
     Ok(())
 }
@@ -306,10 +299,33 @@ pub fn process_wires_and_shell_vertices(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::attribute::{AttributeStore, ObjectKey};
+    use crate::geom::object::ObjectRef;
+    use crate::topology::topology::Topology;
+    use std::collections::BTreeMap;
+
     use crate::curve::line::Line;
     use crate::geom::context::MarkLock;
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::{Edge, Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
+
+    fn copy<'a>(
+        records: &'a mut BTreeMap<ObjectKey, Topology>,
+        attributes: &'a mut AttributeStore,
+    ) -> VertexCopy<'a> {
+        VertexCopy {
+            records,
+            attributes,
+            source_key: &|v| ObjectRef {
+                key: ObjectKey(1_000_000 + u64::from(v.index())),
+                type_code: 16021,
+            },
+            destination_key: &|v| ObjectRef {
+                key: ObjectKey(u64::from(v.index())),
+                type_code: 16021,
+            },
+        }
+    }
 
     fn wire(b: &mut Brep) -> EdgeId {
         let shell = b.add_shell().unwrap();
@@ -358,8 +374,10 @@ mod tests {
         let mut bm = Marks::default();
         am.mark(&k, Entity::Edge(ae), mt);
         bm.mark(&k, Entity::Edge(be), mt);
-        let edges = BTreeMap::from([(be, ae)]);
-        let vertices = BTreeMap::new();
+        let mut relations = Relations::default();
+        relations.edges.record(ae, be).unwrap();
+        let mut records = BTreeMap::new();
+        let mut attrs = AttributeStore::new();
         let mut keep = vec![EdgeId::from_index(u32::MAX)];
         let result = process_wires_and_shell_vertices(
             &k,
@@ -367,10 +385,9 @@ mod tests {
             &b,
             &mut am,
             &mut bm,
-            WireRelations {
-                other_edges: &edges,
-                vertices: &vertices,
-            },
+            &mut relations,
+            &mut copy(&mut records, &mut attrs),
+            None,
             BooleanOperation::Union,
             mt,
             mt,
@@ -399,11 +416,16 @@ mod tests {
         let mut bm = Marks::default();
         am.mark(&k, Entity::Edge(ae), mt);
         bm.mark(&k, Entity::Edge(be), mt);
-        let vertices = BTreeMap::new();
         for edges in [
             BTreeMap::new(),
             BTreeMap::from([(be, EdgeId::from_index(u32::MAX))]),
         ] {
+            let mut relations = Relations::default();
+            for (&other, &primary) in &edges {
+                relations.edges.record(primary, other).unwrap();
+            }
+            let mut records = BTreeMap::new();
+            let mut attrs = AttributeStore::new();
             for operation in [
                 BooleanOperation::Union,
                 BooleanOperation::Intersection,
@@ -417,10 +439,9 @@ mod tests {
                     &b,
                     &mut am,
                     &mut bm,
-                    WireRelations {
-                        other_edges: &edges,
-                        vertices: &vertices
-                    },
+                    &mut relations,
+                    &mut copy(&mut records, &mut attrs),
+                    None,
                     operation,
                     mt,
                     mt,
@@ -445,10 +466,9 @@ mod tests {
                     &b,
                     &mut am,
                     &mut bm,
-                    WireRelations {
-                        other_edges: &edges,
-                        vertices: &vertices,
-                    },
+                    &mut relations,
+                    &mut copy(&mut records, &mut attrs),
+                    None,
                     operation,
                     mt,
                     mt,

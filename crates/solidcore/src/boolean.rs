@@ -6,3 +6,4 @@
 
 pub mod api_brep;
 pub mod merge;
+pub mod topology_intersector;
