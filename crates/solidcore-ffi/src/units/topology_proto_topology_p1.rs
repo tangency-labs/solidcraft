@@ -18,7 +18,8 @@
 //!   `SmPlane`, `2` a B-spline surface block, `3` a vertex, `4 c` an edge on pool curve `c`,
 //!   `5 s` a face on pool surface `s`, `6` a region stand-in, `7` a loop stand-in, `8 c a b
 //!   tol` an edge on pool curve `c` with interval `[a, b]` and zone tolerance `tol` (pool
-//!   kind 4), `9 tol` a vertex with zone tolerance `tol` (pool kind 3)), a
+//!   kind 4), `9 tol` a vertex with zone tolerance `tol` (pool kind 3), `10 P[3] tol` a vertex
+//!   with a point and a zone tolerance (pool kind 3)), a
 //!   manager `SmProtoTopologyManager(brep1, brep2, ti, capture, override)` whose topology
 //!   intersector has approximation tolerance `approx_tol`, and the [`proto_op`] ops. Proto
 //!   objects are numbered per kind in creation order. A point classification `pc` is
@@ -146,6 +147,8 @@ pub mod pool {
     pub const LOOP: i64 = 7;
     pub const EDGE_IVL: i64 = 8;
     pub const VERTEX_TOL: i64 = 9;
+    /// Input only: a vertex with a point and a zone tolerance (`10 P[3] tol`).
+    pub const VERTEX_AT: i64 = 10;
 }
 
 /// Proto-script ops (arguments after the code; `pv`, `pe`, `ed`, `vd`, `pf` are proto ids,
@@ -226,6 +229,15 @@ pub mod pool {
 /// | 88 | `c tol a b pc ed` | `sm_AreOverlapping` (interval as in 78) | `flag` |
 /// | 89 | | the manager's type queries (as list op 18) | |
 /// | 90 | | `GetWhichBrep(1) == brep1`, `GetWhichBrep(2) == brep2`, `GetTolerance`, `GetCaptureDistance` | 4 values |
+/// | 120 | `pc pc` | `FindOrCreateProtoVertex(pc1, pc2, ..)` | `pv created` |
+/// | 121 | `c tol a b pc*6` | `FindOrCreateProtoEdge` (interval `[a, b]` of a classification of curve `c` with source tolerance `tol`; start, mid and end classifications of the first, then of the second interval) | `pe created` |
+/// | 122 | `pe t` | `SmProtoEdge::Split` | `pv pe` |
+/// | 123 | `ed t pv pe` | `SmEdgeDefinition::Split` | `vd ed` |
+/// | 124 | `pe pe` | `SplitIntersectingProtoEdges` | `n c*n` (curves deleted, sorted) |
+/// | 125 | | `GlueCoincidentBrepVertices` (refused when it would glue) | `n c*n` |
+/// | 126 | | `ResolveOverlappingProtoEdges` (refused for edge sources) | `n c*n` |
+///
+/// Objects the p3 ops create are registered (numbered) after the op, as the p2 ops do.
 ///
 /// Ops 91 to 108 belong to unit `topology.proto_topology_p2` ([`proto_op_p2`]).
 ///
@@ -329,7 +341,14 @@ pub mod proto_op {
     pub const ARE_OVERLAPPING: i64 = 88;
     pub const MGR_TYPE: i64 = 89;
     pub const MGR_GET: i64 = 90;
-    pub const LAST: i64 = 90;
+    pub const FOC_PV: i64 = 120;
+    pub const FOC_PE: i64 = 121;
+    pub const PE_SPLIT: i64 = 122;
+    pub const ED_SPLIT: i64 = 123;
+    pub const SPLIT_INT: i64 = 124;
+    pub const GLUE: i64 = 125;
+    pub const RESOLVE: i64 = 126;
+    pub const LAST: i64 = 126;
 }
 
 /// Proto-script ops of unit `topology.proto_topology_p2` (shapes as in [`proto_op`]; `ci`
@@ -632,7 +651,7 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     use proto_op as p;
     let n_obj = rd.int(0, MAX_OBJECTS)?;
     for _ in 0..n_obj {
-        match rd.int(0, pool::VERTEX_TOL)? {
+        match rd.int(0, pool::VERTEX_AT)? {
             pool::CURVE => rd.curve()?,
             pool::PLANE => {
                 rd.vec3()?;
@@ -641,6 +660,10 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             pool::BSURF => rd.surface()?,
             pool::EDGE | pool::FACE => {
                 rd.id()?;
+            }
+            pool::VERTEX_AT => {
+                rd.vec3()?;
+                rd.finite()?;
             }
             pool::EDGE_IVL => {
                 rd.id()?;
@@ -659,7 +682,7 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     rd.finite()?;
     let n_ops = rd.int(0, MAX_OPS)?;
     for _ in 0..n_ops {
-        let code = rd.int(0, proto_op_p2::LAST)?;
+        let code = rd.int(0, p::LAST)?;
         // argument shapes: i id, f finite, 3 point, c pc, l id list
         let shape: &str = match code {
             p::PV_NEW => "3f",
@@ -695,7 +718,9 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             | p::MGR_ALL_VDS
             | p::MGR_ALL_EDS
             | p::MGR_TYPE
-            | p::MGR_GET => "",
+            | p::MGR_GET
+            | p::GLUE
+            | p::RESOLVE => "",
             p::PV_ADD_PE
             | p::PV_ADD_VD
             | p::PE_ADD_ED
@@ -721,7 +746,8 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             | p::ARE_CONNECTED
             | p::MGR_FIND_ED_FROM_EDGE
             | p::ED_EVAL_MID
-            | p::PE_EVAL_MID => "ii",
+            | p::PE_EVAL_MID
+            | p::SPLIT_INT => "ii",
             p::PE_APPEND_OVERLAPS => "il",
             p::PE_SET_IVL | p::ED_SET_IVL | p::ED_SET_IVL_MINMAX => "iff",
             p::PE_REPLACE_PV
@@ -740,10 +766,13 @@ fn validate_proto(rd: &mut Reader<'_>) -> Result<(), FfiError> {
             p::ED_IS_INTERIOR => "i3fi",
             p::MGR_FIND_PV => "3",
             p::MGR_CHECK_OVERLAP => "ifffcc",
-            p::FIND_POS => "cc",
+            p::FIND_POS | p::FOC_PV => "cc",
             p::SAME_CURVE => "iffifff",
             p::IS_INTERIOR => "iffff",
             p::ARE_OVERLAPPING => "ifffci",
+            p::FOC_PE => "ifffcccccc",
+            p::PE_SPLIT => "if",
+            p::ED_SPLIT => "ifii",
             _ => p2_shape(code).ok_or_else(|| bad("op"))?,
         };
         for ch in shape.chars() {

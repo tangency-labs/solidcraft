@@ -136,6 +136,41 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> {
     /// Stores a new curve (an `SmCurve::Copy`) and returns its handle; `None` when the
     /// store is full.
     fn insert_curve(&mut self, curve: Curve) -> Option<O>;
+    /// `SmVertex::GetPoint` (read by `topology.proto_topology_p3`).
+    fn vertex_point(&self, vertex: O) -> Option<Point3>;
+    /// `SmEdge::GetFaces` (read by `topology.proto_topology_p3`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn edge_faces(&self, edge: O) -> Result<Vec<O>>;
+    /// `SmVertex::GetCommonEdges` (read by `topology.proto_topology_p3`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn vertex_common_edges(&self, v1: O, v2: O) -> Result<Vec<O>>;
+    /// `SmEdge::GetOtherVertex` (read by `topology.proto_topology_p3`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the implementation's topology walk.
+    fn edge_other_vertex(&self, edge: O, vertex: O) -> Result<Option<O>>;
+    /// `SmFace::CurveOnClassify(bDoPointClassify, cc)` with upstream's other arguments at
+    /// their defaults (`FALSE`), read by `topology.proto_topology_p3`: the B-rep owner
+    /// implements it with `query::face::p2::curve_on_classify`. Returns
+    /// `pbOptModifiedCurve`.
+    ///
+    /// # Errors
+    ///
+    /// Those of `curve_on_classify`.
+    fn face_curve_on_classify(
+        &self,
+        k: &Kernel,
+        face: O,
+        do_point_classify: bool,
+        cc: &mut CurveClassification<O>,
+    ) -> Result<bool>;
 }
 
 /// The handle the curve point solves name (only the solution count and values are
@@ -2103,6 +2138,27 @@ mod tests {
         fn insert_curve(&mut self, curve: Curve) -> Option<H> {
             self.curves.push(curve);
             Some(H(self.curves.len() - 1, ClassObjectKind::Curve))
+        }
+        fn vertex_point(&self, _vertex: H) -> Option<Point3> {
+            None
+        }
+        fn edge_faces(&self, _edge: H) -> Result<Vec<H>> {
+            Ok(Vec::new())
+        }
+        fn vertex_common_edges(&self, _v1: H, _v2: H) -> Result<Vec<H>> {
+            Ok(Vec::new())
+        }
+        fn edge_other_vertex(&self, _edge: H, _vertex: H) -> Result<Option<H>> {
+            Ok(None)
+        }
+        fn face_curve_on_classify(
+            &self,
+            _k: &Kernel,
+            _face: H,
+            _do_point_classify: bool,
+            _cc: &mut CurveClassification<H>,
+        ) -> Result<bool> {
+            Ok(false)
         }
     }
 

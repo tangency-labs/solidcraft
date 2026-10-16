@@ -56,6 +56,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <vector>
 
 // global in the library (SmProtoTopology.cpp), not declared in a header
@@ -1323,6 +1324,7 @@ enum PoolKind : int64_t
     K_FACE = 5,
     K_REGION = 6,
     K_LOOP = 7,
+    K_VERTEX_AT = 10, // input only: a K_VERTEX with a point and a tolerance
 };
 
 // Pool object codes of the input that make a pool kind with extra data (unit
@@ -1333,8 +1335,14 @@ const int64_t OBJ_VERTEX_TOL = 9;
 
 struct ScVertex : public SmVertex
 {
-    ScVertex() : SmVertex() {}
-    explicit ScVertex(double tol) : SmVertex() { m_sZoneTol3d = SmZoneTol3d(tol); }
+    bool pointed; // built with a point (a bare vertex has (0,0,0))
+    ScVertex() : SmVertex(), pointed(false) {}
+    explicit ScVertex(double tol) : SmVertex(), pointed(false) { m_sZoneTol3d = SmZoneTol3d(tol); }
+    ScVertex(double x, double y, double z, double tol) : SmVertex(), pointed(true)
+    {
+        m_vPoint = SmPoint3d(x, y, z);
+        m_sZoneTol3d = SmZoneTol3d(tol);
+    }
 };
 
 struct ScEdge : public SmEdge
@@ -1684,6 +1692,14 @@ enum ProtoOp : int64_t
     P_ARE_OVERLAPPING = 88,
     P_MGR_TYPE = 89,
     P_MGR_GET = 90,
+    // topology.proto_topology_p3
+    P_FOC_PV = 120,
+    P_FOC_PE = 121,
+    P_PE_SPLIT = 122,
+    P_ED_SPLIT = 123,
+    P_SPLIT_INT = 124,
+    P_GLUE = 125,
+    P_RESOLVE = 126,
 };
 
 // sm_AreConnected walks the bare stand-ins safely except an edge's start vertex (no
@@ -1871,6 +1887,144 @@ bool pe_delete_check(ProtoRun& r, SmProtoEdge* e, std::vector<const void*>& eds_
     return true;
 }
 
+
+// ---- topology.proto_topology_p3 helpers ---------------------------------------------------
+
+// The objects reachable from the manager's lists, and the curves each edge definition owns.
+struct Reach
+{
+    std::set<const void*> vds, eds, pvs, pes, pfs;
+    std::map<const void*, std::vector<const void*>> ed_all, ed_dtor;
+};
+
+Reach reach(ProtoRun& r)
+{
+    Reach s;
+    if (!r.mgr)
+        return s;
+    for (ULONG i = 0; i < r.mgr->GetProtoVertices().GetSize(); i++)
+    {
+        SmProtoVertex* v = r.mgr->GetProtoVertices()[i];
+        s.pvs.insert(v);
+        for (ULONG k = 0; k < v->GetVertexDefinitions().GetSize(); k++)
+            s.vds.insert(v->GetVertexDefinitions()[k]);
+    }
+    for (ULONG i = 0; i < r.mgr->GetProtoEdges().GetSize(); i++)
+    {
+        SmProtoEdge* e = r.mgr->GetProtoEdges()[i];
+        s.pes.insert(e);
+        for (ULONG k = 0; k < e->GetEdgeDefinitions().GetSize(); k++)
+        {
+            SmEdgeDefinition* d = e->GetEdgeDefinitions()[k];
+            s.eds.insert(d);
+            std::vector<const void*>& all = s.ed_all[d];
+            if (d->GetXSectCurve3d())
+                all.push_back(d->GetXSectCurve3d());
+            if (d->GetXSectUVCurve(1))
+                all.push_back(d->GetXSectUVCurve(1));
+            if (d->GetXSectUVCurve(2))
+                all.push_back(d->GetXSectUVCurve(2));
+            ed_deletes(d, s.ed_dtor[d]);
+        }
+    }
+    for (ULONG i = 0; i < r.mgr->GetProtoFaces().GetSize(); i++)
+        s.pfs.insert(r.mgr->GetProtoFaces()[i]);
+    return s;
+}
+
+// What an op deleted (reachable before, not after) is dead: the tables and the pool say so.
+// Returns the sorted ids of the curves deleted.
+std::vector<double> reconcile(ProtoRun& r, const Reach& before, bool destruct_all)
+{
+    Reach after = reach(r);
+    std::vector<double> curves;
+    for (const void* x : before.pvs)
+        if (!after.pvs.count(x))
+            r.pvs.kill(x);
+    for (const void* x : before.vds)
+        if (!after.vds.count(x))
+            r.vds.kill(x);
+    for (const void* x : before.pes)
+        if (!after.pes.count(x))
+            r.pes.kill(x);
+    for (const void* x : before.pfs)
+        if (!after.pfs.count(x))
+            r.pfs.kill(x);
+    for (const void* x : before.eds)
+        if (!after.eds.count(x))
+        {
+            const std::vector<const void*>& cs = destruct_all ? before.ed_all.at(x) : before.ed_dtor.at(x);
+            for (const void* c : cs)
+            {
+                if (r.pool.live_ptr(c))
+                    curves.push_back(r.pool.id(c));
+                r.pool.kill(c);
+            }
+            r.eds.kill(x);
+        }
+    std::sort(curves.begin(), curves.end());
+    return curves;
+}
+
+bool pe_listed(ProtoRun& r, const SmProtoEdge* e)
+{
+    for (ULONG i = 0; i < r.mgr->GetProtoEdges().GetSize(); i++)
+        if (r.mgr->GetProtoEdges()[i] == e)
+            return true;
+    return false;
+}
+
+bool pv_listed(ProtoRun& r, const SmProtoVertex* v)
+{
+    for (ULONG i = 0; i < r.mgr->GetProtoVertices().GetSize(); i++)
+        if (r.mgr->GetProtoVertices()[i] == v)
+            return true;
+    return false;
+}
+
+// the proto edges and both end vertices are listed in the manager (what an op deletes is then
+// found again through the lists)
+bool pe_listed_with_ends(ProtoRun& r, SmProtoEdge* e)
+{
+    return pe_listed(r, e) && pv_listed(r, e->GetStartProtoVertex()) && pv_listed(r, e->GetEndProtoVertex());
+}
+
+// every curve of every live edge definition is live and held by one slot only
+bool ed_curves_unique(ProtoRun& r)
+{
+    std::set<const void*> seen;
+    for (size_t i = 0; i < r.eds.p.size(); i++)
+    {
+        SmEdgeDefinition* d = r.ed((int64_t)i);
+        if (!d)
+            continue;
+        const void* cs[3] = {d->GetXSectCurve3d(), d->GetXSectUVCurve(1), d->GetXSectUVCurve(2)};
+        for (const void* c : cs)
+        {
+            if (!c)
+                continue;
+            if (!r.pool.live_ptr(c) || !seen.insert(c).second)
+                return false;
+        }
+    }
+    return true;
+}
+
+// what SmProtoEdge::Split needs to run on stand-ins: definitions with curves and a proto edge,
+// and both end proto vertices
+bool pe_split_ok(ProtoRun& r, SmProtoEdge* e)
+{
+    if (!e->GetStartProtoVertex() || !e->GetEndProtoVertex())
+        return false;
+    for (ULONG k = 0; k < e->GetEdgeDefinitions().GetSize(); k++)
+    {
+        SmEdgeDefinition* d = e->GetEdgeDefinitions()[k];
+        if (!r.eds.live_ptr(d) || !d->GetXSectCurve3d() || !d->GetProtoEdge())
+            return false;
+    }
+    return true;
+}
+
 // =====================================================================================
 // Unit topology.proto_topology_p2: the second part of SmProtoTopology.cpp (imprint, resolve,
 // create / find / combine / update). Its ops (P2_*) run inside proto scripts; the runner of
@@ -1999,6 +2153,14 @@ bool position_ok(const SmPointClassification& pc1, const SmPointClassification& 
     SmPoint3d p;
     double dev;
     return sc_pt_p1::sm_FindPositionFromPCs(a, b, p, dev) == SM_SUCCESS;
+}
+
+// refused when two classifications that can be imprinted have no position (CreateProtoVertex
+// would read an uninitialised one)
+bool pair_position_ok(const SmPointClassification& pc1, const SmPointClassification& pc2)
+{
+    return !(sc_pt_p1::sm_CanImprint(pc1.GetPointClass()) && sc_pt_p1::sm_CanImprint(pc2.GetPointClass())) ||
+           position_ok(pc1, pc2);
 }
 
 // The tangent EvaluateMid of a proto edge / definition writes (all curves present, success).
@@ -2801,6 +2963,18 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
         case K_PLANE:
         case K_BSURF: p = read_surface(rd, ctx, kind); break;
         case K_VERTEX: p = new (anchor()) ScVertex(); break;
+        case K_VERTEX_AT:
+        {
+            double x = rd.num();
+            double y = rd.num();
+            double z = rd.num();
+            double tol = rd.num();
+            if (rd.bad)
+                return SC_ERR_ARG;
+            p = new (anchor()) ScVertex(x, y, z, tol);
+            kind = K_VERTEX;
+            break;
+        }
         case K_EDGE:
         {
             int64_t c = rd.idx();
@@ -4293,6 +4467,329 @@ int32_t run_proto(Rd& rd, std::vector<double>& o)
             out.push_back((double)mgr->GetTolerance());
             out.push_back(mgr->GetCaptureDistance());
             break;
+        case P_FOC_PV:
+        {
+            SmPointClassification pc1, pc2;
+            ok = read_pc(rd, r.pool, pc1) && ok;
+            ok = read_pc(rd, r.pool, pc2) && ok;
+            if (skip || !ok || (sc_pt_p1::sm_CanImprint(pc1.GetPointClass()) &&
+                                sc_pt_p1::sm_CanImprint(pc2.GetPointClass()) && !position_ok(pc1, pc2)))
+            {
+                skip = true;
+                break;
+            }
+            SmProtoVertex* nv = NULL;
+            SmBoolean created = FALSE;
+            status = st(mgr->FindOrCreateProtoVertex(pc1, pc2, nv, &created));
+            register_new(r);
+            out.push_back(r.pvs.id(nv));
+            out.push_back(flg(created));
+            break;
+        }
+        case P_FOC_PE:
+        {
+            SmCurve* cc_curve = curve_or_null(rd.idx(), ok);
+            double cc_tol = rd.num();
+            double a = rd.num();
+            double b = rd.num();
+            SmPointClassification s1, m1, e1, s2, m2, e2;
+            ok = read_pc(rd, r.pool, s1) && ok;
+            ok = read_pc(rd, r.pool, m1) && ok;
+            ok = read_pc(rd, r.pool, e1) && ok;
+            ok = read_pc(rd, r.pool, s2) && ok;
+            ok = read_pc(rd, r.pool, m2) && ok;
+            ok = read_pc(rd, r.pool, e2) && ok;
+            // creating a proto edge (p2) needs a real B-rep: refused when every end and the middle
+            // classify to topology in both B-reps
+            if (skip || !ok || cc_curve == NULL || a > b || !pair_position_ok(s1, s2) || !pair_position_ok(m1, m2) ||
+                !pair_position_ok(e1, e2) ||
+                (sc_pt_p1::sm_CanImprint(s1.GetPointClass()) && sc_pt_p1::sm_CanImprint(s2.GetPointClass()) &&
+                 sc_pt_p1::sm_CanImprint(e1.GetPointClass()) && sc_pt_p1::sm_CanImprint(e2.GetPointClass()) &&
+                 sc_pt_p1::sm_CanImprint(m1.GetPointClass()) && sc_pt_p1::sm_CanImprint(m2.GetPointClass())))
+            {
+                skip = true;
+                break;
+            }
+            SmCurveClassification cc;
+            cc.SetCurve(cc_curve);
+            SmTol::SetZoneTol3d(&cc, SmZoneTol3d(cc_tol));
+            SmCurveInterval ci1(SmExtent1d(a, b), &ctx, &cc);
+            ci1.m_vStart = s1;
+            ci1.m_vMid = m1;
+            ci1.m_vEnd = e1;
+            SmCurveInterval ci2(SmExtent1d(a, b), &ctx, NULL);
+            ci2.m_vStart = s2;
+            ci2.m_vMid = m2;
+            ci2.m_vEnd = e2;
+            // the definitions compared need a curve (as op CHECK_OVERLAP)
+            if (m1.GetEdgeObject() || m2.GetEdgeObject())
+            {
+                SmTArray<SmEdgeDefinition*> all;
+                mgr->GetAllEdgeDefinitions(all);
+                for (ULONG k = 0; k < all.GetSize(); k++)
+                    if (all[k]->GetSrcTopo(1) == SM_CAST_PTR(SmTopology, m1.GetObject()) &&
+                        all[k]->GetSrcTopo(2) == SM_CAST_PTR(SmTopology, m2.GetObject()) &&
+                        all[k]->GetXSectCurve3d() == NULL)
+                        skip = true;
+            }
+            if (skip)
+                break;
+            SmProtoEdge* npe = NULL;
+            SmBoolean created = FALSE;
+            status = st(mgr->FindOrCreateProtoEdge(ci1, ci2, npe, &created));
+            register_new(r);
+            out.push_back(r.pes.id(npe));
+            out.push_back(flg(created));
+            break;
+        }
+        case P_PE_SPLIT:
+        {
+            SmProtoEdge* e = r.pe(rd.idx());
+            double t = rd.num();
+            if (skip || !e)
+            {
+                skip = true;
+                break;
+            }
+            if (e->GetXSectInterval().ContainsValue(t, -SM_EFF_ZERO) && (!pe_split_ok(r, e) || !ed_curves_unique(r)))
+            {
+                skip = true;
+                break;
+            }
+            Reach before = reach(r);
+            SmProtoVertex* npv = NULL;
+            SmProtoEdge* npe = NULL;
+            status = st(e->Split(t, npv, npe));
+            register_new(r);
+            out.push_back(r.pvs.id(npv));
+            out.push_back(r.pes.id(npe));
+            reconcile(r, before, false);
+            break;
+        }
+        case P_ED_SPLIT:
+        {
+            SmEdgeDefinition* d = r.ed(rd.idx());
+            double t = rd.num();
+            SmProtoVertex* mid = pv_or_null(rd.idx(), ok);
+            SmProtoEdge* top = r.pe(rd.idx());
+            if (skip || !d || !ok || !mid || !top)
+            {
+                skip = true;
+                break;
+            }
+            if (d->GetXSectInterval().ContainsValue(t, -SM_EFF_ZERO) &&
+                (!d->GetXSectCurve3d() || !d->GetProtoEdge() || !r.pes.live_ptr(d->GetProtoEdge()) ||
+                 !ed_curves_unique(r)))
+            {
+                skip = true;
+                break;
+            }
+            Reach before = reach(r);
+            SmVertexDefinition* nvd = NULL;
+            SmEdgeDefinition* ned = NULL;
+            status = st(d->Split(t, mid, top, nvd, ned));
+            register_new(r);
+            out.push_back(r.vds.id(nvd));
+            out.push_back(r.eds.id(ned));
+            reconcile(r, before, false);
+            break;
+        }
+        case P_SPLIT_INT:
+        {
+            SmProtoEdge* e1 = r.pe(rd.idx());
+            SmProtoEdge* e2 = r.pe(rd.idx());
+            if (skip || !e1 || !e2)
+            {
+                skip = true;
+                break;
+            }
+            bool shared = e1->GetStartProtoVertex() == e2->GetStartProtoVertex() ||
+                          e1->GetStartProtoVertex() == e2->GetEndProtoVertex() ||
+                          e1->GetEndProtoVertex() == e2->GetStartProtoVertex() ||
+                          e1->GetEndProtoVertex() == e2->GetEndProtoVertex();
+            if (!shared && e1->GetNumEdgeDefinitions() >= 1 && e2->GetNumEdgeDefinitions() >= 1)
+            {
+                SmTArray<SmProtoEdge*> ov;
+                e1->GetOverlappingPEs(ov);
+                ULONG idx;
+                if (!ov.FindElement(e2, idx) && (!pe_split_ok(r, e1) || !pe_split_ok(r, e2) || !ed_curves_unique(r) ||
+                                              !pe_listed_with_ends(r, e1) || !pe_listed_with_ends(r, e2)))
+                {
+                    skip = true;
+                    break;
+                }
+            }
+            Reach before = reach(r);
+            status = st(mgr->SplitIntersectingProtoEdges(e1, e2));
+            register_new(r);
+            std::vector<double> dead = reconcile(r, before, false);
+            out.push_back((double)dead.size());
+            out.insert(out.end(), dead.begin(), dead.end());
+            break;
+        }
+        case P_GLUE:
+        {
+            if (skip)
+                break;
+            // only the paths that do not glue run: a pair of final vertices must be one vertex or
+            // two vertices with points farther apart than their combined zone tolerance (bare stand-ins have no usable point,
+            // and a glue needs a B-rep)
+            for (ULONG i = 0; i < mgr->GetProtoVertices().GetSize() && !skip; i++)
+            {
+                SmProtoVertex* v = mgr->GetProtoVertices()[i];
+                SmTArray<SmVertexDefinition*> vds = v->GetVertexDefinitions();
+                for (ULONG j = 1; j < vds.GetSize(); j++)
+                {
+                    SmVertex* a1 = vds[0]->GetFinalVertex(1);
+                    SmVertex* b1 = vds[j]->GetFinalVertex(1);
+                    SmVertex* a2 = vds[0]->GetFinalVertex(2);
+                    SmVertex* b2 = vds[j]->GetFinalVertex(2);
+                    if (!(a1 && b1 && a2 && b2))
+                        continue;
+                    SmVertex* pairs[2][2] = {{a1, b1}, {a2, b2}};
+                    for (int s = 0; s < 2; s++)
+                    {
+                        ScVertex* x = static_cast<ScVertex*>(pairs[s][0]);
+                        ScVertex* y = static_cast<ScVertex*>(pairs[s][1]);
+                        if (!x->pointed || !y->pointed)
+                            skip = true;
+                        else if (x != y && !(x->GetPoint().DistanceBetween(y->GetPoint()) > SmTol::GetXSectTol3d(x, y)))
+                            skip = true;
+                    }
+                }
+            }
+            if (skip)
+                break;
+            Reach before = reach(r);
+            status = st(mgr->GlueCoincidentBrepVertices());
+            std::vector<double> dead = reconcile(r, before, false);
+            out.push_back((double)dead.size());
+            out.insert(out.end(), dead.begin(), dead.end());
+            break;
+        }
+        case P_RESOLVE:
+        {
+            if (skip)
+                break;
+            // a proto edge listed twice in the manager crashes upstream (AddProtoEdge does not
+            // de-duplicate, RemoveProtoEdge removes the first copy only: UB-127)
+            for (ULONG a = 0; a < r.mgr->GetProtoEdges().GetSize() && !skip; a++)
+                for (ULONG b = a + 1; b < r.mgr->GetProtoEdges().GetSize(); b++)
+                    if (r.mgr->GetProtoEdges()[a] == r.mgr->GetProtoEdges()[b])
+                        skip = true;
+            if (skip)
+                break;
+            // only face / face groups run (an edge needs a real B-rep); every proto edge of a
+            // group needs its end vertices and every source topology
+            std::set<SmProtoEdge*> grp;
+            for (size_t i = 0; i < r.pes.p.size(); i++)
+            {
+                SmProtoEdge* e = r.pe((int64_t)i);
+                if (!e || e->GetOverlappingPEs().GetSize() == 0)
+                    continue;
+                grp.insert(e);
+                for (ULONG k = 0; k < e->GetOverlappingPEs().GetSize(); k++)
+                    grp.insert(e->GetOverlappingPEs()[k]);
+            }
+            for (SmProtoEdge* e : grp)
+            {
+                if (!r.pes.live_ptr(e) || !e->GetStartProtoVertex() || !e->GetEndProtoVertex() ||
+                    !r.pvs.live_ptr(e->GetStartProtoVertex()) || !r.pvs.live_ptr(e->GetEndProtoVertex()) ||
+                    !pe_listed_with_ends(r, e))
+                {
+                    skip = true;
+                    continue;
+                }
+                // upstream crashes (reads a deleted edge) unless every overlap relation is symmetric,
+                // no overlap list repeats an edge and each edge is in its own overlap group
+                {
+                    SmTArray<SmProtoEdge*> ov = e->GetOverlappingPEs();
+                    std::vector<SmProtoEdge*> group;
+                    for (ULONG a = 0; a < ov.GetSize(); a++)
+                    {
+                        SmProtoEdge* o = ov[a];
+                        for (ULONG b = a + 1; b < ov.GetSize(); b++)
+                            if (ov[b] == o)
+                                skip = true;
+                        if (!o || !r.pes.live_ptr(o))
+                        {
+                            skip = true;
+                            continue;
+                        }
+                        bool back = false;
+                        SmTArray<SmProtoEdge*> ob = o->GetOverlappingPEs();
+                        for (ULONG c = 0; c < ob.GetSize(); c++)
+                            if (ob[c] == e)
+                                back = true;
+                        if (!back)
+                            skip = true;
+                        group.push_back(o);
+                    }
+                    // GetOverlappingPEGroup: chase the overlaps until the group is complete
+                    for (size_t g = 0; g < group.size() && !skip; g++)
+                    {
+                        SmTArray<SmProtoEdge*> og = group[g]->GetOverlappingPEs();
+                        for (ULONG c = 0; c < og.GetSize(); c++)
+                        {
+                            if (!og[c] || !r.pes.live_ptr(og[c]))
+                            {
+                                skip = true;
+                                break;
+                            }
+                            if (std::find(group.begin(), group.end(), og[c]) == group.end())
+                                group.push_back(og[c]);
+                        }
+                    }
+                    if (!skip && std::find(group.begin(), group.end(), e) == group.end())
+                        skip = true;
+                    if (skip)
+                        continue;
+                }
+                // a vertex left without edges but with definitions is deleted (not tracked)
+                SmProtoVertex* ends[2] = {e->GetStartProtoVertex(), e->GetEndProtoVertex()};
+                for (SmProtoVertex* v : ends)
+                {
+                    bool left = false;
+                    for (ULONG k = 0; k < v->GetProtoEdges().GetSize(); k++)
+                        if (!grp.count(v->GetProtoEdges()[k]))
+                            left = true;
+                    if (!left && v->GetVertexDefinitions().GetSize() > 0)
+                        skip = true;
+                }
+            }
+            for (size_t i = 0; i < r.eds.p.size() && !skip; i++)
+            {
+                SmEdgeDefinition* d = r.ed((int64_t)i);
+                if (!d)
+                    continue;
+                for (int w = 1; w <= 2; w++)
+                {
+                    SmTopology* t = d->GetSrcTopo(w);
+                    if (!t || r.pool.kind_of(t) == K_EDGE)
+                        skip = true;
+                }
+            }
+            for (size_t i = 0; i < r.pfs.p.size() && !skip; i++)
+            {
+                SmProtoFace* f = r.pf((int64_t)i);
+                if (!f)
+                    continue;
+                for (ULONG k = 0; k < f->GetCoincProtoEdges()->GetSize(); k++)
+                    if (!r.pes.live_ptr((*f->GetCoincProtoEdges())[k]))
+                        skip = true;
+            }
+            if (skip || !ed_curves_unique(r))
+            {
+                skip = true;
+                break;
+            }
+            Reach before = reach(r);
+            status = st(mgr->ResolveOverlappingProtoEdges());
+            std::vector<double> dead = reconcile(r, before, true);
+            out.push_back((double)dead.size());
+            out.insert(out.end(), dead.begin(), dead.end());
+            break;
+        }
         default:
             if (op < P2_FIRST || op > P2_LAST || run_p2_op(r, rd, op, out, status, skip) != SC_OK)
                 return SC_ERR_ARG;

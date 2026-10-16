@@ -80,7 +80,7 @@ fn res<T>(r: solidcore::Result<T>, status_out: &mut f64, skip: &mut bool) -> Res
 
 /// The objects calls made get the next ids of their kinds (the shim numbers them after the
 /// op in the order the port makes them).
-fn sync_counts(r: &mut ProtoRun) {
+pub(super) fn sync_counts(r: &mut ProtoRun) {
     use solidcore::topology::proto_topology::p1::{EdgeDefId, ProtoFaceId, ProtoVertexId};
     while r.mgr.vertex_def(VertexDefId::from_index(r.n_vd)).is_some() {
         r.n_vd += 1;

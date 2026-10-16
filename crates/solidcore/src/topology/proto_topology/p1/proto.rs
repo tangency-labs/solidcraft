@@ -1481,6 +1481,11 @@ impl ProtoEdge {
         &self.overlapping_pes
     }
 
+    /// Empties the overlapping proto edges (`GetOverlappingPEs().ReSet()`).
+    pub fn clear_overlapping_pes(&mut self) {
+        self.overlapping_pes.clear();
+    }
+
     /// `GetNumEdgeDefinitions`.
     #[must_use]
     pub fn num_edge_definitions(&self) -> usize {
@@ -1621,6 +1626,12 @@ impl<O: ClassObject> ProtoFace<O> {
     #[must_use]
     pub fn coinc_proto_edges(&self) -> &[ProtoEdgeId] {
         &self.coinc_pes
+    }
+
+    /// The bounding proto edges, for the edits of the list upstream makes through the
+    /// pointer `GetCoincProtoEdges` returns.
+    pub fn coinc_proto_edges_mut(&mut self) -> &mut Vec<ProtoEdgeId> {
+        &mut self.coinc_pes
     }
 
     /// Sets the face of B-rep `which` (1, else 2): the object when it is a face
