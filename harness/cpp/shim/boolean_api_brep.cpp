@@ -32,6 +32,11 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/boolean_api_brep.rs).
@@ -136,16 +141,6 @@ std::vector<SmBrep*> build_all(const std::vector<BrepSpec>& specs)
         throw;
     }
     return v;
-}
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
 }
 
 // `faces edges vertices regions manifold_solid` of a B-rep.

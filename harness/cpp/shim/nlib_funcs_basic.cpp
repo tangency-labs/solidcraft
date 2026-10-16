@@ -25,16 +25,13 @@
 #include <limits>
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::nl_status;
+
 namespace
 {
 const double kNaN = std::numeric_limits<double>::quiet_NaN();
-
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
 
 double flag(NL_BOOLEAN b) { return b ? 1.0 : 0.0; }
 

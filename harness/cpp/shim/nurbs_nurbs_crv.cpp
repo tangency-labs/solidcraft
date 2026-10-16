@@ -25,37 +25,12 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::read_crv;
+
 namespace
 {
-// Reads one curve at in[*at] (n p m, n+1 control points x y z w, m+1 knots),
-// allocating it on S; advances *at.
-NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
-{
-    const double* d = in + *at;
-    NL_INDEX n = (NL_INDEX)d[0];
-    NL_DEGREE p = (NL_DEGREE)d[1];
-    NL_INDEX m = (NL_INDEX)d[2];
-    NL_CURVE* cur = N_AllocCrvAndArrays(n, p, m, S);
-    if (cur == NULL)
-        return NULL;
-    const double* c = d + 3;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsAndKnots(cur, &Pw, &U);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        Pw[i].x = c[0];
-        Pw[i].y = c[1];
-        Pw[i].z = c[2];
-        Pw[i].w = c[3];
-        c += 4;
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        U[i] = *c++;
-    *at = (int64_t)(c - in);
-    return cur;
-}
-
 // n p m, used control points, used knots.
 void dump_crv(std::vector<double>& o, const NL_CURVE* cur)
 {

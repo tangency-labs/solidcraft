@@ -26,6 +26,12 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::put_vec;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/nurbs_b_spline_surface_n_lib_p2.rs).
@@ -76,23 +82,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 // Reads `n m p q r s cpts u v` into a surface from sm_AllocateNurbSurface.
 gw_SURFACE* read_nurb(Rd& rd)

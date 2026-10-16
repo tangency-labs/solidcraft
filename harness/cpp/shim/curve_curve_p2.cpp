@@ -47,6 +47,13 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+#include "sc_gw.h"
+
+using sc::Rd;
+using sc::put_vec;
+using sc::read_nurb;
+
 // Not static in SmCurve.cpp and not declared in a header.
 SmStatus sm_TestStep(double dCurrentParameter, double dParamStepSize, SmVector3d sCurPVV[3],
                      SmVector3d sNextPVV[3], double dChordHeightTolerance,
@@ -1042,7 +1049,6 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
   SmBezierSpan * pBezSpan   = (SmBezierSpan*)pCurveNode->m_pData; NER(pBezSpan);
   SmExtent3d   & rBBox      = pCurveNode->m_sBBox;
 
-
   // return false when target m_cpOptVectors[0] point is further from branch bounding box than current m_dBestAnswerSoFarSq
   if (m_eCurveProperty == SM_CP_PROJECTED_POINT_MINIMIZE)
     {
@@ -1229,7 +1235,6 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
       return TRUE;
     } // end if (m_eCurveProperty == SM_CP_PLANE_INTERSECTION)
 
-
   // Make sure that the nodes have data in them
   if (   pCurveNode->m_eAuxDataType != SM_AD_BEZIER_CURVE
       && pCurveNode->m_eAuxDataType != SM_AD_CURVE_DATA)
@@ -1273,7 +1278,6 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
           return FALSE;
         }
     }
-
 
 //    double dT;
 //    double dAngDegFromPerp =
@@ -1464,49 +1468,8 @@ enum : int32_t
     OP_CP_GS = 51,
 };
 
-struct Rd
-{
-    const double* in;
-    int64_t at;
-    double num() { return in[at++]; }
-    int64_t idx() { return (int64_t)in[at++]; }
-    bool flag() { return in[at++] != 0.0; }
-    SmVector3d vec()
-    {
-        double x = num();
-        double y = num();
-        double z = num();
-        return SmVector3d(x, y, z);
-    }
-};
-
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-gw_CURVE* read_nurb(Rd& rd)
-{
-    gw_INDEX n = (gw_INDEX)rd.idx();
-    gw_DEGREE p = (gw_DEGREE)rd.idx();
-    gw_INDEX m = (gw_INDEX)rd.idx();
-    gw_CURVE* cur = sm_AllocateNurbCurve(n, p, m);
-    for (gw_INDEX i = 0; i <= n; i++)
-    {
-        cur->pol->Pw[i].x = rd.num();
-        cur->pol->Pw[i].y = rd.num();
-        cur->pol->Pw[i].z = rd.num();
-        cur->pol->Pw[i].w = rd.num();
-    }
-    for (gw_INDEX i = 0; i <= m; i++)
-        cur->knt->U[i] = rd.num();
-    return cur;
-}
 
 // A curve block (see the file comment).
 SmCurve* read_curve(Rd& rd, const SmContext& ctx)

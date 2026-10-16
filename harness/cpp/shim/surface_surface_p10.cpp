@@ -52,6 +52,10 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::st;
+
 // ---- SmSurface.cpp lines 17885-17932: SmLSIGlobalSolver (declaration) -------------------------
 class SmLSIGlobalSolver : public SmGlobalSolver
 {
@@ -404,7 +408,6 @@ SmBoolean bDebugMe = FALSE ;
     { dSurfaceTol = dSurfaceRadius / 1000; }
 
   double d3DTol = dCurveTol + dSurfaceTol;
-
 
   // when both curve and surface shapes are lines
   if(bCurveLine && bSurfaceLine)
@@ -797,7 +800,6 @@ SmBoolean bDebugMe = FALSE ;
   return SM_SUCCESS;  // Found a guess - loaded it now we are done
 
 } // end sm_ClassifyCurveSurfaceXSectPoint
-
 
 // ---- verbatim: SmSurface.cpp lines 15517-16945: sm_GlobalCurveIntersectCombineSolutions
 /*******************************************************************//**
@@ -1246,7 +1248,6 @@ SmBoolean bDebugMe = FALSE ;
             } // end if range solution branch
         } // end test for merging solutions section
 
-
         // continue here after deciding whether to combine current and last solutions
 CombineDecided:
 
@@ -1385,7 +1386,6 @@ CombineDecided:
   // tangent intersecting curves often will be found to lie
   // within a coincident segment.  The design choice is to
   // keep the intersection point and discard the coincident segment
-
 
   // Mark every interval solution next-to or containing a point solution for removal
   SmTArray<SmBoolean> bCullSolution(rSolutions.GetSize(), NULL, rSolutions.GetSize()) ;
@@ -1531,7 +1531,6 @@ CombineDecided:
               }
           } // end else: range is long enough
 
-
 #ifdef SM_DEBUG_CODE
           if ( bCullSolution[ii] || bCullSolution[jj] ) {
               if(bDebugMe)
@@ -1561,7 +1560,6 @@ CombineDecided:
 
           if ( bCullSolution[ii] )
             { break; }
-
 
           // quit searching when point solutions get past interval solutions
           if(   rPtStart[0] > sInvSpan1.GetMax()
@@ -2281,11 +2279,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
 
 // `n m p q r s cpts(x y z w) u v`, sizes checked by the Rust side.
 SmBSplineSurface* read_bspline_surface(Rd& rd, const SmContext& ctx)

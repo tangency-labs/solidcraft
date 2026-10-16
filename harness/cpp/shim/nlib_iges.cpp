@@ -17,63 +17,14 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::dump_crv;
+using sc::dump_srf;
+using sc::nl_status;
+
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
-void dump_crv(std::vector<double>& o, NL_CURVE* cur)
-{
-    NL_INDEX n, m;
-    NL_DEGREE p;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsDegreeAndKnots(cur, &n, &Pw, &p, &m, &U);
-    o.push_back((double)n);
-    o.push_back((double)p);
-    o.push_back((double)m);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        o.push_back(Pw[i].x);
-        o.push_back(Pw[i].y);
-        o.push_back(Pw[i].z);
-        o.push_back(Pw[i].w);
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        o.push_back(U[i]);
-}
-
-void dump_srf(std::vector<double>& o, NL_SURFACE* sur)
-{
-    NL_INDEX n, m, r, s;
-    NL_DEGREE p, q;
-    NL_CPOINT** Pw;
-    NL_REAL *U, *V;
-    N_SrfGetCPtsDegreesAndKnots(sur, &n, &m, &Pw, &p, &q, &r, &s, &U, &V);
-    o.push_back((double)n);
-    o.push_back((double)m);
-    o.push_back((double)p);
-    o.push_back((double)q);
-    o.push_back((double)r);
-    o.push_back((double)s);
-    for (NL_INDEX i = 0; i <= n; i++)
-        for (NL_INDEX j = 0; j <= m; j++)
-        {
-            o.push_back(Pw[i][j].x);
-            o.push_back(Pw[i][j].y);
-            o.push_back(Pw[i][j].z);
-            o.push_back(Pw[i][j].w);
-        }
-    for (NL_INDEX i = 0; i <= r; i++)
-        o.push_back(U[i]);
-    for (NL_INDEX j = 0; j <= s; j++)
-        o.push_back(V[j]);
-}
-
 // p n b0 b1, (n+1) control points x y z w, n+p+2 knots -> curve on S.
 bool read_crv(const double* in, NL_CURVE* cur, double* b, NL_STACKS* S)
 {

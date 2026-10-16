@@ -35,6 +35,10 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::Rd;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/surface_b_spline_volume_n_lib.rs).
@@ -43,22 +47,6 @@ enum : int32_t
     OP_CONTS = 0,
     OP_HAS_DISC = 1,
     OP_CURVE_IN = 2,
-};
-
-struct Rd
-{
-    const double* in;
-    int64_t at;
-    double num() { return in[at++]; }
-    int64_t idx() { return (int64_t)in[at++]; }
-    bool flag() { return in[at++] != 0.0; }
-    SmVector3d vec()
-    {
-        double x = num();
-        double y = num();
-        double z = num();
-        return SmVector3d(x, y, z);
-    }
 };
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }

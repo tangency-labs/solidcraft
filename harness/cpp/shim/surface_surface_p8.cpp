@@ -43,6 +43,10 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 // SmSPGlobalSolver (SmSurface.cpp:19523): the constructor and virtuals are linked from SMLib.
 class SmSPGlobalSolver : public SmGlobalSolver
 {
@@ -109,13 +113,6 @@ struct Rd
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 const SmContext& the_context()
 {

@@ -16,15 +16,12 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::nl_status;
+
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
 struct Reader
 {
     const double* in;

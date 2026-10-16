@@ -43,6 +43,12 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::put_vec;
+using sc::st;
+
 namespace sc_bssnl_p1_tu
 {
 // ---- verbatim: upstream source/SMLib/src/SmBSplineSurfaceNLib.cpp lines 2906-2970 ----
@@ -411,23 +417,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 // Reads `n m p q r s cpts u v` into a surface from sm_AllocateNurbSurface.
 gw_SURFACE* read_nurb(Rd& rd)

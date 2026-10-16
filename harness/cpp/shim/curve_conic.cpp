@@ -16,6 +16,10 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 // Operations (keep in sync with crates/solidcore-ffi/src/units/curve_conic.rs).
 enum ScCnOp : int32_t
 {
@@ -65,13 +69,6 @@ static SmConic sc_build(const double* c)
     for (int64_t i = 0; i < n; ++i)
         k.Transform2D(c[4 + 3 * i], SmPoint2d(c[5 + 3 * i], c[6 + 3 * i]));
     return k;
-}
-
-static void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
 }
 
 // Type code and the five member doubles (A, B, origin x, y, theta) through the

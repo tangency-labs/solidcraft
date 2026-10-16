@@ -29,6 +29,10 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/curve_iso_curve.rs).
@@ -98,13 +102,6 @@ double stv(SmStatus s)
 double flg(SmBoolean b)
 {
     return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
 }
 
 // Reads `n m p q r s cpts u v` into a surface from sm_AllocateNurbSurface.

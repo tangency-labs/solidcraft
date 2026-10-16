@@ -47,6 +47,13 @@
 #include <map>
 #include <vector>
 
+#include "sc_sm.h"
+#include "sc_gw.h"
+
+using sc::Rd;
+using sc::put_vec;
+using sc::read_nurb;
+
 namespace sc_crv_p5
 {
 // clang-format off
@@ -213,7 +220,6 @@ static SmStatus sm_FindAdditionalCpGuess
     sLineVec.Unitize();
     SmPoint3d sLinePoint = sPV[0] ;
 
-
     ULONG lNumTsect;
     double adTsectLineParam[2];
     SER(smgu_LineCoPlanarCircleIntersect(sLinePoint, sLineVec,
@@ -277,7 +283,6 @@ public:
        SmMatrix               * pOptJacobian,    // out: Partial derivatives of the functions.
        SmBoolean              & rbFoundAnswer) ; // out: Just set to FALSE = Not Used
 } ; // end class SmCCTangentIntENFO
-
 
 /*******************************************************************//**
 PURPOSE: NewtonRaphson Iteration Evaluate function Constructor
@@ -349,7 +354,6 @@ SmStatus SmCCTangentIntENFO::StaticEvaluate
       SM_ASSERT(pOptJacobian->GetNumRows()    == 2);
       SM_ASSERT(pOptJacobian->GetNumColumns() == 2);
     }
-
 
   // init output
   rbFoundAnswer = FALSE;
@@ -428,7 +432,6 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 
   // all done
   return SM_SUCCESS;
-
 
   // Second algorithm: can give false convergence.
 //
@@ -509,7 +512,6 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 //      (*pOptJacobian)[1][1] = - sPVV2[1].Dot( sCtUnit - sDsUnit )
 //                              - sDiff00.Dot( sDsUnit_s );
 //    }
-
 
   // Third algorithm: Also lost quadratic convergence.
 // The idea here is this: just zero the gap, but since we need two functions,
@@ -770,7 +772,6 @@ SmBoolean bDebugMe1 = FALSE;
                                          crX, rF, pOptJacobian, rbFoundAnswer) ;
     }
   else // not near a tangency - use standard evaluation functions
-
 
 // NEW SECTION NOT YET IMPLEMENTED: near-tangent case.
 //    {
@@ -1692,49 +1693,8 @@ enum : int32_t
     OP_NORMAL = 15,
 };
 
-struct Rd
-{
-    const double* in;
-    int64_t at;
-    double num() { return in[at++]; }
-    int64_t idx() { return (int64_t)in[at++]; }
-    bool flag() { return in[at++] != 0.0; }
-    SmVector3d vec()
-    {
-        double x = num();
-        double y = num();
-        double z = num();
-        return SmVector3d(x, y, z);
-    }
-};
-
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-gw_CURVE* read_nurb(Rd& rd)
-{
-    gw_INDEX n = (gw_INDEX)rd.idx();
-    gw_DEGREE p = (gw_DEGREE)rd.idx();
-    gw_INDEX m = (gw_INDEX)rd.idx();
-    gw_CURVE* cur = sm_AllocateNurbCurve(n, p, m);
-    for (gw_INDEX i = 0; i <= n; i++)
-    {
-        cur->pol->Pw[i].x = rd.num();
-        cur->pol->Pw[i].y = rd.num();
-        cur->pol->Pw[i].z = rd.num();
-        cur->pol->Pw[i].w = rd.num();
-    }
-    for (gw_INDEX i = 0; i <= m; i++)
-        cur->knt->U[i] = rd.num();
-    return cur;
-}
 
 // A curve block (see the file comment).
 SmCurve* read_curve(Rd& rd, const SmContext& ctx)

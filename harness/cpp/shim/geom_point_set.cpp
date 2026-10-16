@@ -33,17 +33,15 @@
 #include <cmath>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 namespace
 {
 constexpr int kOps = 8;
 const int kNArgs[kOps] = {0, 0, 4, 4, 0, 3, 0, 0};
 
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 } // namespace
 
 SC_EXPORT int32_t sc_geom_point_set_run(const double* pts, int64_t n_pts, double tol,

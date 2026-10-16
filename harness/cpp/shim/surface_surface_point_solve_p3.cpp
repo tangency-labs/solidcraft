@@ -49,6 +49,12 @@
 #define private public
 #define protected public
 #include "../../../upstream/source/SMLib/src/SmSurfacePointSolve.cpp"
+
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::put_uv;
+using sc::st;
 #undef private
 #undef protected
 
@@ -83,22 +89,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_uv(std::vector<double>& o, const SmVector2d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-}
 
 gw_SURFACE* read_nurb(Rd& rd)
 {
@@ -309,7 +299,6 @@ void put_solutions(std::vector<double>& o, SmSolutionArray& sols, const SmSurfac
         o.push_back(flg(s.m_apObjects[0] == (const SmObject*)srf));
     }
 }
-
 
 void put_state(std::vector<double>& o, SmSurfPtSolveStepper& s)
 {

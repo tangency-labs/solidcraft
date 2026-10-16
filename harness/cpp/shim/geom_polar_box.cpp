@@ -41,6 +41,10 @@
 #include <cmath>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 namespace
 {
 constexpr int kRegs = 4;
@@ -80,13 +84,6 @@ bool reg_index(double d, int& r)
 }
 
 SmVector3d vec(const double* d) { return SmVector3d(d[0], d[1], d[2]); }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 double b(SmBoolean v) { return v ? 1.0 : 0.0; }
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }

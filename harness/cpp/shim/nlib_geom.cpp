@@ -18,16 +18,13 @@
 #include <limits>
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::nl_status;
+
 namespace
 {
 const double kNaN = std::numeric_limits<double>::quiet_NaN();
-
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
 
 NL_POINT pt(const double* d) { return NL_POINT{d[0], d[1], d[2]}; }
 NL_CPOINT cpt(const double* d) { return NL_CPOINT{d[0], d[1], d[2], d[3]}; }

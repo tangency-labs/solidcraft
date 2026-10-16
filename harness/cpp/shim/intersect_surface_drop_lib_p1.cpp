@@ -72,6 +72,12 @@
 #define my_AssertAndDrawDropCurve sc_sdl1_my_AssertAndDrawDropCurve
 #include "../../../upstream/source/SMLib/src/SmSurfaceDropLib.cpp"
 
+#include "sc_sm.h"
+
+using sc::put_uv;
+using sc::put_vec;
+using sc::st;
+
 namespace sc_sdl1
 {
 enum
@@ -141,24 +147,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-void put_uv(std::vector<double>& o, const SmVector2d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-}
 
 // Objects made for one op; deleted on every return.
 struct Owned

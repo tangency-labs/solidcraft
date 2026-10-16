@@ -26,15 +26,14 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::dump_crv;
+using sc::nl_status;
+using sc::null_crv;
+
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
 struct Reader
 {
     const double* in;
@@ -149,27 +148,6 @@ void dump_knots(std::vector<double>& o, NL_KNOTVECTOR* knt)
         o.push_back(U[i]);
 }
 
-void dump_crv(std::vector<double>& o, NL_CURVE* cur)
-{
-    NL_INDEX n, m;
-    NL_DEGREE p;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsDegreeAndKnots(cur, &n, &Pw, &p, &m, &U);
-    o.push_back((double)n);
-    o.push_back((double)p);
-    o.push_back((double)m);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        o.push_back(Pw[i].x);
-        o.push_back(Pw[i].y);
-        o.push_back(Pw[i].z);
-        o.push_back(Pw[i].w);
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        o.push_back(U[i]);
-}
-
 void dump_cfun(std::vector<double>& o, NL_CFUN* cfn)
 {
     NL_INDEX n, m;
@@ -195,14 +173,6 @@ void dump_cpts(std::vector<double>& o, const NL_CPOINT* Pw, long count)
         o.push_back(Pw[i].z);
         o.push_back(Pw[i].w);
     }
-}
-
-NL_CURVE* null_crv(NL_STACKS* S)
-{
-    NL_CURVE* cur = N_AllocCrv(S);
-    if (cur != NULL)
-        N_CrvInitArrays(cur);
-    return cur;
 }
 
 // Runs a knot vector routine on a zero-filled buffer of `len` knots.

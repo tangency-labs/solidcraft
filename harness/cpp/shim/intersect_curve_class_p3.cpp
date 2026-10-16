@@ -59,6 +59,10 @@
 #include <map>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 // global in the library (SmCurveClass.cpp), not declared in a header
 SmXSectTol3d sm_GetXSectTol2dOr3d_ForClassifyPair(const SmCurve* cpSrcCurve, const SmSurface* cpSurface1,
                                                   double dSrcCurveOrObj1_Param,
@@ -575,13 +579,6 @@ struct Rd
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
 
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
 struct ScVertex : public SmVertex
 {
     ScVertex() : SmVertex() {}
@@ -960,7 +957,6 @@ bool read_pc(Rd& rd, const Pool& pool, SmPointClassification& pc)
         pc.SetSSSPoint(p);
     return true;
 }
-
 
 int32_t run(Rd& rd, std::vector<double>& o)
 {

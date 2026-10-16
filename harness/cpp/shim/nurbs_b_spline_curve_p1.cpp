@@ -29,6 +29,11 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/nurbs_b_spline_curve_p1.rs).
@@ -102,18 +107,6 @@ struct Rd
         return SmVector3d(x, y, z);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 // Reads `n p m cpts knots` into a curve from sm_AllocateNurbCurve.
 gw_CURVE* read_nurb(Rd& rd)

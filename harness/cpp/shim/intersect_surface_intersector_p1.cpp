@@ -40,6 +40,12 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_uv;
+using sc::put_vec;
+using sc::st;
+
 namespace sc_ssi_p1
 {
 // clang-format off
@@ -190,7 +196,6 @@ SmBoolean bDebugMe2 = FALSE;
   if ( s3DBox.AreDisjoint( sPntBox ) )
     { return FALSE; }
 
-
   // Do bounding-box checks in the uv-space of both surfaces:
   // check the uv points against the bounding boxes of Hermite curves.
   ULONG lSurf;
@@ -233,7 +238,6 @@ SmBoolean bDebugMe2 = FALSE;
         { dLen = dDiag / 100; }
       sTemp.ExpandAbsolute( dLen );
       sUVBox.SetVInterval( sTemp );
-
 
       // Let sUV = UVPoint to test.
       SmPoint3d sUV( crPointToTest.UVPos( lSurf ));
@@ -515,27 +519,9 @@ struct Rd
     }
 };
 
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
 double flg(SmBoolean b)
 {
     return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-void put_uv(std::vector<double>& o, const SmVector2d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
 }
 
 void put_dom(std::vector<double>& o, const SmExtent2d& e)

@@ -21,15 +21,14 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::dump_srf;
+using sc::nl_status;
+using sc::null_srf;
+
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
 struct Reader
 {
     const double* in;
@@ -88,33 +87,6 @@ std::vector<double> read_reals(Reader& r)
     return v;
 }
 
-void dump_srf(std::vector<double>& o, NL_SURFACE* sur)
-{
-    NL_INDEX n, m, r, s;
-    NL_DEGREE p, q;
-    NL_CPOINT** Pw;
-    NL_REAL *U, *V;
-    N_SrfGetCPtsDegreesAndKnots(sur, &n, &m, &Pw, &p, &q, &r, &s, &U, &V);
-    o.push_back((double)n);
-    o.push_back((double)m);
-    o.push_back((double)p);
-    o.push_back((double)q);
-    o.push_back((double)r);
-    o.push_back((double)s);
-    for (NL_INDEX i = 0; i <= n; i++)
-        for (NL_INDEX j = 0; j <= m; j++)
-        {
-            o.push_back(Pw[i][j].x);
-            o.push_back(Pw[i][j].y);
-            o.push_back(Pw[i][j].z);
-            o.push_back(Pw[i][j].w);
-        }
-    for (NL_INDEX i = 0; i <= r; i++)
-        o.push_back(U[i]);
-    for (NL_INDEX j = 0; j <= s; j++)
-        o.push_back(V[j]);
-}
-
 void dump_sfn(std::vector<double>& o, NL_SFUN* sfn)
 {
     NL_INDEX n, m;
@@ -139,14 +111,6 @@ void dump_sfn(std::vector<double>& o, NL_SFUN* sfn)
         o.push_back(U[i]);
     for (NL_INDEX j = 0; j <= knv->m; j++)
         o.push_back(V[j]);
-}
-
-NL_SURFACE* null_srf(NL_STACKS* S)
-{
-    NL_SURFACE* sur = N_AllocSrf(S);
-    if (sur != NULL)
-        N_SrfInitArrays(sur);
-    return sur;
 }
 
 NL_SFUN* null_sfn(NL_STACKS* S)

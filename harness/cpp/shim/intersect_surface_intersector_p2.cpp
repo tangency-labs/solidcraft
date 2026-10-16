@@ -39,6 +39,12 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_uv;
+using sc::put_vec;
+using sc::st;
+
 // file function of SmSurfaceIntersector.cpp (external linkage upstream)
 SmBoolean sm_IsPointUnique(SmVector3d& rPoint, SmTList<SmTsectPnt>& rStartPoints, SmTArray<SmCurve*>& r3DCurves,
                            double d3DTol);
@@ -111,27 +117,9 @@ struct Rd
     }
 };
 
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
 double flg(SmBoolean b)
 {
     return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-void put_uv(std::vector<double>& o, const SmVector2d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
 }
 
 // `0 o x y scale dom` (SmPlane) or `1 p q nu nv net(x y z w) u v` (SmBSplineSurface).

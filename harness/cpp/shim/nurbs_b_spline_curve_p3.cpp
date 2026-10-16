@@ -26,6 +26,14 @@
 #include <limits>
 #include <vector>
 
+#include "sc_sm.h"
+#include "sc_gw.h"
+
+using sc::Rd;
+using sc::put_vec;
+using sc::read_nurb;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/nurbs_b_spline_curve_p3.rs).
@@ -50,53 +58,6 @@ struct Peek : SmBSplineCurve
     static SmKnotType SmBSplineCurve::*kt() { return &Peek::m_eKnotType; }
     static SmBSplineCurveForm SmBSplineCurve::*form() { return &Peek::m_eBSplineCurveForm; }
 };
-
-struct Rd
-{
-    const double* in;
-    int64_t at;
-    double num() { return in[at++]; }
-    int64_t idx() { return (int64_t)in[at++]; }
-    bool flag() { return in[at++] != 0.0; }
-    SmVector3d vec()
-    {
-        double x = num();
-        double y = num();
-        double z = num();
-        return SmVector3d(x, y, z);
-    }
-};
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-// Reads `n p m cpts knots` into a curve from sm_AllocateNurbCurve.
-gw_CURVE* read_nurb(Rd& rd)
-{
-    gw_INDEX n = (gw_INDEX)rd.idx();
-    gw_DEGREE p = (gw_DEGREE)rd.idx();
-    gw_INDEX m = (gw_INDEX)rd.idx();
-    gw_CURVE* cur = sm_AllocateNurbCurve(n, p, m);
-    for (gw_INDEX i = 0; i <= n; i++)
-    {
-        cur->pol->Pw[i].x = rd.num();
-        cur->pol->Pw[i].y = rd.num();
-        cur->pol->Pw[i].z = rd.num();
-        cur->pol->Pw[i].w = rd.num();
-    }
-    for (gw_INDEX i = 0; i <= m; i++)
-        cur->knt->U[i] = rd.num();
-    return cur;
-}
 
 // A curve block `has_nurb dim oob [curve]`.
 SmBSplineCurve* read_curve(Rd& rd, const SmContext& ctx)

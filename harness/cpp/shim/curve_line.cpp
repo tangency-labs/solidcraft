@@ -37,6 +37,11 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+using sc::st;
+
 namespace
 {
 // Line blocks (keep in sync with crates/solidcore-ffi/src/units/curve_line.rs).
@@ -135,18 +140,6 @@ struct Rd
         return SmVector3d(x, y, z);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 void put_ivl(std::vector<double>& o, const SmExtent1d& e)
 {

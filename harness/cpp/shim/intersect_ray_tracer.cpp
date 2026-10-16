@@ -45,6 +45,10 @@
 
 #include <SmRayTracer.h>
 
+#include "sc_sm.h"
+
+using sc::st;
+
 namespace
 {
 enum : int32_t
@@ -117,11 +121,6 @@ struct Rd
         return SmExtent3d(a, b, c, d, e, f);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
 
 // `1 n m p q cpts(x y z w)` clamped Bezier-knot B-spline surface: degree p x q, (p+1)(q+1) points,
 // knots 0..0 1..1; or `kind 1 o x y scale[2] dom[4]`, an SmPlane.

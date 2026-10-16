@@ -48,6 +48,10 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 namespace sc_srf_p6
 {
 // clang-format off
@@ -620,7 +624,6 @@ SmSolutionPairType SmSSGlobalSolver::IdenticalSolutions // rtn: oneof SM_SP_IDEN
           SmBoolean bSurf2Singular = (   m_pSurf2->IsSingularity( sUV2A, eSingDir )
                                       && m_pSurf2->IsSingularity( sUV2B, eSingDir )) ;
 
-
           // when neither Surf1 nor Surf2 solutions are on a singularity
           if(   !bSurf1Singular
              && !bSurf2Singular)
@@ -713,13 +716,6 @@ struct Rd
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 const SmContext& the_context()
 {

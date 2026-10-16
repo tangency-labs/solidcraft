@@ -34,6 +34,11 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/sweep_api_surfaces.rs).
@@ -231,16 +236,6 @@ struct Curves
         return (SmBSplineCurve*)add(c);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
 
 // `has` then, when set, `has_nurb oob borrowed knot_type form [n m p q r s cpts u v]`.
 void put_surface(std::vector<double>& o, const SmSurface* srf)

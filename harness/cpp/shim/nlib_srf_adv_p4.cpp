@@ -25,47 +25,21 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::dump_crv;
+using sc::dump_srf;
+using sc::nl_status;
+using sc::null_crv;
+using sc::null_srf;
+using sc::read_srf;
+
 // Defined in NL_SrfAdv.cpp without a header declaration (C++ linkage).
 NL_FLAG ST_GetRotationRateOfChange(NL_CURVE* traj, NL_PARAMETER u, NL_CURVE* curZ, NL_VECTOR* Z, NL_VECTOR* prevZ,
                                    NL_PARAMETER prev_u, NL_VECTOR* nextZ, NL_PARAMETER next_u, NL_RMATRIX* drma);
 
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
-NL_SURFACE* read_srf(const double* in, int64_t* at, NL_STACKS* S)
-{
-    const double* d = in + *at;
-    NL_INDEX n = (NL_INDEX)d[0], m = (NL_INDEX)d[1];
-    NL_DEGREE p = (NL_DEGREE)d[2], q = (NL_DEGREE)d[3];
-    NL_INDEX r = n + p + 1, s = m + q + 1;
-    NL_SURFACE* sur = N_AllocSrfAndArrays(n, m, p, q, r, s, S);
-    if (sur == NULL)
-        return NULL;
-    const double* c = d + 4;
-    for (NL_INDEX i = 0; i <= n; i++)
-        for (NL_INDEX j = 0; j <= m; j++)
-        {
-            NL_CPOINT& pw = sur->net->Pw[i][j];
-            pw.x = c[0];
-            pw.y = c[1];
-            pw.z = c[2];
-            pw.w = c[3];
-            c += 4;
-        }
-    for (NL_INDEX i = 0; i <= r; i++)
-        sur->knu->U[i] = *c++;
-    for (NL_INDEX i = 0; i <= s; i++)
-        sur->knv->U[i] = *c++;
-    *at = (int64_t)(c - in);
-    return sur;
-}
-
 NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
 {
     const double* d = in + *at;
@@ -124,70 +98,6 @@ NL_RMATRIX* read_mat(const double* in, int64_t* at, NL_STACKS* S)
         for (int j = 0; j < 3; j++)
             M->RM[i][j] = in[(*at)++];
     return M;
-}
-
-NL_SURFACE* null_srf(NL_STACKS* S)
-{
-    NL_SURFACE* sur = N_AllocSrf(S);
-    if (sur != NULL)
-        N_SrfInitArrays(sur);
-    return sur;
-}
-
-NL_CURVE* null_crv(NL_STACKS* S)
-{
-    NL_CURVE* cur = N_AllocCrv(S);
-    if (cur != NULL)
-        N_CrvInitArrays(cur);
-    return cur;
-}
-
-void dump_srf(std::vector<double>& o, NL_SURFACE* sur)
-{
-    NL_INDEX n, m, r, s;
-    NL_DEGREE p, q;
-    NL_CPOINT** Pw;
-    NL_REAL *U, *V;
-    N_SrfGetCPtsDegreesAndKnots(sur, &n, &m, &Pw, &p, &q, &r, &s, &U, &V);
-    o.push_back((double)n);
-    o.push_back((double)m);
-    o.push_back((double)p);
-    o.push_back((double)q);
-    o.push_back((double)r);
-    o.push_back((double)s);
-    for (NL_INDEX i = 0; i <= n; i++)
-        for (NL_INDEX j = 0; j <= m; j++)
-        {
-            o.push_back(Pw[i][j].x);
-            o.push_back(Pw[i][j].y);
-            o.push_back(Pw[i][j].z);
-            o.push_back(Pw[i][j].w);
-        }
-    for (NL_INDEX i = 0; i <= r; i++)
-        o.push_back(U[i]);
-    for (NL_INDEX j = 0; j <= s; j++)
-        o.push_back(V[j]);
-}
-
-void dump_crv(std::vector<double>& o, NL_CURVE* cur)
-{
-    NL_INDEX n, m;
-    NL_DEGREE p;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsDegreeAndKnots(cur, &n, &Pw, &p, &m, &U);
-    o.push_back((double)n);
-    o.push_back((double)p);
-    o.push_back((double)m);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        o.push_back(Pw[i].x);
-        o.push_back(Pw[i].y);
-        o.push_back(Pw[i].z);
-        o.push_back(Pw[i].w);
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        o.push_back(U[i]);
 }
 
 void push_pt(std::vector<double>& o, NL_POINT P)

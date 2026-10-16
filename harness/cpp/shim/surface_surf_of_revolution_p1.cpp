@@ -37,6 +37,12 @@
 #include <cmath>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::put_vec;
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/surface_surf_of_revolution_p1.rs).
@@ -105,23 +111,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 // `n p m`, `n+1` points `x y z w`, `m+1` knots: SmBSplineCurve(gw_CURVE*, 3, FALSE).
 SmBSplineCurve* read_bspline(Rd& rd, const SmContext& ctx)

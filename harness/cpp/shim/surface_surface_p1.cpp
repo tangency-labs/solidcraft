@@ -39,6 +39,14 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::flg;
+using sc::put_dom;
+using sc::put_uv;
+using sc::put_vec;
+using sc::st;
+
 // ---- copies of the file-local helpers of SmSurface.cpp ------------------------------------
 
 static SmBoolean sm_CrossedSeamOrPole(SmSurface* pSurf, const SmPoint2d& crPrevUV, const SmPoint2d& crCurrUV,
@@ -232,37 +240,6 @@ struct Rd
         return SmExtent2d(a, b, c, d);
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
-
-double flg(bool b)
-{
-    return b ? 1.0 : 0.0;
-}
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-void put_uv(std::vector<double>& o, const SmVector2d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-}
-
-void put_dom(std::vector<double>& o, const SmExtent2d& d)
-{
-    o.push_back(d.GetMin().x);
-    o.push_back(d.GetMin().y);
-    o.push_back(d.GetMax().x);
-    o.push_back(d.GetMax().y);
-}
 
 void put_box(std::vector<double>& o, const SmExtent3d& e)
 {

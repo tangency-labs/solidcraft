@@ -43,6 +43,13 @@
 #include <map>
 #include <vector>
 
+#include "sc_sm.h"
+#include "sc_gw.h"
+
+using sc::Rd;
+using sc::put_vec;
+using sc::read_nurb;
+
 namespace sc_crv_p3
 {
 // clang-format off
@@ -305,7 +312,6 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
   SmBezierSpan * pBezSpan   = (SmBezierSpan*)pCurveNode->m_pData; NER(pBezSpan);
   SmExtent3d   & rBBox      = pCurveNode->m_sBBox;
 
-
   // return false when target m_cpOptVectors[0] point is further from branch bounding box than current m_dBestAnswerSoFarSq
   if (m_eCurveProperty == SM_CP_PROJECTED_POINT_MINIMIZE)
     {
@@ -492,7 +498,6 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
       return TRUE;
     } // end if (m_eCurveProperty == SM_CP_PLANE_INTERSECTION)
 
-
   // Make sure that the nodes have data in them
   if (   pCurveNode->m_eAuxDataType != SM_AD_BEZIER_CURVE
       && pCurveNode->m_eAuxDataType != SM_AD_CURVE_DATA)
@@ -536,7 +541,6 @@ SmBoolean SmCurvePropertyGS::BranchMayContainAnswers
           return FALSE;
         }
     }
-
 
 //    double dT;
 //    double dAngDegFromPerp =
@@ -599,7 +603,6 @@ static SmStatus sm_FindAdditionalCpGuess
     if (sLineVec.LengthSquared() < SM_EFF_ZERO_SQ) { return SM_SUCCESS; }
     sLineVec.Unitize();
     SmPoint3d sLinePoint = sPV[0] ;
-
 
     ULONG lNumTsect;
     double adTsectLineParam[2];
@@ -874,7 +877,6 @@ static constexpr SmBoolean  bDebugMe = FALSE;
   //    sIvl.SetMinMax( sIvl.GetMin(), dNewTop );
   //  }
 
-
   if (   m_eCurveProperty == SM_CP_MINIMIZE_ANGLE_TO_PLANE
      ||  m_eCurveProperty == SM_CP_MINIMIZE_DIRECTED_ANGLE
      ||  m_eCurveProperty == SM_CP_MINIMIZE_CCW_ANGLE
@@ -1069,7 +1071,6 @@ public:
        SmBoolean              & rbFoundAnswer) ; // out: Just set to FALSE = Not Used
 } ; // end class SmCCTangentIntENFO
 
-
 /*******************************************************************//**
 PURPOSE: NewtonRaphson Iteration Evaluate function Constructor
             for tangent Curve/Curve Intersections
@@ -1140,7 +1141,6 @@ SmStatus SmCCTangentIntENFO::StaticEvaluate
       SM_ASSERT(pOptJacobian->GetNumRows()    == 2);
       SM_ASSERT(pOptJacobian->GetNumColumns() == 2);
     }
-
 
   // init output
   rbFoundAnswer = FALSE;
@@ -1219,7 +1219,6 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 
   // all done
   return SM_SUCCESS;
-
 
   // Second algorithm: can give false convergence.
 //
@@ -1300,7 +1299,6 @@ static constexpr SmBoolean  bDebugMe = FALSE;
 //      (*pOptJacobian)[1][1] = - sPVV2[1].Dot( sCtUnit - sDsUnit )
 //                              - sDiff00.Dot( sDsUnit_s );
 //    }
-
 
   // Third algorithm: Also lost quadratic convergence.
 // The idea here is this: just zero the gap, but since we need two functions,
@@ -1582,7 +1580,6 @@ SmBoolean  bDebugMe = FALSE;
 
   rdFPrimeOfT = dTanDotTan + dVDot2nd ;
 
-
   // Set sign of 1st Derive for maximize
   //cbi: check this.
   if ( m_eSolverOperation == SM_SO_MAXIMIZE )
@@ -1791,7 +1788,6 @@ SmBoolean bDebugMe1 = FALSE;
     }
   else // not near a tangency - use standard evaluation functions
 
-
 // NEW SECTION NOT YET IMPLEMENTED: near-tangent case.
 //    {
 //      // In near tangent situations move the guess points to sample the gap function
@@ -1985,49 +1981,8 @@ enum : int32_t
     OP_IS_LINEAR = 9,
 };
 
-struct Rd
-{
-    const double* in;
-    int64_t at;
-    double num() { return in[at++]; }
-    int64_t idx() { return (int64_t)in[at++]; }
-    bool flag() { return in[at++] != 0.0; }
-    SmVector3d vec()
-    {
-        double x = num();
-        double y = num();
-        double z = num();
-        return SmVector3d(x, y, z);
-    }
-};
-
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-gw_CURVE* read_nurb(Rd& rd)
-{
-    gw_INDEX n = (gw_INDEX)rd.idx();
-    gw_DEGREE p = (gw_DEGREE)rd.idx();
-    gw_INDEX m = (gw_INDEX)rd.idx();
-    gw_CURVE* cur = sm_AllocateNurbCurve(n, p, m);
-    for (gw_INDEX i = 0; i <= n; i++)
-    {
-        cur->pol->Pw[i].x = rd.num();
-        cur->pol->Pw[i].y = rd.num();
-        cur->pol->Pw[i].z = rd.num();
-        cur->pol->Pw[i].w = rd.num();
-    }
-    for (gw_INDEX i = 0; i <= m; i++)
-        cur->knt->U[i] = rd.num();
-    return cur;
-}
 
 // A curve block (see the file comment).
 SmCurve* read_curve(Rd& rd, const SmContext& ctx)

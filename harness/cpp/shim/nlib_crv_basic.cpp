@@ -26,16 +26,14 @@
 #include <limits>
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::nl_status;
+using sc::null_crv;
+
 namespace
 {
 const double kNaN = std::numeric_limits<double>::quiet_NaN();
-
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
 
 double flag(NL_BOOLEAN b) { return b ? 1.0 : 0.0; }
 
@@ -170,14 +168,6 @@ void dump_cfn(std::vector<double>& o, NL_CFUN* cfn)
         o.push_back(fu[i]);
     for (NL_INDEX i = 0; i <= m; i++)
         o.push_back(U[i]);
-}
-
-NL_CURVE* null_crv(NL_STACKS* S)
-{
-    NL_CURVE* cur = N_AllocCrv(S);
-    if (cur != NULL)
-        N_CrvInitArrays(cur);
-    return cur;
 }
 
 NL_CFUN* null_cfn(NL_STACKS* S)

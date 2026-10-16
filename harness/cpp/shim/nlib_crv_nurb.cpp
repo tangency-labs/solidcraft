@@ -26,65 +26,15 @@
 
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::dump_crv;
+using sc::nl_status;
+using sc::null_crv;
+using sc::read_crv;
+
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
-// Reads one curve at in[*at], allocating it on S; advances *at.
-NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
-{
-    const double* d = in + *at;
-    NL_INDEX n = (NL_INDEX)d[0];
-    NL_DEGREE p = (NL_DEGREE)d[1];
-    NL_INDEX m = (NL_INDEX)d[2];
-    NL_CURVE* cur = N_AllocCrvAndArrays(n, p, m, S);
-    if (cur == NULL)
-        return NULL;
-    const double* c = d + 3;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsAndKnots(cur, &Pw, &U);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        Pw[i].x = c[0];
-        Pw[i].y = c[1];
-        Pw[i].z = c[2];
-        Pw[i].w = c[3];
-        c += 4;
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        U[i] = *c++;
-    *at = (int64_t)(c - in);
-    return cur;
-}
-
-// n p m, used control points, used knots (through N_CrvGetCPtsDegreeAndKnots).
-void dump_crv(std::vector<double>& o, NL_CURVE* cur)
-{
-    NL_INDEX n, m;
-    NL_DEGREE p;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsDegreeAndKnots(cur, &n, &Pw, &p, &m, &U);
-    o.push_back((double)n);
-    o.push_back((double)p);
-    o.push_back((double)m);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        o.push_back(Pw[i].x);
-        o.push_back(Pw[i].y);
-        o.push_back(Pw[i].z);
-        o.push_back(Pw[i].w);
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        o.push_back(U[i]);
-}
-
 void push_pt(std::vector<double>& o, NL_POINT P)
 {
     o.push_back(P.x);
@@ -99,14 +49,6 @@ NL_POINT pt(const double* d)
     P.y = d[1];
     P.z = d[2];
     return P;
-}
-
-NL_CURVE* null_crv(NL_STACKS* S)
-{
-    NL_CURVE* cur = N_AllocCrv(S);
-    if (cur != NULL)
-        N_CrvInitArrays(cur);
-    return cur;
 }
 
 // Output curve: the input itself (in place) or a new NULL curve.

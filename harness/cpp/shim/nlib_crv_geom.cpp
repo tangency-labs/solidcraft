@@ -20,43 +20,13 @@
 #include <cmath>
 #include <vector>
 
+#include "sc_nlib.h"
+
+using sc::nl_status;
+using sc::read_crv;
+
 namespace
 {
-double nl_status(NL_FLAG err)
-{
-    if (err == NL_NO)
-        return 0.0;
-    return NL_ERROR.eno != 0 ? (double)NL_ERROR.eno : 1000.0;
-}
-
-// Reads one curve at in[*at], allocating it on S; advances *at.
-NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
-{
-    const double* d = in + *at;
-    NL_INDEX n = (NL_INDEX)d[0];
-    NL_DEGREE p = (NL_DEGREE)d[1];
-    NL_INDEX m = (NL_INDEX)d[2];
-    NL_CURVE* cur = N_AllocCrvAndArrays(n, p, m, S);
-    if (cur == NULL)
-        return NULL;
-    const double* c = d + 3;
-    NL_CPOINT* Pw;
-    NL_REAL* U;
-    N_CrvGetCPtsAndKnots(cur, &Pw, &U);
-    for (NL_INDEX i = 0; i <= n; i++)
-    {
-        Pw[i].x = c[0];
-        Pw[i].y = c[1];
-        Pw[i].z = c[2];
-        Pw[i].w = c[3];
-        c += 4;
-    }
-    for (NL_INDEX i = 0; i <= m; i++)
-        U[i] = *c++;
-    *at = (int64_t)(c - in);
-    return cur;
-}
-
 void push_pt(std::vector<double>& o, NL_POINT P)
 {
     o.push_back(P.x);

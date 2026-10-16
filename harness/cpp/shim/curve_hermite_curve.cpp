@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_vec;
+
 // Curve constructions (keep in sync with crates/solidcore-ffi/src/units/curve_hermite_curve.rs).
 enum ScHcKind : int32_t
 {
@@ -63,13 +67,6 @@ static SmHermiteCurve sc_build(int32_t kind, const double* v, int64_t dim)
                               SmVector2d(v[9], v[10]));
     default: return SmHermiteCurve(sc_vec(v, 0), sc_vec(v, 1), sc_vec(v, 2), sc_vec(v, 3), (ULONG)dim);
     }
-}
-
-static void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
 }
 
 // The 18 member doubles (P1, D1, P2, D2, C, D) through the upstream binary writer.

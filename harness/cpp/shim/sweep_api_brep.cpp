@@ -35,6 +35,10 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::st;
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/sweep_api_brep.rs).
@@ -246,11 +250,6 @@ struct Owned
         return faces;
     }
 };
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
-}
 
 // The status then, on success, `has [faces edges vertices]`.
 void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res)

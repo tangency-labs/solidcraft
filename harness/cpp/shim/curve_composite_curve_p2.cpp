@@ -36,6 +36,13 @@
 #include <string>
 #include <vector>
 
+#include "sc_sm.h"
+#include "sc_gw.h"
+
+using sc::Rd;
+using sc::put_vec;
+using sc::read_nurb;
+
 // Non-static upstream function without a header declaration (SmCompositeCurve.cpp).
 SmStatus sm_FixBowTie(const SmCurve* pOffCrv, const SmTArray<SmPoint3d>& sPointsToTest, double dOffsetDist,
                       double d3DApproxTol, SmTArray<double>& sBreaks);
@@ -155,31 +162,8 @@ enum : int32_t
     OP_MISC = 8,
 };
 
-struct Rd
-{
-    const double* in;
-    int64_t at;
-    double num() { return in[at++]; }
-    int64_t idx() { return (int64_t)in[at++]; }
-    bool flag() { return in[at++] != 0.0; }
-    SmVector3d vec()
-    {
-        double x = num();
-        double y = num();
-        double z = num();
-        return SmVector3d(x, y, z);
-    }
-};
-
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
 
 // Objects the shim made that upstream does not own (deleted at the end of the call).
 struct Pool
@@ -199,24 +183,6 @@ struct Pool
         return c;
     }
 };
-
-gw_CURVE* read_nurb(Rd& rd)
-{
-    gw_INDEX n = (gw_INDEX)rd.idx();
-    gw_DEGREE p = (gw_DEGREE)rd.idx();
-    gw_INDEX m = (gw_INDEX)rd.idx();
-    gw_CURVE* cur = sm_AllocateNurbCurve(n, p, m);
-    for (gw_INDEX i = 0; i <= n; i++)
-    {
-        cur->pol->Pw[i].x = rd.num();
-        cur->pol->Pw[i].y = rd.num();
-        cur->pol->Pw[i].z = rd.num();
-        cur->pol->Pw[i].w = rd.num();
-    }
-    for (gw_INDEX i = 0; i <= m; i++)
-        cur->knt->U[i] = rd.num();
-    return cur;
-}
 
 // A curve block `kind dim ...` (0: SmBSplineCurve `oob n p m cpts(x y z w) knots`; 1:
 // SmHermiteCurve `P1 D1 P2 D2`; 2: bounded SmLine `P V d0 d1 scale io`; 3: SmOffsetCurve

@@ -47,6 +47,11 @@
 
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::put_uv;
+using sc::put_vec;
+
 namespace sc_srf_p4
 {
 // clang-format off
@@ -408,7 +413,6 @@ SmBoolean bDebugMe = FALSE ;
     { dSurfaceTol = dSurfaceRadius / 1000; }
 
   double d3DTol = dCurveTol + dSurfaceTol;
-
 
   // when both curve and surface shapes are lines
   if(bCurveLine && bSurfaceLine)
@@ -1291,7 +1295,6 @@ SmBoolean bDebugMe = FALSE ;
       SmVector3d sSv_Unit_u = sSv.UnitizedDerivative( sSuv );  // Note: not the same as sSu_Unit_v.
       SmVector3d sSv_Unit_v = sSv.UnitizedDerivative( sSvv );
 
-
       if (pOptJacobian)
         {
           (*pOptJacobian)[0][0] =  sCt_Unit_t.Dot( sSMinusC ) - sCt_Unit.Dot( sCt );
@@ -1817,7 +1820,6 @@ SmBoolean bDebugMe = FALSE;
       SER( ComputeJacobian( sTmpX, rF, *pOptJacobian, &sDomains ));
     }
 
-
 #ifdef SM_DEBUG_CODE
   if (bDebugMe)
     {
@@ -2133,7 +2135,6 @@ SmBoolean bDebugMe2 = FALSE;
 
   return SM_SUCCESS;
 
-
 } // end SmSSNormalizeENFO::Evaluate
 
 // clang-format on
@@ -2194,19 +2195,6 @@ struct Rd
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
-
-void put_vec(std::vector<double>& o, const SmVector3d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-    o.push_back(v.z);
-}
-
-void put_uv(std::vector<double>& o, const SmVector2d& v)
-{
-    o.push_back(v.x);
-    o.push_back(v.y);
-}
 
 const SmContext& the_context()
 {

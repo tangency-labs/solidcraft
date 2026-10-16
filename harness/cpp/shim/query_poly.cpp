@@ -41,6 +41,10 @@
 #include <cstdint>
 #include <vector>
 
+#include "sc_sm.h"
+
+using sc::st;
+
 namespace
 {
 enum : int32_t
@@ -141,11 +145,6 @@ template <typename T> double ix(const std::vector<T*>& v, const void* p)
         if ((const void*)v[i] == p)
             return (double)i;
     return -2.0;
-}
-
-double st(SmStatus s)
-{
-    return s == SM_SUCCESS ? 0.0 : (double)s;
 }
 
 void* fake(int64_t label)
