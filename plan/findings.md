@@ -5565,10 +5565,11 @@ mutated scales and accepted/reduced step counts are compared.
   Rust stepped off four times (count > 2 and `dMinDist > dTolerance`) and returned inside. Every step-off
   call, its distances and its outputs agreed bit for bit (checked by calling
   `EvaluateBinormalStepOff` from the shim at the same distances). Fix: the shim exports an `SmPlane`
-  as `1 O Z` (item 5 of the AGENTS.md checklist: the shim builds every geometry kind the code branches
+  as a whole plane, `1 O X Y su sv umin vmin umax vmax` like `sc_edgeuse_graph.h` (item 5 of the AGENTS.md checklist: the shim builds every geometry kind the code branches
   on). Those faces are now real planes in Rust, so 28 cases that passed on a B-spline stand-in defer on
   the global point solve instead (`surface.surface_point_solve_p3`): query.edge 1368 cases, 1279 pass, 0
-  fail, 89 deferred. A zero-length `Unitize`/`AngleBetween` in the classifications is an `SM_ERR`
+  fail, 89 deferred at the time (after merging main: 1316 pass, 0 failed, 52 deferred, all
+  `intersect.surface_drop_lib_p3`). A zero-length `Unitize`/`AngleBetween` in the classifications is an `SM_ERR`
   status, as `SER` returns it, not a null dereference; the step-off locals start at
   `SM_UNDEF_DOUBLE` like upstream's default-constructed vectors. Other shim copies of `put_surface`
   without the plane branch (`topology.vertex`, `topology.brep_data`, `topology.proto_topology_p1`,
@@ -5581,6 +5582,28 @@ mutated scales and accepted/reduced step counts are compared.
 - `IsTangentSector` and `SmEdge::GetBlendEdgeuse` ignore a failing `EvaluateBinormal` (`SE`) and read
   the default-constructed `SM_UNDEF_DOUBLE` locals; the port does the same (the partial writes of a
   failure midway are not modelled).
+
+## sweep.rotational_sweep_geometry (`SmRotationalSweepGeometry`, 2026-10-15; partial, no disagreements)
+
+- **Harness.** Edges are wire edges of a real `SmBrep` (`MakeShellVertex` + `MakeWireEdgeVertex`,
+  or `MakeWireEdge` to the same vertex for a closed edge) on real `SmBSplineCurve`s, B-spline and
+  analytic `SmLine` segments, `SmCircle`s, `SmEllipse`s and `SmHermiteCurve`s, with set edge,
+  vertex and B-rep tolerances; the Rust side builds the same records (the shim reports the start
+  / primary vertex, closed flag, points and tolerances, which are compared too). Results are
+  compared as type codes, natural intervals / domains and evaluations at fixed fractions, so
+  B-spline and analytic results are both covered. Edge intervals are in the curve's natural
+  (NURB) interval: `[0, 1]` for circles and ellipses, not degrees.
+- **Out-of-range read** in `sm_CheckEdgeOnAxis` (`sSolutions[1]` with one solution): the port
+  reads a zero-filled slot; upstream-issues UB-130. The C++ agrees on every case reaching it.
+- **`SM_SWEEP_CHECKS` is not defined**, so `CheckCurveSweep` only detects rotation about an
+  interior point of the curve, and only through `IntersectWithLine` (no solutions for a general
+  B-spline, which upstream then sweeps even when it crosses the axis); the port does the same.
+- **`SmLine` generators**: `CreateSurfOfRevolution` reparametrises the sweep circle with arc
+  length for a line parallel to the axis (`GetType() == SmLine_TYPE`); the port passes the line
+  vector (`create_surf_of_revolution_with_line_vector`). Without it the cylinder cases disagreed
+  in the circular parameter range only.
+- **Deferred**: `CopyAndAddAnalytics` of a non-planar swept B-spline surface or face surface
+  reaches `SmCone::IsNurbSurfaceCone` (unit `surface.cone_p2`).
 
 ## heal.face_props (`SmFaceProps` / `SmLoopProps` / `SmLooptreeItem`, 2026-10-16; partial, no disagreements)
 
